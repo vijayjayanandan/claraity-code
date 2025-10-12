@@ -42,7 +42,7 @@ class LLMConfig(BaseModel):
     stream: bool = True
 
     # Timeout
-    timeout: float = 120.0
+    timeout: float = 300.0  # 5 minutes for complex RAG queries
 
     class Config:
         use_enum_values = True

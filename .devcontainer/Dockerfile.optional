@@ -1,0 +1,27 @@
+# Optional Custom Dockerfile
+# (Not needed - using pre-built image instead)
+#
+# Only use this if you need custom base configuration
+# To use: change "image" to "dockerfile" in devcontainer.json
+
+FROM mcr.microsoft.com/devcontainers/python:3.11-bullseye
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js (for Claude Code CLI)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs
+
+# Install Ollama
+RUN curl -fsSL https://ollama.ai/install.sh | sh
+
+# Set working directory
+WORKDIR /workspace
+
+# Note: Python dependencies installed via postCreateCommand
+# This keeps the image lean and rebuild fast
