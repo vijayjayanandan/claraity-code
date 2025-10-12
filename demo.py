@@ -24,7 +24,7 @@ def main():
     console.print("Creating agent with CodeLlama 7B...")
 
     agent = CodingAgent(
-        model_name="codellama:7b-instruct",
+        model_name="deepseek-coder:6.7b-instruct",
         backend="ollama",
         context_window=4096,
     )

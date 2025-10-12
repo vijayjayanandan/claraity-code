@@ -147,8 +147,8 @@ def main() -> None:
 
     parser.add_argument(
         "--model",
-        default="codellama:7b-instruct",
-        help="Model name (default: codellama:7b-instruct)"
+        default="deepseek-coder:6.7b-instruct",
+        help="Model name (default: deepseek-coder:6.7b-instruct)"
     )
 
     parser.add_argument(
