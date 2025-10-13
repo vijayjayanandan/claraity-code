@@ -3,7 +3,7 @@
 from typing import List, Dict, Any, Optional
 from src.memory import MemoryManager
 from src.rag import HybridRetriever, CodeChunk
-from src.prompts import SystemPrompts, PromptOptimizer
+from src.prompts import EnhancedSystemPrompts, PromptOptimizer
 
 
 class ContextBuilder:
@@ -55,10 +55,10 @@ class ContextBuilder:
         rag_tokens = int(self.max_context_tokens * 0.30)  # 30%
         memory_tokens = int(self.max_context_tokens * 0.35)  # 35%
 
-        # 1. Build system prompt
-        system_prompt = SystemPrompts.get_context_aware_prompt(
-            task_type=task_type,
+        # 1. Build system prompt using enhanced prompts
+        system_prompt = EnhancedSystemPrompts.get_system_prompt(
             language=language,
+            task_type=task_type,
             context_size=self.max_context_tokens,
         )
 

@@ -54,6 +54,13 @@ CODING_MODELS = {
         use_case="coding",
         description="Mistral's code model. Good reasoning and code generation."
     ),
+    "qwen3-coder:30b": ModelConfig(
+        name="qwen3-coder:30b",
+        context_window=262144,
+        recommended_temperature=0.2,
+        use_case="coding",
+        description="Qwen3 Coder 30B. Massive 262K context window with enhanced agentic capabilities. Best for complex multi-file tasks."
+    ),
 }
 
 # General purpose models

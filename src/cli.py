@@ -147,8 +147,8 @@ def main() -> None:
 
     parser.add_argument(
         "--model",
-        default="deepseek-coder:6.7b-instruct",
-        help="Model name (default: deepseek-coder:6.7b-instruct)"
+        default="qwen3-coder:30b",
+        help="Model name (default: qwen3-coder:30b)"
     )
 
     parser.add_argument(
@@ -167,8 +167,8 @@ def main() -> None:
     parser.add_argument(
         "--context",
         type=int,
-        default=4096,
-        help="Context window size (default: 4096)"
+        default=131072,
+        help="Context window size (default: 131072 - 128K)"
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
@@ -217,6 +217,16 @@ def main() -> None:
             sys.exit(1)
 
         console.print(f"[green]Agent initialized successfully![/green]\n")
+
+        # Auto-index codebase for chat mode if not explicitly indexing
+        if args.command in ["chat", None]:
+            if len(agent.indexed_chunks) == 0:
+                console.print("[yellow]Auto-indexing codebase for RAG...[/yellow]")
+                try:
+                    result = agent.index_codebase("./src")
+                    console.print(f"[green]✓ Indexed {result['total_files']} files, {result['total_chunks']} chunks[/green]\n")
+                except Exception as e:
+                    console.print(f"[yellow]⚠ Could not index codebase: {e}[/yellow]\n")
 
         # Execute command
         if args.command == "chat":

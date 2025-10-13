@@ -8,6 +8,7 @@ from src.memory import MemoryManager, TaskContext
 from src.rag import CodeIndexer, Embedder, HybridRetriever, CodeChunk
 from src.llm import LLMBackend, OllamaBackend, LLMConfig, LLMBackendType
 from src.tools import ToolExecutor, ReadFileTool, WriteFileTool, EditFileTool, SearchCodeTool, AnalyzeCodeTool
+from src.tools.tool_parser import ToolCallParser, ParsedResponse
 from src.prompts import PromptLibrary, TaskType
 from .context_builder import ContextBuilder
 
@@ -34,10 +35,10 @@ class CodingAgent:
 
     def __init__(
         self,
-        model_name: str = "codellama:7b-instruct",
+        model_name: str = "qwen3-coder:30b",
         backend: str = "ollama",
         base_url: str = "http://localhost:11434",
-        context_window: int = 4096,
+        context_window: int = 131072,
         working_directory: str = ".",
     ):
         """
@@ -85,6 +86,9 @@ class CodingAgent:
         self.tool_executor = ToolExecutor()
         self._register_tools()
 
+        # Initialize tool parser
+        self.tool_parser = ToolCallParser()
+
         # Initialize context builder
         self.context_builder = ContextBuilder(
             memory_manager=self.memory,
@@ -99,6 +103,137 @@ class CodingAgent:
         self.tool_executor.register_tool(EditFileTool())
         self.tool_executor.register_tool(SearchCodeTool())
         self.tool_executor.register_tool(AnalyzeCodeTool())
+
+    def _execute_with_tools(
+        self,
+        context: List[Dict[str, str]],
+        max_iterations: int = 5,
+        stream: bool = False
+    ) -> str:
+        """
+        Execute LLM with tool calling loop.
+
+        Args:
+            context: Initial conversation context
+            max_iterations: Maximum tool calling iterations (prevent infinite loops)
+            stream: Whether to stream responses
+
+        Returns:
+            Final response content
+        """
+        iteration = 0
+        current_context = context.copy()
+
+        while iteration < max_iterations:
+            iteration += 1
+            print(f"\n[Tool Loop - Iteration {iteration}/{max_iterations}]")
+
+            # Generate LLM response
+            if stream and iteration == 1:  # Only stream first response
+                full_response = ""
+                for chunk in self.llm.generate_stream(current_context):
+                    print(chunk.content, end="", flush=True)
+                    full_response += chunk.content
+                print()  # New line after streaming
+                response_content = full_response
+            else:
+                llm_response = self.llm.generate(current_context)
+                response_content = llm_response.content
+                if not stream:
+                    print(f"LLM Response: {response_content[:200]}...")
+
+            # Parse response for tool calls
+            parsed = self.tool_parser.parse(response_content)
+
+            if not parsed.has_tool_calls:
+                # No tool calls - we're done
+                print("[Tool Loop] No tool calls detected - finishing")
+                return response_content
+
+            # Execute tool calls
+            print(f"[Tool Loop] Found {len(parsed.tool_calls)} tool call(s)")
+            if parsed.thoughts:
+                print(f"[Tool Loop] Thoughts: {parsed.thoughts}")
+
+            tool_results = []
+            for i, tool_call in enumerate(parsed.tool_calls, 1):
+                print(f"\n[Tool {i}/{len(parsed.tool_calls)}] Executing: {tool_call.tool}")
+                print(f"  Arguments: {tool_call.arguments}")
+
+                try:
+                    # Execute the tool
+                    result = self.tool_executor.execute_tool(
+                        tool_call.tool,
+                        **tool_call.arguments
+                    )
+
+                    if result.is_success():
+                        output = result.output
+                        # Truncate large outputs
+                        if isinstance(output, str) and len(output) > 2000:
+                            output = output[:2000] + f"\n... (truncated {len(output) - 2000} characters)"
+
+                        tool_results.append({
+                            "tool": tool_call.tool,
+                            "arguments": tool_call.arguments,
+                            "success": True,
+                            "result": output
+                        })
+                        print(f"  ✓ Success: {str(output)[:100]}...")
+                    else:
+                        tool_results.append({
+                            "tool": tool_call.tool,
+                            "arguments": tool_call.arguments,
+                            "success": False,
+                            "error": result.error
+                        })
+                        print(f"  ✗ Error: {result.error}")
+
+                except Exception as e:
+                    tool_results.append({
+                        "tool": tool_call.tool,
+                        "arguments": tool_call.arguments,
+                        "success": False,
+                        "error": str(e)
+                    })
+                    print(f"  ✗ Exception: {e}")
+
+            # Format tool results for LLM
+            tool_results_text = self._format_tool_results(tool_results)
+
+            # Add assistant's tool request and tool results to context
+            current_context.append({
+                "role": "assistant",
+                "content": response_content
+            })
+            current_context.append({
+                "role": "user",
+                "content": f"Tool execution results:\n\n{tool_results_text}\n\nPlease provide your response to the user based on these results."
+            })
+
+        # Max iterations reached
+        print(f"\n[Tool Loop] Max iterations ({max_iterations}) reached")
+        return "I've executed several tool operations but need to stop here. Please review the results above."
+
+    def _format_tool_results(self, results: List[Dict[str, Any]]) -> str:
+        """Format tool results for LLM consumption."""
+        formatted = []
+
+        for i, result in enumerate(results, 1):
+            if result["success"]:
+                formatted.append(
+                    f"Tool {i}: {result['tool']}\n"
+                    f"Arguments: {result['arguments']}\n"
+                    f"Result:\n{result['result']}\n"
+                )
+            else:
+                formatted.append(
+                    f"Tool {i}: {result['tool']}\n"
+                    f"Arguments: {result['arguments']}\n"
+                    f"Error: {result['error']}\n"
+                )
+
+        return "\n".join(formatted)
 
     def index_codebase(
         self,
@@ -194,20 +329,12 @@ class CodingAgent:
             available_chunks=self.indexed_chunks if use_rag else None,
         )
 
-        # Generate response
-        if stream:
-            # Streaming response
-            full_response = ""
-            for chunk in self.llm.generate_stream(context):
-                print(chunk.content, end="", flush=True)
-                full_response += chunk.content
-
-            print()  # New line after streaming
-            response_content = full_response
-        else:
-            # Non-streaming response
-            llm_response = self.llm.generate(context)
-            response_content = llm_response.content
+        # Execute with tool calling loop
+        response_content = self._execute_with_tools(
+            context=context,
+            max_iterations=5,
+            stream=stream
+        )
 
         # Add assistant response to memory
         self.memory.add_assistant_message(response_content)

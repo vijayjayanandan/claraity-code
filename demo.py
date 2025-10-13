@@ -21,12 +21,12 @@ def main():
 
     # Step 1: Initialize Agent
     console.print("\n[bold]Step 1: Initializing Agent[/bold]")
-    console.print("Creating agent with CodeLlama 7B...")
+    console.print("Creating agent with Qwen3-Coder 30B...")
 
     agent = CodingAgent(
-        model_name="deepseek-coder:6.7b-instruct",
+        model_name="qwen3-coder:30b",
         backend="ollama",
-        context_window=4096,
+        context_window=131072,
     )
 
     console.print("[green]✓ Agent initialized![/green]")

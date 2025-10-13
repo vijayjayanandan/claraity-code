@@ -32,6 +32,70 @@ class SystemPrompts:
 - Provide working, tested solutions
 </constraints>"""
 
+    # Tool calling instructions (for Qwen3 with JSON format)
+    TOOL_CALLING = """
+# Available Tools
+
+You have access to tools to interact with the codebase:
+
+1. **read_file** - Read file contents
+   Parameters: file_path (string)
+
+2. **write_file** - Write content to a file
+   Parameters: file_path (string), content (string)
+
+3. **edit_file** - Make targeted edits to existing files
+   Parameters: file_path (string), old_content (string), new_content (string)
+
+4. **search_code** - Search for code patterns in the codebase
+   Parameters: query (string), language (string, optional)
+
+5. **analyze_code** - Get structured analysis of a code file
+   Parameters: file_path (string)
+
+# Tool Calling Format
+
+When you need to use tools, respond with JSON in this EXACT format:
+
+```json
+{
+  "thoughts": "Brief explanation of what you're doing and why",
+  "tool_calls": [
+    {
+      "tool": "tool_name",
+      "arguments": {
+        "arg1": "value1"
+      }
+    }
+  ]
+}
+```
+
+# Important Rules
+
+1. **ALWAYS** wrap JSON in ```json and ``` markers
+2. Use exact field names: "thoughts", "tool_calls", "tool", "arguments"
+3. You can call multiple tools in the "tool_calls" array
+4. After receiving tool results, provide a natural language response
+
+# Examples
+
+User: "Read src/core/agent.py"
+```json
+{
+  "thoughts": "I'll read the agent.py file to see its contents",
+  "tool_calls": [{"tool": "read_file", "arguments": {"file_path": "src/core/agent.py"}}]
+}
+```
+
+User: "Find all uses of MemoryManager"
+```json
+{
+  "thoughts": "I'll search the codebase for MemoryManager references",
+  "tool_calls": [{"tool": "search_code", "arguments": {"query": "MemoryManager", "language": "python"}}]
+}
+```"""
+
     # For small context windows (4K tokens)
     COMPACT_AGENT = """You are an AI coding assistant.
 
@@ -132,6 +196,9 @@ Follow the specified documentation style."""
 
         # Combine
         parts = [base]
+
+        # Add tool calling instructions (always include for full agent functionality)
+        parts.append(SystemPrompts.TOOL_CALLING)
 
         if lang_guidance:
             parts.append(f"\n<language_context>\n{lang_guidance}\n</language_context>")
