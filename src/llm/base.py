@@ -13,6 +13,7 @@ class LLMBackendType(str, Enum):
     VLLM = "vllm"
     LOCALAI = "localai"
     LLAMACPP = "llamacpp"
+    OPENAI = "openai"  # Generic OpenAI-compatible API
 
 
 class LLMConfig(BaseModel):

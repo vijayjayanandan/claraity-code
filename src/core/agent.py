@@ -6,7 +6,7 @@ from pathlib import Path
 
 from src.memory import MemoryManager, TaskContext
 from src.rag import CodeIndexer, Embedder, HybridRetriever, CodeChunk
-from src.llm import LLMBackend, OllamaBackend, LLMConfig, LLMBackendType
+from src.llm import LLMBackend, OllamaBackend, OpenAIBackend, LLMConfig, LLMBackendType
 from src.tools import ToolExecutor, ReadFileTool, WriteFileTool, EditFileTool, SearchCodeTool, AnalyzeCodeTool
 from src.tools.tool_parser import ToolCallParser, ParsedResponse
 from src.prompts import PromptLibrary, TaskType
@@ -40,16 +40,20 @@ class CodingAgent:
         base_url: str = "http://localhost:11434",
         context_window: int = 131072,
         working_directory: str = ".",
+        api_key: Optional[str] = None,
+        api_key_env: str = "OPENAI_API_KEY",
     ):
         """
         Initialize coding agent.
 
         Args:
             model_name: Name of the LLM model
-            backend: Backend type (ollama, vllm, etc.)
+            backend: Backend type (ollama, openai, etc.)
             base_url: Base URL for LLM API
             context_window: Context window size
             working_directory: Working directory for file operations
+            api_key: API key for OpenAI-compatible backends (optional)
+            api_key_env: Environment variable name for API key (default: OPENAI_API_KEY)
         """
         self.model_name = model_name
         self.context_window = context_window
@@ -66,6 +70,12 @@ class CodingAgent:
 
         if backend == "ollama":
             self.llm: LLMBackend = OllamaBackend(llm_config)
+        elif backend == "openai":
+            self.llm: LLMBackend = OpenAIBackend(
+                llm_config,
+                api_key=api_key,
+                api_key_env=api_key_env
+            )
         else:
             raise ValueError(f"Unsupported backend: {backend}")
 
@@ -107,7 +117,7 @@ class CodingAgent:
     def _execute_with_tools(
         self,
         context: List[Dict[str, str]],
-        max_iterations: int = 5,
+        max_iterations: int = 3,
         stream: bool = False
     ) -> str:
         """
@@ -211,9 +221,18 @@ class CodingAgent:
                 "content": f"Tool execution results:\n\n{tool_results_text}\n\nPlease provide your response to the user based on these results."
             })
 
-        # Max iterations reached
-        print(f"\n[Tool Loop] Max iterations ({max_iterations}) reached")
-        return "I've executed several tool operations but need to stop here. Please review the results above."
+        # Max iterations reached - generate final summary
+        print(f"\n[Tool Loop] Max iterations ({max_iterations}) reached - generating final summary")
+
+        # Ask LLM to summarize what was learned
+        current_context.append({
+            "role": "user",
+            "content": "You've reached the maximum number of tool iterations. Based on the information you've gathered from the tools, please provide a clear, concise answer to the original user question."
+        })
+
+        # Generate final summary
+        final_response = self.llm.generate(current_context)
+        return final_response.content
 
     def _format_tool_results(self, results: List[Dict[str, Any]]) -> str:
         """Format tool results for LLM consumption."""
@@ -332,7 +351,7 @@ class CodingAgent:
         # Execute with tool calling loop
         response_content = self._execute_with_tools(
             context=context,
-            max_iterations=5,
+            max_iterations=3,
             stream=stream
         )
 

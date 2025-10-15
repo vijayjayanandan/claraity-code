@@ -1,13 +1,199 @@
 # Claude Session Handoff - AI Coding Agent
 
-**Latest Session:** 2025-10-13 | **Status:** ✅ PRODUCTION-READY WITH ENHANCED PROMPTS!
-**Environment:** RunPod GPU Pod | **Model:** Qwen3-Coder 30B (262K context!)
+**Latest Session:** 2025-10-15 | **Status:** ✅ API INTEGRATION COMPLETE
+**Environment:** Flexible (Local/RunPod) | **Backend:** OpenAI-Compatible APIs
 
 ---
 
-## 🔥 **CURRENT STATUS: Production-Grade Prompts Implemented & Tested!**
+## 🎉 **CURRENT STATUS: API Integration Complete!**
 
-### **Enhanced Prompts Implementation (2025-10-13 Late Evening)** ⭐ NEW!
+**Strategic Shift:** Instead of optimizing local model performance, we've implemented **OpenAI-compatible API integration** to focus on agent capabilities rather than infrastructure.
+
+### **What's Implemented (2025-10-15)** ✅
+
+1. **✅ Generic OpenAI Backend** (`src/llm/openai_backend.py`)
+   - Works with ANY OpenAI-compatible API
+   - Supports: OpenAI, Alibaba Cloud (DashScope), Azure, Groq, Together.ai, etc.
+   - Streaming and non-streaming modes
+   - Token usage tracking
+   - Full error handling
+
+2. **✅ Agent Integration** (`src/core/agent.py`)
+   - Flexible backend selection: `backend="ollama"` or `backend="openai"`
+   - API key management via environment variables
+   - Context window configuration
+   - Example usage:
+     ```python
+     agent = CodingAgent(
+         backend="openai",
+         model_name="qwen3-coder-plus",
+         base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+         api_key_env="DASHSCOPE_API_KEY"
+     )
+     ```
+
+3. **✅ Test Scripts**
+   - `test_alibaba_api.py` - Tests Alibaba Cloud integration
+   - Ready for production use
+
+4. **✅ Portable Setup Scripts**
+   - `startup.sh` - Auto-setup on pod restart
+   - `setup-auto-startup.sh` - Configure auto-startup
+   - Now in project folder for easy porting
+
+5. **✅ Dependencies**
+   - Added `openai>=1.30.0` to requirements.txt
+
+### **Why This Approach?**
+
+**Previous Challenge:**
+- Local Qwen3-Coder 30B: 2-5 min per query
+- GPU memory bottleneck (94% VRAM usage)
+- 131K context → only 35/49 layers on GPU
+
+**New Solution:**
+- Use cloud APIs (Alibaba, OpenAI, etc.) for instant responses
+- Focus development on agent features (memory, RAG, tools)
+- Keep local Ollama option for data residency requirements
+
+**Benefits:**
+- ⚡ **Fast Development** - No infrastructure bottlenecks
+- 🎯 **Focus on Agent Logic** - Improve memory, RAG, tool calling
+- 🔄 **Flexible Deployment** - Switch between local/cloud easily
+- 💰 **Cost-Effective** - Only pay for what you use
+
+### **Quick Start (Local or New Pod)**
+
+**1. Install Dependencies:**
+```bash
+cd /path/to/ai-coding-agent
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+**2. Set Up API Key:**
+```bash
+# For Alibaba Cloud (recommended for development)
+export DASHSCOPE_API_KEY="your-key-here"
+
+# Or for OpenAI
+export OPENAI_API_KEY="your-key-here"
+```
+
+**3. Test the Integration:**
+```bash
+python test_alibaba_api.py
+```
+
+**4. Use in Your Code:**
+```python
+from src.core.agent import CodingAgent
+
+# Alibaba Cloud (fast & affordable)
+agent = CodingAgent(
+    backend="openai",
+    model_name="qwen3-coder-plus",
+    base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    api_key_env="DASHSCOPE_API_KEY"
+)
+
+# Or OpenAI
+agent = CodingAgent(
+    backend="openai",
+    model_name="gpt-4",
+    api_key_env="OPENAI_API_KEY"
+)
+
+# Or local Ollama (for data residency)
+agent = CodingAgent(
+    backend="ollama",
+    model_name="qwen3-coder:30b"
+)
+
+# Use the agent
+response = agent.chat("Write a Python function to sort a list", stream=True)
+```
+
+### **Next Steps: Focus on Agent Features**
+
+Now that infrastructure is sorted, focus on these core agent capabilities:
+
+**Priority 1: Enhanced Tool Calling** 🔧
+- Current: Basic tool loop implemented
+- Needed: Better error recovery, parallel tool execution
+- Files: `src/core/agent.py`, `src/tools/tool_parser.py`
+
+**Priority 2: Better Memory Integration** 🧠
+- Current: Memory system works, but LLM doesn't always use it
+- Needed: Improve prompts to ensure conversation retention
+- Files: `src/prompts/enhanced_prompts.py`, `src/core/context_builder.py`
+
+**Priority 3: CLI API Support** 💻
+- Current: CLI only supports Ollama backend
+- Needed: Add `--backend` and `--api-key` flags to CLI
+- Files: `src/cli.py`
+
+**Priority 4: Testing & Validation** ✅
+- Create comprehensive test suite for agent workflows
+- Test memory retention across conversations
+- Test tool calling with real codebases
+
+---
+
+## 📋 **PREVIOUS: Performance Optimization Attempts (Archive)**
+
+### **Performance Issues Identified (2025-10-13 Evening)** ⚠️ CRITICAL!
+
+**Problem:** Agent too slow (2-5 minutes per query) and doesn't provide final answers
+
+**Root Causes Found:**
+1. ❌ **GPU Memory Bottleneck** - Only 35/49 layers on GPU (29% on slow CPU!)
+   - VRAM: 23 GB / 24 GB used (94% full)
+   - KV Cache: 8.8 GB (for 131K context window)
+   - CPU at 100% processing the 14 CPU layers
+
+2. ❌ **Prompt Too Large** - 22.7K chars sent with every iteration
+   - 5,700 tokens per request
+   - Adds 30-40s per LLM call
+
+3. ❌ **Too Many Iterations** - 5 iterations × 30s = 2.5 minutes minimum
+   - Agent explores without answering
+   - Hits max iterations with generic "review results" message
+
+**Fixes Implemented (Not Yet Tested):**
+1. ✅ **Max Iterations: 5 → 3**
+   - File: `src/core/agent.py` (lines 110, 344)
+   - Impact: 40% fewer iterations
+
+2. ✅ **Final Answer Generation**
+   - File: `src/core/agent.py` (lines 214-225)
+   - When hitting max iterations, agent now summarizes findings
+   - Impact: Agent actually answers questions!
+
+3. ✅ **Medium Prompt: 22.7K → 8K chars**
+   - File: `src/prompts/enhanced_prompts.py` (new `get_medium_prompt()`)
+   - File: `src/core/context_builder.py` (switched to medium prompt)
+   - Keeps: Conversation memory, tool descriptions, 1 example
+   - Drops: Verbose examples 2-4, extended guidelines
+   - Impact: 65% size reduction, ~60% faster processing
+
+**Still Needed (HIGH PRIORITY):**
+1. ⚠️ **Reduce Context Window: 131K → 32K**
+   - Will free ~6.6 GB VRAM
+   - Should allow all 49 layers on GPU
+   - Expected: 3-5x speedup
+   - File to change: `src/core/agent.py` line 41
+   - **DO THIS FIRST THING NEXT SESSION!**
+
+**Expected After All Fixes:**
+- Time: 2-5 min → 30-60 seconds (73% faster)
+- Behavior: Agent provides actual answers
+- Resources: VRAM ~75% (vs 94%), CPU not maxed
+
+---
+
+## ✅ **PREVIOUS: Enhanced Prompts Implementation (2025-10-13 Afternoon)**
 
 🎉 **Major Breakthrough - Enterprise-Grade System Prompts!**
 - **Prompts:** Production-quality 920-line system based on Claude Code, Cursor, Aider patterns

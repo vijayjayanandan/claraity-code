@@ -55,11 +55,11 @@ class ContextBuilder:
         rag_tokens = int(self.max_context_tokens * 0.30)  # 30%
         memory_tokens = int(self.max_context_tokens * 0.35)  # 35%
 
-        # 1. Build system prompt using enhanced prompts
-        system_prompt = EnhancedSystemPrompts.get_system_prompt(
+        # 1. Build system prompt using medium (balanced) prompts
+        # Use medium prompt for better performance while maintaining quality
+        system_prompt = EnhancedSystemPrompts.get_medium_prompt(
             language=language,
             task_type=task_type,
-            context_size=self.max_context_tokens,
         )
 
         # Compress if needed

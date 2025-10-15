@@ -52,6 +52,7 @@ psutil>=5.9.8
 # LLM Backends (install as needed)
 # ollama  # Use official Ollama installation instead
 # requests>=2.31.0  # For Ollama API calls (typically already installed)
+openai>=1.30.0  # For OpenAI-compatible API backends (OpenAI, Alibaba Cloud, Azure, Groq, etc.)
 
 # Note: For GPU acceleration, install Ollama on your system
 # CPU: Works but slow (30-60s per query)
