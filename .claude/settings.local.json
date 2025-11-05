@@ -2,7 +2,21 @@
   "permissions": {
     "allow": [
       "WebSearch",
-      "Bash(git remote set-url:*)"
+      "Bash(git remote set-url:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(python:*)",
+      "Bash(mkdir:*)",
+      "Bash(curl -s http://localhost:8000/architecture)",
+      "Bash(curl -s http://localhost:3000)",
+      "Bash(wsl python3:*)",
+      "Bash(wsl node:*)",
+      "Bash(wsl bash:*)",
+      "Bash(export DASHSCOPE_API_KEY:*)",
+      "Bash(curl:*)",
+      "Bash(export CLARITY_DB_PATH=\".clarity/ai-coding-agent.db\")",
+      "Bash(export DASHSCOPE_API_KEY=\"sk-4e4a13fc4efb48408e22eb9feb40a03d\")",
+      "Bash(set:*)",
+      "Bash(powershell.exe -Command \"$env:DASHSCOPE_API_KEY=''sk-4e4a13fc4efb48408e22eb9feb40a03d''; python -c ''from src.validation import runner; print(\"\"success\"\")'' 2>&1 | Out-File -FilePath error.txt -Encoding UTF8\")"
     ],
     "deny": [],
     "ask": []

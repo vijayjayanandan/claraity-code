@@ -83,6 +83,17 @@ models/
 *.temp
 .temp/
 tmp/
+greet.py
+fix_tests.py
+
+# Node.js (React UI)
+node_modules/
+clarity-ui/node_modules/
+
+# Test Results
+memory_test_results.json
+test_results.json
+*.test_results
 
 # OS
 Thumbs.db

@@ -1,41 +1,56 @@
-"""Embedder for generating vector embeddings of code chunks."""
+"""Embedder for generating vector embeddings of code chunks using Alibaba Cloud API."""
 
 from typing import List, Optional, Dict, Any
-from sentence_transformers import SentenceTransformer
 import numpy as np
 from pathlib import Path
 import pickle
+import os
+from openai import OpenAI
 
 from .models import CodeChunk
 
 
 class Embedder:
     """
-    Generates and caches embeddings for code chunks.
-    Optimized for small, efficient embedding models.
+    Generates and caches embeddings for code chunks using Alibaba Cloud API.
+    Uses text-embedding-v2 model via OpenAI-compatible interface.
     """
 
     def __init__(
         self,
-        model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
+        model_name: str = "text-embedding-v4",  # Alibaba model
         cache_dir: Optional[str] = None,
         batch_size: int = 32,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,  # Will use LLM_HOST env var or default
     ):
         """
-        Initialize embedder.
+        Initialize embedder with Alibaba Cloud API.
 
         Args:
-            model_name: SentenceTransformer model name
+            model_name: Alibaba embedding model name (default: text-embedding-v4)
             cache_dir: Directory for caching embeddings
             batch_size: Batch size for embedding generation
+            api_key: Alibaba API key (defaults to DASHSCOPE_API_KEY env var)
+            base_url: API base URL
         """
         self.model_name = model_name
-        self.model = SentenceTransformer(model_name)
         self.batch_size = batch_size
         self.cache_dir = Path(cache_dir) if cache_dir else None
 
         if self.cache_dir:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
+
+        # Initialize OpenAI client for Alibaba API
+        self.client = OpenAI(
+            api_key=api_key or os.getenv("DASHSCOPE_API_KEY"),
+            base_url=base_url
+            or os.getenv("LLM_HOST")
+            or "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        )
+
+        # Embedding dimension for text-embedding-v4 is 1024
+        self.embedding_dimension = 1024
 
         # In-memory cache
         self._cache: Dict[str, List[float]] = {}
@@ -69,30 +84,34 @@ class Embedder:
             # Prepare texts
             texts = [chunk.get_searchable_content() for chunk in chunks_to_embed]
 
-            # Generate embeddings in batches
-            embeddings = self.model.encode(
-                texts,
-                batch_size=self.batch_size,
-                show_progress_bar=len(texts) > 100,
-                convert_to_numpy=True,
-            )
+            # Generate embeddings using Alibaba API
+            # Process in batches to respect API limits
+            all_embeddings = []
+            for i in range(0, len(texts), self.batch_size):
+                batch_texts = texts[i : i + self.batch_size]
+
+                response = self.client.embeddings.create(
+                    model=self.model_name, input=batch_texts
+                )
+
+                batch_embeddings = [item.embedding for item in response.data]
+                all_embeddings.extend(batch_embeddings)
 
             # Update chunks and cache
             for chunk, embedding, idx in zip(
-                chunks_to_embed, embeddings, chunk_indices
+                chunks_to_embed, all_embeddings, chunk_indices
             ):
-                embedding_list = embedding.tolist()
-                chunk.embedding = embedding_list
+                chunk.embedding = embedding
                 chunks[idx] = chunk
 
                 if use_cache:
-                    self._cache[chunk.id] = embedding_list
+                    self._cache[chunk.id] = embedding
 
         return chunks
 
     def embed_query(self, query: str) -> List[float]:
         """
-        Generate embedding for a query.
+        Generate embedding for a query using Alibaba API.
 
         Args:
             query: Query text
@@ -100,8 +119,8 @@ class Embedder:
         Returns:
             Embedding vector
         """
-        embedding = self.model.encode(query, convert_to_numpy=True)
-        return embedding.tolist()
+        response = self.client.embeddings.create(model=self.model_name, input=[query])
+        return response.data[0].embedding
 
     def compute_similarity(
         self, embedding1: List[float], embedding2: List[float]
@@ -147,8 +166,8 @@ class Embedder:
                 self._cache = pickle.load(f)
 
     def get_embedding_dimension(self) -> int:
-        """Get dimensionality of embeddings."""
-        return self.model.get_sentence_embedding_dimension()
+        """Get dimensionality of embeddings (1024 for text-embedding-v4)."""
+        return self.embedding_dimension
 
     def clear_cache(self) -> None:
         """Clear embedding cache."""

@@ -1,11 +1,12 @@
-"""Semantic Memory - Long-term knowledge base with vector storage."""
+"""Semantic Memory - Long-term knowledge base with vector storage using Alibaba Cloud API."""
 
 import uuid
+import os
 from typing import List, Optional, Dict, Any, Tuple
 from pathlib import Path
 import chromadb
 from chromadb.config import Settings
-from sentence_transformers import SentenceTransformer
+from openai import OpenAI
 
 from .models import MemoryEntry, MemoryType, CodeContext
 
@@ -14,32 +15,43 @@ class SemanticMemory:
     """
     Semantic memory provides long-term knowledge storage using vector embeddings.
     Supports similarity-based retrieval for code, concepts, and solutions.
+    Uses Alibaba Cloud API for embeddings.
     """
 
     def __init__(
         self,
         persist_directory: str = "./data/embeddings",
         collection_name: str = "semantic_memory",
-        embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
+        embedding_model: str = "text-embedding-v4",  # Alibaba model
         similarity_threshold: float = 0.7,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,  # Will use LLM_HOST env var or default
     ):
         """
-        Initialize semantic memory.
+        Initialize semantic memory with Alibaba Cloud API.
 
         Args:
             persist_directory: Directory to persist vector database
             collection_name: Name of the collection
-            embedding_model: SentenceTransformer model name
+            embedding_model: Alibaba embedding model name
             similarity_threshold: Minimum similarity score for retrieval
+            api_key: Alibaba API key (defaults to DASHSCOPE_API_KEY env var)
+            base_url: API base URL
         """
         self.persist_directory = Path(persist_directory)
         self.persist_directory.mkdir(parents=True, exist_ok=True)
 
         self.similarity_threshold = similarity_threshold
         self.embedding_model_name = embedding_model
+        self.embedding_dimension = 1024  # text-embedding-v4 dimension
 
-        # Initialize embedding model
-        self.embedding_model = SentenceTransformer(embedding_model)
+        # Initialize OpenAI client for Alibaba API
+        self.client_api = OpenAI(
+            api_key=api_key or os.getenv("DASHSCOPE_API_KEY"),
+            base_url=base_url
+            or os.getenv("LLM_HOST")
+            or "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        )
 
         # Initialize ChromaDB
         self.client = chromadb.Client(
@@ -76,8 +88,11 @@ class SemanticMemory:
         """
         memory_id = str(uuid.uuid4())
 
-        # Generate embedding
-        embedding = self.embedding_model.encode(content).tolist()
+        # Generate embedding using Alibaba API
+        response = self.client_api.embeddings.create(
+            model=self.embedding_model_name, input=[content]
+        )
+        embedding = response.data[0].embedding
 
         # Prepare metadata
         meta = metadata or {}
@@ -160,8 +175,11 @@ class SemanticMemory:
         Returns:
             List of (content, similarity_score, metadata) tuples
         """
-        # Generate query embedding
-        query_embedding = self.embedding_model.encode(query).tolist()
+        # Generate query embedding using Alibaba API
+        response = self.client_api.embeddings.create(
+            model=self.embedding_model_name, input=[query]
+        )
+        query_embedding = response.data[0].embedding
 
         # Search ChromaDB
         results = self.collection.query(
@@ -298,7 +316,7 @@ class SemanticMemory:
         return {
             "total_memories": len(all_data["ids"]) if all_data["ids"] else 0,
             "embedding_model": self.embedding_model_name,
-            "embedding_dimension": self.embedding_model.get_sentence_embedding_dimension(),
+            "embedding_dimension": self.embedding_dimension,
             "similarity_threshold": self.similarity_threshold,
             "type_counts": type_counts,
             "collection_name": self.collection.name,

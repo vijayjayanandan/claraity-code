@@ -1,0 +1,11 @@
+{
+  "success": true,
+  "response": "<src.core.agent.AgentResponse object at 0x000001D9A1533AF0>",
+  "duration_seconds": 31.388267,
+  "tokens_used": 0,
+  "cost_usd": 0.0,
+  "tool_calls": {},
+  "errors": [],
+  "warnings": [],
+  "human_interventions": 0
+}

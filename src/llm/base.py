@@ -25,7 +25,7 @@ class LLMConfig(BaseModel):
 
     # Generation parameters
     temperature: float = 0.2
-    max_tokens: int = 2048
+    max_tokens: int = 65536  # Qwen3-coder-plus maximum output capacity (was 2048)
     top_p: float = 0.95
     top_k: int = 40
     repeat_penalty: float = 1.1
@@ -49,10 +49,60 @@ class LLMConfig(BaseModel):
         use_enum_values = True
 
 
+class ToolParameter(BaseModel):
+    """Tool parameter definition (JSON Schema format)."""
+
+    type: str  # "string", "number", "boolean", "array", "object"
+    description: str
+    enum: Optional[List[str]] = None
+    items: Optional[Dict[str, Any]] = None  # For array types
+    properties: Optional[Dict[str, Any]] = None  # For object types
+    required: Optional[List[str]] = None  # For object types
+
+
+class ToolDefinition(BaseModel):
+    """Tool definition for LLM (OpenAI function calling format)."""
+
+    name: str
+    description: str
+    parameters: Dict[str, Any]  # JSON Schema object
+
+    class Config:
+        # Pydantic V2: renamed from schema_extra to json_schema_extra
+        json_schema_extra = {
+            "example": {
+                "name": "write_file",
+                "description": "Create a new file with content",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "Path to file"
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "File content"
+                        }
+                    },
+                    "required": ["file_path", "content"]
+                }
+            }
+        }
+
+
+class ToolCall(BaseModel):
+    """A tool call returned by LLM."""
+
+    id: str  # Unique ID for this call
+    name: str  # Tool name
+    arguments: Dict[str, Any]  # Parsed arguments (dict, not JSON string)
+
+
 class LLMResponse(BaseModel):
     """Response from LLM."""
 
-    content: str
+    content: Optional[str] = None  # Optional because tool-only responses may have no text
     model: str
     finish_reason: Optional[str] = None
 
@@ -66,6 +116,9 @@ class LLMResponse(BaseModel):
 
     # Raw response
     raw_response: Optional[Dict[str, Any]] = None
+
+    # Tool calls (for tool calling mode)
+    tool_calls: Optional[List[ToolCall]] = None
 
 
 class StreamChunk(BaseModel):
@@ -124,6 +177,57 @@ class LLMBackend(ABC):
             Stream chunks
         """
         pass
+
+    def generate_with_tools(
+        self,
+        messages: List[Dict[str, str]],
+        tools: List[ToolDefinition],
+        tool_choice: str = "auto",
+        **kwargs: Any
+    ) -> LLMResponse:
+        """
+        Generate completion with tool calling support.
+
+        This method enables the LLM to call tools (functions) as part of its response.
+        The LLM can choose to call one or more tools, or respond with text.
+
+        Args:
+            messages: List of message dicts with 'role' and 'content'
+            tools: List of available tools (function definitions)
+            tool_choice: "auto" (LLM decides), "required" (must call tool),
+                        "none" (no tools), or specific tool name
+            **kwargs: Additional generation parameters
+
+        Returns:
+            LLM response with optional tool_calls field
+
+        Raises:
+            NotImplementedError: If backend doesn't support tool calling
+
+        Example:
+            tools = [
+                ToolDefinition(
+                    name="write_file",
+                    description="Create a new file",
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string", "description": "File path"},
+                            "content": {"type": "string", "description": "Content"}
+                        },
+                        "required": ["path", "content"]
+                    }
+                )
+            ]
+            response = backend.generate_with_tools(messages, tools)
+            if response.tool_calls:
+                for call in response.tool_calls:
+                    print(f"Call {call.name} with {call.arguments}")
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support tool calling. "
+            "Use OpenAIBackend or implement generate_with_tools() method."
+        )
 
     @abstractmethod
     def count_tokens(self, text: str) -> int:

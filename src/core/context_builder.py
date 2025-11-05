@@ -4,6 +4,7 @@ from typing import List, Dict, Any, Optional
 from src.memory import MemoryManager
 from src.rag import HybridRetriever, CodeChunk
 from src.prompts import EnhancedSystemPrompts, PromptOptimizer
+from src.core.file_reference_parser import FileReference
 
 
 class ContextBuilder:
@@ -35,6 +36,7 @@ class ContextBuilder:
         language: str = "python",
         use_rag: bool = True,
         available_chunks: Optional[List[CodeChunk]] = None,
+        file_references: Optional[List[FileReference]] = None,
     ) -> List[Dict[str, str]]:
         """
         Build complete context for LLM.
@@ -45,6 +47,7 @@ class ContextBuilder:
             language: Programming language
             use_rag: Whether to use RAG retrieval
             available_chunks: Optional pre-loaded chunks for RAG
+            file_references: Optional list of file references to inject
 
         Returns:
             List of message dictionaries
@@ -55,11 +58,12 @@ class ContextBuilder:
         rag_tokens = int(self.max_context_tokens * 0.30)  # 30%
         memory_tokens = int(self.max_context_tokens * 0.35)  # 35%
 
-        # 1. Build system prompt using medium (balanced) prompts
-        # Use medium prompt for better performance while maintaining quality
-        system_prompt = EnhancedSystemPrompts.get_medium_prompt(
+        # 1. Build system prompt using FULL enhanced prompts (production-grade)
+        # Use full prompts for comprehensive instructions like modern coding agents
+        system_prompt = EnhancedSystemPrompts.get_system_prompt(
             language=language,
             task_type=task_type,
+            context_size=self.max_context_tokens
         )
 
         # Compress if needed
@@ -112,6 +116,27 @@ class ContextBuilder:
             "role": "system",
             "content": system_prompt
         })
+
+        # Add file references if provided (after system prompt, before RAG)
+        if file_references:
+            loaded_refs = [ref for ref in file_references if ref.is_loaded]
+            if loaded_refs:
+                file_parts = []
+                for ref in loaded_refs:
+                    file_parts.append(f"# File: {ref.display_path}")
+                    if ref.line_start is not None:
+                        if ref.line_start == ref.line_end:
+                            file_parts.append(f"# Line: {ref.line_start}")
+                        else:
+                            file_parts.append(f"# Lines: {ref.line_start}-{ref.line_end}")
+                    file_parts.append(f"```\n{ref.content}\n```")
+                    file_parts.append("")  # Blank line between files
+
+                file_context = "\n".join(file_parts)
+                context.append({
+                    "role": "system",
+                    "content": f"<referenced_files>\nThe user has referenced these files:\n\n{file_context}\n</referenced_files>"
+                })
 
         # Add RAG context if available
         if rag_context:

@@ -186,3 +186,46 @@ class WorkingMemory:
         )
 
         return " | ".join(summary_parts)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Serialize working memory to dictionary.
+
+        Returns:
+            Dictionary with all working memory state
+        """
+        return {
+            "messages": [msg.model_dump(mode='json') for msg in self.messages],
+            "task_context": self.task_context.model_dump(mode='json') if self.task_context else None,
+            "code_contexts": [ctx.model_dump(mode='json') for ctx in self.code_contexts],
+            "metadata": self.metadata,
+            "max_tokens": self.max_tokens,
+        }
+
+    def from_dict(self, data: Dict[str, Any]) -> None:
+        """
+        Restore working memory from dictionary.
+
+        Args:
+            data: Dictionary with working memory state
+        """
+        from .models import Message, MessageRole, CodeContext, TaskContext
+
+        # Restore messages
+        self.messages = [Message.model_validate(msg) for msg in data.get("messages", [])]
+
+        # Restore task context
+        task_data = data.get("task_context")
+        self.task_context = TaskContext.model_validate(task_data) if task_data else None
+
+        # Restore code contexts
+        self.code_contexts = [
+            CodeContext.model_validate(ctx) for ctx in data.get("code_contexts", [])
+        ]
+
+        # Restore metadata
+        self.metadata = data.get("metadata", {})
+
+        # Update max_tokens if present
+        if "max_tokens" in data:
+            self.max_tokens = data["max_tokens"]
