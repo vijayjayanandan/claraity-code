@@ -1,0 +1,10 @@
+{
+  "success": false,
+  "error": "API key not provided. Set OPENAI_API_KEY environment variable or pass api_key parameter.",
+  "traceback": "Traceback (most recent call last):\n  File \"/home/user/ai-coding-agent/validation-results/hard_web_scraper_8bf4990f_20251105_224409/run_agent.py\", line 43, in <module>\n    agent = CodingAgent(\n            ^^^^^^^^^^^^\n  File \"/home/user/ai-coding-agent/src/core/agent.py\", line 116, in __init__\n    self.llm: LLMBackend = OpenAIBackend(\n                           ^^^^^^^^^^^^^^\n  File \"/home/user/ai-coding-agent/src/llm/openai_backend.py\", line 54, in __init__\n    raise ValueError(\nValueError: API key not provided. Set OPENAI_API_KEY environment variable or pass api_key parameter.\n",
+  "errors": [
+    "API key not provided. Set OPENAI_API_KEY environment variable or pass api_key parameter."
+  ],
+  "warnings": [],
+  "human_interventions": 0
+}
