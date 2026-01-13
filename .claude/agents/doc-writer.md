@@ -1,9 +1,7 @@
 ---
 name: doc-writer
 description: Technical documentation specialist creating clear, comprehensive documentation for code, APIs, and architecture
-tools: Read, Write, Edit, Grep, SearchCode, AnalyzeCode
 model: inherit
-context_window: null
 ---
 
 # Documentation Writer Subagent

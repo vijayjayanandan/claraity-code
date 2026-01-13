@@ -16,9 +16,20 @@
       "Bash(export CLARITY_DB_PATH=\".clarity/ai-coding-agent.db\")",
       "Bash(export DASHSCOPE_API_KEY=\"sk-4e4a13fc4efb48408e22eb9feb40a03d\")",
       "Bash(set:*)",
-      "Bash(powershell.exe -Command \"$env:DASHSCOPE_API_KEY=''sk-4e4a13fc4efb48408e22eb9feb40a03d''; python -c ''from src.validation import runner; print(\"\"success\"\")'' 2>&1 | Out-File -FilePath error.txt -Encoding UTF8\")"
+      "Bash(powershell.exe -Command \"$env:DASHSCOPE_API_KEY=''sk-4e4a13fc4efb48408e22eb9feb40a03d''; python -c ''from src.validation import runner; print(\"\"success\"\")'' 2>&1 | Out-File -FilePath error.txt -Encoding UTF8\")",
+      "WebFetch(domain:aider.chat)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:platform.openai.com)",
+      "WebFetch(domain:code.claude.com)",
+      "WebFetch(domain:textual.textualize.io)",
+      "Bash(find:*)",
+      "WebFetch(domain:www.anthropic.com)",
+      "WebFetch(domain:claude.com)"
     ],
     "deny": [],
-    "ask": []
+    "ask": [
+      "Edit",
+      "Write"
+    ]
   }
 }

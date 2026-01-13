@@ -1,5 +1,6 @@
 """File operation tools."""
 
+import platform
 import subprocess
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -276,6 +277,88 @@ class EditFileTool(Tool):
         }
 
 
+class AppendToFileTool(Tool):
+    """Tool for appending content to files."""
+
+    def __init__(self):
+        super().__init__(
+            name="append_to_file",
+            description="Append content to an existing file (or create if doesn't exist)"
+        )
+
+    def execute(self, file_path: str, content: str, **kwargs: Any) -> ToolResult:
+        """Append content to file.
+
+        Args:
+            file_path: Path to the file to append to
+            content: Content to append
+
+        Returns:
+            ToolResult with operation status
+        """
+        try:
+            path = Path(file_path)
+
+            # Create parent directories if needed
+            path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Determine if we need a leading newline
+            needs_newline = False
+            if path.exists():
+                with open(path, "r", encoding="utf-8") as f:
+                    existing = f.read()
+                    # Add newline if file doesn't end with one
+                    if existing and not existing.endswith('\n'):
+                        needs_newline = True
+
+            # Append content
+            with open(path, "a", encoding="utf-8") as f:
+                if needs_newline:
+                    f.write('\n')
+                f.write(content)
+
+            # Get total file size after append
+            total_size = path.stat().st_size
+            with open(path, "r", encoding="utf-8") as f:
+                total_lines = len(f.readlines())
+
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.SUCCESS,
+                output=f"Successfully appended {len(content)} characters to {file_path} (total: {total_lines} lines, {total_size} bytes)",
+                metadata={
+                    "file_path": str(path),
+                    "appended_size": len(content),
+                    "total_size": total_size,
+                    "total_lines": total_lines
+                }
+            )
+
+        except Exception as e:
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.ERROR,
+                output=None,
+                error=f"Failed to append to file: {str(e)}"
+            )
+
+    def _get_parameters(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Path to the file to append to (creates if doesn't exist)"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Content to append to the file"
+                }
+            },
+            "required": ["file_path", "content"]
+        }
+
+
 class RunCommandTool(Tool):
     """Tool for running shell commands safely."""
 
@@ -333,14 +416,27 @@ class RunCommandTool(Tool):
                 cwd = str(cwd_path.absolute())
 
             # Execute command
-            result = subprocess.run(
-                command,
-                shell=True,
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                timeout=timeout
-            )
+            # On Windows, use PowerShell instead of cmd.exe for better Unix compatibility
+            # (PowerShell has aliases for common Unix commands like pwd, ls, cat, etc.)
+            if platform.system() == "Windows":
+                # Use PowerShell with the command
+                result = subprocess.run(
+                    ["powershell", "-NoProfile", "-Command", command],
+                    cwd=cwd,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout
+                )
+            else:
+                # On Unix-like systems, use the default shell
+                result = subprocess.run(
+                    command,
+                    shell=True,
+                    cwd=cwd,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout
+                )
 
             # Prepare output
             output_parts = []

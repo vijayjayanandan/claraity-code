@@ -1,4 +1,4 @@
-"""Embedder for generating vector embeddings of code chunks using Alibaba Cloud API."""
+"""Embedder for generating vector embeddings of code chunks using OpenAI-compatible APIs."""
 
 from typing import List, Optional, Dict, Any
 import numpy as np
@@ -12,45 +12,72 @@ from .models import CodeChunk
 
 class Embedder:
     """
-    Generates and caches embeddings for code chunks using Alibaba Cloud API.
-    Uses text-embedding-v2 model via OpenAI-compatible interface.
+    Generates and caches embeddings for code chunks using OpenAI-compatible APIs.
+    Supports any embedding service with OpenAI-compatible endpoints.
     """
 
     def __init__(
         self,
-        model_name: str = "text-embedding-v4",  # Alibaba model
+        model_name: str,
         cache_dir: Optional[str] = None,
-        batch_size: int = 32,
+        batch_size: Optional[int] = None,
         api_key: Optional[str] = None,
-        base_url: Optional[str] = None,  # Will use LLM_HOST env var or default
+        api_key_env: str = "EMBEDDING_API_KEY",
+        base_url: Optional[str] = None,
+        embedding_dimension: Optional[int] = None,
     ):
         """
-        Initialize embedder with Alibaba Cloud API.
+        Initialize embedder with OpenAI-compatible API.
 
         Args:
-            model_name: Alibaba embedding model name (default: text-embedding-v4)
+            model_name: Embedding model name (required, no default)
             cache_dir: Directory for caching embeddings
-            batch_size: Batch size for embedding generation
-            api_key: Alibaba API key (defaults to DASHSCOPE_API_KEY env var)
-            base_url: API base URL
+            batch_size: Batch size for embedding generation (from .env EMBEDDING_BATCH_SIZE)
+            api_key: API key (optional, will use env var if not provided)
+            api_key_env: Environment variable name for API key (default: EMBEDDING_API_KEY)
+            base_url: API base URL (from .env EMBEDDING_BASE_URL)
+            embedding_dimension: Dimension of embeddings (from .env EMBEDDING_DIMENSION)
         """
         self.model_name = model_name
-        self.batch_size = batch_size
+        # Read batch_size from .env
+        self.batch_size = batch_size or int(os.getenv("EMBEDDING_BATCH_SIZE", "10"))
         self.cache_dir = Path(cache_dir) if cache_dir else None
 
         if self.cache_dir:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-        # Initialize OpenAI client for Alibaba API
+        # Get API key from parameter or environment variable
+        resolved_api_key = api_key or os.getenv(api_key_env)
+        if not resolved_api_key:
+            # Fallback to OPENAI_API_KEY if EMBEDDING_API_KEY is not set
+            resolved_api_key = os.getenv("OPENAI_API_KEY")
+        if not resolved_api_key:
+            raise ValueError(
+                f"Embedding API key not provided. Set {api_key_env} or OPENAI_API_KEY environment variable "
+                f"or pass api_key parameter."
+            )
+
+        # Get base URL from parameter or environment variable
+        resolved_base_url = base_url or os.getenv("EMBEDDING_BASE_URL")
+        if not resolved_base_url:
+            raise ValueError(
+                "Embedding base URL not provided. Set EMBEDDING_BASE_URL environment variable "
+                "or pass base_url parameter."
+            )
+
+        # Initialize OpenAI client with provided configuration
         self.client = OpenAI(
-            api_key=api_key or os.getenv("DASHSCOPE_API_KEY"),
-            base_url=base_url
-            or os.getenv("LLM_HOST")
-            or "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+            api_key=resolved_api_key,
+            base_url=resolved_base_url,
         )
 
-        # Embedding dimension for text-embedding-v4 is 1024
-        self.embedding_dimension = 1024
+        # Embedding dimension from parameter or environment
+        self.embedding_dimension = embedding_dimension or int(os.getenv("EMBEDDING_DIMENSION", "1536"))
+        if not self.embedding_dimension:
+            raise ValueError(
+                "Embedding dimension not provided. Set EMBEDDING_DIMENSION environment variable "
+                "or pass embedding_dimension parameter."
+            )
 
         # In-memory cache
         self._cache: Dict[str, List[float]] = {}

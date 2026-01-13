@@ -29,6 +29,7 @@ An advanced AI coding agent optimized for small open-source LLMs, featuring stat
 - **Incremental Codebase Learning**: Progressive understanding without overwhelming small context windows
 - **Token Budget Management**: Dynamic allocation of context budget based on task requirements
 - **Session Persistence**: Save and restore conversation state across sessions
+- **Checkpoints for Long-Running Projects**: Create save points during multi-day development with full context preservation
 - **Tool Execution Engine**: Read, write, edit, search, and analyze code intelligently
 
 ### Language Support
@@ -218,6 +219,131 @@ Sessions are stored in `.opencodeagent/sessions/` with the following structure:
       task_context.json        # Current task details
       file_memories.txt        # Loaded CLAUDE.md content
 ```
+
+### Checkpoints for Long-Running Projects
+
+**Checkpoints** are work-in-progress snapshots designed for multi-day/multi-session development. Unlike session persistence (which saves complete conversations), checkpoints create save points you can return to later.
+
+**Think of it like save games:** Resume development exactly where you left off, with full context of architecture decisions, pending tasks, and conversation history.
+
+**CLI Commands (in chat mode):**
+```bash
+# Create a checkpoint during development
+> checkpoint-save
+Description: Backend API complete, frontend pending
+Phase: Phase 1 - API Development
+Pending tasks:
+  - Create React dashboard
+  - Add authentication UI
+  - Implement real-time updates
+✓ Checkpoint created: abc12345
+
+# List all checkpoints for current project
+> checkpoints
+╭─ Project Checkpoints (3 total) ──────────────────────╮
+│ ID       │ Description        │ Files │ Phase      │
+├──────────┼────────────────────┼───────┼────────────┤
+│ abc12345 │ Backend API comp...│ 12    │ Phase 1    │
+│ def67890 │ User auth added    │ 15    │ Phase 2    │
+╰───────────────────────────────────────────────────────╯
+
+# Restore from a checkpoint (rollback)
+> checkpoint-restore abc12345
+✓ Restored to: Backend API complete, frontend pending
+✓ Restored 24 messages, 8 tool calls
+✓ Working directory: ./my-project
+✓ Pending tasks: 3
+
+# Delete all checkpoints (WARNING: irreversible!)
+> checkpoint-clear-all
+⚠ Delete ALL checkpoints? (yes/no): yes
+✓ Deleted 3 checkpoint(s)
+```
+
+**Python API (for automation/testing):**
+```python
+from src.orchestration import AgentOrchestrator
+
+# Start a multi-session project
+orchestrator = AgentOrchestrator(
+    working_directory="./music-academy"
+)
+session = orchestrator.start_conversation(
+    task_description="Build online music learning academy"
+)
+
+# === Day 1: Build backend ===
+session.send_message("Create database models for User, Course, Lesson")
+session.send_message("Create FastAPI endpoints for course catalog")
+
+# Create checkpoint before ending day
+checkpoint_id = session.save_checkpoint(
+    description="Backend foundation complete",
+    phase="Phase 1 - Backend",
+    pending_tasks=[
+        "Create React frontend",
+        "Add authentication",
+        "Implement video player"
+    ]
+)
+print(f"Checkpoint saved: {checkpoint_id}")
+
+# End day 1
+orchestrator.end_conversation(session.conversation_id)
+
+# === Day 2: Resume work ===
+# Start fresh session (simulates new day/terminal)
+new_session = orchestrator.start_conversation(
+    task_description="Continue music academy"
+)
+
+# Restore checkpoint
+new_session.restore_checkpoint(checkpoint_id)
+# Agent now has full context from day 1!
+
+# Continue building
+new_session.send_message("Create the React student dashboard")
+```
+
+**Checkpoint Features:**
+- **Full Context Preservation**: Saves conversation history, files created, tool calls, and pending tasks
+- **Cross-Session Resume**: Start new terminal/session and pick up exactly where you left off
+- **Architecture Memory**: Agent remembers database schemas, API endpoints, and design decisions
+- **Pending Task Tracking**: Checkpoint stores what's left to do (frontend, tests, deployment, etc.)
+- **Project-Scoped**: Checkpoints stored in `.checkpoints/` directory within project workspace
+- **Automatic Cleanup**: Configure `max_checkpoints` to auto-delete old checkpoints
+
+**Common Use Cases:**
+- **Multi-day development**: Build complex apps over several days with full context
+- **Experiment safety**: Create checkpoint before trying risky changes, restore if needed
+- **Team handoffs**: Share checkpoint ID so teammates can resume your work
+- **Milestone tracking**: Save checkpoints after completing each project phase
+- **Testing/QA**: Restore to specific states for bug reproduction
+
+**Checkpoint vs Session Persistence:**
+| Feature | Checkpoints | Session Persistence |
+|---------|-------------|---------------------|
+| **Purpose** | Work-in-progress snapshots | Complete conversation archives |
+| **Scope** | Project-specific | Global across all projects |
+| **Use Case** | Resume multi-day development | Pause/resume conversations |
+| **Storage** | `.checkpoints/` in project | `.opencodeagent/sessions/` |
+| **Restore Behavior** | Rolls back to checkpoint state | Loads full conversation |
+| **Pending Tasks** | Yes, explicitly tracked | No, use tags instead |
+
+**Checkpoint Storage:**
+Checkpoints are stored in your project's `.checkpoints/` directory:
+```
+my-project/
+  .checkpoints/
+    checkpoint_abc12345.json   # Includes working memory, tool history, pending tasks
+    checkpoint_def67890.json
+```
+
+Each checkpoint contains:
+- **Conversation history**: All messages exchanged with agent
+- **Tool execution history**: Files created/modified, commands run
+- **Task context**: Current phase, pending tasks, file count
+- **Metadata**: Timestamp, description, working directory
 
 #### Python API
 

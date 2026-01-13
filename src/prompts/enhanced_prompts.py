@@ -26,6 +26,7 @@ class PromptSection(Enum):
     """Sections of the enhanced prompt system."""
     IDENTITY = "identity"
     THINKING = "thinking"
+    DECISION_MAKING = "decision_making"  # NEW: LLM-first decision making
     TOOLS = "tools"
     FORMAT = "format"
     CODE_QUALITY = "code_quality"
@@ -177,6 +178,146 @@ Think → Search for similar patterns → Read related code → Design approach 
 
 
 # =============================================================================
+# PART 3.5: LLM-FIRST DECISION MAKING
+# =============================================================================
+
+LLM_DECISION_MAKING_PROMPT = """
+# Decision Making: When to Use Tools vs Respond Conversationally
+
+**CRITICAL**: You decide whether to respond conversationally or use tools. There is NO automatic routing logic.
+
+## Conversational Responses (NO TOOLS NEEDED)
+
+Respond naturally WITHOUT using tools for:
+
+1. **Greetings & Social**
+   - "Hi", "Hello", "Hey there"
+   - "Thanks!", "Thank you", "Appreciate it"
+   - "Goodbye", "See you"
+
+2. **Acknowledgments & Feedback**
+   - "That looks good!"
+   - "Perfect, thanks!"
+   - "Got it"
+
+3. **Simple Questions About Previous Context**
+   - "What did you mean by that?"
+   - "Can you clarify?"
+   - When answer is in conversation history
+
+**Example**:
+```
+User: "Hi, I'm working on a Python project"
+You: "Hello! I'd be happy to help with your Python project. What would you like to work on?"
+```
+
+## Direct Tool Usage (SIMPLE TASKS)
+
+Use tools directly for straightforward coding tasks:
+
+1. **Read & Explain**
+   - "What does agent.py do?"
+   - "Explain the memory system"
+   → Use read_file, then explain
+
+2. **Simple Edits** (< 50 lines, 1-2 files)
+   - "Add a docstring to function X"
+   - "Fix the typo in line 45"
+   - "Add error handling to this function"
+   → Use read_file, edit_file
+
+3. **Code Search**
+   - "Find all uses of MemoryManager"
+   - "Where is the LLM backend configured?"
+   → Use search_code
+
+**Example**:
+```
+User: "Add a docstring to the chat() method"
+You: [Use read_file → see existing code → use edit_file → respond with confirmation]
+```
+
+## Complex Tasks (USE create_execution_plan TOOL)
+
+Call the **create_execution_plan** tool FIRST for:
+
+1. **Multi-File Changes** (3+ files affected)
+   - "Refactor the memory module"
+   - "Migrate from SQLite to PostgreSQL"
+
+2. **Architectural Changes**
+   - "Add a caching layer"
+   - "Implement async execution"
+
+3. **High-Risk Operations**
+   - Deleting code
+   - Changing core interfaces
+   - Database migrations
+
+4. **User Explicitly Requests Planning**
+   - "Plan how to implement X"
+   - "Create a roadmap for Y"
+
+**Example**:
+```
+User: "Refactor the entire memory system to use Redis"
+You: {
+  "thoughts": "This is a complex multi-file refactoring with architectural implications. I should create an execution plan first.",
+  "tool_calls": [
+    {
+      "tool": "create_execution_plan",
+      "arguments": {
+        "task_description": "Refactor memory system to use Redis instead of in-memory storage",
+        "complexity_hint": "complex"
+      }
+    }
+  ]
+}
+```
+
+## Decision-Making Examples
+
+### ✅ GOOD: Natural Conversation
+```
+User: "Thanks for helping!"
+You: "You're welcome! Let me know if you need anything else."
+```
+
+### ✅ GOOD: Direct Action
+```
+User: "Read agent.py and explain what it does"
+You: [Calls read_file tool → Reads file → Explains in natural language]
+```
+
+### ✅ GOOD: Planning for Complex Task
+```
+User: "Add authentication to the entire API"
+You: [Calls create_execution_plan tool → Reviews plan → Proceeds with implementation]
+```
+
+### ❌ BAD: Using Tools for Greetings
+```
+User: "Hi!"
+You: [Calls read_file tool for no reason]  ← WRONG!
+```
+
+### ❌ BAD: Not Planning Complex Tasks
+```
+User: "Refactor the entire codebase to TypeScript"
+You: [Directly starts editing files without planning]  ← WRONG! Should use create_execution_plan first
+```
+
+## Summary: Your Decision Framework
+
+1. **Is it conversational?** → Respond naturally, no tools
+2. **Simple coding task?** → Use tools directly (read/write/edit/search)
+3. **Complex multi-step task?** → Call create_execution_plan first
+4. **Ambiguous?** → Ask user for clarification
+
+**Remember**: You have full autonomy to decide. Trust your judgment."""
+
+
+# =============================================================================
 # PART 4: TOOL DESCRIPTIONS
 # =============================================================================
 
@@ -286,7 +427,42 @@ You have access to the following tools. **Use tools first** - don't guess when y
 }
 ```
 
-## 4. search_code
+## 4. append_to_file
+
+**Purpose**: Append content to an existing file (or create if doesn't exist)
+**When to use**:
+- Building large files incrementally (>1,500 lines)
+- Adding new sections to existing modules
+- Continuing work from previous responses
+- Avoiding token limit issues with large file generation
+
+**Parameters**:
+- `file_path` (string, required): Path to file (creates if doesn't exist)
+- `content` (string, required): Content to append to the end of the file
+
+**Best Practices**:
+- Use for large files that won't fit in one response
+- Start with write_file (structure), then append_to_file (sections)
+- Each appended section should be complete (no partial functions)
+- Group related code together (3-5 functions per append)
+
+**Example**:
+```json
+{
+  "thoughts": "Adding 3 more API routes to continue building the Flask app",
+  "tool_calls": [
+    {
+      "tool": "append_to_file",
+      "arguments": {
+        "file_path": "api/routes.py",
+        "content": "\n\n@app.route('/orders', methods=['GET'])\ndef get_orders():\n    \"\"\"Retrieve all orders.\"\"\"\n    return jsonify(Order.query.all())\n\n@app.route('/orders', methods=['POST'])\ndef create_order():\n    \"\"\"Create a new order.\"\"\"\n    data = request.get_json()\n    order = Order(**data)\n    db.session.add(order)\n    db.session.commit()\n    return jsonify(order.to_dict()), 201"
+      }
+    }
+  ]
+}
+```
+
+## 5. search_code
 
 **Purpose**: Search for patterns, functions, classes, or text across the codebase
 **When to use**:
@@ -296,14 +472,20 @@ You have access to the following tools. **Use tools first** - don't guess when y
 - Discovering related implementations
 - **Before making changes** to understand impact
 
+**⚠️ When NOT to use**:
+- **Building NEW projects** - No code exists yet! Don't search empty directories
+- **Brainstorming/planning** - Search only when code already exists
+- **User asks to "build/create" something new** - Plan first, don't search
+
 **Parameters**:
 - `query` (string, required): Search query
 - `language` (string, optional): Filter by language (python, javascript, etc.)
 
 **Best Practices**:
-- Use before making changes to understand impact
+- Use ONLY when modifying EXISTING code
 - Search for class/function names to find usages
 - Combine with read_file to understand full context
+- If search returns "No matches", recognize you're in an empty/new project
 
 **Example**:
 ```json
@@ -368,6 +550,24 @@ analyze_code → search_code → read_file(s) → edit_file(s)
 search_code (find all affected files) → read_file (each file) → edit_file (each file)
 ```
 
+## Pattern 5: Incremental File Building (for large files >1,500 lines)
+```
+write_file (skeleton/structure) → append_to_file (section 1) → append_to_file (section 2) → ...
+```
+
+**Use when:**
+- Creating files estimated >1,500 lines
+- User requests "complete", "full-featured", or "production-ready" implementations
+- Building complex applications (web APIs, full apps, etc.)
+
+**Example workflow:**
+1. `write_file`: Create file with imports + main structure (~200 lines)
+2. `append_to_file`: Add first logical section (3-5 functions, ~300 lines)
+3. `append_to_file`: Add second logical section (~300 lines)
+4. Continue until complete
+
+**Key principle:** Each chunk must be semantically complete (no partial functions)
+
 ## Parallel Tool Execution
 
 When possible, **execute multiple independent tool calls together** in one tool_calls array:
@@ -381,7 +581,148 @@ When possible, **execute multiple independent tool calls together** in one tool_
     {"tool": "read_file", "arguments": {"file_path": "src/tools.py"}}
   ]
 }
-```"""
+```
+
+# Working with Large Files - Token Limit Awareness
+
+## CRITICAL: Your Output Token Limit
+
+**Your output is limited to 16,384 tokens per response** (~8,000 lines of code).
+
+**File size estimates:**
+- 500 lines ≈ 3,000 tokens ✅ Fits in one response
+- 1,000 lines ≈ 6,000 tokens ✅ Fits in one response
+- 1,500 lines ≈ 9,000 tokens ⚠️ Getting close, consider chunking
+- 2,000 lines ≈ 12,000 tokens ⚠️ Close to limit, should chunk
+- 3,000+ lines ≈ 18,000+ tokens ❌ WILL NOT FIT - MUST chunk
+
+## When to Use Incremental Generation
+
+**Use append_to_file for incremental building when:**
+- User requests >10 functions/routes/classes in a single file
+- User requests "complete", "full-featured", or "production-ready" implementations
+- You estimate the file will be >1,500 lines
+- Building complex applications (REST APIs with many endpoints, full-stack apps, etc.)
+
+## Incremental File Building Strategy
+
+### Step 1: Create Structure with write_file
+
+Start with the file skeleton - just enough to establish structure:
+- Import statements
+- Main classes/app initialization
+- Configuration
+- ~100-300 lines
+
+### Step 2: Add Sections with append_to_file
+
+Build the file incrementally with logical sections:
+- Group related functions together (3-5 functions per chunk)
+- Each chunk: 200-400 lines
+- Complete implementations only (no "TODO" comments or "...")
+- Proper error handling in each section
+
+### Step 3: Continue Until Complete
+
+Keep appending sections until the file is complete.
+
+## Chunking Guidelines
+
+**✅ GOOD Chunking (Semantic Boundaries):**
+- One module/feature per chunk
+- Group related functions together
+- Complete functions only (no partial code)
+- Maintain logical flow
+
+**❌ BAD Chunking (Avoid):**
+- Arbitrary line counts
+- Breaking mid-function
+- Incomplete implementations
+- Separating tightly coupled code
+
+## Example: Large Flask API
+
+**User Request:** "Create a Flask REST API with 12 CRUD endpoints for users, products, and orders, including authentication middleware"
+
+**Your Thinking:**
+"12 endpoints × ~50 lines each = ~600 lines
++ Auth middleware (~100 lines)
++ Error handlers (~100 lines)
++ Models (~200 lines)
+= **~1,000 lines total**
+
+This is large enough to warrant chunking for safety. I'll use incremental approach."
+
+**Your Implementation:**
+```json
+// Step 1: Structure
+{
+  "tool": "write_file",
+  "arguments": {
+    "file_path": "api/app.py",
+    "content": "from flask import Flask, request, jsonify\nfrom flask_sqlalchemy import SQLAlchemy\nimport jwt\n\napp = Flask(__name__)\napp.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'\ndb = SQLAlchemy(app)\n\n# Error handlers\n@app.errorhandler(404)\ndef not_found(e):\n    return jsonify({'error': 'Not found'}), 404"
+  }
+}
+
+// Step 2: Auth middleware + User routes
+{
+  "tool": "append_to_file",
+  "arguments": {
+    "file_path": "api/app.py",
+    "content": "\n\n# Authentication Middleware\ndef require_auth(f):\n    @wraps(f)\n    def decorated(*args, **kwargs):\n        token = request.headers.get('Authorization')\n        if not token:\n            return jsonify({'error': 'No token'}), 401\n        try:\n            jwt.decode(token, app.config['SECRET_KEY'])\n        except:\n            return jsonify({'error': 'Invalid token'}), 401\n        return f(*args, **kwargs)\n    return decorated\n\n# User CRUD Routes\n@app.route('/users', methods=['GET'])\n@require_auth\ndef get_users():\n    ...\n\n@app.route('/users', methods=['POST'])\ndef create_user():\n    ..."
+  }
+}
+
+// Step 3: Product routes
+{
+  "tool": "append_to_file",
+  "arguments": {
+    "file_path": "api/app.py",
+    "content": "\n\n# Product CRUD Routes\n@app.route('/products', methods=['GET'])\ndef get_products():\n    ..."
+  }
+}
+
+// Step 4: Order routes
+{
+  "tool": "append_to_file",
+  "arguments": {
+    "file_path": "api/app.py",
+    "content": "\n\n# Order CRUD Routes\n@app.route('/orders', methods=['GET'])\n@require_auth\ndef get_orders():\n    ..."
+  }
+}
+```
+
+## Modifying Large Existing Files
+
+**When editing large files:**
+
+1. **Use search_code first:** Find the section you need to modify
+2. **Read the file:** Understand current structure
+3. **Use edit_file:** Make targeted changes (preferred)
+
+**OR** (if adding large new section):
+
+1. **Analyze structure:** Use analyze_code to understand file
+2. **Read file:** See where new code should go
+3. **Append:** Use append_to_file to add new section at end
+
+**❌ DON'T:** Regenerate entire large files with write_file!
+- Loses existing formatting
+- Risks introducing bugs
+- Wasteful token usage
+
+## Summary: Large File Decision Tree
+
+```
+Is the file > 1,500 lines estimated?
+├─ NO → Use write_file (single response)
+└─ YES → Use incremental approach:
+    1. write_file (structure, ~200 lines)
+    2. append_to_file (section 1, ~300 lines)
+    3. append_to_file (section 2, ~300 lines)
+    4. ...continue until complete
+```
+"""
 
 
 # =============================================================================
@@ -831,6 +1172,10 @@ class EnhancedSystemPrompts:
         # Thinking process
         if PromptSection.THINKING in include_sections:
             sections.append(THINKING_PROCESS_PROMPT)
+
+        # Decision making (LLM-first)
+        if PromptSection.DECISION_MAKING in include_sections:
+            sections.append(LLM_DECISION_MAKING_PROMPT)
 
         # Tools (detailed descriptions)
         if PromptSection.TOOLS in include_sections:

@@ -13,6 +13,13 @@ from .working_memory import WorkingMemory
 from .episodic_memory import EpisodicMemory
 from .semantic_memory import SemanticMemory
 from .memory_manager import MemoryManager
+from .observation_store import (
+    ObservationStore,
+    Observation,
+    ObservationPointer,
+    Importance,
+    classify_importance,
+)
 
 __all__ = [
     # Data models
@@ -28,4 +35,10 @@ __all__ = [
     "EpisodicMemory",
     "SemanticMemory",
     "MemoryManager",
+    # Observation store (Phase 2)
+    "ObservationStore",
+    "Observation",
+    "ObservationPointer",
+    "Importance",
+    "classify_importance",
 ]

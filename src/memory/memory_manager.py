@@ -9,6 +9,13 @@ from .working_memory import WorkingMemory
 from .episodic_memory import EpisodicMemory
 from .semantic_memory import SemanticMemory
 from .file_loader import MemoryFileLoader
+from .observation_store import (
+    ObservationStore,
+    Observation,
+    ObservationPointer,
+    Importance,
+    classify_importance,
+)
 from .models import (
     Message,
     MessageRole,
@@ -31,7 +38,11 @@ class MemoryManager:
         working_memory_tokens: int = 2000,
         episodic_memory_tokens: int = 1000,
         system_prompt_tokens: int = 300,
-        embedding_model: str = "text-embedding-v4",  # Alibaba Cloud API
+        embedding_model: Optional[str] = None,
+        embedding_api_key: Optional[str] = None,
+        embedding_api_key_env: str = "EMBEDDING_API_KEY",
+        embedding_base_url: Optional[str] = None,
+        embedding_dimension: Optional[int] = None,
         persist_directory: str = "./data",
         load_file_memories: bool = True,
         starting_directory: Optional[Path] = None,
@@ -44,7 +55,11 @@ class MemoryManager:
             working_memory_tokens: Tokens allocated to working memory
             episodic_memory_tokens: Tokens allocated to episodic memory
             system_prompt_tokens: Tokens reserved for system prompt
-            embedding_model: Embedding model for semantic memory
+            embedding_model: Embedding model for semantic memory (from .env EMBEDDING_MODEL)
+            embedding_api_key: API key for embedding service (optional)
+            embedding_api_key_env: Environment variable for embedding API key (default: EMBEDDING_API_KEY)
+            embedding_base_url: Base URL for embedding API (from .env EMBEDDING_BASE_URL)
+            embedding_dimension: Dimension of embeddings (from .env EMBEDDING_DIMENSION)
             persist_directory: Directory for persistence
             load_file_memories: Whether to load hierarchical file memories on init
             starting_directory: Starting directory for file memory search (default: cwd)
@@ -63,6 +78,10 @@ class MemoryManager:
         self.semantic_memory = SemanticMemory(
             persist_directory=f"{persist_directory}/embeddings",
             embedding_model=embedding_model,
+            api_key=embedding_api_key,
+            api_key_env=embedding_api_key_env,
+            base_url=embedding_base_url,
+            embedding_dimension=embedding_dimension,
         )
 
         # Initialize file-based memory loader
@@ -78,6 +97,17 @@ class MemoryManager:
         self.session_start = datetime.now()
         self.persist_directory = Path(persist_directory)
 
+        # Key-value store for structured data
+        self._key_value_store: Dict[str, Any] = {}
+        import threading
+        self._kv_lock = threading.RLock()  # Thread safety for key-value store
+
+        # Phase 2: ObservationStore for reversible tool output masking
+        self.observation_store = ObservationStore(
+            db_path=f"{persist_directory}/observations.db",
+        )
+        self._current_turn_id = 0  # Stable turn ID incremented per user message
+
     def add_user_message(
         self, content: str, metadata: Optional[Dict] = None
     ) -> None:
@@ -88,11 +118,19 @@ class MemoryManager:
             content: Message content
             metadata: Optional metadata
         """
+        # Increment turn_id for each user message (stable turn tracking)
+        self._current_turn_id += 1
+
         self.working_memory.add_message(
             role=MessageRole.USER,
             content=content,
             metadata=metadata,
         )
+
+    @property
+    def current_turn_id(self) -> int:
+        """Get current turn ID (increments per user message)."""
+        return self._current_turn_id
 
     def add_assistant_message(
         self,
@@ -136,6 +174,112 @@ class MemoryManager:
                 )
 
                 self.episodic_memory.add_turn(turn)
+
+    def add_tool_observation(
+        self,
+        tool_name: str,
+        args: Any,
+        content: str,
+        importance: Optional[Importance] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        inline_threshold_tokens: int = 500,
+    ) -> Tuple[str, bool]:
+        """
+        Store tool output in ObservationStore and decide inline vs pointer.
+
+        This implements Phase 2 of context management: reversible masking.
+        Large or old tool outputs are stored externally with a pointer in context.
+
+        Args:
+            tool_name: Name of the tool that produced output
+            args: Tool arguments (for deduplication)
+            content: Full tool output content
+            importance: Importance level (auto-classified if None)
+            metadata: Optional metadata
+            inline_threshold_tokens: Token threshold for inline vs pointer decision
+
+        Returns:
+            Tuple of (content_to_use, is_pointer):
+                - content_to_use: Either full content or pointer string
+                - is_pointer: True if content was stored as pointer
+
+        Example:
+            >>> content, is_pointer = memory.add_tool_observation(
+            ...     tool_name="read_file",
+            ...     args={"path": "/src/app.py"},
+            ...     content="def main():\\n    print('Hello')",
+            ... )
+            >>> if is_pointer:
+            ...     print(f"Stored as pointer: {content}")
+        """
+        # Auto-classify importance if not provided
+        if importance is None:
+            importance = classify_importance(tool_name, content)
+
+        # Save to ObservationStore
+        observation = self.observation_store.save(
+            tool_name=tool_name,
+            args=args,
+            content=content,
+            turn_id=self._current_turn_id,
+            importance=importance,
+            metadata=metadata,
+        )
+
+        # Decision: inline vs pointer
+        # Inline if: small AND (recent OR critical)
+        is_recent = True  # Current turn is always recent
+        is_small = observation.token_count <= inline_threshold_tokens
+        is_critical = importance == Importance.CRITICAL
+
+        if is_small and (is_recent or is_critical):
+            # Keep inline
+            return content, False
+        else:
+            # Use pointer
+            pointer = observation.to_pointer()
+            return pointer, True
+
+    def rehydrate_observation(self, pointer: str) -> Optional[str]:
+        """
+        Rehydrate a pointer to its full content.
+
+        Args:
+            pointer: Pointer string like [[OBS#abc123 ...]]
+
+        Returns:
+            Full content if found, None otherwise
+        """
+        return self.observation_store.rehydrate(pointer)
+
+    def mask_old_observations(
+        self,
+        mask_age: int = 15,
+        exclude_critical: bool = True,
+    ) -> int:
+        """
+        Convert old inline tool outputs to pointers.
+
+        This is called during context compaction to reduce token usage
+        while preserving recoverability.
+
+        Args:
+            mask_age: Mask observations older than this many turns
+            exclude_critical: If True, don't mask critical observations
+
+        Returns:
+            Number of observations that could be masked
+        """
+        maskable = self.observation_store.find_for_masking(
+            current_turn_id=self._current_turn_id,
+            mask_age=mask_age,
+            exclude_critical=exclude_critical,
+        )
+        return len(maskable)
+
+    def get_observation_stats(self) -> Dict[str, Any]:
+        """Get statistics about stored observations."""
+        return self.observation_store.get_stats()
 
     def add_code_context(self, code_context: CodeContext) -> None:
         """
@@ -317,6 +461,7 @@ class MemoryManager:
         session_name: Optional[str] = None,
         task_description: str = "",
         tags: Optional[List[str]] = None,
+        permission_mode: str = "normal",
     ) -> str:
         """
         Save current session to disk using SessionManager.
@@ -325,6 +470,7 @@ class MemoryManager:
             session_name: Optional human-readable name (uses session_id if not provided)
             task_description: Description of the task being worked on
             tags: Optional list of tags for organization
+            permission_mode: Current permission mode (plan/normal/auto) to save with session
 
         Returns:
             session_id: Unique session identifier
@@ -333,7 +479,8 @@ class MemoryManager:
             >>> session_id = memory_manager.save_session(
             ...     session_name="feature-auth",
             ...     task_description="Implementing authentication system",
-            ...     tags=["feature", "backend"]
+            ...     tags=["feature", "backend"],
+            ...     permission_mode="normal"
             ... )
             >>> print(f"Saved session: {session_id[:8]}")
         """
@@ -369,6 +516,7 @@ class MemoryManager:
             "model_name": "unknown",  # Will be overridden if Agent provides it
             "message_count": len(self.working_memory.messages),
             "duration_minutes": duration_minutes,
+            "permission_mode": permission_mode,
         }
 
         # Initialize SessionManager
@@ -618,12 +766,46 @@ class MemoryManager:
 
         return created_path
 
-    def optimize_context(self, target_tokens: Optional[int] = None) -> None:
+    def needs_compaction(self, threshold: float = 0.85) -> bool:
+        """
+        Check if context usage exceeds threshold and compaction is needed.
+
+        Called by orchestrator to decide whether to trigger compaction with user notification.
+
+        Args:
+            threshold: Trigger compaction when usage exceeds this fraction (default: 85%)
+                       Must be between 0.0 and 1.0 (exclusive)
+
+        Returns:
+            True if compaction is recommended
+        """
+        # Validate threshold bounds
+        if not 0.0 < threshold < 1.0:
+            raise ValueError(f"threshold must be between 0 and 1, got {threshold}")
+
+        current = (
+            self.working_memory.get_current_token_count()
+            + self.episodic_memory.current_token_count
+        )
+        available = self.total_context_tokens - self.system_prompt_tokens
+
+        # Guard against division by zero or negative available space
+        if available <= 0:
+            return False  # No usable space to manage, don't trigger compaction
+
+        return current > (available * threshold)
+
+    def optimize_context(self, target_tokens: Optional[int] = None) -> int:
         """
         Optimize context to fit within target token budget.
 
+        Called by orchestrator when needs_compaction() returns True.
+
         Args:
             target_tokens: Target token count (uses total_context_tokens if not provided)
+
+        Returns:
+            Number of messages removed from working memory (for user notification)
         """
         target = target_tokens or (
             self.total_context_tokens - self.system_prompt_tokens
@@ -632,6 +814,8 @@ class MemoryManager:
             self.working_memory.get_current_token_count()
             + self.episodic_memory.current_token_count
         )
+
+        messages_removed = 0
 
         if current > target:
             # First, compress episodic memory
@@ -643,4 +827,43 @@ class MemoryManager:
                 + self.episodic_memory.current_token_count
             )
             if current > target:
-                self.working_memory._compact()
+                messages_removed = self.working_memory.compact()
+
+        return messages_removed
+
+    def set_value(self, key: str, value: Any) -> None:
+        """
+        Store structured key-value data.
+
+        Thread-safe storage for preserving structured data (dicts, lists, etc.)
+        without flattening to strings. Used by AgentInterface.update_memory().
+
+        Args:
+            key: Memory key
+            value: Value to store (any JSON-serializable type)
+
+        Example:
+            memory.set_value('test_results', {'passed': 10, 'failed': 2})
+        """
+        with self._kv_lock:
+            self._key_value_store[key] = value
+
+    def get_value(self, key: str, default: Any = None) -> Any:
+        """
+        Retrieve structured key-value data.
+
+        Thread-safe retrieval of structured data stored via set_value().
+        Used by AgentInterface.get_memory().
+
+        Args:
+            key: Memory key
+            default: Default value if key not found
+
+        Returns:
+            Stored value, or default if not found
+
+        Example:
+            results = memory.get_value('test_results', {'passed': 0, 'failed': 0})
+        """
+        with self._kv_lock:
+            return self._key_value_store.get(key, default)

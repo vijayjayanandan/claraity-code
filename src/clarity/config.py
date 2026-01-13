@@ -89,8 +89,8 @@ class ClarityConfig:
     llm_base_url: Optional[str] = None
     """LLM API base URL (None = use env var or default)"""
 
-    llm_api_key_env: str = "DASHSCOPE_API_KEY"
-    """Environment variable for LLM API key"""
+    llm_api_key_env: str = "OPENAI_API_KEY"
+    """Environment variable for LLM API key (default: OPENAI_API_KEY, can override to DASHSCOPE_API_KEY)"""
 
     # === Feature Flags ===
     enable_document_mode: bool = True
@@ -212,6 +212,7 @@ class ClarityConfig:
             'CLARITY_API_HOST': ('api_host', str),
             'CLARITY_LLM_MODEL': ('llm_model', str),
             'CLARITY_LLM_BASE_URL': ('llm_base_url', str),
+            'CLARITY_LLM_API_KEY_ENV': ('llm_api_key_env', str),
             'CLARITY_LOG_LEVEL': ('log_level', str),
         }
 

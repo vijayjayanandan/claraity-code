@@ -99,3 +99,31 @@ test_results.json
 Thumbs.db
 .Spotlight-V100
 .Trashes
+
+# Claude Code temporary files
+tmpclaude-*
+.pytest_report.json
+=24.1.0
+=3.0.0
+nul
+
+# Screenshots (keep in separate documentation if needed)
+*.png
+
+# Validation results (generated)
+validation-results/
+
+# Live test workspaces (generated)
+live-*-logs/
+live-*-workspace/
+test-*-logs/
+test-*-workspace/
+
+# Temporary test files
+ai_test_error.txt
+spec_output.txt
+timeout_behavior_fix.txt
+code_review_large_test.md
+
+# Checkpoints (session data)
+.checkpoints/

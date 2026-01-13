@@ -238,7 +238,7 @@ class VerificationLayer:
 
         if recommendations:
             logger.info("\n" + "=" * 70)
-            logger.info("📦 Recommended Tools for Better Verification:")
+            logger.info("[TOOLS] Recommended Tools for Better Verification:")
             logger.info("=" * 70)
             for rec in recommendations:
                 logger.info(rec)

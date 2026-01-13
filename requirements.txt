@@ -8,6 +8,14 @@ tiktoken>=0.7.0
 tree-sitter==0.21.3  # Required: v0.25+ has breaking changes
 tree-sitter-languages>=1.10.2
 
+# LSP Integration (Code Intelligence)
+multilspy>=0.1.0  # Microsoft's LSP client library
+jedi-language-server==0.41.3  # Python LSP server (required by multilspy)
+
+# NOTE: On Windows, jedi-language-server.exe must be in PATH
+# Location: C:\Users\<username>\AppData\Roaming\Python\Python3X\Scripts
+# If missing, create the Scripts directory and reinstall: pip install --force-reinstall jedi-language-server==0.41.3
+
 # SQLite upgrade for ChromaDB compatibility
 pysqlite3-binary
 
@@ -34,7 +42,11 @@ alembic>=1.13.0
 
 # CLI & UI
 rich>=13.7.0
+prompt_toolkit>=3.0.0  # Interactive CLI with autocomplete and key bindings
 typer>=0.12.0
+pygments>=2.17.0  # Syntax highlighting for code display
+colorama>=0.4.6  # Cross-platform colored terminal text (Windows ANSI support)
+pyperclip>=1.8.0  # Cross-platform clipboard copy/paste
 
 # Testing
 pytest>=8.0.0
@@ -58,6 +70,10 @@ psutil>=5.9.8
 # ollama  # Use official Ollama installation instead
 # requests>=2.31.0  # For Ollama API calls (typically already installed)
 openai>=1.30.0  # For OpenAI-compatible API backends (OpenAI, Alibaba Cloud, Azure, Groq, etc.)
+
+# Observability (LLM tracing, metrics, cost tracking)
+langfuse>=2.0.0  # Production-grade LLM observability platform
+structlog>=24.1.0  # Structured logging with context binding
 
 # Note: For GPU acceleration, install Ollama on your system
 # CPU: Works but slow (30-60s per query)

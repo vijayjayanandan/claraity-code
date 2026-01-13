@@ -126,15 +126,25 @@ Use this tool proactively when appropriate!"""
             task_description=task.strip()
         )
 
-        # Check if subagent was found
+        # Check if delegation succeeded
         if not result:
             available = self.subagent_manager.get_available_subagents()
-            return ToolResult(
-                tool_name=self.name,
-                status=ToolStatus.ERROR,
-                output=None,
-                error=f"Subagent '{subagent}' not found. Available: {', '.join(available)}"
-            )
+            if subagent.strip() in available:
+                # Config exists but SubAgent creation failed
+                return ToolResult(
+                    tool_name=self.name,
+                    status=ToolStatus.ERROR,
+                    output=None,
+                    error=f"Subagent '{subagent}' failed to initialize. Check logs for details."
+                )
+            else:
+                # Config not found
+                return ToolResult(
+                    tool_name=self.name,
+                    status=ToolStatus.ERROR,
+                    output=None,
+                    error=f"Subagent '{subagent}' not found. Available: {', '.join(available)}"
+                )
 
         # Return result based on success
         if result.success:

@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional, AsyncIterator, Iterator
 from pydantic import BaseModel, Field
 from enum import Enum
+import os
 
 
 class LLMBackendType(str, Enum):
@@ -17,21 +18,21 @@ class LLMBackendType(str, Enum):
 
 
 class LLMConfig(BaseModel):
-    """Configuration for LLM backend."""
+    """Configuration for LLM backend. All values should come from .env file."""
 
     backend_type: LLMBackendType
     model_name: str
-    base_url: str = "http://localhost:11434"
+    base_url: str
 
-    # Generation parameters
-    temperature: float = 0.2
-    max_tokens: int = 65536  # Qwen3-coder-plus maximum output capacity (was 2048)
-    top_p: float = 0.95
-    top_k: int = 40
-    repeat_penalty: float = 1.1
+    # Generation parameters (no defaults - must be provided)
+    temperature: float
+    max_tokens: int
+    top_p: float
+    top_k: int = Field(default_factory=lambda: int(os.getenv("LLM_TOP_K", "40")))
+    repeat_penalty: float = Field(default_factory=lambda: float(os.getenv("LLM_REPEAT_PENALTY", "1.1")))
 
     # Context settings
-    context_window: int = 4096
+    context_window: int
     num_ctx: Optional[int] = None  # Override context window
 
     # Performance
@@ -40,10 +41,12 @@ class LLMConfig(BaseModel):
     num_thread: Optional[int] = None
 
     # Streaming
-    stream: bool = True
+    stream: bool = Field(default_factory=lambda: os.getenv("ENABLE_STREAMING", "true").lower() == "true")
+    # Stream usage tracking (OpenAI-specific, may not work with all providers)
+    stream_usage: bool = Field(default_factory=lambda: os.getenv("STREAM_USAGE", "true").lower() == "true")
 
     # Timeout
-    timeout: float = 300.0  # 5 minutes for complex RAG queries
+    timeout: float = Field(default_factory=lambda: float(os.getenv("REQUEST_TIMEOUT", "300")))
 
     class Config:
         use_enum_values = True
@@ -128,6 +131,11 @@ class StreamChunk(BaseModel):
     done: bool = False
     model: Optional[str] = None
     finish_reason: Optional[str] = None
+
+    # Token usage (populated on final chunk when done=True)
+    prompt_tokens: Optional[int] = None
+    completion_tokens: Optional[int] = None
+    total_tokens: Optional[int] = None
 
 
 class LLMBackend(ABC):
@@ -276,10 +284,14 @@ class LLMBackend(ABC):
             raise ValueError("Messages cannot be empty")
 
         for msg in messages:
-            if "role" not in msg or "content" not in msg:
-                raise ValueError("Each message must have 'role' and 'content'")
+            if "role" not in msg:
+                raise ValueError("Each message must have 'role'")
 
-            if msg["role"] not in ["system", "user", "assistant"]:
+            # Content is optional for assistant messages with tool_calls and tool messages
+            if msg["role"] not in ["assistant", "tool"] and "content" not in msg:
+                raise ValueError(f"Message with role '{msg['role']}' must have 'content'")
+
+            if msg["role"] not in ["system", "user", "assistant", "tool"]:
                 raise ValueError(f"Invalid role: {msg['role']}")
 
     def format_prompt(self, messages: List[Dict[str, str]]) -> str:

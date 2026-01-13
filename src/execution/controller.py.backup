@@ -1,0 +1,620 @@
+"""
+Long-Running Controller - Multi-Session Execution Orchestration
+
+Provides the "intellect" that manages unlimited agent iterations, auto-checkpointing,
+and seamless session continuity across restarts.
+
+Key Capabilities:
+- Session Management: Detect and resume from checkpoints
+- Auto-Checkpoint: Smart timing at turn boundaries with activity detection
+- Manual Checkpoint: User-triggered via /checkpoint command
+- Graceful Exit: Prompt to save on Ctrl+C
+- Resume Flow: Present understanding and wait for user approval
+
+Design Philosophy:
+This controller enables truly long-running autonomous workflows by:
+1. Detecting existing checkpoints at session start
+2. Presenting user with clear resume options
+3. Restoring complete agent state (memory + ClarAIty context)
+4. Auto-checkpointing intelligently at safe points
+5. Handling interruptions gracefully
+
+Author: AI Coding Agent Team
+Phase: 1 - Self-Testing & Long-Running Execution
+"""
+
+import os
+import signal
+import sys
+import time
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from src.execution.checkpoint import CheckpointManager, ExecutionCheckpoint, CheckpointMetadata
+
+
+class LongRunningController:
+    """
+    Orchestrates multi-session agent execution with automatic checkpointing.
+
+    This controller acts as the "brain" managing long-running workflows:
+    - Detects existing checkpoints and prompts user
+    - Restores complete agent state from checkpoints
+    - Auto-checkpoints at safe turn boundaries
+    - Handles graceful interruptions (Ctrl+C)
+    - Supports manual checkpoints via /checkpoint command
+
+    Usage:
+        controller = LongRunningController(
+            agent=coding_agent,
+            project_dir="/path/to/project"
+        )
+        controller.run()
+
+    Attributes:
+        agent: CodingAgent instance being controlled
+        checkpoint_manager: CheckpointManager for save/load operations
+        project_dir: Root directory of the project
+        last_checkpoint_time: Timestamp of last checkpoint
+        activity_since_checkpoint: Whether work has been done since last checkpoint
+        checkpoint_requested: Flag for manual checkpoint requests
+    """
+
+    def __init__(
+        self,
+        agent: Any,  # CodingAgent instance
+        project_dir: str = ".",
+        max_checkpoints: int = 10
+    ):
+        """
+        Initialize long-running controller.
+
+        Args:
+            agent: CodingAgent instance to control
+            project_dir: Project root directory (default: current directory)
+            max_checkpoints: Maximum checkpoints to keep (default: 10)
+        """
+        self.agent = agent
+        self.project_dir = Path(project_dir).resolve()
+
+        # Initialize checkpoint manager with per-project directory
+        checkpoint_dir = self.project_dir / ".checkpoints"
+        self.checkpoint_manager = CheckpointManager(
+            checkpoint_dir=str(checkpoint_dir),
+            max_checkpoints=max_checkpoints
+        )
+
+        # Checkpoint tracking (manual only - no auto-checkpoint)
+        self.last_checkpoint_time: Optional[datetime] = None
+        self.activity_since_checkpoint = False  # For exit prompt only
+
+        # Session state
+        self.session_start_time = datetime.now()
+        self.current_checkpoint_id: Optional[str] = None
+
+        # Note: Ctrl+C (SIGINT) should be handled by CLI layer using
+        # try/except KeyboardInterrupt, not signal handlers (safer)
+
+    def run(self) -> None:
+        """
+        Main entry point for long-running controller.
+
+        This method orchestrates the entire session lifecycle:
+        1. Detect existing checkpoints
+        2. Prompt user for resume/fresh start
+        3. Restore checkpoint if selected
+        4. Run main session loop
+        5. Handle checkpoints and interruptions
+
+        The session continues until user exits or an error occurs.
+        """
+        print("\n" + "=" * 60)
+        print("AI Coding Agent - Long-Running Session")
+        print("=" * 60)
+
+        # Step 1: Check for existing checkpoints
+        existing_checkpoints = self.checkpoint_manager.list_checkpoints()
+
+        if existing_checkpoints:
+            # Step 2: Prompt user for action
+            action = self._prompt_user_for_checkpoint_action(existing_checkpoints)
+
+            if action == "resume":
+                # Step 3: Resume from checkpoint
+                checkpoint = self._select_checkpoint_to_resume(existing_checkpoints)
+                if checkpoint:
+                    self._resume_from_checkpoint(checkpoint)
+                else:
+                    print("[INFO] Starting fresh session (no checkpoint selected)")
+                    self._start_fresh_session()
+
+            elif action == "fresh":
+                print("[INFO] Starting fresh session")
+                self._start_fresh_session()
+
+            elif action == "clear":
+                self._clear_all_checkpoints()
+                print("[INFO] All checkpoints cleared, starting fresh session")
+                self._start_fresh_session()
+
+            elif action == "list":
+                self._list_all_checkpoints(existing_checkpoints)
+                # After listing, ask again
+                action = self._prompt_user_for_checkpoint_action(existing_checkpoints)
+                if action == "resume":
+                    checkpoint = self._select_checkpoint_to_resume(existing_checkpoints)
+                    if checkpoint:
+                        self._resume_from_checkpoint(checkpoint)
+                    else:
+                        self._start_fresh_session()
+                elif action == "fresh":
+                    self._start_fresh_session()
+                else:
+                    print("[INFO] Starting fresh session")
+                    self._start_fresh_session()
+        else:
+            # No existing checkpoints, start fresh
+            print("[INFO] No existing checkpoints found, starting fresh session")
+            self._start_fresh_session()
+
+        # Step 4: Run main session loop
+        print("\n" + "=" * 60)
+        print("[INFO] Session active - Type /checkpoint to save, Ctrl+C to exit")
+        print("=" * 60 + "\n")
+
+        # Note: The actual agent interaction loop is handled by the CLI
+        # This controller provides checkpoint management hooks that the CLI calls
+
+    def _prompt_user_for_checkpoint_action(
+        self,
+        checkpoints: List[CheckpointMetadata]
+    ) -> str:
+        """
+        Prompt user to choose action when checkpoints exist.
+
+        Args:
+            checkpoints: List of available checkpoints
+
+        Returns:
+            Action choice: "resume", "fresh", "clear", or "list"
+        """
+        print(f"\n[INFO] Found {len(checkpoints)} existing checkpoint(s)")
+        print(f"Most recent: {checkpoints[0].task_description}")
+        print(f"Timestamp: {checkpoints[0].timestamp}")
+        print(f"Files modified: {checkpoints[0].files_modified_count}")
+        print(f"Conversation turns: {checkpoints[0].conversation_turns}")
+
+        print("\nWhat would you like to do?")
+        print("  [R] Resume from checkpoint")
+        print("  [S] Start fresh (keep checkpoints)")
+        print("  [C] Clear all checkpoints and start fresh")
+        print("  [L] List all checkpoints")
+
+        while True:
+            choice = input("\nYour choice [R/S/C/L]: ").strip().upper()
+
+            if choice in ["R", "RESUME"]:
+                return "resume"
+            elif choice in ["S", "START", "FRESH"]:
+                return "fresh"
+            elif choice in ["C", "CLEAR"]:
+                return "clear"
+            elif choice in ["L", "LIST"]:
+                return "list"
+            else:
+                print("[WARN] Invalid choice. Please enter R, S, C, or L.")
+
+    def _select_checkpoint_to_resume(
+        self,
+        checkpoints: List[CheckpointMetadata]
+    ) -> Optional[ExecutionCheckpoint]:
+        """
+        Let user select which checkpoint to resume from.
+
+        Args:
+            checkpoints: List of available checkpoints
+
+        Returns:
+            ExecutionCheckpoint to resume, or None if cancelled
+        """
+        print("\nAvailable checkpoints:")
+        for i, checkpoint_meta in enumerate(checkpoints, 1):
+            print(f"\n{i}. [{checkpoint_meta.checkpoint_id}]")
+            print(f"   Task: {checkpoint_meta.task_description}")
+            print(f"   Time: {checkpoint_meta.timestamp}")
+            print(f"   Files: {checkpoint_meta.files_modified_count}, "
+                  f"Tools: {checkpoint_meta.tool_calls_count}, "
+                  f"Turns: {checkpoint_meta.conversation_turns}")
+
+        print(f"\n{len(checkpoints) + 1}. Cancel (start fresh)")
+
+        while True:
+            try:
+                choice = input(f"\nSelect checkpoint [1-{len(checkpoints) + 1}]: ").strip()
+                choice_num = int(choice)
+
+                if choice_num == len(checkpoints) + 1:
+                    return None  # User cancelled
+
+                if 1 <= choice_num <= len(checkpoints):
+                    selected_meta = checkpoints[choice_num - 1]
+                    checkpoint = self.checkpoint_manager.load_checkpoint(
+                        selected_meta.checkpoint_id
+                    )
+                    return checkpoint
+                else:
+                    print(f"[WARN] Please enter a number between 1 and {len(checkpoints) + 1}")
+
+            except ValueError:
+                print("[WARN] Invalid input. Please enter a number.")
+            except Exception as e:
+                print(f"[ERROR] Failed to load checkpoint: {e}")
+                return None
+
+    def _resume_from_checkpoint(self, checkpoint: ExecutionCheckpoint) -> None:
+        """
+        Resume agent execution from checkpoint.
+
+        This implements the complete resume flow:
+        1. Restore agent memory from checkpoint
+        2. Query ClarAIty DB for current project state
+        3. Present agent's understanding to user
+        4. Wait for user approval or redirection
+
+        Args:
+            checkpoint: ExecutionCheckpoint to resume from
+        """
+        print("\n" + "=" * 60)
+        print("RESUMING FROM CHECKPOINT")
+        print("=" * 60)
+
+        # Step 1: Restore agent memory
+        print("\n[INFO] Restoring agent memory...")
+        try:
+            self.checkpoint_manager.restore_to_agent(checkpoint, self.agent)
+            self.current_checkpoint_id = checkpoint.metadata.checkpoint_id
+            self.last_checkpoint_time = datetime.now()  # Reset checkpoint timer
+            print(f"[OK] Memory restored: {len(checkpoint.working_memory)} messages, "
+                  f"{len(checkpoint.tool_execution_history)} tool calls")
+        except Exception as e:
+            print(f"[ERROR] Failed to restore checkpoint: {e}")
+            print("[INFO] Starting fresh session instead")
+            self._start_fresh_session()
+            return
+
+        # Step 2: Query ClarAIty DB for project state
+        print("\n[INFO] Querying ClarAIty DB for project state...")
+        next_task_result = None
+        try:
+            # Import here to avoid circular dependency
+            from src.tools.clarity_tools import GetNextTaskTool
+
+            tool = GetNextTaskTool()
+            next_task_result = tool.execute()
+            print("[OK] ClarAIty context retrieved")
+        except ImportError:
+            # ClarAIty tools not available (e.g., in tests)
+            print("[WARN] ClarAIty tools not available")
+        except Exception as e:
+            print(f"[WARN] Could not query ClarAIty DB: {e}")
+
+        # Step 3: Present agent's understanding
+        print("\n" + "=" * 60)
+        print("AGENT'S UNDERSTANDING")
+        print("=" * 60)
+
+        print(f"\n[INFO] Checkpoint: {checkpoint.metadata.task_description}")
+        print(f"[INFO] Timestamp: {checkpoint.metadata.timestamp}")
+        print(f"[INFO] Working Directory: {checkpoint.metadata.working_directory}")
+
+        # Show conversation context
+        if checkpoint.working_memory:
+            print(f"\n[INFO] Recent conversation ({len(checkpoint.working_memory)} messages):")
+            # Show last 3 messages for context
+            for msg in checkpoint.working_memory[-3:]:
+                role = msg["role"].upper()
+                content = msg["content"][:100]  # Truncate for display
+                print(f"  {role}: {content}...")
+
+        # Show task context
+        if checkpoint.task_context:
+            print(f"\n[INFO] Project context:")
+            if "project_type" in checkpoint.task_context:
+                print(f"  Type: {checkpoint.task_context['project_type']}")
+            if "key_files" in checkpoint.task_context:
+                files = checkpoint.task_context["key_files"]
+                print(f"  Key files: {', '.join(files[:5])}")
+            if "key_concepts" in checkpoint.task_context:
+                concepts = checkpoint.task_context["key_concepts"]
+                print(f"  Key concepts: {', '.join(concepts[:5])}")
+
+        # Show current phase and todos
+        if checkpoint.current_phase:
+            print(f"\n[INFO] Current phase: {checkpoint.current_phase}")
+
+        if checkpoint.current_todos:
+            print(f"\n[INFO] Current todos ({len(checkpoint.current_todos)}):")
+            for todo in checkpoint.current_todos[:5]:  # Show first 5
+                status = todo["status"]
+                content = todo["content"]
+                print(f"  [{status.upper()}] {content}")
+
+        # Show ClarAIty next task
+        if next_task_result:
+            print(f"\n[INFO] ClarAIty next task:")
+            print(f"  {next_task_result[:200]}...")  # Truncate for display
+
+        # Step 4: Wait for user approval
+        print("\n" + "=" * 60)
+        print("[INFO] Agent is ready to continue from this checkpoint")
+        print("[INFO] The agent will resume with the restored context")
+        print("=" * 60)
+
+        input("\nPress Enter to continue, or Ctrl+C to exit...")
+
+        print("\n[OK] Resuming session from checkpoint\n")
+
+    def _start_fresh_session(self) -> None:
+        """
+        Start a fresh session without loading checkpoints.
+
+        This initializes the session for a new conversation.
+        """
+        print("\n[INFO] Initializing fresh session...")
+        self.last_checkpoint_time = datetime.now()
+        self.activity_since_checkpoint = False
+        print("[OK] Fresh session initialized")
+
+    def _is_valid_checkpoint_id(self, checkpoint_id: str) -> bool:
+        """
+        Validate checkpoint ID to prevent path traversal attacks.
+
+        Checkpoint IDs should only contain hexadecimal characters (UUID format).
+        This prevents malicious checkpoint files from deleting arbitrary files.
+
+        Args:
+            checkpoint_id: Checkpoint ID to validate
+
+        Returns:
+            True if checkpoint_id is safe, False otherwise
+        """
+        import re
+        # Checkpoint IDs are 8-character hex strings (first 8 chars of UUID)
+        return bool(re.match(r'^[a-f0-9]{8}$', checkpoint_id))
+
+    def _clear_all_checkpoints(self) -> None:
+        """
+        Delete all existing checkpoints.
+
+        Prompts for confirmation before deletion.
+        Includes path traversal protection.
+        """
+        print("\n[WARN] This will delete ALL checkpoints permanently.")
+        confirm = input("Are you sure? [y/N]: ").strip().lower()
+
+        if confirm in ["y", "yes"]:
+            checkpoints = self.checkpoint_manager.list_checkpoints()
+            deleted_count = 0
+
+            for checkpoint_meta in checkpoints:
+                # Security: Validate checkpoint ID before using it
+                if not self._is_valid_checkpoint_id(checkpoint_meta.checkpoint_id):
+                    print(f"[WARN] Skipping invalid checkpoint ID: {checkpoint_meta.checkpoint_id}")
+                    continue
+
+                checkpoint_file = (
+                    self.checkpoint_manager.checkpoint_dir /
+                    f"checkpoint_{checkpoint_meta.checkpoint_id}.json"
+                )
+
+                # Security: Verify file is actually inside checkpoint directory
+                try:
+                    resolved_path = checkpoint_file.resolve()
+                    checkpoint_dir_resolved = self.checkpoint_manager.checkpoint_dir.resolve()
+
+                    if not str(resolved_path).startswith(str(checkpoint_dir_resolved)):
+                        print(f"[WARN] Skipping file outside checkpoint dir: {checkpoint_file}")
+                        continue
+
+                    checkpoint_file.unlink()
+                    deleted_count += 1
+                except (OSError, ValueError) as e:
+                    print(f"[WARN] Could not delete {checkpoint_file.name}: {e}")
+
+            print(f"[OK] Deleted {deleted_count} checkpoint(s)")
+        else:
+            print("[INFO] Checkpoint deletion cancelled")
+
+    def _list_all_checkpoints(self, checkpoints: List[CheckpointMetadata]) -> None:
+        """
+        Display detailed list of all checkpoints.
+
+        Args:
+            checkpoints: List of checkpoint metadata to display
+        """
+        print("\n" + "=" * 60)
+        print(f"ALL CHECKPOINTS ({len(checkpoints)})")
+        print("=" * 60)
+
+        for i, checkpoint_meta in enumerate(checkpoints, 1):
+            print(f"\n{i}. Checkpoint ID: {checkpoint_meta.checkpoint_id}")
+            print(f"   Task: {checkpoint_meta.task_description}")
+            print(f"   Timestamp: {checkpoint_meta.timestamp}")
+            print(f"   Working Dir: {checkpoint_meta.working_directory}")
+            print(f"   Files Modified: {checkpoint_meta.files_modified_count}")
+            print(f"   Tool Calls: {checkpoint_meta.tool_calls_count}")
+            print(f"   Conversation Turns: {checkpoint_meta.conversation_turns}")
+
+    def should_checkpoint(self) -> bool:
+        """
+        Determine if auto-checkpoint should be triggered.
+
+        Checkpoints are created when ALL of these conditions are met:
+        1. At least checkpoint_interval_minutes have elapsed since last checkpoint
+        2. Activity has occurred since last checkpoint (messages, tool calls, file changes)
+        3. At a safe point (turn boundary - agent finished response)
+
+        Returns:
+            True if checkpoint should be created, False otherwise
+        """
+        # Check 1: Manual checkpoint requested
+        if self.checkpoint_requested:
+            return True
+
+        # Check 2: Minimum time interval elapsed
+        if self.last_checkpoint_time is None:
+            # First checkpoint - wait for interval
+            time_since_start = datetime.now() - self.session_start_time
+            if time_since_start < timedelta(minutes=self.checkpoint_interval_minutes):
+                return False
+        else:
+            time_since_checkpoint = datetime.now() - self.last_checkpoint_time
+            if time_since_checkpoint < timedelta(minutes=self.checkpoint_interval_minutes):
+                return False
+
+        # Check 3: Activity has occurred
+        if not self.activity_since_checkpoint:
+            return False
+
+        # All conditions met - checkpoint should be created
+        return True
+
+    def record_activity(self, activity_type: str = "general") -> None:
+        """
+        Record that activity has occurred (message, tool call, file change).
+
+        This is called by the CLI when the agent performs work.
+
+        Args:
+            activity_type: Type of activity (e.g., "message", "tool_call", "file_change")
+        """
+        self.activity_since_checkpoint = True
+
+    def create_checkpoint(
+        self,
+        task_description: str = "Ongoing work",
+        current_phase: Optional[str] = None,
+        pending_tasks: Optional[List[str]] = None
+    ) -> Optional[str]:
+        """
+        Create a checkpoint of current agent state.
+
+        This is the main checkpoint creation method called by the CLI.
+
+        Args:
+            task_description: Description of current work
+            current_phase: Current development phase
+            pending_tasks: List of remaining tasks
+
+        Returns:
+            Checkpoint ID if successful, None otherwise
+        """
+        try:
+            print("\n[INFO] Creating checkpoint...")
+
+            checkpoint_id = self.checkpoint_manager.save_checkpoint(
+                agent=self.agent,
+                execution_progress=task_description,
+                task_description=task_description,
+                current_phase=current_phase,
+                pending_tasks=pending_tasks
+            )
+
+            # Update checkpoint tracking
+            self.last_checkpoint_time = datetime.now()
+            self.activity_since_checkpoint = False
+            self.checkpoint_requested = False
+            self.current_checkpoint_id = checkpoint_id
+
+            print(f"[OK] Checkpoint created: {checkpoint_id}")
+            return checkpoint_id
+
+        except Exception as e:
+            print(f"[ERROR] Failed to create checkpoint: {e}")
+            return None
+
+    def request_checkpoint(self) -> None:
+        """
+        Request manual checkpoint (triggered by /checkpoint command).
+
+        Sets flag that will be checked on next should_checkpoint() call.
+        """
+        self.checkpoint_requested = True
+        print("[INFO] Checkpoint will be created at next safe point (turn boundary)")
+
+    def handle_exit_request(self) -> bool:
+        """
+        Handle exit request with save prompt (called by CLI layer).
+
+        This should be called by the CLI when user requests exit (via 'exit'
+        command or Ctrl+D). The CLI layer is responsible for actually exiting.
+
+        Returns:
+            True if exit should proceed, False to cancel exit
+
+        Note:
+            This method is designed to be called from the main thread/CLI loop,
+            NOT from signal handlers. Signal handlers should set flags that
+            the CLI checks periodically.
+        """
+        print("\n" + "=" * 60)
+        print("EXIT REQUESTED")
+        print("=" * 60)
+
+        # Check if there's any unsaved work
+        if self.activity_since_checkpoint:
+            print("\n[WARN] You have unsaved work since the last checkpoint")
+            print(f"[INFO] Last checkpoint: {self.last_checkpoint_time or 'Never'}")
+
+            save = input("\nSave checkpoint before exiting? [Y/n]: ").strip().lower()
+
+            # Input validation
+            if len(save) > 10:
+                print("[WARN] Invalid input - defaulting to save")
+                save = "y"
+
+            if save not in ["y", "n", "yes", "no", ""]:
+                print("[WARN] Invalid choice - defaulting to save")
+                save = "y"
+
+            if save != "n":
+                checkpoint_id = self.create_checkpoint(
+                    task_description="Session ended by user",
+                    current_phase=getattr(self.agent, 'current_phase', None)
+                )
+
+                if checkpoint_id:
+                    print(f"\n[OK] Work saved to checkpoint: {checkpoint_id}")
+                else:
+                    print("\n[ERROR] Failed to save checkpoint")
+                    retry = input("Exit anyway? [y/N]: ").strip().lower()
+                    if retry != "y":
+                        print("[INFO] Exit cancelled")
+                        return False
+        else:
+            print("\n[INFO] No unsaved work since last checkpoint")
+
+        print("\n[INFO] Goodbye!")
+        return True
+
+    def get_checkpoint_status(self) -> Dict[str, Any]:
+        """
+        Get current checkpoint status for display.
+
+        Returns:
+            Dictionary with checkpoint status information
+        """
+        status = {
+            "current_checkpoint_id": self.current_checkpoint_id,
+            "last_checkpoint_time": self.last_checkpoint_time,
+            "time_since_checkpoint": None,
+            "activity_since_checkpoint": self.activity_since_checkpoint,
+            "checkpoint_due": self.should_checkpoint(),
+        }
+
+        if self.last_checkpoint_time:
+            time_since = datetime.now() - self.last_checkpoint_time
+            status["time_since_checkpoint"] = str(time_since).split(".")[0]  # Remove microseconds
+
+        return status

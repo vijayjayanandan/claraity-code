@@ -1,6 +1,10 @@
 """Base tool interface and executor."""
 
+import asyncio
+import json
+import logging
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from pydantic import BaseModel, Field
 from enum import Enum
@@ -8,6 +12,60 @@ import time
 
 if TYPE_CHECKING:
     from src.hooks import HookManager, HookDecision, HookBlockedError
+
+# Try to import structured logging with get_logger
+try:
+    from src.observability import get_logger, ErrorCategory
+    logger = get_logger("tools.base")
+    STRUCTURED_LOGGING = True
+except ImportError:
+    # Fallback to stdlib logger
+    logger = logging.getLogger(__name__)
+    STRUCTURED_LOGGING = False
+    class ErrorCategory:
+        TOOL_TIMEOUT = 'tool_timeout'
+        TOOL_ERROR = 'tool_error'
+
+# =============================================================================
+# Tool Timeout Configuration
+# =============================================================================
+# Global timeout prevents any tool from hanging forever (critical safety net)
+# These values apply when wall-time limit is disabled (MAX_WALL_TIME_SECONDS=None)
+
+DEFAULT_TOOL_TIMEOUT_S = 120  # 2 minutes default for most tools
+
+# Per-tool timeout overrides (tools that need more/less time)
+TOOL_TIMEOUT_OVERRIDES = {
+    # Commands can run long (builds, tests, etc.)
+    "run_command": 600,  # 10 minutes
+
+    # LSP tools need extra time for server startup (jedi-language-server ~25s)
+    "get_file_outline": 90,
+    "get_symbol_context": 90,
+
+    # File operations are usually fast, but large files need some buffer
+    "write_file": 60,
+    "read_file": 30,
+
+    # Search tools can be slow on large codebases
+    "search_code": 60,
+    "glob_files": 30,
+
+    # Web tools need network time
+    "web_search": 45,  # API call + processing
+    "web_fetch": 60,   # Large pages can be slow
+}
+
+
+# Tool Exceptions
+class ToolNotFoundError(Exception):
+    """Tool does not exist in registry."""
+    pass
+
+
+class ToolExecutionError(Exception):
+    """Tool execution failed."""
+    pass
 
 
 class ToolStatus(str, Enum):
@@ -81,15 +139,18 @@ class Tool(ABC):
 class ToolExecutor:
     """Executor for managing and running tools."""
 
-    def __init__(self, hook_manager: Optional['HookManager'] = None):
+    def __init__(self, hook_manager: Optional['HookManager'] = None, max_workers: int = 4):
         """
         Initialize tool executor.
 
         Args:
             hook_manager: Optional hook manager for event hooks
+            max_workers: Max threads for async tool execution (default: 4)
         """
         self.tools: Dict[str, Tool] = {}
         self.hook_manager = hook_manager
+        # ThreadPoolExecutor for running sync tools in async context
+        self._executor = ThreadPoolExecutor(max_workers=max_workers)
 
     def register_tool(self, tool: Tool) -> None:
         """
@@ -199,6 +260,73 @@ class ToolExecutor:
                 logging.getLogger(__name__).warning(f"PostToolUse hook error: {e}")
 
         return result
+
+    async def execute_tool_async(self, tool_name: str, **kwargs: Any) -> ToolResult:
+        """
+        Execute a tool asynchronously with timeout protection.
+
+        This allows tools to be executed without blocking the asyncio event loop,
+        enabling the TUI to remain responsive during tool execution.
+
+        Safety: Every tool has a timeout to prevent indefinite hangs. This is
+        critical when MAX_WALL_TIME_SECONDS is disabled - without per-tool
+        timeouts, a hanging tool would freeze the agent forever.
+
+        Args:
+            tool_name: Name of tool to execute
+            **kwargs: Tool parameters
+
+        Returns:
+            Tool result
+
+        Note:
+            Timeout is determined by TOOL_TIMEOUT_OVERRIDES or DEFAULT_TOOL_TIMEOUT_S.
+            On timeout, returns ToolResult with ERROR status (not exception).
+        """
+        # Determine timeout for this tool
+        timeout_s = TOOL_TIMEOUT_OVERRIDES.get(tool_name, DEFAULT_TOOL_TIMEOUT_S)
+        loop = asyncio.get_running_loop()
+
+        try:
+            # Wrap executor call with timeout
+            return await asyncio.wait_for(
+                loop.run_in_executor(
+                    self._executor,
+                    lambda: self.execute_tool(tool_name, **kwargs)
+                ),
+                timeout=timeout_s
+            )
+        except asyncio.TimeoutError:
+            # Calculate elapsed time (should be ~timeout_s)
+            elapsed_ms = timeout_s * 1000  # Timeout means we hit the limit
+
+            # Log with structlog key=value pattern
+            logger.error(
+                "tool_timeout",
+                category=ErrorCategory.TOOL_TIMEOUT,
+                error_type="TimeoutError",
+                tool_name=tool_name,
+                tool_timeout_s=timeout_s,
+                elapsed_ms=elapsed_ms,
+                tool_args_keys=json.dumps(list(kwargs.keys())),  # JSON list of arg keys
+            )
+            return ToolResult(
+                tool_name=tool_name,
+                status=ToolStatus.ERROR,
+                output=None,
+                error=(
+                    f"Tool timed out after {timeout_s}s. "
+                    "Try a simpler operation or break into smaller steps."
+                )
+            )
+        except asyncio.CancelledError:
+            # Propagate cancellation cleanly (user interrupt via Ctrl+C)
+            logger.info(f"Tool '{tool_name}' was cancelled by user")
+            raise
+
+    def shutdown(self) -> None:
+        """Shutdown the thread pool executor."""
+        self._executor.shutdown(wait=True)
 
     def get_available_tools(self) -> List[Dict[str, Any]]:
         """

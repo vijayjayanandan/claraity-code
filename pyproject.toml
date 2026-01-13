@@ -161,3 +161,6 @@ addopts = [
     "--cov-report=html",
 ]
 asyncio_mode = "auto"
+markers = [
+    "integration: marks tests as integration tests (require network/API keys)",
+]

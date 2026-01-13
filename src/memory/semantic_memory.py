@@ -1,4 +1,4 @@
-"""Semantic Memory - Long-term knowledge base with vector storage using Alibaba Cloud API."""
+"""Semantic Memory - Long-term knowledge base with vector storage using OpenAI-compatible APIs."""
 
 import uuid
 import os
@@ -15,42 +15,63 @@ class SemanticMemory:
     """
     Semantic memory provides long-term knowledge storage using vector embeddings.
     Supports similarity-based retrieval for code, concepts, and solutions.
-    Uses Alibaba Cloud API for embeddings.
+    Uses OpenAI-compatible embedding APIs.
     """
 
     def __init__(
         self,
         persist_directory: str = "./data/embeddings",
         collection_name: str = "semantic_memory",
-        embedding_model: str = "text-embedding-v4",  # Alibaba model
+        embedding_model: Optional[str] = None,
         similarity_threshold: float = 0.7,
         api_key: Optional[str] = None,
-        base_url: Optional[str] = None,  # Will use LLM_HOST env var or default
+        api_key_env: str = "EMBEDDING_API_KEY",
+        base_url: Optional[str] = None,
+        embedding_dimension: Optional[int] = None,
     ):
         """
-        Initialize semantic memory with Alibaba Cloud API.
+        Initialize semantic memory with OpenAI-compatible embedding API.
 
         Args:
             persist_directory: Directory to persist vector database
             collection_name: Name of the collection
-            embedding_model: Alibaba embedding model name
+            embedding_model: Embedding model name (from .env EMBEDDING_MODEL)
             similarity_threshold: Minimum similarity score for retrieval
-            api_key: Alibaba API key (defaults to DASHSCOPE_API_KEY env var)
-            base_url: API base URL
+            api_key: API key (optional, will use env var if not provided)
+            api_key_env: Environment variable name for API key (default: EMBEDDING_API_KEY)
+            base_url: API base URL (from .env EMBEDDING_BASE_URL)
+            embedding_dimension: Dimension of embeddings (from .env EMBEDDING_DIMENSION)
         """
         self.persist_directory = Path(persist_directory)
         self.persist_directory.mkdir(parents=True, exist_ok=True)
 
         self.similarity_threshold = similarity_threshold
-        self.embedding_model_name = embedding_model
-        self.embedding_dimension = 1024  # text-embedding-v4 dimension
+        self.embedding_model_name = embedding_model or os.getenv("EMBEDDING_MODEL", "text-embedding-v3")
+        self.embedding_dimension = embedding_dimension or int(os.getenv("EMBEDDING_DIMENSION", "1024"))
 
-        # Initialize OpenAI client for Alibaba API
+        # Get API key from parameter or environment variable
+        resolved_api_key = api_key or os.getenv(api_key_env)
+        if not resolved_api_key:
+            # Fallback to OPENAI_API_KEY if EMBEDDING_API_KEY is not set
+            resolved_api_key = os.getenv("OPENAI_API_KEY")
+        if not resolved_api_key:
+            raise ValueError(
+                f"Embedding API key not provided. Set {api_key_env} or OPENAI_API_KEY environment variable "
+                f"or pass api_key parameter."
+            )
+
+        # Get base URL from parameter or environment variable
+        resolved_base_url = base_url or os.getenv("EMBEDDING_BASE_URL")
+        if not resolved_base_url:
+            raise ValueError(
+                "Embedding base URL not provided. Set EMBEDDING_BASE_URL environment variable "
+                "or pass base_url parameter."
+            )
+
+        # Initialize OpenAI client with provided configuration
         self.client_api = OpenAI(
-            api_key=api_key or os.getenv("DASHSCOPE_API_KEY"),
-            base_url=base_url
-            or os.getenv("LLM_HOST")
-            or "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+            api_key=resolved_api_key,
+            base_url=resolved_base_url,
         )
 
         # Initialize ChromaDB

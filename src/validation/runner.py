@@ -41,33 +41,7 @@ from .scenarios import (
     get_scenarios_by_difficulty
 )
 from .report_generator import ReportGenerator
-
-
-def safe_print(text: str) -> None:
-    """Print text, replacing emojis on Windows to avoid encoding issues."""
-    if sys.platform == 'win32':
-        # Replace common emojis with text equivalents
-        replacements = {
-            '[TEST]': '[TEST]',
-            '[OK]': '[OK]',
-            '[FAIL]': '[FAIL]',
-            '[DIR]': '[DIR]',
-            '[START]': '[RUN]',
-            '[REPORT]': '[REPORT]',
-            '[TARGET]': '[TARGET]',
-            '[AGENT]': '[AGENT]',
-            '📋': '[INFO]',
-            '[TIME]': '[TIME]',
-            '🔧': '[SETUP]',
-            '[WARN]': '[WARN]',
-        }
-        for emoji, replacement in replacements.items():
-            text = text.replace(emoji, replacement)
-    try:
-        print(text)
-    except UnicodeEncodeError:
-        # Fallback: remove any remaining problematic characters
-        print(text.encode('ascii', 'replace').decode('ascii'))
+from src.platform import safe_print
 
 
 class ValidationRunner:

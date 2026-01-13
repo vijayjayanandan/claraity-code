@@ -301,17 +301,17 @@ class PermissionManager:
         """
         descriptions = {
             PermissionMode.PLAN: (
-                "📋 PLAN Mode\n"
+                "[PLAN] PLAN Mode\n"
                 "  Always shows execution plan and asks for approval.\n"
                 "  Best for: Learning, reviewing agent decisions, high-security environments"
             ),
             PermissionMode.NORMAL: (
-                "⚖️  NORMAL Mode (Default)\n"
+                "[NORMAL] NORMAL Mode (Default)\n"
                 "  Asks for approval only for high-risk operations.\n"
                 "  Best for: Balanced autonomy and safety, production use"
             ),
             PermissionMode.AUTO: (
-                "🤖 AUTO Mode\n"
+                "[AUTO] AUTO Mode\n"
                 "  Fully autonomous - never asks for approval.\n"
                 "  Best for: Batch processing, trusted environments, CI/CD"
             )

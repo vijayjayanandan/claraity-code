@@ -11,18 +11,39 @@ Works with any OpenAI-compatible API including:
 
 import os
 import logging
-from typing import List, Dict, Any, Iterator, Optional
+import json
+import time
+import traceback
+from typing import List, Dict, Any, Iterator, Optional, AsyncIterator
 
 try:
-    from openai import OpenAI
+    from openai import OpenAI, AsyncOpenAI
 except ImportError:
     raise ImportError(
         "OpenAI SDK not installed. Install with: pip install openai"
     )
 
-logger = logging.getLogger(__name__)
+# Try to import structured logging with get_logger
+try:
+    from src.observability import get_logger, ErrorCategory
+    logger = get_logger("llm.openai_backend")
+    STRUCTURED_LOGGING = True
+except ImportError:
+    # Fallback to stdlib logger
+    logger = logging.getLogger(__name__)
+    STRUCTURED_LOGGING = False
+    class ErrorCategory:
+        PROVIDER_TIMEOUT = 'provider_timeout'
+        PROVIDER_ERROR = 'provider_error'
+
+# Timeout constants (in seconds)
+# Note: read timeout is configurable via LLMConfig.timeout for slow LLMs
+DEFAULT_CONNECT_TIMEOUT = 10.0  # Time to establish connection
+DEFAULT_WRITE_TIMEOUT = 10.0   # Time to send request
+DEFAULT_POOL_TIMEOUT = 10.0    # Time to get connection from pool
 
 from .base import LLMBackend, LLMConfig, LLMResponse, StreamChunk, ToolDefinition, ToolCall
+from .failure_handler import LLMFailureHandler
 
 
 class OpenAIBackend(LLMBackend):
@@ -56,12 +77,44 @@ class OpenAIBackend(LLMBackend):
                 f"or pass api_key parameter."
             )
 
-        # Initialize OpenAI client with custom base URL if provided
+        # DEBUG: Log initialization details
+        import logging
+        import httpx
+
+        logger = logging.getLogger(__name__)
+        logger.info(f"OpenAI Backend Init - base_url: {config.base_url}, api_key_env: {api_key_env}, key_found: {bool(self.api_key)}, key_prefix: {self.api_key[:10]}..." if self.api_key else "no key")
+
+        # Initialize OpenAI client with base URL from config
+        # Use httpx.Timeout for granular timeout control:
+        # - connect: time to establish connection
+        # - read: time between chunks (not total stream time)
+        # - write: time to send request
+        # - pool: time to get connection from pool
         self.client = OpenAI(
             api_key=self.api_key,
-            base_url=config.base_url if config.base_url != "http://localhost:11434" else None,
-            timeout=config.timeout
+            base_url=config.base_url,
+            timeout=httpx.Timeout(
+                connect=DEFAULT_CONNECT_TIMEOUT,
+                read=config.timeout,
+                write=DEFAULT_WRITE_TIMEOUT,
+                pool=DEFAULT_POOL_TIMEOUT
+            )
         )
+
+        # Async client for non-blocking operations (TUI streaming)
+        self.async_client = AsyncOpenAI(
+            api_key=self.api_key,
+            base_url=config.base_url,
+            timeout=httpx.Timeout(
+                connect=DEFAULT_CONNECT_TIMEOUT,
+                read=config.timeout,
+                write=DEFAULT_WRITE_TIMEOUT,
+                pool=DEFAULT_POOL_TIMEOUT
+            )
+        )
+
+        # Initialize failure handler for robust error handling
+        self.failure_handler = LLMFailureHandler(logger_instance=logger)
 
     def generate(
         self,
@@ -90,12 +143,24 @@ class OpenAIBackend(LLMBackend):
             "stream": False,
         }
 
+        # Wrap API call with failure handler (retry on transient errors)
+        def api_call():
+            return self.client.chat.completions.create(**params)
+
         try:
-            response = self.client.chat.completions.create(**params)
+            response = self.failure_handler.execute_with_retry(
+                api_call,
+                max_attempts=3,
+                backoff_base=2.0
+            )
 
             # Extract content and metadata
             content = response.choices[0].message.content
             finish_reason = response.choices[0].finish_reason
+
+            # Validate response
+            if content:
+                self.failure_handler.validate_response(content)
 
             # Build LLMResponse
             return LLMResponse(
@@ -274,13 +339,39 @@ class OpenAIBackend(LLMBackend):
             "stream": False,
         }
 
+        # Wrap API call with failure handler (retry on transient errors)
+        def api_call():
+            return self.client.chat.completions.create(**params)
+
         try:
-            response = self.client.chat.completions.create(**params)
+            response = self.failure_handler.execute_with_retry(
+                api_call,
+                max_attempts=3,
+                backoff_base=2.0
+            )
 
             # Extract content and tool calls
             message = response.choices[0].message
             content = message.content  # May be None if tool-only response
             finish_reason = response.choices[0].finish_reason
+
+            # Validate response if content is present
+            if content:
+                self.failure_handler.validate_response(content)
+
+            # Detect truncation
+            truncation_info = {"truncated": False}
+            if finish_reason == "length":
+                logger.warning(
+                    f"[TRUNCATION DETECTED] Response exceeded max_tokens limit. "
+                    f"Tokens used: {response.usage.total_tokens if response.usage else 'unknown'}"
+                )
+                truncation_info = {
+                    "truncated": True,
+                    "finish_reason": "length",
+                    "total_tokens": response.usage.total_tokens if response.usage else None,
+                    "partial_tool_calls": len(message.tool_calls) if message.tool_calls else 0
+                }
 
             # Parse tool calls if present
             tool_calls = None
@@ -311,11 +402,445 @@ class OpenAIBackend(LLMBackend):
                 raw_response={
                     "id": response.id,
                     "created": response.created,
+                    "truncation_info": truncation_info
                 }
             )
 
         except Exception as e:
             raise RuntimeError(f"OpenAI tool calling API error: {str(e)}") from e
+
+    def generate_with_tools_stream(
+        self,
+        messages: List[Dict[str, str]],
+        tools: List[ToolDefinition],
+        tool_choice: str = "auto",
+        **kwargs: Any
+    ) -> Iterator[tuple[StreamChunk, Optional[List[ToolCall]]]]:
+        """
+        Generate streaming completion with tool calling support.
+
+        This enables streaming responses while using OpenAI's function calling API.
+        Content is yielded as it arrives, and tool calls are accumulated and returned
+        when the stream completes.
+
+        Args:
+            messages: List of message dicts with 'role' and 'content'
+            tools: List of available tools (function definitions)
+            tool_choice: "auto" (LLM decides), "required" (must call tool),
+                        "none" (no tools), or {"type": "function", "function": {"name": "..."}}
+            **kwargs: Additional generation parameters
+
+        Yields:
+            Tuple of (StreamChunk, Optional[List[ToolCall]]):
+            - StreamChunk: Content chunk with done=False during streaming
+            - None: Tool calls are None until stream completes
+
+            Final yield when stream completes:
+            - StreamChunk with done=True
+            - List[ToolCall] if tools were called, else None
+
+        Example:
+            tools = [ToolDefinition(...)]
+            for chunk, tool_calls in backend.generate_with_tools_stream(messages, tools):
+                if not chunk.done:
+                    print(chunk.content, end="", flush=True)
+                else:
+                    # Stream complete
+                    if tool_calls:
+                        for call in tool_calls:
+                            result = execute_tool(call.name, call.arguments)
+        """
+        self.validate_messages(messages)
+
+        # Convert ToolDefinition objects to OpenAI function calling format
+        tools_json = [
+            {
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.parameters
+                }
+            }
+            for tool in tools
+        ]
+
+        # Build parameters for API call
+        params = {
+            "model": self.config.model_name,
+            "messages": messages,
+            "temperature": kwargs.get("temperature", self.config.temperature),
+            "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
+            "top_p": kwargs.get("top_p", self.config.top_p),
+            "tools": tools_json,
+            "tool_choice": tool_choice,
+            "stream": True,  # Enable streaming
+        }
+
+        # Add stream_options for usage tracking (OpenAI-specific, may not work with all providers)
+        if getattr(self.config, 'stream_usage', True):
+            params["stream_options"] = {"include_usage": True}
+
+        # Initialize stream variable before try block to ensure cleanup works
+        stream = None
+        try:
+            stream = self.client.chat.completions.create(**params)
+
+            # Accumulate tool calls by index (for parallel calls)
+            tool_calls_accumulator: Dict[int, Dict[str, Any]] = {}
+            finish_reason = None
+            model_name = None
+            # Token usage (captured from final chunk with stream_options.include_usage)
+            prompt_tokens = None
+            completion_tokens = None
+            total_tokens = None
+
+            try:
+                for chunk in stream:
+                    # Capture usage from any chunk that has it (comes after finish_reason)
+                    if hasattr(chunk, 'usage') and chunk.usage:
+                        prompt_tokens = chunk.usage.prompt_tokens
+                        completion_tokens = chunk.usage.completion_tokens
+                        total_tokens = chunk.usage.total_tokens
+
+                    # Skip chunks with no choices (e.g., usage-only chunks)
+                    if not chunk.choices or len(chunk.choices) == 0:
+                        continue
+
+                    delta = chunk.choices[0].delta
+                    finish_reason = chunk.choices[0].finish_reason
+                    model_name = chunk.model
+
+                    # Yield text content chunks as they arrive
+                    if delta.content:
+                        yield (
+                            StreamChunk(
+                                content=delta.content,
+                                done=False,
+                                model=model_name,
+                                finish_reason=None
+                            ),
+                            None  # No tool calls yet during streaming
+                        )
+
+                    # Accumulate tool call deltas
+                    if delta.tool_calls:
+                        for tc_delta in delta.tool_calls:
+                            idx = tc_delta.index
+
+                            # Initialize accumulator for this tool call index
+                            if idx not in tool_calls_accumulator:
+                                tool_calls_accumulator[idx] = {
+                                    "id": "",
+                                    "name": "",
+                                    "arguments": ""
+                                }
+
+                            # Accumulate ID (comes in first chunk for this index)
+                            if tc_delta.id:
+                                tool_calls_accumulator[idx]["id"] = tc_delta.id
+
+                            # Accumulate function name (comes in first chunk)
+                            if tc_delta.function and tc_delta.function.name:
+                                tool_calls_accumulator[idx]["name"] = tc_delta.function.name
+
+                            # Accumulate function arguments (comes in multiple chunks)
+                            if tc_delta.function and tc_delta.function.arguments:
+                                tool_calls_accumulator[idx]["arguments"] += tc_delta.function.arguments
+
+            finally:
+                # CRITICAL: Always close stream to release HTTP connection
+                if stream is not None and hasattr(stream, 'close'):
+                    stream.close()
+
+            # Stream complete - parse accumulated tool calls
+            tool_calls = None
+            if tool_calls_accumulator:
+                tool_calls = []
+                for idx in sorted(tool_calls_accumulator.keys()):
+                    tc_data = tool_calls_accumulator[idx]
+
+                    # Parse accumulated JSON arguments
+                    arguments = self._parse_tool_arguments(
+                        tc_data["arguments"],
+                        tc_data["name"]
+                    )
+
+                    tool_calls.append(
+                        ToolCall(
+                            id=tc_data["id"],
+                            name=tc_data["name"],
+                            arguments=arguments
+                        )
+                    )
+
+            # Yield final chunk with tool calls and usage
+            yield (
+                StreamChunk(
+                    content="",  # No more content
+                    done=True,
+                    model=model_name,
+                    finish_reason=finish_reason,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                ),
+                tool_calls
+            )
+
+        except Exception as e:
+            # Extract error details
+            error_type = type(e).__name__
+            error_msg = str(e).strip() or repr(e)
+
+            # Determine error category
+            is_timeout = 'timeout' in error_type.lower()
+            category = ErrorCategory.PROVIDER_TIMEOUT if is_timeout else ErrorCategory.PROVIDER_ERROR
+
+            # Find root cause in exception chain
+            root_cause = e
+            while root_cause.__cause__ is not None:
+                root_cause = root_cause.__cause__
+            root_cause_type = type(root_cause).__name__
+            root_cause_message = str(root_cause).strip()[:500]
+
+            # Log with structlog key=value pattern including timeout debugging fields
+            logger.exception(
+                "openai_streaming_error",
+                category=category,
+                error_type=error_type,
+                model=self.config.model_name,
+                backend="openai",
+                operation="generate_with_tools_stream",
+                timeout_read_s=self.config.timeout,
+                timeout_write_s=DEFAULT_WRITE_TIMEOUT,
+                timeout_connect_s=DEFAULT_CONNECT_TIMEOUT,
+                timeout_pool_s=DEFAULT_POOL_TIMEOUT,
+                root_cause_type=root_cause_type,
+                root_cause_message=root_cause_message,
+            )
+
+            raise RuntimeError(
+                f"OpenAI streaming tool calling error: {error_type}: {error_msg}"
+            ) from e
+
+    async def generate_with_tools_stream_async(
+        self,
+        messages: List[Dict[str, str]],
+        tools: List[ToolDefinition],
+        tool_choice: str = "auto",
+        **kwargs: Any
+    ) -> AsyncIterator[tuple[StreamChunk, Optional[List[ToolCall]]]]:
+        """
+        Generate async streaming completion with tool calling support.
+
+        This is the async version of generate_with_tools_stream() for use with
+        asyncio-based applications like the TUI chat interface.
+
+        Content is yielded as it arrives, and tool calls are accumulated and returned
+        when the stream completes.
+
+        Args:
+            messages: List of message dicts with 'role' and 'content'
+            tools: List of available tools (function definitions)
+            tool_choice: "auto" (LLM decides), "required" (must call tool),
+                        "none" (no tools), or {"type": "function", "function": {"name": "..."}}
+            **kwargs: Additional generation parameters
+
+        Yields:
+            Tuple of (StreamChunk, Optional[List[ToolCall]]):
+            - StreamChunk: Content chunk with done=False during streaming
+            - None: Tool calls are None until stream completes
+
+            Final yield when stream completes:
+            - StreamChunk with done=True
+            - List[ToolCall] if tools were called, else None
+
+        Example:
+            tools = [ToolDefinition(...)]
+            async for chunk, tool_calls in backend.generate_with_tools_stream_async(messages, tools):
+                if not chunk.done:
+                    print(chunk.content, end="", flush=True)
+                else:
+                    # Stream complete
+                    if tool_calls:
+                        for call in tool_calls:
+                            result = await execute_tool_async(call.name, call.arguments)
+        """
+        self.validate_messages(messages)
+
+        # Convert ToolDefinition objects to OpenAI function calling format
+        tools_json = [
+            {
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.parameters
+                }
+            }
+            for tool in tools
+        ]
+
+        # Build parameters for API call
+        params = {
+            "model": self.config.model_name,
+            "messages": messages,
+            "temperature": kwargs.get("temperature", self.config.temperature),
+            "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
+            "top_p": kwargs.get("top_p", self.config.top_p),
+            "tools": tools_json,
+            "tool_choice": tool_choice,
+            "stream": True,  # Enable streaming
+        }
+
+        # Add stream_options for usage tracking (OpenAI-specific, may not work with all providers)
+        if getattr(self.config, 'stream_usage', True):
+            params["stream_options"] = {"include_usage": True}
+
+        # Initialize stream variable before try block to ensure cleanup works
+        stream = None
+        try:
+            # Use async client for non-blocking API call
+            stream = await self.async_client.chat.completions.create(**params)
+
+            # Accumulate tool calls by index (for parallel calls)
+            tool_calls_accumulator: Dict[int, Dict[str, Any]] = {}
+            finish_reason = None
+            model_name = None
+            # Token usage (captured from final chunk with stream_options.include_usage)
+            prompt_tokens = None
+            completion_tokens = None
+            total_tokens = None
+
+            try:
+                async for chunk in stream:
+                    # Capture usage from any chunk that has it (comes after finish_reason)
+                    if hasattr(chunk, 'usage') and chunk.usage:
+                        prompt_tokens = chunk.usage.prompt_tokens
+                        completion_tokens = chunk.usage.completion_tokens
+                        total_tokens = chunk.usage.total_tokens
+
+                    # Skip chunks with no choices (e.g., usage-only chunks)
+                    if not chunk.choices or len(chunk.choices) == 0:
+                        continue
+
+                    delta = chunk.choices[0].delta
+                    finish_reason = chunk.choices[0].finish_reason
+                    model_name = chunk.model
+
+                    # Yield text content chunks as they arrive
+                    if delta.content:
+                        yield (
+                            StreamChunk(
+                                content=delta.content,
+                                done=False,
+                                model=model_name,
+                                finish_reason=None
+                            ),
+                            None  # No tool calls yet during streaming
+                        )
+
+                    # Accumulate tool call deltas
+                    if delta.tool_calls:
+                        for tc_delta in delta.tool_calls:
+                            idx = tc_delta.index
+
+                            # Initialize accumulator for this tool call index
+                            if idx not in tool_calls_accumulator:
+                                tool_calls_accumulator[idx] = {
+                                    "id": "",
+                                    "name": "",
+                                    "arguments": ""
+                                }
+
+                            # Accumulate ID (comes in first chunk for this index)
+                            if tc_delta.id:
+                                tool_calls_accumulator[idx]["id"] = tc_delta.id
+
+                            # Accumulate function name (comes in first chunk)
+                            if tc_delta.function and tc_delta.function.name:
+                                tool_calls_accumulator[idx]["name"] = tc_delta.function.name
+
+                            # Accumulate function arguments (comes in multiple chunks)
+                            if tc_delta.function and tc_delta.function.arguments:
+                                tool_calls_accumulator[idx]["arguments"] += tc_delta.function.arguments
+
+            finally:
+                # CRITICAL: Always close stream to release HTTP connection
+                if stream is not None and hasattr(stream, 'close'):
+                    await stream.close()
+
+            # Stream complete - parse accumulated tool calls
+            tool_calls = None
+            if tool_calls_accumulator:
+                tool_calls = []
+                for idx in sorted(tool_calls_accumulator.keys()):
+                    tc_data = tool_calls_accumulator[idx]
+
+                    # Parse accumulated JSON arguments
+                    arguments = self._parse_tool_arguments(
+                        tc_data["arguments"],
+                        tc_data["name"]
+                    )
+
+                    tool_calls.append(
+                        ToolCall(
+                            id=tc_data["id"],
+                            name=tc_data["name"],
+                            arguments=arguments
+                        )
+                    )
+
+            # Yield final chunk with tool calls and usage
+            yield (
+                StreamChunk(
+                    content="",  # No more content
+                    done=True,
+                    model=model_name,
+                    finish_reason=finish_reason,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                ),
+                tool_calls
+            )
+
+        except Exception as e:
+            # Extract error details
+            error_type = type(e).__name__
+            error_msg = str(e).strip() or repr(e)
+
+            # Determine error category
+            is_timeout = 'timeout' in error_type.lower()
+            category = ErrorCategory.PROVIDER_TIMEOUT if is_timeout else ErrorCategory.PROVIDER_ERROR
+
+            # Find root cause in exception chain
+            root_cause = e
+            while root_cause.__cause__ is not None:
+                root_cause = root_cause.__cause__
+            root_cause_type = type(root_cause).__name__
+            root_cause_message = str(root_cause).strip()[:500]
+
+            # Log with structlog key=value pattern including timeout debugging fields
+            logger.exception(
+                "openai_async_streaming_error",
+                category=category,
+                error_type=error_type,
+                model=self.config.model_name,
+                backend="openai",
+                operation="generate_with_tools_stream_async",
+                timeout_read_s=self.config.timeout,
+                timeout_write_s=DEFAULT_WRITE_TIMEOUT,
+                timeout_connect_s=DEFAULT_CONNECT_TIMEOUT,
+                timeout_pool_s=DEFAULT_POOL_TIMEOUT,
+                root_cause_type=root_cause_type,
+                root_cause_message=root_cause_message,
+            )
+
+            raise RuntimeError(
+                f"OpenAI async streaming tool calling error: {error_type}: {error_msg}"
+            ) from e
 
     def count_tokens(self, text: str) -> int:
         """
@@ -345,7 +870,11 @@ class OpenAIBackend(LLMBackend):
             # Try to list models as a health check
             self.client.models.list()
             return True
-        except Exception:
+        except Exception as e:
+            # DEBUG: Log what went wrong
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Backend availability check failed: {type(e).__name__}: {str(e)}")
             return False
 
     def list_models(self) -> List[str]:

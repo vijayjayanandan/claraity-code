@@ -78,30 +78,31 @@ class WorkingMemory:
             token_count=self.count_tokens(content),
         )
         self.messages.append(message)
-
-        # Auto-compact if over budget
-        if self.get_current_token_count() > self.max_tokens:
-            self._compact()
+        # NOTE: No auto-compaction here. Orchestrator is responsible for calling
+        # compact() when context threshold is reached. This ensures user is notified.
 
     def add_code_context(self, code_context: CodeContext) -> None:
         """Add code context to working memory."""
         self.code_contexts.append(code_context)
-
-        # Auto-compact if needed
-        if self.get_current_token_count() > self.max_tokens:
-            self._compact()
+        # NOTE: No auto-compaction here. Orchestrator is responsible for calling
+        # compact() when context threshold is reached. This ensures user is notified.
 
     def set_task_context(self, task_context: TaskContext) -> None:
         """Set current task context."""
         self.task_context = task_context
 
-    def _compact(self) -> None:
+    def compact(self) -> int:
         """
         Compact working memory by removing or summarizing old messages.
         Uses importance-based retention strategy.
+
+        Called by orchestrator when context threshold is reached.
+        Returns number of messages removed for notification purposes.
         """
-        if len(self.messages) <= 2:  # Keep at least last user-assistant pair
-            return
+        original_count = len(self.messages)
+
+        if original_count <= 2:  # Keep at least last user-assistant pair
+            return 0
 
         # Always keep system messages and last 2 messages
         system_messages = [m for m in self.messages if m.role == MessageRole.SYSTEM]
@@ -128,6 +129,8 @@ class WorkingMemory:
         self.messages = sorted(
             retained_messages + recent_messages, key=lambda m: m.timestamp
         )
+
+        return original_count - len(self.messages)
 
     def get_context_for_llm(self) -> List[Dict[str, str]]:
         """

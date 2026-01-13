@@ -1,9 +1,7 @@
 ---
 name: test-writer
 description: Expert test engineer creating comprehensive test suites with unit tests, integration tests, and edge case coverage
-tools: Read, Write, Edit, Grep, SearchCode, AnalyzeCode, RunCommand
 model: inherit
-context_window: null
 ---
 
 # Test Writer Subagent

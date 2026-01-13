@@ -47,32 +47,31 @@ class ValidationJudge:
             # Use provided backend
             self.llm = llm_backend
         else:
-            # Create new backend using same config as agent
-            # Default to environment variables
-            api_key = api_key or os.getenv("DASHSCOPE_API_KEY") or os.getenv("OPENAI_API_KEY")
+            # Create new backend using config from .env
+            api_key = api_key or os.getenv("OPENAI_API_KEY")
+            base_url = base_url or os.getenv("LLM_HOST")
+            model_name = model_name or os.getenv("LLM_MODEL")
 
             if not api_key:
                 raise ValueError(
                     "API key required. Either:\n"
                     "1. Pass llm_backend parameter (recommended)\n"
-                    "2. Set DASHSCOPE_API_KEY or OPENAI_API_KEY env var\n"
+                    "2. Set OPENAI_API_KEY in .env\n"
                     "3. Pass api_key parameter"
                 )
 
-            # Default to Alibaba DashScope if DASHSCOPE_API_KEY is set
-            if os.getenv("DASHSCOPE_API_KEY") and not base_url:
-                base_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"  # International endpoint
-                model_name = model_name or "qwen3-coder-plus"  # Use same model as agent
-            else:
-                base_url = base_url or "https://api.openai.com/v1"
-                model_name = model_name or "gpt-4"
+            if not base_url:
+                raise ValueError("Base URL required. Set LLM_HOST in .env or pass base_url parameter.")
+            if not model_name:
+                raise ValueError("Model name required. Set LLM_MODEL in .env or pass model_name parameter.")
 
             config = LLMConfig(
                 backend_type=LLMBackendType.OPENAI,
                 model_name=model_name,
                 base_url=base_url,
                 temperature=0.0,  # Deterministic for evaluation
-                max_tokens=4000
+                max_tokens=int(os.getenv("LLM_MAX_TOKENS", "4000")),
+                top_p=float(os.getenv("LLM_TOP_P", "0.95"))
             )
 
             self.llm = OpenAIBackend(config, api_key=api_key)
@@ -123,7 +122,10 @@ class ValidationJudge:
         # Call LLM API (same backend as agent)
         try:
             # Use the LLM backend (works with OpenAI-compatible APIs)
-            response_text = self.llm.generate(eval_prompt)
+            # Wrap prompt in message format expected by generate()
+            messages = [{"role": "user", "content": eval_prompt}]
+            response = self.llm.generate(messages)
+            response_text = response.content
 
             # Extract JSON from response (handle markdown code blocks)
             judge_result = self._parse_judge_response(response_text)

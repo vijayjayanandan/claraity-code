@@ -46,49 +46,48 @@ class ClarityGenerator:
     def __init__(
         self,
         llm_backend: Optional[LLMBackend] = None,
-        model_name: str = "qwen-plus",
+        model_name: Optional[str] = None,
         base_url: Optional[str] = None,
         api_key: Optional[str] = None,
-        api_key_env: str = "DASHSCOPE_API_KEY",
+        api_key_env: str = "OPENAI_API_KEY",
     ):
         """
         Initialize the generator.
 
         Args:
             llm_backend: Optional LLM backend instance (if None, creates default)
-            model_name: Model to use for generation (default: qwen-plus)
-            base_url: Optional base URL for API (falls back to LLM_HOST env var, then default)
-            api_key: Optional API key (falls back to api_key_env environment variable)
-            api_key_env: Environment variable name for API key (default: DASHSCOPE_API_KEY)
+            model_name: Model to use for generation (from .env: LLM_MODEL)
+            base_url: Optional base URL for API (from .env: LLM_HOST)
+            api_key: Optional API key (from .env: OPENAI_API_KEY)
+            api_key_env: Environment variable name for API key (default: OPENAI_API_KEY)
         """
         if llm_backend:
             self.llm = llm_backend
         else:
-            # Resolve base URL: parameter > LLM_HOST env var > default
-            resolved_base_url = (
-                base_url
-                or os.getenv("LLM_HOST")
-                or "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-            )
+            # Resolve configuration from .env
+            resolved_model_name = model_name or os.getenv("LLM_MODEL")
+            resolved_base_url = base_url or os.getenv("LLM_HOST")
+            resolved_api_key = api_key or os.getenv(api_key_env)
 
-            # Resolve API key: parameter > api_key_env > DASHSCOPE_API_KEY > OPENAI_API_KEY
-            resolved_api_key = (
-                api_key
-                or os.getenv(api_key_env)
-                or os.getenv("DASHSCOPE_API_KEY")
-                or os.getenv("OPENAI_API_KEY")
-            )
+            if not resolved_model_name:
+                raise ValueError("Model name required. Set LLM_MODEL in .env or pass model_name parameter.")
+            if not resolved_base_url:
+                raise ValueError("Base URL required. Set LLM_HOST in .env or pass base_url parameter.")
+            if not resolved_api_key:
+                raise ValueError(f"API key required. Set {api_key_env} in .env or pass api_key parameter.")
 
-            # Create default LLM backend (OpenAI-compatible)
+            # Create default LLM backend (OpenAI-compatible) from .env
             config = LLMConfig(
                 backend_type=LLMBackendType.OPENAI,
-                model_name=model_name,
+                model_name=resolved_model_name,
                 base_url=resolved_base_url,
-                temperature=0.3,  # Lower temperature for more focused architecture
-                max_tokens=4096,
+                temperature=float(os.getenv("LLM_TEMPERATURE", "0.3")),
+                max_tokens=int(os.getenv("LLM_MAX_TOKENS", "4096")),
+                top_p=float(os.getenv("LLM_TOP_P", "0.95")),
+                context_window=int(os.getenv("MAX_CONTEXT_TOKENS", "32768")),
                 stream=False,  # Don't stream for structured JSON output
             )
-            self.llm = OpenAIBackend(config, api_key=resolved_api_key)
+            self.llm = OpenAIBackend(config, api_key=resolved_api_key, api_key_env=api_key_env)
 
     def generate_blueprint(
         self,

@@ -1,9 +1,7 @@
 ---
 name: code-reviewer
 description: Expert code reviewer analyzing code quality, security vulnerabilities, performance issues, and best practices
-tools: Read, Grep, SearchCode, AnalyzeCode, GitDiff
 model: inherit
-context_window: null
 ---
 
 # Code Reviewer Subagent

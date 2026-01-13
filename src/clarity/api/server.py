@@ -58,14 +58,20 @@ async def lifespan(app: FastAPI):
         _db = ClarityDB(str(db_path))
         logger.info(f"Database initialized: {db_path}")
 
-        # Initialize generator
+        # Initialize generator (optional for view-only mode)
         if config.enable_generate_mode:
-            _generator = ClarityGenerator(
-                model_name=config.llm_model,
-                base_url=config.llm_base_url,
-                api_key_env=config.llm_api_key_env
-            )
-            logger.info("ClarityGenerator initialized")
+            try:
+                _generator = ClarityGenerator(
+                    model_name=config.llm_model,
+                    base_url=config.llm_base_url,
+                    api_key_env=config.llm_api_key_env
+                )
+                logger.info("ClarityGenerator initialized")
+            except ValueError as e:
+                logger.warning(f"Generator initialization failed: {e}")
+                logger.warning("Running in view-only mode (generate mode disabled)")
+                config.enable_generate_mode = False
+                _generator = None
 
         # Initialize sync orchestrator
         if config.enable_document_mode:
@@ -217,7 +223,11 @@ def get_generator() -> ClarityGenerator:
         RuntimeError: If generator not initialized
     """
     if _generator is None:
-        raise RuntimeError("Generator not initialized")
+        raise RuntimeError(
+            "Generator not initialized. Generate mode requires LLM configuration. "
+            "Set LLM_MODEL, LLM_HOST, and API key in .env file. "
+            "Server is running in view-only mode."
+        )
     return _generator
 
 

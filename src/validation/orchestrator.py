@@ -23,33 +23,7 @@ from .scenario import (
     StepType,
     DifficultyLevel
 )
-
-
-def safe_print(text: str) -> None:
-    """Print text, replacing emojis on Windows to avoid encoding issues."""
-    if sys.platform == 'win32':
-        # Replace common emojis with text equivalents
-        replacements = {
-            '[TEST]': '[TEST]',
-            '[OK]': '[OK]',
-            '[FAIL]': '[FAIL]',
-            '[DIR]': '[DIR]',
-            '[START]': '[RUN]',
-            '[REPORT]': '[REPORT]',
-            '[TARGET]': '[TARGET]',
-            '[AGENT]': '[AGENT]',
-            '📋': '[INFO]',
-            '[TIME]': '[TIME]',
-            '🔧': '[SETUP]',
-            '[WARN]': '[WARN]',
-        }
-        for emoji, replacement in replacements.items():
-            text = text.replace(emoji, replacement)
-    try:
-        print(text)
-    except UnicodeEncodeError:
-        # Fallback: remove any remaining problematic characters
-        print(text.encode('ascii', 'replace').decode('ascii'))
+from src.platform import safe_print
 
 
 class ValidationOrchestrator:
@@ -304,13 +278,13 @@ try:
     from src.core.agent import CodingAgent
 
     # Initialize agent in AUTO mode for validation (no approval prompts)
-    # Use OpenAI-compatible backend with DashScope API (from .env config)
+    # Use OpenAI-compatible backend (from .env config)
     safe_print("[AGENT] Initializing CodingAgent...")
-    api_key = os.environ.get("DASHSCOPE_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    api_key = os.environ.get("OPENAI_API_KEY")
     agent = CodingAgent(
-        model_name="qwen3-coder-plus",  # From .env: LLM_MODEL
-        backend="openai",
-        base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",  # From .env: LLM_HOST
+        model_name=os.environ.get("LLM_MODEL"),  # From .env: LLM_MODEL
+        backend=os.environ.get("LLM_BACKEND", "openai"),
+        base_url=os.environ.get("LLM_HOST"),  # From .env: LLM_HOST
         api_key=api_key,
         permission_mode="auto",
         enable_clarity=False  # Disable ClarAIty in validation mode

@@ -44,6 +44,7 @@ class SessionMetadata:
         message_count: Number of messages in conversation
         tags: Optional list of tags for organization
         duration_minutes: Total time spent on session
+        permission_mode: Permission mode when session was saved (plan/normal/auto)
     """
     session_id: str
     name: Optional[str]
@@ -54,6 +55,7 @@ class SessionMetadata:
     message_count: int
     tags: List[str]
     duration_minutes: float
+    permission_mode: str = "normal"  # Default to normal mode for backward compatibility
 
     @property
     def short_id(self) -> str:
@@ -172,6 +174,7 @@ class SessionManager:
             message_count=state.get("message_count", 0),
             tags=tags or [],
             duration_minutes=state.get("duration_minutes", 0.0),
+            permission_mode=state.get("permission_mode", "normal"),
         )
 
         # Create session directory

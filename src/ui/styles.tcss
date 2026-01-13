@@ -1,0 +1,370 @@
+/*
+ * Textual CSS for Coding Agent TUI
+ *
+ * Color scheme designed for readability and clear visual hierarchy.
+ * Compatible with both light and dark terminal themes.
+ */
+
+/* =============================================================================
+ * Screen Layout (using dock instead of grid for Windows compatibility)
+ * ============================================================================= */
+
+Screen {
+    layout: vertical;
+    background: $background;
+    layers: base autocomplete;
+}
+
+/* =============================================================================
+ * Conversation Area
+ * ============================================================================= */
+
+#conversation {
+    height: 1fr;
+    overflow-y: auto;
+    padding: 1 1;
+    background: $surface;
+    border-bottom: solid $surface-darken-1;
+}
+
+#conversation:focus {
+    border-bottom: solid $surface-darken-1;
+}
+
+/* =============================================================================
+ * Input Area
+ * ============================================================================= */
+
+/* Multi-line input area (TextArea-based) - auto-resizes with content */
+#input {
+    height: auto;
+    min-height: 5;
+    max-height: 15;
+    margin: 0 2 1 2;
+    border: round #666666;
+    background: transparent;
+    padding: 0 1;
+}
+
+#input:focus {
+    border: round $accent;
+    background: $surface;
+}
+
+/* =============================================================================
+ * Attachment Bar
+ * ============================================================================= */
+
+#attachment-bar {
+    height: auto;
+    min-height: 0;
+    max-height: 2;
+    margin: 0 2;
+    padding: 0 1;
+    background: $surface;
+    display: none;
+}
+
+#attachment-bar.-has-attachments {
+    display: block;
+    height: 1;
+}
+
+#attachment-bar:focus {
+    background: $surface-lighten-1;
+}
+
+/* =============================================================================
+ * Todo Bar (collapsible task list)
+ * ============================================================================= */
+
+#todo-bar {
+    height: auto;
+    min-height: 0;
+    max-height: 0;
+    width: 100%;
+    background: $surface;
+    padding: 0 1;
+    display: none;
+    overflow: hidden;
+}
+
+#todo-bar.has-todos {
+    display: block;
+    max-height: 20;
+    min-height: 1;
+    border-top: solid $primary;
+}
+
+#todo-bar.expanded {
+    padding: 1 1;
+}
+
+/* =============================================================================
+ * Status Bar
+ * ============================================================================= */
+
+#status {
+    height: 2;
+    min-height: 1;
+    background: #1a1a1a;
+    color: #6e7681;
+    padding: 0 2;
+    border-top: solid #2a2a2a;
+}
+
+/* =============================================================================
+ * Messages - Compact, role indicated by border color
+ * ============================================================================= */
+
+MessageWidget {
+    height: auto;
+    margin: 0 0 1 0;
+    padding: 0 1;
+}
+
+MessageWidget.user {
+    border-left: thick #3794ff;
+    background: #1e2433;
+    padding: 0 1;
+}
+
+MessageWidget.assistant {
+    border-left: thick #73c991;
+    padding: 0 1;
+}
+
+MessageWidget.system {
+    border-left: thick #cca700;
+    background: #2a2820;
+    opacity: 0.9;
+    padding: 0 1;
+}
+
+/* Markdown inside messages */
+MessageWidget > Markdown {
+    margin: 0;
+    padding: 0;
+}
+
+/* =============================================================================
+ * Code Blocks
+ * ============================================================================= */
+
+CodeBlock {
+    height: auto;
+    margin: 1 0;
+    min-height: 3;
+}
+
+CodeBlock.streaming {
+    border: round $warning;
+}
+
+CodeBlock.complete {
+    border: round $success;
+}
+
+/* =============================================================================
+ * Tool Cards (Compact Claude Code style)
+ * ============================================================================= */
+
+ToolCard {
+    height: auto;
+    margin: 0;
+    padding: 0 0 0 1;
+}
+
+/* Approval Options - Polished card appearance */
+ToolApprovalOptions {
+    height: auto;
+    padding: 1 2;
+    margin: 1 2;
+    background: #1e2433;
+    border: round #3794ff;
+}
+
+ToolApprovalOptions:focus {
+    border: round #3794ff;
+    background: #1e2838;
+}
+
+/* =============================================================================
+ * Diff Widget (Claude Code-style diff display)
+ * ============================================================================= */
+
+DiffWidget {
+    height: auto;
+    margin: 0 0 1 0;
+    padding: 0;
+}
+
+InlineDiffWidget {
+    height: auto;
+    margin: 0;
+    padding: 0;
+}
+
+/* Scrollable container for large diffs */
+ScrollableDiffContainer {
+    max-height: 20;
+    height: auto;
+    margin: 1 0 1 2;
+    padding: 0 1;
+    background: #1a1a1a;
+    border: round #333333;
+    scrollbar-size: 1 1;
+    scrollbar-color: #555555;
+    scrollbar-background: #1a1a1a;
+}
+
+ScrollableDiffContainer:focus {
+    border: round #3794ff;
+}
+
+/* =============================================================================
+ * Thinking Blocks
+ * ============================================================================= */
+
+ThinkingBlock {
+    height: auto;
+    margin: 1 0;
+    min-height: 3;
+}
+
+/* PERF: Removed :hover effect - was causing style recalculation */
+
+ThinkingBlock.streaming {
+    border: round $primary-darken-2;
+}
+
+ThinkingBlock.complete {
+    border: round $primary-darken-3;
+}
+
+ThinkingBlock.collapsed {
+    max-height: 5;
+}
+
+ThinkingBlock.expanded {
+    max-height: 100%;
+}
+
+/* =============================================================================
+ * Footer
+ * ============================================================================= */
+
+Footer {
+    height: 1;
+    background: transparent;
+}
+
+Footer > .footer--key {
+    background: $surface-darken-1;
+    color: $text-muted;
+}
+
+Footer > .footer--description {
+    color: $text-muted;
+}
+
+/* =============================================================================
+ * Header (optional)
+ * ============================================================================= */
+
+Header {
+    height: 1;
+    dock: top;
+    background: $primary;
+    color: $text;
+}
+
+/* =============================================================================
+ * Scrollbar Styling - Minimal, VS Code-inspired
+ * ============================================================================= */
+
+/* Main conversation scrollbar - thin and subtle */
+/* PERF: Removed :hover effects to reduce style recalculation on mouse movement */
+#conversation {
+    scrollbar-size: 1 1;
+    scrollbar-color: #555555;
+    scrollbar-background: transparent;
+}
+
+/* Generic scrollable container styling */
+/* PERF: Removed :hover effects */
+ScrollableContainer {
+    margin: 0;
+    padding: 0;
+    scrollbar-size: 1 1;
+    scrollbar-color: #505050;
+    scrollbar-background: $surface;
+}
+
+/* Legacy class-based scrollbar (fallback) */
+ScrollableContainer > .scrollbar {
+    background: transparent;
+    width: 1;
+}
+
+ScrollableContainer > .scrollbar--bar {
+    background: #505050;
+}
+
+/* VerticalScroll containers (used for diff widgets, etc.) */
+/* PERF: Removed :hover effects */
+VerticalScroll {
+    scrollbar-size: 1 1;
+    scrollbar-color: #505050;
+    scrollbar-background: transparent;
+}
+
+/* =============================================================================
+ * Focus Indicators
+ * ============================================================================= */
+
+*:focus {
+    /* Subtle focus indicator */
+}
+
+/* =============================================================================
+ * Autocomplete Dropdown (@ file reference)
+ * ============================================================================= */
+
+AutocompleteDropdown {
+    width: auto;
+    min-width: 40;
+    max-width: 80;
+    height: auto;
+    max-height: 12;
+    background: $surface;
+    border: solid $accent;
+    padding: 0 1;
+    layer: autocomplete;
+    dock: bottom;
+    offset: 2 -8;
+    margin: 0 2;
+}
+
+AutocompleteDropdown.-hidden {
+    display: none;
+}
+
+/* =============================================================================
+ * Loading Indicator
+ * ============================================================================= */
+
+.loading-indicator {
+    color: $text-muted;
+    text-style: italic;
+    padding: 0 1;
+}
+
+/* =============================================================================
+ * Animations (Textual supports basic animations)
+ * ============================================================================= */
+
+/* Fade in for new messages */
+MessageWidget {
+    /* opacity: 1; */
+}

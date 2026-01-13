@@ -1,41 +1,184 @@
 """Command-line interface for the AI coding agent."""
 
 import sys
+import os
+import asyncio
+
+# CRITICAL: Remove TERM on Windows BEFORE importing prompt_toolkit
+# This prevents prompt_toolkit from thinking we're in a Unix terminal
+if sys.platform == 'win32' and 'TERM' in os.environ:
+    del os.environ['TERM']
+
+# CRITICAL: Set Windows event loop policy for proper async I/O
+# This must be done before any asyncio operations
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
 from pathlib import Path
 from typing import Optional
 import argparse
+import logging
+
+# CRITICAL: Load .env BEFORE any imports that initialize observability
+# Langfuse/OTEL SDK reads env vars at import time
+from dotenv import load_dotenv
+load_dotenv()
+
+# CRITICAL: Import platform module early to activate global print() override
+# This prevents Windows encoding crashes throughout the entire codebase
+import src.platform  # noqa: F401 (unused import - side effect only)
 
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.prompt import Prompt
+from rich.status import Status
+
+from prompt_toolkit import PromptSession
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.formatted_text import HTML
 
 from src.core import CodingAgent
+from src.execution.controller import LongRunningController
+from src.ui.app import CodingAgentApp
+
+# Configure production-grade logging (structlog + QueueHandler)
+# Logging will be configured based on mode (cli vs tui) in the main function
+# For now, set up minimal logging until mode is determined
+log_level = os.environ.get("LOG_LEVEL", "WARNING").upper()
+_logging_configured = False
 
 
 console = Console()
 
 
-def chat_mode(agent: CodingAgent) -> None:
-    """Interactive chat mode."""
+def chat_mode(agent: CodingAgent, controller: Optional[LongRunningController] = None) -> None:
+    """Interactive chat mode with professional Textual TUI and async streaming.
+
+    Uses Textual framework for rich UI with code blocks, tool cards, and streaming.
+    The agent's stream_response() method yields typed UIEvents that the TUI renders.
+    Falls back to simple mode if TUI fails.
+
+    Args:
+        agent: CodingAgent instance
+        controller: Optional LongRunningController for checkpoint functionality
+    """
+    try:
+        # Configure production-grade logging for TUI mode
+        # In TUI mode: file logging ON, console OFF (except errors to stderr)
+        from src.observability.logging_config import configure_logging, install_asyncio_handler
+        configure_logging(mode="tui", log_level=log_level)
+
+        # Create and run Textual app with agent directly
+        # The app will internally call agent.stream_response() which yields UIEvents
+        app = CodingAgentApp(
+            agent=agent,
+            show_header=False
+        )
+        app.run()
+
+    except Exception as e:
+        # Fallback to simple mode
+        console.print(f"[dim]TUI unavailable: {type(e).__name__}: {e}[/dim]")
+        console.print(f"[dim]Falling back to simple chat mode...[/dim]")
+        simple_chat_mode(agent, controller)
+
+
+def simple_chat_mode(agent: CodingAgent, controller: Optional[LongRunningController] = None) -> None:
+    """Simple interactive chat mode (fallback).
+
+    Args:
+        agent: CodingAgent instance
+        controller: Optional LongRunningController for checkpoint functionality
+    """
+    # Configure production-grade logging for CLI mode (console + file)
+    from src.observability.logging_config import configure_logging
+    configure_logging(mode="cli", log_level=log_level)
+
     console.print(Panel.fit(
         "[bold cyan]AI Coding Agent - Interactive Mode[/bold cyan]\n"
         f"Model: {agent.model_name}\n"
         f"Context: {agent.context_window} tokens\n"
-        "Type 'exit' or 'quit' to leave, 'help' for commands",
+        f"Current mode: {agent.get_permission_mode().upper()}\n"
+        "[dim]Press Alt+M to toggle mode | Type ? for quick reference | Type 'exit' to quit[/dim]",
         border_style="cyan"
     ))
 
+    # Setup key bindings for Alt+M
+    kb = KeyBindings()
+
+    @kb.add('escape', 'm')  # Alt+M (escape sequence for Alt key)
+    def _(event):
+        """Toggle permission mode with Alt+M (silent toggle)"""
+        current_mode = agent.get_permission_mode()
+
+        # Cycle through modes silently
+        mode_cycle = {
+            "plan": "normal",
+            "normal": "auto",
+            "auto": "plan"
+        }
+
+        next_mode = mode_cycle.get(current_mode, "normal")
+        agent.set_permission_mode(next_mode)
+
+        # Update the bottom toolbar without printing
+        event.app.invalidate()
+
+    # Function to generate bottom toolbar showing current mode
+    # Only show for PLAN and AUTO modes (not NORMAL)
+    # Style: subtle floating text like Claude Code (no background bar)
+    def bottom_toolbar():
+        mode = agent.get_permission_mode().lower()
+
+        # Don't show toolbar for NORMAL mode
+        if mode == "normal":
+            return None
+
+        # Subtle, muted style - just text, no loud colors
+        if mode == "plan":
+            return 'plan mode on (alt+m to cycle)'
+        else:  # auto
+            return 'auto accept on (alt+m to cycle)'
+
+    # Style to remove toolbar background (make it transparent like Claude Code)
+    from prompt_toolkit.styles import Style
+    style = Style.from_dict({
+        'bottom-toolbar': 'noreverse',
+    })
+
+    # Create prompt session with key bindings and styled toolbar
+    session = PromptSession(
+        key_bindings=kb,
+        bottom_toolbar=bottom_toolbar,
+        style=style
+    )
+
     while True:
         try:
-            # Get user input
-            user_input = Prompt.ask("\n[bold green]You[/bold green]")
+            # Simple prompt - mode is shown in status bar only
+            user_input = session.prompt('> ')
 
             if not user_input.strip():
                 continue
 
             # Handle commands
             if user_input.lower() in ["exit", "quit", "q"]:
+                # Prompt to save checkpoint before exiting
+                if controller:
+                    from rich.prompt import Confirm
+                    save = Confirm.ask(
+                        "Save checkpoint before exiting?",
+                        default=True
+                    )
+                    if save:
+                        description = Prompt.ask(
+                            "[cyan]Description[/cyan]",
+                            default="Session ended"
+                        )
+                        controller.create_checkpoint(description=description)
+                        console.print("[green]Checkpoint saved[/green]")
+
                 console.print("[yellow]Goodbye![/yellow]")
                 break
 
@@ -94,23 +237,38 @@ def chat_mode(agent: CodingAgent) -> None:
                 reload_memories(agent)
                 continue
 
+            # Quick reference shortcut
+            if user_input == "?":
+                show_quick_reference(agent)
+                continue
+
             # Permission mode commands
-            if user_input.lower() in ["permission", "permission-mode", "p"]:
-                show_permission_mode(agent)
-                continue
+            if user_input.lower().startswith("/mode"):
+                parts = user_input.lower().split()
 
-            if user_input.lower().startswith("permission-set"):
-                parts = user_input.split(maxsplit=1)
-                if len(parts) < 2:
-                    console.print("[yellow]Usage: permission-set <mode>[/yellow]")
-                    console.print("[dim]Valid modes: plan, normal, auto[/dim]")
-                    continue
-                set_permission_mode(agent, parts[1])
-                continue
+                if len(parts) == 1:
+                    # Just "/mode" - toggle through modes
+                    toggle_permission_mode(agent)
+                elif len(parts) == 2:
+                    # "/mode p/n/a" - set specific mode
+                    mode_arg = parts[1]
+                    mode_map = {
+                        'p': 'plan',
+                        'n': 'normal',
+                        'a': 'auto'
+                    }
 
-            # Quick permission mode toggle (like Shift+Tab in Claude Code)
-            if user_input.lower() in ["permission-toggle", "pt", "/mode"]:
-                toggle_permission_mode(agent)
+                    if mode_arg in mode_map:
+                        set_permission_mode(agent, mode_map[mode_arg])
+                    else:
+                        console.print("[yellow]Invalid mode argument. Use: /mode p, /mode n, or /mode a[/yellow]")
+                        console.print("[dim]Or type ? for quick reference[/dim]")
+                else:
+                    console.print("[yellow]Usage: /mode [p|n|a][/yellow]")
+                    console.print("[dim]  /mode    - Toggle mode[/dim]")
+                    console.print("[dim]  /mode p  - Set to Plan mode[/dim]")
+                    console.print("[dim]  /mode n  - Set to Normal mode[/dim]")
+                    console.print("[dim]  /mode a  - Set to Auto mode[/dim]")
                 continue
 
             # Hooks commands
@@ -147,13 +305,63 @@ def chat_mode(agent: CodingAgent) -> None:
                 launch_clarity_ui(agent)
                 continue
 
+            # Checkpoint commands
+            if user_input.lower().startswith("checkpoint-save") or user_input.lower().startswith("checkpoint-create"):
+                create_checkpoint_command(controller, user_input)
+                continue
+
+            if user_input.lower() == "checkpoint-list" or user_input.lower() == "checkpoints":
+                list_checkpoints_command(controller)
+                continue
+
+            if user_input.lower().startswith("checkpoint-restore"):
+                restore_checkpoint_command(controller, user_input)
+                continue
+
+            if user_input.lower() == "checkpoint-clear":
+                clear_checkpoints_command(controller)
+                continue
+
             # Process with agent
-            console.print("\n[bold blue]Agent[/bold blue]")
-            response = agent.chat(user_input, stream=True)
+            console.print()  # Single newline for spacing
+            console.print("[dim]Agent[/dim]")
+
+            # Create status indicator for thinking phase
+            status = Status("Thinking...", console=console, spinner="dots")
+
+            def stop_status():
+                """Callback to stop status when streaming starts."""
+                status.stop()
+
+            # Start thinking indicator and chat
+            status.start()
+            response = agent.chat(user_input, stream=True, on_stream_start=stop_status)
+            status.stop()  # Ensure status is stopped if streaming never starts
+
+            # Note: Response content is already printed during streaming
+            # No need to print again here
+            console.print()  # Extra spacing after response
 
         except KeyboardInterrupt:
-            console.print("\n[yellow]Interrupted. Type 'exit' to quit.[/yellow]")
-            continue
+            console.print()  # New line after ^C
+
+            # Prompt to save checkpoint before exiting
+            if controller:
+                from rich.prompt import Confirm
+                save = Confirm.ask(
+                    "Save checkpoint before exiting?",
+                    default=True
+                )
+                if save:
+                    description = Prompt.ask(
+                        "[cyan]Description[/cyan]",
+                        default="Session interrupted"
+                    )
+                    controller.create_checkpoint(description=description)
+                    console.print("[green]Checkpoint saved[/green]")
+
+            console.print("[yellow]Goodbye![/yellow]")
+            break
         except Exception as e:
             console.print(f"[red]Error: {e}[/red]")
 
@@ -271,15 +479,15 @@ def toggle_permission_mode(agent: CodingAgent) -> None:
         next_mode = mode_cycle.get(current_mode, "normal")
         agent.set_permission_mode(next_mode)
 
-        # Show quick status with emoji
-        mode_emoji = {
-            "plan": "📋",
-            "normal": "⚖️",
-            "auto": "🤖"
+        # Show quick status with marker
+        mode_marker = {
+            "plan": "[PLAN]",
+            "normal": "[NORM]",
+            "auto": "[AUTO]"
         }
 
-        emoji = mode_emoji.get(next_mode, "")
-        console.print(f"\n{emoji} [bold green]Permission mode: {current_mode} → {next_mode}[/bold green]")
+        marker = mode_marker.get(next_mode, "")
+        console.print(f"\n{marker} [bold green]Permission mode: {current_mode} → {next_mode}[/bold green]")
 
         # Show brief description
         descriptions = {
@@ -291,6 +499,44 @@ def toggle_permission_mode(agent: CodingAgent) -> None:
 
     except Exception as e:
         console.print(f"[red]Error toggling permission mode: {e}[/red]")
+
+
+def show_quick_reference(agent: CodingAgent) -> None:
+    """Show quick reference guide (triggered by ? shortcut)."""
+    from rich.table import Table
+
+    current_mode = agent.get_permission_mode().upper()
+
+    # Create quick reference panel
+    mode_color = 'yellow' if current_mode == 'PLAN' else 'cyan' if current_mode == 'NORMAL' else 'green'
+    help_text = f"""[bold cyan]SHORTCUTS:[/bold cyan]
+  ?                  Show this quick reference
+
+[bold cyan]MODE COMMANDS:[/bold cyan]
+  /mode              Toggle permission mode (plan → normal → auto)
+  /mode p            Set to Plan mode (always ask approval)
+  /mode n            Set to Normal mode (balanced - default)
+  /mode a            Set to Auto mode (fully autonomous)
+
+[bold cyan]OTHER COMMANDS:[/bold cyan]
+  save [name]        Save current session
+  sessions           List all saved sessions
+  help               Show detailed help
+  exit               Quit the application
+
+[bold cyan]CURRENT MODE:[/bold cyan] [bold {mode_color}]{current_mode}[/bold {mode_color}]
+  Shown in prompt: [{current_mode}] You>
+
+[dim]Note: Mode is shown in the prompt with color coding
+  Yellow = PLAN, Cyan = NORMAL, Green = AUTO[/dim]
+"""
+
+    console.print(Panel(
+        help_text,
+        title="Quick Reference",
+        border_style="cyan",
+        padding=(1, 2)
+    ))
 
 
 def save_session_command(agent: CodingAgent, user_input: str) -> None:
@@ -326,7 +572,8 @@ def save_session_command(agent: CodingAgent, user_input: str) -> None:
         session_id = agent.memory.save_session(
             session_name=session_name,
             task_description=description,
-            tags=tags
+            tags=tags,
+            permission_mode=agent.get_permission_mode()
         )
 
         console.print(f"\n[green]✓ Session saved successfully![/green]")
@@ -368,11 +615,12 @@ def list_sessions_command(agent: CodingAgent) -> None:
         table = Table(title=f"Saved Sessions ({len(sessions)} total)", show_header=True)
         table.add_column("ID", style="cyan", width=10)
         table.add_column("Name", style="green", width=20)
-        table.add_column("Description", style="white", width=30)
+        table.add_column("Description", style="white", width=25)
+        table.add_column("Mode", style="magenta", width=8)
         table.add_column("Messages", justify="right", style="blue", width=8)
         table.add_column("Duration", justify="right", style="magenta", width=10)
         table.add_column("Updated", style="yellow", width=16)
-        table.add_column("Tags", style="dim", width=20)
+        table.add_column("Tags", style="dim", width=15)
 
         for session in sessions:
             # Format duration
@@ -396,10 +644,14 @@ def list_sessions_command(agent: CodingAgent) -> None:
             if len(session.tags) > 3:
                 tags_str += "..."
 
+            # Get permission mode (with backward compatibility)
+            mode = getattr(session, 'permission_mode', 'normal').upper()
+
             table.add_row(
                 session.short_id,
                 session.name or "[dim]unnamed[/dim]",
-                session.task_description[:30] + ("..." if len(session.task_description) > 30 else ""),
+                session.task_description[:25] + ("..." if len(session.task_description) > 25 else ""),
+                mode,
                 str(session.message_count),
                 duration,
                 updated_str,
@@ -433,7 +685,7 @@ def load_session_command(agent: CodingAgent, user_input: str) -> None:
     # Confirm before loading (will clear current memory)
     if agent.memory.working_memory.messages:
         confirm = Confirm.ask(
-            f"[yellow]⚠ Loading will clear current conversation. Continue?[/yellow]",
+            f"[yellow][WARN] Loading will clear current conversation. Continue?[/yellow]",
             default=False
         )
         if not confirm:
@@ -459,11 +711,16 @@ def load_session_command(agent: CodingAgent, user_input: str) -> None:
         # Load the session
         agent.memory.load_session(session_id)
 
+        # Restore permission mode
+        if hasattr(info, 'permission_mode') and info.permission_mode:
+            agent.set_permission_mode(info.permission_mode)
+
         console.print(f"\n[green]✓ Session loaded successfully![/green]")
         console.print(f"[dim]Session ID: {info.short_id}[/dim]")
         if info.name:
             console.print(f"[dim]Name: {info.name}[/dim]")
         console.print(f"[dim]Description: {info.task_description}[/dim]")
+        console.print(f"[dim]Permission Mode: {info.permission_mode.upper() if hasattr(info, 'permission_mode') else 'NORMAL'}[/dim]")
 
         # Show what was loaded
         console.print(f"\n[cyan]Restored:[/cyan]")
@@ -590,6 +847,166 @@ def session_info_command(agent: CodingAgent, user_input: str) -> None:
 
     except Exception as e:
         console.print(f"[red]Error getting session info: {e}[/red]")
+
+
+# Checkpoint Commands
+
+def create_checkpoint_command(controller: Optional[LongRunningController], user_input: str) -> None:
+    """Create a checkpoint of current agent state."""
+    if not controller:
+        console.print("[red]Error: Controller not initialized[/red]")
+        return
+
+    # Parse optional description from command
+    parts = user_input.split(maxsplit=1)
+    description = parts[1] if len(parts) > 1 else None
+
+    # If no description provided, ask for one
+    if not description:
+        description = Prompt.ask(
+            "[cyan]Description[/cyan] (what did you accomplish?)",
+            default="Manual checkpoint"
+        )
+
+    try:
+        checkpoint_id = controller.create_checkpoint(description=description)
+
+        if checkpoint_id:
+            console.print(f"\n[green]Checkpoint created: {checkpoint_id}[/green]")
+            console.print(f"[dim]Description: {description}[/dim]")
+            console.print(f"[dim]Location: .checkpoints/[/dim]")
+        else:
+            console.print("[red]Failed to create checkpoint[/red]")
+
+    except Exception as e:
+        console.print(f"[red]Error creating checkpoint: {e}[/red]")
+
+
+def list_checkpoints_command(controller: Optional[LongRunningController]) -> None:
+    """List all saved checkpoints."""
+    from rich.table import Table
+    from datetime import datetime
+
+    if not controller:
+        console.print("[red]Error: Controller not initialized[/red]")
+        return
+
+    try:
+        checkpoints = controller.list_checkpoints()
+
+        if not checkpoints:
+            console.print("[yellow]No checkpoints found.[/yellow]")
+            console.print("[dim]Use 'checkpoint-save' to create your first checkpoint.[/dim]")
+            return
+
+        # Create table
+        table = Table(title=f"Checkpoints ({len(checkpoints)} total)", show_header=True)
+        table.add_column("ID", style="cyan", width=10)
+        table.add_column("Description", style="white", width=40)
+        table.add_column("Files", justify="right", style="blue", width=6)
+        table.add_column("Tools", justify="right", style="magenta", width=6)
+        table.add_column("Created", style="yellow", width=16)
+
+        for checkpoint in checkpoints:
+            # Format created time (relative)
+            now = datetime.now()
+            created = datetime.fromisoformat(checkpoint.timestamp)
+            delta = now - created
+
+            if delta.days > 0:
+                created_str = f"{delta.days}d ago"
+            elif delta.seconds > 3600:
+                created_str = f"{delta.seconds // 3600}h ago"
+            else:
+                created_str = f"{delta.seconds // 60}m ago"
+
+            table.add_row(
+                checkpoint.checkpoint_id,
+                checkpoint.task_description[:40] + ("..." if len(checkpoint.task_description) > 40 else ""),
+                str(checkpoint.files_modified_count),
+                str(checkpoint.tool_calls_count),
+                created_str
+            )
+
+        console.print()
+        console.print(table)
+        console.print()
+        console.print("[dim]Use 'checkpoint-restore <id>' to restore a checkpoint[/dim]")
+
+    except Exception as e:
+        console.print(f"[red]Error listing checkpoints: {e}[/red]")
+
+
+def restore_checkpoint_command(controller: Optional[LongRunningController], user_input: str) -> None:
+    """Restore a saved checkpoint."""
+    from rich.prompt import Confirm
+
+    if not controller:
+        console.print("[red]Error: Controller not initialized[/red]")
+        return
+
+    parts = user_input.split(maxsplit=1)
+
+    if len(parts) < 2:
+        console.print("[yellow]Usage: checkpoint-restore <checkpoint-id>[/yellow]")
+        console.print("[dim]Example: checkpoint-restore a1b2c3d4[/dim]")
+        console.print("[dim]Use 'checkpoint-list' to see available checkpoints[/dim]")
+        return
+
+    checkpoint_id = parts[1].strip()
+
+    # Confirm before restoring
+    confirm = Confirm.ask(
+        f"[yellow]Restore checkpoint {checkpoint_id}? This will restore agent state.[/yellow]",
+        default=True
+    )
+    if not confirm:
+        console.print("[dim]Restore cancelled.[/dim]")
+        return
+
+    try:
+        success = controller.restore_checkpoint(checkpoint_id)
+
+        if success:
+            console.print(f"[green]Checkpoint {checkpoint_id} restored successfully![/green]")
+        else:
+            console.print(f"[red]Failed to restore checkpoint {checkpoint_id}[/red]")
+
+    except Exception as e:
+        console.print(f"[red]Error restoring checkpoint: {e}[/red]")
+
+
+def clear_checkpoints_command(controller: Optional[LongRunningController]) -> None:
+    """Delete all checkpoints."""
+    from rich.prompt import Confirm
+
+    if not controller:
+        console.print("[red]Error: Controller not initialized[/red]")
+        return
+
+    # Get checkpoint count first
+    checkpoints = controller.list_checkpoints()
+    count = len(checkpoints)
+
+    if count == 0:
+        console.print("[yellow]No checkpoints to clear.[/yellow]")
+        return
+
+    # Confirm before clearing
+    confirm = Confirm.ask(
+        f"[yellow]Delete all {count} checkpoint(s)? This cannot be undone![/yellow]",
+        default=False
+    )
+    if not confirm:
+        console.print("[dim]Clear cancelled.[/dim]")
+        return
+
+    try:
+        deleted = controller.clear_all_checkpoints()
+        console.print(f"[green]Deleted {deleted} checkpoint(s)[/green]")
+
+    except Exception as e:
+        console.print(f"[red]Error clearing checkpoints: {e}[/red]")
 
 
 def show_hooks_status(agent: CodingAgent) -> None:
@@ -754,19 +1171,28 @@ def show_help() -> None:
 - `session-delete <id>` - Delete a saved session
 - `session-info <id>` - Show detailed session information
 
+**Checkpoint Commands:**
+- `checkpoint-save` or `checkpoint-create [desc]` - Save current work to checkpoint (resumable save point)
+- `checkpoint-list` or `checkpoints` - List all saved checkpoints
+- `checkpoint-restore <id>` - Restore agent state from checkpoint
+- `checkpoint-clear` - Delete all checkpoints (WARNING: irreversible!)
+
 **Memory Commands:**
 - `memory` - Show current file memories
 - `memory-init` - Create .opencodeagent/memory.md template
 - `memory-add <text>` - Quick add memory (e.g., "memory-add Use 2-space indent")
 - `memory-reload` - Reload file memories after editing
 
-**Permission Commands:**
-- `permission` or `p` - Show current permission mode
-- `permission-toggle` or `pt` or `/mode` - 🔄 Quick toggle (plan → normal → auto → plan)
-- `permission-set <mode>` - Set permission mode (plan/normal/auto)
-  - `plan`: Always ask for approval before executing
-  - `normal`: Ask only for high-risk operations (default)
-  - `auto`: Never ask for approval (fully autonomous)
+**Quick Reference:**
+- `?` - Show quick reference guide with all shortcuts
+
+**Permission Mode:**
+- `Alt+M` - Quick toggle permission mode (plan -> normal -> auto)
+- `/mode` - Toggle through modes
+- `/mode p` - Set to Plan mode (always ask approval)
+- `/mode n` - Set to Normal mode (balanced - default)
+- `/mode a` - Set to Auto mode (fully autonomous)
+  Current mode shown in prompt: [PLAN], [NORMAL], or [AUTO]
 
 **Hooks Commands:**
 - `hooks` or `hooks-status` - Show current hooks status
@@ -1014,53 +1440,105 @@ def launch_clarity_ui(agent: CodingAgent) -> None:
 
 def main() -> None:
     """Main CLI entry point."""
+    # Early logging configuration for initialization errors
+    # Will be reconfigured with proper mode (tui/cli) later
+    from src.observability.logging_config import configure_logging
+    configure_logging(mode="cli", log_level=log_level)
+
     parser = argparse.ArgumentParser(
         description="AI Coding Agent - Optimized for small open-source LLMs"
     )
 
     parser.add_argument(
         "--model",
-        default="qwen3-coder:30b",
-        help="Model name (default: qwen3-coder:30b)"
+        default=os.environ.get("LLM_MODEL"),
+        help="Model name (from .env: LLM_MODEL)"
     )
 
     parser.add_argument(
         "--backend",
-        default="ollama",
+        default=os.environ.get("LLM_BACKEND"),
         choices=["ollama", "openai"],
-        help="LLM backend (default: ollama, openai for API services)"
+        help="LLM backend (from .env: LLM_BACKEND)"
     )
 
     parser.add_argument(
         "--url",
-        default="http://localhost:11434",
-        help="Backend API URL (default: http://localhost:11434)"
+        default=os.environ.get("LLM_HOST"),
+        help="Backend API URL (from .env: LLM_HOST)"
     )
 
     parser.add_argument(
         "--context",
         type=int,
-        default=131072,
-        help="Context window size (default: 131072 - 128K)"
+        default=int(os.environ.get("MAX_CONTEXT_TOKENS", 131072)),
+        help="Context window size (from .env: MAX_CONTEXT_TOKENS)"
     )
 
     parser.add_argument(
         "--api-key",
         default=None,
-        help="API key for OpenAI-compatible backends (can also use env var)"
+        help="API key for OpenAI-compatible backends (optional, can use env var)"
     )
 
     parser.add_argument(
         "--api-key-env",
-        default="OPENAI_API_KEY",
-        help="Environment variable name for API key (default: OPENAI_API_KEY, use DASHSCOPE_API_KEY for Alibaba)"
+        default=os.environ.get("API_KEY_ENV", "OPENAI_API_KEY"),
+        help="Environment variable name for API key (OPENAI_API_KEY by default for OpenAI-compatible APIs)"
+    )
+
+    # Embedding configuration
+    parser.add_argument(
+        "--embedding-model",
+        default=os.environ.get("EMBEDDING_MODEL"),
+        help="Embedding model name (from .env: EMBEDDING_MODEL)"
+    )
+
+    parser.add_argument(
+        "--embedding-api-key",
+        default=None,
+        help="API key for embedding service (optional, uses env var if not provided)"
+    )
+
+    parser.add_argument(
+        "--embedding-api-key-env",
+        default=os.environ.get("EMBEDDING_API_KEY_ENV", "EMBEDDING_API_KEY"),
+        help="Environment variable name for embedding API key (default: EMBEDDING_API_KEY)"
+    )
+
+    parser.add_argument(
+        "--embedding-base-url",
+        default=os.environ.get("EMBEDDING_BASE_URL"),
+        help="Embedding API base URL (from .env: EMBEDDING_BASE_URL)"
+    )
+
+    # LLM generation parameters
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=float(os.environ.get("LLM_TEMPERATURE", "0.2")),
+        help="LLM temperature (from .env: LLM_TEMPERATURE)"
+    )
+
+    parser.add_argument(
+        "--max-tokens",
+        type=int,
+        default=int(os.environ.get("LLM_MAX_TOKENS", "16384")),
+        help="Max output tokens (from .env: LLM_MAX_TOKENS)"
+    )
+
+    parser.add_argument(
+        "--top-p",
+        type=float,
+        default=float(os.environ.get("LLM_TOP_P", "0.95")),
+        help="Top-p sampling (from .env: LLM_TOP_P)"
     )
 
     parser.add_argument(
         "--permission",
-        default="normal",
+        default=os.environ.get("PERMISSION_MODE", "normal"),
         choices=["plan", "normal", "auto"],
-        help="Permission mode: plan (always ask), normal (ask for risky ops), auto (never ask) (default: normal)"
+        help="Permission mode (from .env: PERMISSION_MODE, or normal by default)"
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
@@ -1089,10 +1567,27 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    # Validate required configuration from .env
+    if not args.model:
+        console.print("[red]Error: LLM_MODEL not set in .env file[/red]")
+        console.print("[yellow]Please add LLM_MODEL to your .env file (e.g., LLM_MODEL=qwen3-coder-plus)[/yellow]")
+        sys.exit(1)
+
+    if not args.backend:
+        console.print("[red]Error: LLM_BACKEND not set in .env file[/red]")
+        console.print("[yellow]Please add LLM_BACKEND to your .env file (e.g., LLM_BACKEND=openai)[/yellow]")
+        sys.exit(1)
+
+    if not args.url:
+        console.print("[red]Error: LLM_HOST not set in .env file[/red]")
+        console.print("[yellow]Please add LLM_HOST to your .env file[/yellow]")
+        sys.exit(1)
+
     # Initialize agent
     console.print(f"\n[cyan]Initializing AI Coding Agent...[/cyan]")
     console.print(f"Model: {args.model}")
     console.print(f"Backend: {args.backend}")
+    console.print(f"URL: {args.url}")
 
     try:
         agent = CodingAgent(
@@ -1100,8 +1595,15 @@ def main() -> None:
             backend=args.backend,
             base_url=args.url,
             context_window=args.context,
+            temperature=args.temperature,
+            max_tokens=args.max_tokens,
+            top_p=args.top_p,
             api_key=args.api_key,
             api_key_env=args.api_key_env,
+            embedding_model=args.embedding_model,
+            embedding_api_key=args.embedding_api_key,
+            embedding_api_key_env=args.embedding_api_key_env,
+            embedding_base_url=args.embedding_base_url,
             permission_mode=args.permission,
         )
 
@@ -1113,26 +1615,32 @@ def main() -> None:
 
         console.print(f"[green]Agent initialized successfully![/green]\n")
 
-        # Auto-index codebase for chat mode if not explicitly indexing
-        if args.command in ["chat", None]:
-            if len(agent.indexed_chunks) == 0:
-                console.print("[yellow]Auto-indexing codebase for RAG...[/yellow]")
-                try:
-                    result = agent.index_codebase("./src")
-                    console.print(f"[green]✓ Indexed {result['total_files']} files, {result['total_chunks']} chunks[/green]\n")
-                except Exception as e:
-                    console.print(f"[yellow]⚠ Could not index codebase: {e}[/yellow]\n")
+        # Initialize Long Running Controller for checkpoints
+        controller = LongRunningController(
+            agent=agent,
+            project_dir=".",
+            max_checkpoints=10
+        )
+
+        # Wire controller to checkpoint tool
+        for tool in agent.tool_executor.tools.values():
+            if tool.name == "create_checkpoint":
+                tool.set_controller(controller)
+                break
+
+        # Note: Auto-indexing removed - use 'memory-init' command in chat or 'index' command explicitly
+        # Indexing should be on-demand when LLM decides it's needed, or user requests it
 
         # Execute command
         if args.command == "chat":
-            chat_mode(agent)
+            chat_mode(agent, controller)
         elif args.command == "task":
             task_mode(agent, args.description, args.type)
         elif args.command == "index":
             index_mode(agent, args.directory)
         else:
             # Default to chat mode
-            chat_mode(agent)
+            chat_mode(agent, controller)
 
     except Exception as e:
         console.print(f"[red]Failed to initialize agent: {e}[/red]")

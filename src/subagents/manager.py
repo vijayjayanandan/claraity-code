@@ -33,12 +33,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 
 if TYPE_CHECKING:
-    from src.core.agent import CodingAgent
+    from src.core.agent_interface import AgentInterface
     from src.subagents.config import SubAgentConfig
     from src.subagents.subagent import SubAgent, SubAgentResult
 
 from src.subagents.config import SubAgentConfigLoader
 from src.subagents.subagent import SubAgent
+from src.platform import remove_emojis
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +61,7 @@ class DelegationResult:
 
     def __str__(self) -> str:
         """Human-readable representation."""
-        status = "✅ SUCCESS" if self.success else "❌ FAILED"
+        status = "[OK] SUCCESS" if self.success else "[FAIL] FAILED"
         lines = [
             f"Delegation Result: {status}",
             f"Subagents Used: {len(self.subagent_results)}",
@@ -68,9 +69,9 @@ class DelegationResult:
         ]
 
         for i, result in enumerate(self.subagent_results, 1):
-            status_emoji = "✅" if result.success else "❌"
+            status_marker = "[OK]" if result.success else "[FAIL]"
             lines.append(
-                f"  {i}. [{result.subagent_name}] {status_emoji} "
+                f"  {i}. [{result.subagent_name}] {status_marker} "
                 f"({result.execution_time:.2f}s)"
             )
 
@@ -107,7 +108,7 @@ class SubAgentManager:
 
     def __init__(
         self,
-        main_agent: 'CodingAgent',
+        main_agent: 'AgentInterface',
         working_directory: Optional[Path] = None,
         max_parallel_workers: int = 4,
         enable_auto_delegation: bool = True
@@ -115,7 +116,7 @@ class SubAgentManager:
         """Initialize SubAgentManager.
 
         Args:
-            main_agent: Main CodingAgent instance
+            main_agent: Main agent instance (implements AgentInterface)
             working_directory: Project directory (default: current directory)
             max_parallel_workers: Maximum concurrent subagent executions
             enable_auto_delegation: Enable automatic delegation based on task
@@ -209,8 +210,6 @@ class SubAgentManager:
             subagent = SubAgent(
                 config=config,
                 main_agent=self.main_agent,
-                enable_verification=True,
-                enable_rollback=False
             )
 
             # Cache instance
@@ -269,7 +268,7 @@ class SubAgentManager:
 
         logger.info(
             f"Subagent '{subagent_name}' completed: "
-            f"{'✅ success' if result.success else '❌ failed'} "
+            f"{'[OK] success' if result.success else '[FAIL] failed'} "
             f"({result.execution_time:.2f}s)"
         )
 
@@ -388,7 +387,7 @@ class SubAgentManager:
 
         logger.info(
             f"Parallel execution complete: "
-            f"{'✅ all succeeded' if success else '❌ some failed'} "
+            f"{'[OK] all succeeded' if success else '[FAIL] some failed'} "
             f"({total_time:.2f}s total)"
         )
 
