@@ -1,7 +1,7 @@
 # Claude Session Handoff - AI Coding Agent
 
-**Latest Session:** 2025-12-23 | **Status:** ✅ TUI IMPLEMENTATION COMPLETE
-**Next Priority:** TUI Polish & UI Enhancements
+**Latest Session:** 2026-01-13 | **Status:** ✅ TUI Performance Fixed, CI/CD Setup
+**Current Version:** v0.1.0 | **Next Priority:** Feature Development
 
 ## 🚀 START HERE
 
@@ -578,6 +578,58 @@ Esc to cancel
 **Impact:** ~25 minutes saved per component (250+ minutes total over remaining components)
 
 **Tests:** All 6 tools verified working with live ClarityDB
+
+---
+
+## CI/CD & VERSION CONTROL
+
+**Current Version:** `v0.1.0` | **Branches:** `main` (stable), `develop` (integration)
+
+### Branching Strategy (Git Flow Simplified)
+
+| Branch | Purpose |
+|--------|---------|
+| `main` | Stable, production-ready (tagged releases) |
+| `develop` | Integration branch for features |
+| `feature/*` | New features (branch from develop) |
+| `fix/*` | Bug fixes |
+
+### Quick Reference
+
+**Start a feature:**
+```bash
+git checkout develop && git pull
+git checkout -b feature/my-feature
+# ... work and commit ...
+git push origin feature/my-feature
+# Create PR to develop on GitHub
+```
+
+**Create a release:**
+```bash
+git checkout main && git merge develop
+# Update version in pyproject.toml
+git tag -a v0.2.0 -m "Release description"
+git push origin main v0.2.0
+# GitHub Action auto-creates release
+```
+
+**Rollback:**
+```bash
+git tag -l              # List versions
+git checkout v0.1.0     # Checkout specific version
+```
+
+### CI Pipeline (GitHub Actions)
+
+| Workflow | Trigger | Jobs |
+|----------|---------|------|
+| `ci.yml` | Push/PR to main/develop | Lint (ruff), Test (py3.10-3.12, ubuntu/windows), Type check, Build |
+| `release.yml` | Push tag `v*` | Build package, Create GitHub release |
+
+**Full documentation:** See `CONTRIBUTING.md`
+
+---
 
 ## ENGINEERING PRINCIPLES
 
