@@ -15,7 +15,7 @@ import re
 import logging
 
 from .task_analyzer import TaskAnalysis, TaskType
-from src.llm.base import ToolCall
+from src.session.models.message import ToolCall  # Session Model (canonical)
 from src.tools.tool_schemas import ALL_TOOLS
 
 logger = logging.getLogger(__name__)
@@ -283,8 +283,8 @@ class TaskPlanner:
         exploration_tools = {"list_directory", "read_file", "search_code", "analyze_code", "git_status", "git_diff"}
         implementation_tools = {"write_file", "edit_file", "run_command", "git_commit"}
 
-        has_exploration = any(tc.name in exploration_tools for tc in tool_calls)
-        has_implementation = any(tc.name in implementation_tools for tc in tool_calls)
+        has_exploration = any(tc.function.name in exploration_tools for tc in tool_calls)
+        has_implementation = any(tc.function.name in implementation_tools for tc in tool_calls)
 
         # Exploration phase = has exploration tools AND no implementation tools
         return has_exploration and not has_implementation
@@ -301,8 +301,8 @@ class TaskPlanner:
         results = []
 
         for tool_call in tool_calls:
-            tool_name = tool_call.name
-            args = tool_call.arguments
+            tool_name = tool_call.function.name
+            args = tool_call.function.get_parsed_arguments()
 
             try:
                 if tool_name == "list_directory":
@@ -491,7 +491,7 @@ If the task requires multiple files, call write_file multiple times in parallel.
         steps = []
         for i, tool_call in enumerate(tool_calls, start=1):
             # Determine action type from tool name
-            action_type = TOOL_ACTION_MAP.get(tool_call.name, "run")
+            action_type = TOOL_ACTION_MAP.get(tool_call.function.name, "run")
 
             # Infer dependencies: each step depends on all previous steps
             # (Conservative approach - ExecutionEngine will optimize)
@@ -499,17 +499,17 @@ If the task requires multiple files, call write_file multiple times in parallel.
 
             # Assess risk based on tool and action
             risk = "low"
-            if tool_call.name in ["write_file", "edit_file", "git_commit"]:
+            if tool_call.function.name in ["write_file", "edit_file", "git_commit"]:
                 risk = "medium"
-            elif tool_call.name == "run_command":
+            elif tool_call.function.name == "run_command":
                 # Check if command is destructive
-                command = tool_call.arguments.get("command", "")
+                command = tool_call.function.get_parsed_arguments().get("command", "")
                 if any(word in command.lower() for word in ["rm ", "del ", "delete", "drop"]):
                     risk = "high"
 
             # Determine reversibility
             reversible = True
-            if tool_call.name in ["git_commit", "run_command"]:
+            if tool_call.function.name in ["git_commit", "run_command"]:
                 reversible = False
 
             # Create step with proper description
@@ -519,8 +519,8 @@ If the task requires multiple files, call write_file multiple times in parallel.
                 id=i,
                 description=description,
                 action_type=action_type,
-                tool=tool_call.name,
-                arguments=tool_call.arguments,  # Already a dict!
+                tool=tool_call.function.name,
+                arguments=tool_call.function.get_parsed_arguments(),  # Already a dict!
                 dependencies=dependencies,
                 estimated_time="< 1 min",  # Conservative estimate
                 risk=risk,
@@ -568,8 +568,8 @@ If the task requires multiple files, call write_file multiple times in parallel.
         Returns:
             Clear, actionable description
         """
-        tool_name = tool_call.name
-        args = tool_call.arguments
+        tool_name = tool_call.function.name
+        args = tool_call.function.get_parsed_arguments()
 
         # Generate descriptions based on tool type
         if tool_name == "read_file":

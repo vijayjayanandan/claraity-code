@@ -23,6 +23,8 @@ class ToolStatus(Enum):
     RUNNING = auto()            # Currently executing
     SUCCESS = auto()            # Completed successfully
     FAILED = auto()             # Completed with error
+    ERROR = auto()              # Tool execution error (alias for FAILED)
+    TIMEOUT = auto()            # Tool execution timed out
     CANCELLED = auto()          # User cancelled mid-execution
     SKIPPED = auto()            # Blocked (e.g., repeated failed call)
 

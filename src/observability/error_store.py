@@ -12,6 +12,11 @@ Engineering Principles:
 - Thread-safe with RLock
 - Truncate traceback to 32KB
 - Auto-cleanup of old errors
+
+Thread Safety:
+- All public methods are thread-safe via RLock
+- Global singleton uses proper locking pattern (lock always held for init)
+- Connection per operation ensures SQLite thread safety
 """
 
 import json
@@ -26,6 +31,22 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# =============================================================================
+# CONSTANTS
+# =============================================================================
+
+# Maximum traceback length to store (prevents DB bloat from huge stack traces)
+MAX_TRACEBACK_LENGTH = 32768
+
+# Default database path
+DEFAULT_DB_PATH = ".clarity/metrics.db"
+
+# Default retention period for old error cleanup
+DEFAULT_RETENTION_DAYS = 30
+
+# Default query limit
+DEFAULT_QUERY_LIMIT = 100
 
 
 # =============================================================================
@@ -99,7 +120,7 @@ class ErrorStore:
     - Category-based queries
     """
 
-    def __init__(self, db_path: str = ".clarity/metrics.db"):
+    def __init__(self, db_path: str = DEFAULT_DB_PATH):
         """
         Initialize error store.
 
@@ -254,10 +275,10 @@ class ErrorStore:
         error_id = str(uuid.uuid4())
         ts = datetime.utcnow().isoformat() + 'Z'
 
-        # Truncate traceback to 32KB
+        # Truncate traceback to prevent DB bloat
         traceback_str = kwargs.get('traceback')
-        if traceback_str and len(traceback_str) > 32768:
-            traceback_str = traceback_str[:32768] + '\n...[truncated]'
+        if traceback_str and len(traceback_str) > MAX_TRACEBACK_LENGTH:
+            traceback_str = traceback_str[:MAX_TRACEBACK_LENGTH] + '\n...[truncated]'
             kwargs['traceback'] = traceback_str
 
         # Handle extra fields as JSON (avoid duplicating traceback/exception)
@@ -324,7 +345,7 @@ class ErrorStore:
         category: Optional[str] = None,
         component: Optional[str] = None,
         since_minutes: Optional[int] = None,
-        limit: int = 100,
+        limit: int = DEFAULT_QUERY_LIMIT,
     ) -> List[ErrorRecord]:
         """
         Query errors with filters.
@@ -414,7 +435,7 @@ class ErrorStore:
         """
         return self.query(limit=count)
 
-    def clear_old(self, days: int = 30) -> int:
+    def clear_old(self, days: int = DEFAULT_RETENTION_DAYS) -> int:
         """
         Delete errors older than N days.
 
@@ -449,14 +470,32 @@ _error_store_lock = threading.Lock()
 
 
 def get_error_store() -> ErrorStore:
-    """Get global error store instance (thread-safe with double-checked locking)."""
+    """
+    Get global error store instance (thread-safe singleton).
+
+    Thread Safety:
+    - Uses lock-based singleton pattern (not double-checked locking)
+    - Instance is fully constructed before assignment to global
+    - Safe for concurrent access from multiple threads
+
+    Returns:
+        Global ErrorStore instance
+    """
     global _error_store_instance
-    if _error_store_instance is None:
-        with _error_store_lock:
-            # Double-check after acquiring lock
-            if _error_store_instance is None:
-                _error_store_instance = ErrorStore()
-    return _error_store_instance
+
+    # Fast path: instance already exists
+    if _error_store_instance is not None:
+        return _error_store_instance
+
+    # Slow path: acquire lock and create instance
+    with _error_store_lock:
+        # Check again under lock (another thread may have created it)
+        if _error_store_instance is None:
+            # Create instance in local variable first (ensures full construction)
+            instance = ErrorStore()
+            # Only assign to global after full construction
+            _error_store_instance = instance
+        return _error_store_instance
 
 
 # Convenience alias

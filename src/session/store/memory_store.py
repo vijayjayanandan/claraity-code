@@ -1,0 +1,782 @@
+"""In-memory message store with indexes and projections.
+
+This is a PROJECTION, not a ledger. The JSONL file is the ledger.
+
+Key differences from ledger:
+- Assistant messages are collapsed by stream_id (latest wins)
+- Projection ordering may differ from JSONL line order after collapse
+- Indexes provide O(1) lookups
+
+Features:
+- O(1) message lookup by UUID
+- Ordering by seq (line number / append order)
+- Seq uniqueness assertion (fail fast on collision)
+- Assistant message collapsing by stream_id (v2.1)
+- Tool result indexing for O(1) linkage
+- Compaction-aware projections
+- Sidechain tracking
+- Reactive subscriptions for UI updates
+
+Per v3.1 Patch 1: Store owns seq authority via next_seq() method.
+Per v3.1 Patch 2: _remove_from_indexes() cleans _sidechains as well.
+Per v2.1: Collapse by stream_id (not provider_message_id).
+"""
+
+from dataclasses import dataclass, field
+from typing import (
+    Dict, List, Optional, Set, Callable, Any,
+    TYPE_CHECKING
+)
+from enum import Enum
+import threading
+
+from src.observability import get_logger
+from src.core.tool_status import ToolStatus
+
+if TYPE_CHECKING:
+    from ..models.message import Message, FileHistorySnapshot
+
+logger = get_logger("session.store")
+
+
+class StoreEvent(str, Enum):
+    """Store event types for subscriptions.
+
+    Event lifecycle for streaming messages:
+    - MESSAGE_ADDED: New message added (first appearance of a stream_id)
+    - MESSAGE_UPDATED: Existing message updated (collapse by stream_id)
+    - MESSAGE_FINALIZED: Stream complete, no more updates expected
+    - BULK_LOAD_COMPLETE: Replay finished, all messages loaded
+    - TOOL_STATE_UPDATED: Tool execution state changed (ephemeral, not persisted)
+    """
+    MESSAGE_ADDED = "message_added"
+    MESSAGE_UPDATED = "message_updated"
+    MESSAGE_FINALIZED = "message_finalized"
+    SNAPSHOT_ADDED = "snapshot_added"
+    STORE_CLEARED = "store_cleared"
+    BULK_LOAD_COMPLETE = "bulk_load_complete"
+    TOOL_STATE_UPDATED = "tool_state_updated"
+
+
+@dataclass
+class ToolExecutionState:
+    """Ephemeral tool execution state (not persisted to JSONL).
+
+    Tracks the lifecycle of tool execution for UI rendering.
+    Agent updates this via MessageStore.update_tool_state().
+    TUI reads via MessageStore.get_tool_state() or TOOL_STATE_UPDATED notifications.
+    """
+    status: ToolStatus = ToolStatus.PENDING
+    result: Optional[Any] = None
+    error: Optional[str] = None
+    duration_ms: Optional[int] = None
+
+
+@dataclass
+class StoreNotification:
+    """Notification payload for store events."""
+    event: StoreEvent
+    message: Optional["Message"] = None
+    snapshot: Optional["FileHistorySnapshot"] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    # For TOOL_STATE_UPDATED events
+    tool_call_id: Optional[str] = None
+    tool_state: Optional[ToolExecutionState] = None
+
+
+Subscriber = Callable[[StoreNotification], None]
+
+
+class SeqCollisionError(Exception):
+    """Raised when two messages have the same seq (invariant violation)."""
+    pass
+
+
+class MessageStore:
+    """
+    Thread-safe in-memory store for session messages.
+
+    This is a PROJECTION, not a ledger. The JSONL file is the ledger.
+
+    Key differences from ledger:
+    - Assistant messages are collapsed by stream_id (latest wins)
+    - Projection ordering may differ from JSONL line order after collapse
+    - Indexes provide O(1) lookups
+
+    Features:
+    - O(1) message lookup by UUID
+    - Ordering by seq (line number / append order)
+    - seq uniqueness assertion (fail fast on collision)
+    - Assistant message collapsing by stream_id (v2.1)
+    - Tool result indexing for O(1) linkage
+    - Compaction-aware projections
+    - Sidechain tracking
+    - Reactive subscriptions for UI updates
+    """
+
+    def __init__(self):
+        # Primary storage
+        self._messages: Dict[str, "Message"] = {}
+
+        # Indexes
+        self._by_seq: Dict[int, str] = {}  # seq -> uuid (unique keys)
+        self._children: Dict[str, List[str]] = {}  # parent_uuid -> [child_uuids]
+        self._root_ids: List[str] = []  # Messages with no parent
+
+        # Assistant message collapse index (stream_id -> uuid)
+        self._by_stream_id: Dict[str, str] = {}
+
+        # Tool linkage indexes
+        self._tool_results: Dict[str, str] = {}  # tool_call_id -> tool_result_message_uuid
+        self._assistant_tools: Dict[str, List[str]] = {}  # assistant_uuid -> [tool_call_ids]
+        self._tool_approvals: Dict[str, str] = {}  # tool_call_id -> approval_message_uuid
+
+        # Sidechain tracking
+        self._sidechains: Dict[str, List[str]] = {}  # parent_uuid -> [sidechain_uuids]
+
+        # Compaction tracking
+        self._last_compact_boundary_seq: Optional[int] = None
+        self._compact_boundary_uuid: Optional[str] = None
+        self._compact_summary_uuid: Optional[str] = None
+
+        # File snapshots
+        self._snapshots: Dict[str, "FileHistorySnapshot"] = {}
+
+        # Ephemeral tool execution state (NOT persisted)
+        # Keyed by tool_call_id, updated by Agent, read by TUI
+        self._tool_state: Dict[str, ToolExecutionState] = {}
+
+        # Sequence tracking (Store owns seq authority per v3.1 Patch 1)
+        self._max_seq: int = 0
+
+        # Subscriptions
+        self._subscribers: Set[Subscriber] = set()
+        self._lock = threading.RLock()
+
+        # Metadata
+        self._session_id: Optional[str] = None
+        self._is_bulk_loading: bool = False
+
+    # =========================================================================
+    # Core Operations
+    # =========================================================================
+
+    def add_message(self, message: "Message") -> None:
+        """
+        Add a message to the store.
+
+        Handles:
+        - Seq uniqueness assertion
+        - Assistant message collapsing by stream_id
+        - Index maintenance
+        - Sidechain tracking
+        - Compaction boundary detection
+        - Tool result indexing
+
+        Emits:
+        - MESSAGE_ADDED: First time a message/stream_id is added
+        - MESSAGE_UPDATED: When collapsing an existing stream_id
+
+        Raises:
+            SeqCollisionError: If seq already exists for different message
+        """
+        with self._lock:
+            uuid = message.uuid
+            parent_uuid = message.parent_uuid
+            seq = message.seq
+            is_update = False  # Track if this is an update vs new message
+
+            # Update max seq
+            if seq > self._max_seq:
+                self._max_seq = seq
+
+            # Handle assistant message collapsing by stream_id (v2.1)
+            if message.is_assistant:
+                stream_id = message.get_collapse_key()  # Returns meta.stream_id
+                if stream_id and stream_id in self._by_stream_id:
+                    # Replace previous entry for this stream - this is an UPDATE
+                    is_update = True
+                    old_uuid = self._by_stream_id[stream_id]
+                    old_seq = self._messages[old_uuid].seq if old_uuid in self._messages else None
+                    self._remove_from_indexes(old_uuid)
+                    del self._messages[old_uuid]
+                    # Free up the old seq slot
+                    if old_seq is not None and old_seq in self._by_seq:
+                        del self._by_seq[old_seq]
+
+                if stream_id:
+                    self._by_stream_id[stream_id] = uuid
+
+                # Index tool calls from this assistant message
+                tool_call_ids = message.get_tool_call_ids()
+                if tool_call_ids:
+                    self._assistant_tools[uuid] = tool_call_ids
+
+            # Handle tool result indexing (role=tool)
+            if message.is_tool and message.tool_call_id:
+                self._tool_results[message.tool_call_id] = uuid
+
+                # Log tool message addition for debugging
+                from src.observability import get_logger
+                logger = get_logger("session.store")
+                logger.debug(
+                    f"[ADD_MESSAGE] Tool message added: tool_call_id={message.tool_call_id}, "
+                    f"uuid={uuid}, seq={seq}, is_sidechain={message.is_sidechain}"
+                )
+
+                # Fix 4: Validate that tool result has a corresponding assistant tool_call
+                # This detects orphaned tool results (JSONL corruption, missing assistant message)
+                tool_call_id = message.tool_call_id
+                has_assistant = False
+                for assistant_uuid, tool_call_ids in self._assistant_tools.items():
+                    if tool_call_id in tool_call_ids:
+                        has_assistant = True
+                        break
+
+                if not has_assistant:
+                    logger.warning(
+                        f"Orphaned tool result: tool_call_id={tool_call_id} "
+                        f"has no matching assistant tool_call. Message uuid={uuid}"
+                    )
+
+            # Handle tool approval indexing (system event with event_type="tool_approval")
+            if message.is_system and message.meta.event_type == "tool_approval":
+                extra = message.meta.extra or {}
+                tool_call_id = extra.get("tool_call_id")
+                if tool_call_id:
+                    self._tool_approvals[tool_call_id] = uuid
+
+            # Handle compaction boundary
+            if message.is_system and message.meta.event_type == "compact_boundary":
+                self._last_compact_boundary_seq = seq
+                self._compact_boundary_uuid = uuid
+
+            # Handle compact summary
+            if message.is_user and message.meta.is_compact_summary:
+                self._compact_summary_uuid = uuid
+
+            # Assert seq uniqueness (fail fast on collision)
+            if seq in self._by_seq and self._by_seq[seq] != uuid:
+                existing_uuid = self._by_seq[seq]
+                raise SeqCollisionError(
+                    f"Seq collision: seq={seq} already assigned to {existing_uuid}, "
+                    f"cannot assign to {uuid}"
+                )
+
+            # Store message
+            self._messages[uuid] = message
+            self._by_seq[seq] = uuid
+
+            # Track parent-child / sidechain relationships
+            if parent_uuid is None:
+                if uuid not in self._root_ids:
+                    self._root_ids.append(uuid)
+            else:
+                if message.is_sidechain:
+                    if parent_uuid not in self._sidechains:
+                        self._sidechains[parent_uuid] = []
+                    self._sidechains[parent_uuid].append(uuid)
+                else:
+                    if parent_uuid not in self._children:
+                        self._children[parent_uuid] = []
+                    if uuid not in self._children[parent_uuid]:
+                        self._children[parent_uuid].append(uuid)
+
+            # Set session metadata from first message
+            if self._session_id is None:
+                self._session_id = message.session_id
+
+            # Notify subscribers with appropriate event type
+            if not self._is_bulk_loading:
+                event_type = StoreEvent.MESSAGE_UPDATED if is_update else StoreEvent.MESSAGE_ADDED
+                self._notify(StoreNotification(
+                    event=event_type,
+                    message=message,
+                    metadata={"is_streaming_update": is_update}
+                ))
+
+    def finalize_message(self, stream_id: str) -> Optional["Message"]:
+        """
+        Mark a streaming message as finalized.
+
+        Call this when a stream completes to emit MESSAGE_FINALIZED.
+        The message should already exist in the store via add_message().
+
+        Args:
+            stream_id: The stream_id of the message to finalize
+
+        Returns:
+            The finalized message, or None if not found
+
+        Emits:
+            MESSAGE_FINALIZED with the final message state
+        """
+        with self._lock:
+            uuid = self._by_stream_id.get(stream_id)
+            if not uuid:
+                logger.warning(f"Cannot finalize: stream_id {stream_id} not found")
+                return None
+
+            message = self._messages.get(uuid)
+            if not message:
+                logger.warning(f"Cannot finalize: message {uuid} not found")
+                return None
+
+            # Notify subscribers of finalization
+            if not self._is_bulk_loading:
+                self._notify(StoreNotification(
+                    event=StoreEvent.MESSAGE_FINALIZED,
+                    message=message,
+                    metadata={"stream_id": stream_id}
+                ))
+
+            return message
+
+    def get_message(self, uuid: str) -> Optional["Message"]:
+        """Get a message by UUID."""
+        with self._lock:
+            return self._messages.get(uuid)
+
+    def get_by_seq(self, seq: int) -> Optional["Message"]:
+        """Get a message by sequence number."""
+        with self._lock:
+            uuid = self._by_seq.get(seq)
+            return self._messages.get(uuid) if uuid else None
+
+    def next_seq(self) -> int:
+        """
+        Get next sequence number for runtime appends.
+
+        This is the SINGLE AUTHORITY for seq allocation (v3.1 Patch 1).
+        """
+        with self._lock:
+            self._max_seq += 1
+            return self._max_seq
+
+    # =========================================================================
+    # Ordering & Iteration
+    # =========================================================================
+
+    def get_ordered_messages(self) -> List["Message"]:
+        """
+        Get all messages ordered by seq.
+
+        Note: This is projection order, not ledger order.
+        Collapsed assistant messages use the seq of their latest entry.
+        """
+        with self._lock:
+            seqs = sorted(self._by_seq.keys())
+            return [self._messages[self._by_seq[s]] for s in seqs if self._by_seq[s] in self._messages]
+
+    def get_messages_after_seq(self, seq: int) -> List["Message"]:
+        """Get messages with seq > given value, ordered."""
+        with self._lock:
+            seqs = sorted(s for s in self._by_seq.keys() if s > seq)
+            return [self._messages[self._by_seq[s]] for s in seqs if self._by_seq[s] in self._messages]
+
+    # =========================================================================
+    # Tool Linkage (O(1) lookups)
+    # =========================================================================
+
+    def get_tool_result(self, tool_call_id: str) -> Optional["Message"]:
+        """Get the tool result message for a tool_call_id. O(1)."""
+        with self._lock:
+            uuid = self._tool_results.get(tool_call_id)
+            return self._messages.get(uuid) if uuid else None
+
+    def get_tool_calls_for_assistant(self, assistant_uuid: str) -> List[str]:
+        """Get tool_call_ids requested by an assistant message."""
+        with self._lock:
+            return self._assistant_tools.get(assistant_uuid, [])
+
+    def get_tool_approval(self, tool_call_id: str) -> Optional["Message"]:
+        """Get the tool approval event for a tool_call_id. O(1).
+
+        Returns the system message with event_type="tool_approval" if the user
+        made an approval decision for this tool call.
+
+        The approval decision is in meta.extra:
+        - tool_call_id: The tool call ID
+        - tool_name: Name of the tool
+        - approved: bool
+        - action: "yes", "yes_all", or "no"
+        - feedback: Optional rejection feedback
+        """
+        with self._lock:
+            uuid = self._tool_approvals.get(tool_call_id)
+            return self._messages.get(uuid) if uuid else None
+
+    # =========================================================================
+    # Tool Execution State (Ephemeral, NOT persisted)
+    # =========================================================================
+
+    def update_tool_state(
+        self,
+        tool_call_id: str,
+        status: ToolStatus,
+        result: Optional[Any] = None,
+        error: Optional[str] = None,
+        duration_ms: Optional[int] = None
+    ) -> None:
+        """Update ephemeral tool execution state.
+
+        Called by Agent/ToolRunner during tool lifecycle:
+        - PENDING: Tool call received
+        - AWAITING_APPROVAL: Waiting for user approval
+        - RUNNING: Execution in progress
+        - SUCCESS/ERROR: Execution complete
+
+        Emits TOOL_STATE_UPDATED notification for TUI rendering.
+
+        Note: This state is NOT persisted to JSONL. It's ephemeral,
+        session-scoped, and exists only for live UI updates.
+        Tool results are persisted via role="tool" messages.
+        """
+        with self._lock:
+            self._tool_state[tool_call_id] = ToolExecutionState(
+                status=status,
+                result=result,
+                error=error,
+                duration_ms=duration_ms
+            )
+
+            if not self._is_bulk_loading:
+                self._notify(StoreNotification(
+                    event=StoreEvent.TOOL_STATE_UPDATED,
+                    tool_call_id=tool_call_id,
+                    tool_state=self._tool_state[tool_call_id]
+                ))
+
+    def get_tool_state(self, tool_call_id: str) -> Optional[ToolExecutionState]:
+        """Get ephemeral tool execution state.
+
+        Called by TUI when rendering tool cards.
+        Returns None if not found (e.g., during replay when state wasn't set).
+        """
+        with self._lock:
+            return self._tool_state.get(tool_call_id)
+
+    def clear_tool_state(self) -> None:
+        """Clear ephemeral tool state (session reset)."""
+        with self._lock:
+            self._tool_state.clear()
+
+    # =========================================================================
+    # Sidechain Operations
+    # =========================================================================
+
+    def get_mainline_messages(self) -> List["Message"]:
+        """Get non-sidechain messages in seq order."""
+        with self._lock:
+            messages = [m for m in self._messages.values() if not m.is_sidechain]
+            return sorted(messages, key=lambda m: m.seq)
+
+    def get_sidechain_count(self, parent_uuid: str) -> int:
+        """Get number of alternate responses for a parent."""
+        with self._lock:
+            return len(self._sidechains.get(parent_uuid, []))
+
+    def get_sidechains(self, parent_uuid: str) -> List["Message"]:
+        """Get sidechain messages for a parent."""
+        with self._lock:
+            uuids = self._sidechains.get(parent_uuid, [])
+            return [self._messages[u] for u in uuids if u in self._messages]
+
+    # =========================================================================
+    # Projection Views
+    # =========================================================================
+
+    def get_transcript_view(self, include_pre_compaction: bool = False) -> List["Message"]:
+        """
+        Get messages for transcript display.
+
+        Default: Post-compaction messages only (mainline), EXCLUDING boundary marker.
+        With flag: Everything including pre-compaction.
+
+        Use get_compact_boundary() separately to render banner.
+        """
+        with self._lock:
+            messages = self.get_mainline_messages()
+
+            if not include_pre_compaction and self._last_compact_boundary_seq is not None:
+                # EXCLUSIVE: seq > boundary (not >=)
+                # Boundary marker itself is not in the list
+                messages = [m for m in messages if m.seq > self._last_compact_boundary_seq]
+
+            return messages
+
+    def get_llm_context(self, max_messages: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        Get messages suitable for LLM context (OpenAI format).
+
+        - Post-compaction only (exclusive)
+        - Mainline only (no sidechains)
+        - Excludes isVisibleInTranscriptOnly
+        - Uses to_llm_dict() to strip meta
+
+        Returns:
+            List of dicts in OpenAI message format
+        """
+        from src.observability import get_logger
+        logger = get_logger("session.store")
+
+        with self._lock:
+            messages = []
+            mainline = self.get_mainline_messages()
+
+            # Debug: Count tool messages in mainline
+            tool_in_mainline = [m for m in mainline if m.is_tool]
+            if tool_in_mainline:
+                logger.warning(
+                    f"[GET_LLM_CONTEXT] Mainline has {len(tool_in_mainline)} tool messages: "
+                    f"{[(m.tool_call_id, m.seq) for m in tool_in_mainline]}"
+                )
+
+            for m in mainline:
+                # Skip pre-compaction (exclusive)
+                if self._last_compact_boundary_seq and m.seq <= self._last_compact_boundary_seq:
+                    if m.is_tool:
+                        logger.warning(
+                            f"[GET_LLM_CONTEXT] Filtered tool message (pre-compaction): "
+                            f"tool_call_id={m.tool_call_id}, seq={m.seq}, "
+                            f"boundary_seq={self._last_compact_boundary_seq}"
+                        )
+                    continue
+
+                # Check if should be included in context
+                if not m.should_include_in_context:
+                    if m.is_tool:
+                        logger.warning(
+                            f"[GET_LLM_CONTEXT] Filtered tool message (should_include_in_context=False): "
+                            f"tool_call_id={m.tool_call_id}, seq={m.seq}"
+                        )
+                    continue
+
+                messages.append(m)
+
+            if max_messages:
+                messages = messages[-max_messages:]
+
+            # Convert to LLM format (strip meta)
+            return [m.to_llm_dict() for m in messages]
+
+    def get_llm_context_messages(self, max_messages: Optional[int] = None) -> List["Message"]:
+        """
+        Get Message objects for LLM context (for custom processing).
+
+        - Post-compaction only (exclusive)
+        - Mainline only (no sidechains)
+        - Excludes isVisibleInTranscriptOnly
+        """
+        with self._lock:
+            messages = []
+
+            for m in self.get_mainline_messages():
+                # Skip pre-compaction (exclusive)
+                if self._last_compact_boundary_seq and m.seq <= self._last_compact_boundary_seq:
+                    continue
+
+                # Check if should be included in context
+                if not m.should_include_in_context:
+                    continue
+
+                messages.append(m)
+
+            if max_messages:
+                messages = messages[-max_messages:]
+
+            return messages
+
+    def get_compact_summary(self) -> Optional["Message"]:
+        """Get the compaction summary message if present."""
+        with self._lock:
+            if self._compact_summary_uuid:
+                return self._messages.get(self._compact_summary_uuid)
+            return None
+
+    def get_compact_boundary(self) -> Optional["Message"]:
+        """Get the compact boundary marker for banner rendering."""
+        with self._lock:
+            if self._compact_boundary_uuid:
+                return self._messages.get(self._compact_boundary_uuid)
+            return None
+
+    def has_compaction(self) -> bool:
+        """Check if session has been compacted."""
+        with self._lock:
+            return self._last_compact_boundary_seq is not None
+
+    # =========================================================================
+    # Threading (Parent-Child)
+    # =========================================================================
+
+    def get_children(self, uuid: str) -> List["Message"]:
+        """Get direct children of a message (non-sidechain)."""
+        with self._lock:
+            child_ids = self._children.get(uuid, [])
+            return [self._messages[cid] for cid in child_ids if cid in self._messages]
+
+    def get_thread(self, uuid: str) -> List["Message"]:
+        """Get message thread from root to given UUID."""
+        with self._lock:
+            thread = []
+            current_uuid = uuid
+
+            while current_uuid:
+                message = self._messages.get(current_uuid)
+                if message:
+                    thread.insert(0, message)
+                    current_uuid = message.parent_uuid
+                else:
+                    break
+
+            return thread
+
+    # =========================================================================
+    # Snapshot Operations
+    # =========================================================================
+
+    def add_snapshot(self, snapshot: "FileHistorySnapshot") -> None:
+        """Add a file history snapshot."""
+        with self._lock:
+            self._snapshots[snapshot.uuid] = snapshot
+
+            if not self._is_bulk_loading:
+                self._notify(StoreNotification(
+                    event=StoreEvent.SNAPSHOT_ADDED,
+                    snapshot=snapshot
+                ))
+
+    def get_snapshot(self, uuid: str) -> Optional["FileHistorySnapshot"]:
+        """Get snapshot by UUID."""
+        with self._lock:
+            return self._snapshots.get(uuid)
+
+    # =========================================================================
+    # Bulk Operations
+    # =========================================================================
+
+    def begin_bulk_load(self) -> None:
+        """Begin bulk loading (suppresses individual notifications)."""
+        with self._lock:
+            self._is_bulk_loading = True
+
+    def end_bulk_load(self) -> None:
+        """End bulk loading and notify subscribers."""
+        with self._lock:
+            self._is_bulk_loading = False
+            self._notify(StoreNotification(
+                event=StoreEvent.BULK_LOAD_COMPLETE,
+                metadata={"message_count": len(self._messages)}
+            ))
+
+    def clear(self) -> None:
+        """Clear all messages and indexes."""
+        with self._lock:
+            self._messages.clear()
+            self._by_seq.clear()
+            self._children.clear()
+            self._root_ids.clear()
+            self._by_stream_id.clear()
+            self._tool_results.clear()
+            self._assistant_tools.clear()
+            self._sidechains.clear()
+            self._snapshots.clear()
+            self._tool_state.clear()  # Clear ephemeral tool state
+            self._last_compact_boundary_seq = None
+            self._compact_boundary_uuid = None
+            self._compact_summary_uuid = None
+            self._max_seq = 0
+            self._session_id = None
+
+            self._notify(StoreNotification(event=StoreEvent.STORE_CLEARED))
+
+    # =========================================================================
+    # Subscription Management
+    # =========================================================================
+
+    def subscribe(self, callback: Subscriber) -> Callable[[], None]:
+        """Subscribe to store events. Returns unsubscribe function."""
+        with self._lock:
+            self._subscribers.add(callback)
+
+        def unsubscribe():
+            with self._lock:
+                self._subscribers.discard(callback)
+
+        return unsubscribe
+
+    def _notify(self, notification: StoreNotification) -> None:
+        """Notify all subscribers."""
+        subscribers = list(self._subscribers)
+        for callback in subscribers:
+            try:
+                callback(notification)
+            except Exception as e:
+                logger.warning(f"Subscriber error: {e}")
+
+    # =========================================================================
+    # Internal Helpers
+    # =========================================================================
+
+    def _remove_from_indexes(self, uuid: str) -> None:
+        """
+        Remove a message from ALL indexes.
+
+        Used during assistant message collapse to prevent ghost references.
+        Per v3.1 Patch 2: Also cleans _sidechains.
+        """
+        if uuid not in self._messages:
+            return
+
+        message = self._messages[uuid]
+        parent_uuid = message.parent_uuid
+
+        # Remove from parent's children list
+        if parent_uuid and parent_uuid in self._children:
+            self._children[parent_uuid] = [
+                cid for cid in self._children[parent_uuid] if cid != uuid
+            ]
+
+        # Remove from parent's sidechains list (v3.1 Patch 2)
+        if parent_uuid and parent_uuid in self._sidechains:
+            self._sidechains[parent_uuid] = [
+                sid for sid in self._sidechains[parent_uuid] if sid != uuid
+            ]
+
+        # Remove from root list
+        if uuid in self._root_ids:
+            self._root_ids.remove(uuid)
+
+        # Remove tool use tracking
+        if uuid in self._assistant_tools:
+            del self._assistant_tools[uuid]
+
+        # Remove from stream_id index
+        stream_id = message.get_collapse_key() if message.is_assistant else None
+        if stream_id and stream_id in self._by_stream_id:
+            if self._by_stream_id[stream_id] == uuid:
+                del self._by_stream_id[stream_id]
+
+    # =========================================================================
+    # Properties
+    # =========================================================================
+
+    @property
+    def session_id(self) -> Optional[str]:
+        return self._session_id
+
+    @property
+    def message_count(self) -> int:
+        with self._lock:
+            return len(self._messages)
+
+    @property
+    def is_empty(self) -> bool:
+        with self._lock:
+            return len(self._messages) == 0
+
+    @property
+    def max_seq(self) -> int:
+        with self._lock:
+            return self._max_seq

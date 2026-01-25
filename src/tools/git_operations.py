@@ -55,7 +55,9 @@ class GitStatusTool(Tool):
                 cwd=cwd,
                 capture_output=True,
                 text=True,
-                timeout=5
+                timeout=5,
+                encoding='utf-8',
+                errors='replace'
             )
 
             if git_check.returncode != 0:
@@ -72,7 +74,9 @@ class GitStatusTool(Tool):
                 cwd=cwd,
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=10,
+                encoding='utf-8',
+                errors='replace'
             )
 
             if result.returncode == 0:
@@ -188,7 +192,9 @@ class GitDiffTool(Tool):
                 cwd=cwd,
                 capture_output=True,
                 text=True,
-                timeout=30
+                timeout=30,
+                encoding='utf-8',
+                errors='replace'
             )
 
             if result.returncode == 0:
@@ -303,7 +309,9 @@ class GitCommitTool(Tool):
                 cwd=cwd,
                 capture_output=True,
                 text=True,
-                timeout=30
+                timeout=30,
+                encoding='utf-8',
+                errors='replace'
             )
 
             if result.returncode == 0:

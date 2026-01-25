@@ -59,15 +59,44 @@ def chat_mode(agent: CodingAgent, controller: Optional[LongRunningController] = 
     The agent's stream_response() method yields typed UIEvents that the TUI renders.
     Falls back to simple mode if TUI fails.
 
+    Phase 6: Integrates MessageStore for session persistence to JSONL.
+
     Args:
         agent: CodingAgent instance
         controller: Optional LongRunningController for checkpoint functionality
     """
     try:
-        # Configure production-grade logging for TUI mode
-        # In TUI mode: file logging ON, console OFF (except errors to stderr)
+        # Configure logging - all logs go to JSONL file only, no console output
         from src.observability.logging_config import configure_logging, install_asyncio_handler
         configure_logging(mode="tui", log_level=log_level)
+
+        # Phase 6: Initialize MessageStore and SessionWriter for persistence
+        from src.session.store.memory_store import MessageStore
+        from src.session.persistence.writer import SessionWriter
+        from src.ui.app import TUI_RENDER_FROM_STORE
+        import uuid
+        from datetime import datetime
+
+        # Create session directory
+        session_id = f"session-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
+        sessions_dir = Path(".sessions")
+        session_dir = sessions_dir / session_id
+        session_dir.mkdir(parents=True, exist_ok=True)
+        jsonl_path = session_dir / "session.jsonl"
+
+        # Initialize store (writer will be opened by app in its event loop)
+        store = MessageStore()
+        writer = SessionWriter(file_path=jsonl_path)
+
+        # Link MemoryManager to MessageStore for unified data flow
+        # This makes fresh sessions behave identically to resumed sessions:
+        # - Agent adds messages to store via MemoryManager
+        # - Store notifications trigger TUI rendering
+        # - Single source of truth for conversation history
+        agent.memory.set_message_store(store, session_id)
+
+        console.print(f"[dim]Session: {session_id}[/dim]")
+        console.print(f"[dim]JSONL: {jsonl_path}[/dim]")
 
         # Create and run Textual app with agent directly
         # The app will internally call agent.stream_response() which yields UIEvents
@@ -75,7 +104,21 @@ def chat_mode(agent: CodingAgent, controller: Optional[LongRunningController] = 
             agent=agent,
             show_header=False
         )
+
+        # Phase 6: Bind store and writer to app
+        # The app will open/close the writer in its own event loop
+        app.bind_store(store, session_id=session_id)
+        app.set_session_writer(writer)
+
+        # Wire up render meta registry for approval policy hints
+        # Agent freezes approval policy when tool call name becomes known during streaming
+        # TUI queries registry when creating tool cards from store notifications
+        app.set_render_meta_registry(agent.memory.render_meta)
+
+        console.print(f"[dim]Store-driven rendering: {TUI_RENDER_FROM_STORE}[/dim]")
+
         app.run()
+        console.print(f"[dim]Session saved to: {jsonl_path}[/dim]")
 
     except Exception as e:
         # Fallback to simple mode
@@ -91,7 +134,7 @@ def simple_chat_mode(agent: CodingAgent, controller: Optional[LongRunningControl
         agent: CodingAgent instance
         controller: Optional LongRunningController for checkpoint functionality
     """
-    # Configure production-grade logging for CLI mode (console + file)
+    # Configure logging - all logs go to JSONL file only, no console output
     from src.observability.logging_config import configure_logging
     configure_logging(mode="cli", log_level=log_level)
 
@@ -1440,10 +1483,9 @@ def launch_clarity_ui(agent: CodingAgent) -> None:
 
 def main() -> None:
     """Main CLI entry point."""
-    # Early logging configuration for initialization errors
-    # Will be reconfigured with proper mode (tui/cli) later
-    from src.observability.logging_config import configure_logging
-    configure_logging(mode="cli", log_level=log_level)
+    # Note: Logging auto-configures on first get_logger() call during imports.
+    # All logs go to JSONL file only - no console output.
+    # User-facing messages use Rich console.print().
 
     parser = argparse.ArgumentParser(
         description="AI Coding Agent - Optimized for small open-source LLMs"

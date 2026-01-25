@@ -136,6 +136,8 @@ class ToolCard(Static):
         # Initialize instance attributes BEFORE super().__init__
         # because reactive watchers may fire during initialization
         self._approval_widget: ToolApprovalOptions | None = None
+        self._defer_diff_mount: bool = False  # Set True during bulk load for performance
+        self._diff_mounted: bool = False  # Track if diff already mounted
 
         super().__init__(**kwargs)
         self.call_id = call_id
@@ -155,48 +157,98 @@ class ToolCard(Static):
         pass
 
     def watch_status(self, new_status: ToolStatus) -> None:
-        """React to status changes."""
+        """React to status changes.
+
+        Handles approval widget lifecycle based on status:
+        - AWAITING_APPROVAL: Show approval widget (create if needed)
+        - Any other status: Hide/remove approval widget
+
+        This makes store state the single source of truth for approval UI,
+        independent of the initial requires_approval value at card creation.
+        """
+        from src.observability import get_logger
+        logger = get_logger("tool_card")
+        logger.info(f"[WATCH_STATUS] {self.call_id}: new_status={new_status}, is_attached={self.is_attached}, has_widget={self._approval_widget is not None}")
+
         self._update_classes()
 
-        # Remove approval UI when no longer awaiting
-        if new_status != ToolStatus.AWAITING_APPROVAL and self._approval_widget:
-            try:
-                self._approval_widget.remove()
-            except Exception:
-                # Widget may not be mounted yet, ignore
-                pass
-            self._approval_widget = None
+        if new_status == ToolStatus.AWAITING_APPROVAL:
+            # Show approval widget - create if not exists
+            if not self._approval_widget and self.is_attached:
+                logger.info(f"[WATCH_STATUS] {self.call_id}: Creating approval widget")
+                self._approval_widget = ToolApprovalOptions(
+                    call_id=self.call_id,
+                    tool_name=self.tool_name,
+                    args=self.args
+                )
+                # Mount diff first if not already mounted, then approval
+                # This ensures approval appears BELOW diff preview
+                if not self._diff_mounted:
+                    self._mount_diff_widget_if_applicable()
+                self.mount(self._approval_widget)
+                self.call_after_refresh(self._focus_approval)
+            elif not self.is_attached:
+                logger.warning(f"[WATCH_STATUS] {self.call_id}: NOT ATTACHED - cannot create approval widget!")
+            elif self._approval_widget:
+                logger.info(f"[WATCH_STATUS] {self.call_id}: Approval widget already exists")
+        else:
+            # Remove approval UI when no longer awaiting
+            if self._approval_widget:
+                try:
+                    self._approval_widget.remove()
+                except Exception:
+                    # Widget may not be mounted yet, ignore
+                    pass
+                self._approval_widget = None
 
     def on_mount(self) -> None:
-        """Set initial status and mount child widgets after widget is in DOM.
+        """Mount child widgets after widget is in DOM.
 
         For file operations (write_file, edit_file), mounts a DiffWidget to show
         the changes with professional formatting (line numbers, background colors).
         This happens regardless of approval mode - users should always see what
         file operations are doing.
 
-        NOTE: We mount widgets here instead of in compose() because Static widgets
-        don't reliably render children from compose(). Explicit mounting ensures
-        the widgets are visible.
+        NOTE: Status is NOT reset here. The reactive default is PENDING, and the
+        store-driven flow may have already set status to AWAITING_APPROVAL before
+        mount. We check current status and create approval widget if needed, since
+        watch_status() may have fired before is_attached was True.
         """
         # Mount DiffWidget for file operations ALWAYS (regardless of approval mode)
         # Users should see what's being written/edited even in AUTO mode
+        # NOTE: Must mount diff BEFORE approval so diff appears above approval in UI
         self._mount_diff_widget_if_applicable()
 
-        if self.requires_approval:
-            self.status = ToolStatus.AWAITING_APPROVAL
-
-            # Create and mount approval widget explicitly
+        # Check if we need to create approval widget
+        # (watch_status may have been called before mount when is_attached=False)
+        if self.status == ToolStatus.AWAITING_APPROVAL and not self._approval_widget:
+            from src.observability import get_logger
+            logger = get_logger("tool_card")
+            logger.info(f"[ON_MOUNT] {self.call_id}: Creating approval widget (status was set before mount)")
             self._approval_widget = ToolApprovalOptions(
                 call_id=self.call_id,
                 tool_name=self.tool_name,
                 args=self.args
             )
-            self.mount(self._approval_widget)
-            # Focus after mount is complete
-            self.call_after_refresh(self._focus_approval)
-        else:
-            self.status = ToolStatus.PENDING
+            # Approval should appear AFTER diff - defer if diff mount was deferred
+            if self._defer_diff_mount and not self._diff_mounted:
+                # Diff will be mounted later, schedule approval after it
+                self.call_after_refresh(self._mount_approval_after_diff)
+            else:
+                self.mount(self._approval_widget)
+                self.call_after_refresh(self._focus_approval)
+
+    def set_defer_diff_mount(self, defer: bool) -> None:
+        """Set whether to defer diff widget mounting.
+
+        Use during bulk load (session resume) to avoid blocking the render loop
+        while processing many tool cards. The diff widget will be mounted
+        asynchronously after the main render cycle completes.
+
+        Args:
+            defer: True to defer mounting, False for immediate mounting
+        """
+        self._defer_diff_mount = defer
 
     def _mount_diff_widget_if_applicable(self) -> None:
         """Mount DiffWidget for file operations (write_file, edit_file).
@@ -206,7 +258,30 @@ class ToolCard(Static):
 
         Uses ScrollableDiffContainer to handle large files - users can scroll
         to see the full diff within a bounded height area.
+
+        If deferred mounting is enabled (bulk load), schedules the mount
+        for after the current refresh cycle to avoid blocking.
         """
+        # Check if already mounted to prevent double-mounting
+        if self._diff_mounted:
+            return
+
+        # Deferred mounting during bulk load
+        if self._defer_diff_mount:
+            self.call_after_refresh(self._do_mount_diff_widget)
+            return
+
+        self._do_mount_diff_widget()
+
+    def _do_mount_diff_widget(self) -> None:
+        """Actually mount the diff widget (internal helper).
+
+        Separated from _mount_diff_widget_if_applicable to support deferred mounting.
+        """
+        # Safety check: prevent double mounting and ensure widget is still attached
+        if self._diff_mounted or not self.is_attached:
+            return
+
         if self.tool_name == 'write_file':
             content = self.args.get('content', '')
             if content:
@@ -221,6 +296,7 @@ class ToolCard(Static):
                 scroll_container = ScrollableDiffContainer()
                 self.mount(scroll_container)
                 scroll_container.mount(diff_widget)
+                self._diff_mounted = True
 
         elif self.tool_name == 'edit_file':
             old_text = self.args.get('old_text', '')
@@ -235,6 +311,13 @@ class ToolCard(Static):
                 scroll_container = ScrollableDiffContainer()
                 self.mount(scroll_container)
                 scroll_container.mount(diff_widget)
+                self._diff_mounted = True
+
+    def _mount_approval_after_diff(self) -> None:
+        """Mount approval widget after deferred diff mount completes."""
+        if self._approval_widget and not self._approval_widget.is_attached:
+            self.mount(self._approval_widget)
+            self.call_after_refresh(self._focus_approval)
 
     def _focus_approval(self) -> None:
         """Focus the approval widget after it's rendered."""

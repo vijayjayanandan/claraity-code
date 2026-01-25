@@ -21,10 +21,12 @@ This document describes the production-grade logging infrastructure implemented 
 │                     structlog (stdlib backend)                               │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
 │  │ Processors: contextvars → log_level → timestamp → callsite →        │    │
-│  │             add_context → redact_sensitive → format_exc → JSON      │    │
+│  │             add_context → redact_sensitive → format_exc →           │    │
+│  │             wrap_for_formatter (preserves event_dict as dict)       │    │
 │  └─────────────────────────────────────────────────────────────────────┘    │
 │                                   │                                          │
 │                     LoggerFactory(stdlib) → logging.Logger                   │
+│                     (record.msg = event_dict as dict, not JSON string)       │
 └──────────────────────────────────┬───────────────────────────────────────────┘
                                    │
                                    ▼
@@ -44,14 +46,14 @@ This document describes the production-grade logging infrastructure implemented 
          ▼                         ▼                         ▼
 ┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐
 │ RotatingFileHandler│   │  StreamHandler   │    │SQLiteErrorHandler│
-│ (.clarity/logs/   │   │ CLI: stdout      │    │ (errors table)   │
-│  app.jsonl)       │   │ TUI: WARN+stderr │    │ Non-recursive    │
+│ (.clarity/logs/   │   │ CLI: stdout      │    │ (.clarity/       │
+│  app.jsonl)       │   │ TUI: WARN+stderr │    │  metrics.db)     │
 └────────┬─────────┘    └──────────────────┘    └────────┬─────────┘
          │                                               │
          ▼                                               ▼
 ┌──────────────────┐                          ┌──────────────────┐
 │   JSONL Files    │                          │  SQLite errors   │
-│  (50MB x 5 max)  │                          │ (30 columns)     │
+│  (50MB x 5 max)  │                          │ (31 columns)     │
 └──────────────────┘                          └──────────────────┘
 ```
 
@@ -68,6 +70,35 @@ This document describes the production-grade logging infrastructure implemented 
 9. **Bounded Queue with Drop Policy**: Queue drops messages when full instead of blocking
 10. **Windows Compatibility**: No emojis, explicit UTF-8 encoding
 11. **TUI Safe**: TUI mode uses WARN+ to stderr only, preserving terminal UI
+12. **ProcessorFormatter Integration**: Uses `wrap_for_formatter` to preserve event_dict as dict on `record.msg`, enabling handlers to access structured data directly
+13. **Thread Safety**: Lock-based singletons, contextvars for async re-entry guards, module-level atexit deduplication
+
+## structlog Integration Pattern
+
+We use structlog's recommended stdlib integration pattern:
+
+```python
+# In structlog.configure(), the final processor is:
+structlog.stdlib.ProcessorFormatter.wrap_for_formatter
+
+# This sets record.msg = event_dict (as a dict, not JSON string)
+# Handlers then use ProcessorFormatter to do final rendering:
+formatter = structlog.stdlib.ProcessorFormatter(
+    processors=[
+        ProcessorFormatter.remove_processors_meta,
+        structlog.processors.JSONRenderer(),  # or console renderer
+    ],
+    foreign_pre_chain=[...],  # For non-structlog stdlib logs
+)
+```
+
+**Why this pattern?**
+- `record.msg` remains a dict, so handlers (especially SQLiteErrorHandler) can extract structured fields directly
+- Each handler can render differently (JSON for files, simple text for console)
+- Non-structlog stdlib logs are handled via `foreign_pre_chain`
+
+**BoundedQueueHandler.prepare()**:
+We override `prepare()` to NOT modify `record.msg`. The default `QueueHandler.prepare()` calls `self.format(record)` which would convert the dict to a string, breaking ProcessorFormatter.
 
 ## Components
 
@@ -126,6 +157,8 @@ logger.exception("unexpected_error")  # Includes traceback automatically
 ### 2. `error_store.py` - SQLite Error Persistence
 
 **Location**: `src/observability/error_store.py`
+
+**Database Path**: `.clarity/metrics.db` (default)
 
 **Responsibilities**:
 - Persist errors to SQLite for queryable history
@@ -216,21 +249,28 @@ deleted = store.clear_old(days=30)
 
 **Responsibilities**:
 - Intercept ERROR+ log records
-- Extract structured fields from structlog `_structlog_event_dict`
+- Extract structured fields from `record.msg` dict (set by `wrap_for_formatter`)
 - Write to SQLite via internal queue (non-blocking)
 - **Non-recursive**: Failures write to `sys.__stderr__`, never back through logging
 
 **Features**:
 - Only processes ERROR level and above (or records with exc_info)
-- Re-entry guard prevents recursive logging
+- Re-entry guard using `contextvars` (works with async coroutines)
 - Internal queue prevents blocking the QueueListener thread
 - Bounded queue (1000 items) prevents memory exhaustion
 - Extracts timeout debugging fields from structlog events
+- Uses global `get_error_store()` singleton for thread-safe ErrorStore access
+- Module-level atexit registration prevents duplicate shutdown handlers
 
-**Field Extraction Priority**:
-1. `_structlog_event_dict` (native structlog key=value)
-2. `event_dict` attribute (legacy pattern, backwards compatible)
-3. `exc_info` for exception details
+**Thread Safety**:
+- `emit()` uses `contextvars.ContextVar` for re-entry guard (safe for async)
+- Writer thread has exclusive access to ErrorStore via singleton
+- Multiple handler instances share module-level atexit cleanup
+
+**Field Extraction**:
+- **structlog logs**: `record.msg` is a dict (from `wrap_for_formatter`) → extract fields directly
+- **stdlib logs**: `record.msg` is a string → store as plain message
+- **exc_info**: Exception details extracted if present
 
 ### 4. `log_query.py` - CLI Query Tool
 
@@ -336,9 +376,9 @@ The logging system installs exception hooks and signal handlers for robust shutd
 3. **`asyncio.loop.set_exception_handler`** - Unhandled Task exceptions
 4. **`atexit` handler** - Flush logs on normal exit
 
-**Signal Handlers** (NEW):
+**Signal Handlers**:
 5. **`SIGINT`** - Ctrl+C: Flushes logs, then raises KeyboardInterrupt
-6. **`SIGTERM`** - kill: Flushes logs, then exits gracefully
+6. **`SIGTERM`** - kill: Flushes logs, then re-raises SIGTERM for proper process termination tracking (with Windows fallback to `sys.exit(0)`)
 
 **Flush Order**:
 1. Stop QueueListener (flushes pending log records to handlers)
@@ -378,16 +418,30 @@ install_asyncio_handler(loop)
 
 Sensitive data is automatically redacted:
 
-**Redacted Keys**:
+**Redacted Keys** (dict keys that are fully redacted):
 - `api_key`, `apikey`, `api-key`
-- `authorization`, `auth_token`
-- `secret`, `password`, `passwd`, `pwd`
-- `bearer`
+- `authorization`, `auth_token`, `access_token`, `refresh_token`
+- `secret`, `secret_key`, `private_key`
+- `password`, `passwd`, `pwd`
+- `bearer`, `token`
+- `aws_secret_access_key`, `aws_access_key_id`
+- `anthropic_api_key`, `openai_api_key`
+- `database_url`, `connection_string`
 
-**Redacted Patterns**:
-- `sk-*` (OpenAI API keys)
-- `Bearer *` tokens
-- Long strings (>500 chars) are truncated
+**Redacted Patterns** (regex patterns applied to string values):
+
+| Pattern | Example | Replacement |
+|---------|---------|-------------|
+| OpenAI API keys | `sk-abc123...` | `***OPENAI_API_KEY***` |
+| Anthropic API keys | `sk-ant-api03-...` | `***ANTHROPIC_API_KEY***` |
+| AWS Access Key IDs | `AKIAIOSFODNN7EXAMPLE` | `***AWS_ACCESS_KEY***` |
+| AWS Secret Keys | `aws_secret_access_key=...` | `***AWS_SECRET_KEY***` |
+| Bearer tokens | `Bearer eyJ...` | `Bearer ***REDACTED***` |
+| Private key headers | `-----BEGIN RSA PRIVATE KEY-----` | `***PRIVATE_KEY_HEADER***` |
+| Database URLs | `postgres://user:pass@host` | `postgres://user:***PASSWORD***@host` |
+| Generic tokens | `access_token=abc123...` | `access_token=***TOKEN***` |
+
+**Truncation**: Long strings (>500 chars) are truncated to prevent log bloat.
 
 **Example**:
 
@@ -397,6 +451,10 @@ logger.info("api_call", api_key="sk-abc123xyz", prompt="Hello world...")
 
 # Output (redacted)
 {"event": "api_call", "api_key": "***REDACTED***", "prompt": "Hello world..."}
+
+# Anthropic key in string
+logger.info("config", config="key: sk-ant-api03-abcdef...")
+# Output: {"event": "config", "config": "key: ***ANTHROPIC_API_KEY***"}
 ```
 
 ## Integration Points
@@ -466,7 +524,7 @@ logger.exception(
 
 The logging queue is bounded and uses a drop policy instead of blocking:
 
-- **Queue Size**: 10,000 messages maximum
+- **Queue Size**: 10,000 messages maximum (`LOG_QUEUE_SIZE` constant)
 - **Drop Policy**: When full, new messages are dropped (not blocked)
 - **Warning Rate**: Drops are logged to stderr at most every 10 seconds
 - **Why**: Prevents log producers from being blocked by slow consumers
@@ -476,7 +534,13 @@ This is critical for non-blocking async code where a blocked logger could freeze
 ```python
 # When queue is full:
 # [WARN] Log queue full, dropped 42 messages (to stderr)
+
+# Query drop count programmatically
+from src.observability.logging_config import get_drop_count
+print(f"Total dropped messages: {get_drop_count()}")
 ```
+
+**Thread Safety**: Drop count is tracked at module level with thread-safe locking. The `get_drop_count()` function returns the aggregate count across all handler instances.
 
 ## Timeout Debugging
 
@@ -509,13 +573,61 @@ ORDER BY ts DESC
 LIMIT 10;
 ```
 
+## Constants
+
+Named constants are used throughout for maintainability:
+
+**logging_config.py**:
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `LOG_QUEUE_SIZE` | 10,000 | Max messages in logging queue |
+| `REDACT_MAX_LENGTH` | 500 | Truncation limit for redacted strings |
+| `DROP_WARNING_INTERVAL_SECONDS` | 10.0 | Rate limit for drop warnings |
+| `MAX_TRACEBACK_LENGTH` | 32,768 | Max traceback size (32KB) |
+
+**error_store.py**:
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `MAX_TRACEBACK_LENGTH` | 32,768 | Max traceback size (32KB) |
+| `DEFAULT_DB_PATH` | `.clarity/metrics.db` | Default database location |
+| `DEFAULT_RETENTION_DAYS` | 30 | Default cleanup retention |
+| `DEFAULT_QUERY_LIMIT` | 100 | Default query result limit |
+
+**sqlite_error_handler.py**:
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `ERROR_QUEUE_SIZE` | 1,000 | Max pending error records |
+| `WRITER_QUEUE_TIMEOUT` | 1.0s | Writer thread queue timeout |
+| `WRITER_SHUTDOWN_TIMEOUT` | 5.0s | Graceful shutdown timeout |
+
+## Thread Safety
+
+The logging infrastructure is designed for multi-threaded and async environments:
+
+**Global Singletons**:
+- `get_error_store()` uses lock-based singleton pattern (not double-checked locking)
+- Instance is fully constructed before assignment to prevent partial object visibility
+
+**BoundedQueueHandler**:
+- Drop count tracked at module level with `threading.Lock`
+- Thread-safe `get_drop_count()` function for metrics
+
+**SQLiteErrorHandler**:
+- Re-entry guard uses `contextvars.ContextVar` (works with async coroutines)
+- Writer thread has exclusive access to database operations
+- Module-level atexit registration prevents duplicate shutdown handlers
+
+**ErrorStore**:
+- All public methods protected by `threading.RLock`
+- Connection-per-operation ensures SQLite thread safety
+
 ## Files
 
 | File | LOC | Purpose |
 |------|-----|---------|
-| `src/observability/logging_config.py` | ~550 | Core configuration, context binding, crash hooks |
-| `src/observability/error_store.py` | ~400 | SQLite error persistence (30 columns) |
-| `src/observability/sqlite_error_handler.py` | ~340 | Non-recursive custom logging handler |
+| `src/observability/logging_config.py` | ~850 | Core configuration, context binding, crash hooks |
+| `src/observability/error_store.py` | ~500 | SQLite error persistence (31 columns) |
+| `src/observability/sqlite_error_handler.py` | ~415 | Non-recursive custom logging handler |
 | `src/observability/log_query.py` | ~250 | CLI query tool |
 
 ## Dependencies
@@ -538,6 +650,7 @@ from src.observability import (
     install_asyncio_handler,
     ErrorCategory,
 )
+from src.observability.logging_config import get_drop_count
 
 # Configure (once at startup)
 configure_logging(mode="cli")  # or "tui"
@@ -565,6 +678,11 @@ install_asyncio_handler(loop)
 # Query errors
 store = get_error_store()
 errors = store.query(since_minutes=60, category=ErrorCategory.PROVIDER_TIMEOUT)
+
+# Check for dropped messages (indicates queue overflow)
+dropped = get_drop_count()
+if dropped > 0:
+    print(f"Warning: {dropped} log messages were dropped due to queue overflow")
 ```
 
 ## Querying Errors
@@ -615,6 +733,13 @@ python -m src.observability.log_query --minutes 60 --json > errors.json
 ```
 
 ### Via SQL (Direct)
+
+The error database is located at `.clarity/metrics.db`:
+
+```bash
+# Open the database
+sqlite3 .clarity/metrics.db
+```
 
 ```sql
 -- Recent errors with timeout debugging

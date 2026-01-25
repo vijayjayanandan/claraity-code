@@ -1,27 +1,154 @@
-"""File operation tools."""
+"""
+File operation tools with security and streaming support.
+
+Provides production-grade file operations matching Claude Code capabilities:
+- ReadFileTool: Streaming line-range reading with bounded memory
+- WriteFileTool: Safe file writing with parent directory creation
+- EditFileTool: Find/replace editing
+- AppendToFileTool: Safe file appending
+- ListDirectoryTool: Directory listing
+- RunCommandTool: Shell command execution
+
+Security:
+- Path traversal protection via validate_path_security
+- Workspace boundary enforcement
+"""
 
 import platform
 import subprocess
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
+
 from .base import Tool, ToolResult, ToolStatus
+from .search_tools import validate_path_security
 
 
-class ReadFileTool(Tool):
-    """Tool for reading files."""
+class FileOperationTool(Tool):
+    """
+    Base class for file operation tools with shared security validation.
+
+    Provides:
+    - Path validation with traversal protection
+    - Configurable workspace root for testing
+    """
+
+    # Class-level workspace root override (for testing)
+    # Set this to allow operations in test directories
+    _workspace_root: Optional[Path] = None
+
+    def _validate_path(
+        self,
+        file_path: str,
+        must_exist: bool = True,
+        allow_outside_workspace: bool = False
+    ) -> Path:
+        """
+        Validate file path with security checks.
+
+        Args:
+            file_path: Path to validate
+            must_exist: If True, path must exist
+            allow_outside_workspace: If True, allow paths outside workspace
+
+        Returns:
+            Validated Path object
+
+        Raises:
+            ValueError: If path fails security validation
+            FileNotFoundError: If must_exist=True and path doesn't exist
+        """
+        # Use class-level workspace root if set (for testing)
+        workspace = self._workspace_root
+
+        # Validate path security
+        validated_path = validate_path_security(
+            file_path,
+            workspace_root=workspace,
+            allow_files_outside_workspace=allow_outside_workspace
+        )
+
+        # Check existence if required
+        if must_exist and not validated_path.exists():
+            raise FileNotFoundError(f"Path does not exist: {validated_path}")
+
+        return validated_path
+
+
+class ReadFileTool(FileOperationTool):
+    """
+    Tool for reading files with streaming line-range support.
+
+    Features:
+    - Streaming reads with bounded memory (never loads entire file)
+    - Line range support (start_line, end_line, max_lines)
+    - Line number formatting (cat -n style)
+    - Long line truncation
+    - Path traversal protection
+
+    Matches Claude Code's Read tool capabilities.
+    """
+
+    # Configuration constants
+    MAX_LINES_DEFAULT = 1000     # Balanced default - read meaningful chunks
+    MAX_LINES_LIMIT = 2000       # Hard cap per request
+    MAX_LINE_LENGTH = 2000       # Truncate lines longer than this
 
     def __init__(self):
         super().__init__(
             name="read_file",
-            description="Read contents of a file"
+            description="Read contents of a file with optional line range support"
         )
 
-    def execute(self, file_path: str, **kwargs: Any) -> ToolResult:
-        """Read file contents."""
-        try:
-            path = Path(file_path)
+    def _get_parameters(self) -> Dict[str, Any]:
+        """Get parameter schema (canonical source is tool_schemas.py)."""
+        return {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Path to file"},
+                "start_line": {"type": "integer", "description": "Start line (1-indexed)"},
+                "end_line": {"type": "integer", "description": "End line (exclusive)"},
+                "max_lines": {"type": "integer", "description": "Max lines to return"}
+            },
+            "required": ["file_path"]
+        }
 
-            if not path.exists():
+    def execute(
+        self,
+        file_path: str,
+        start_line: Optional[int] = None,
+        end_line: Optional[int] = None,
+        max_lines: Optional[int] = None,
+        **kwargs: Any
+    ) -> ToolResult:
+        """
+        Read file contents with streaming (bounded memory).
+
+        Args:
+            file_path: Path to file to read
+            start_line: 1-indexed start line, inclusive (default: 1)
+            end_line: 1-indexed end line, EXCLUSIVE (default: start + max_lines)
+            max_lines: Maximum lines to return (default: 500, max: 2000)
+
+        Returns:
+            ToolResult with file contents and metadata
+
+        Line Semantics:
+            - start_line=100, end_line=200 returns lines 100-199 (100 lines)
+            - start_line and end_line are 1-indexed to match editor line numbers
+            - end_line is EXCLUSIVE (standard Python semantics)
+        """
+        try:
+            # Validate path security
+            try:
+                path = self._validate_path(file_path, must_exist=True)
+            except ValueError as e:
+                return ToolResult(
+                    tool_name=self.name,
+                    status=ToolStatus.ERROR,
+                    output=None,
+                    error=str(e)
+                )
+            except FileNotFoundError:
                 return ToolResult(
                     tool_name=self.name,
                     status=ToolStatus.ERROR,
@@ -37,14 +164,103 @@ class ReadFileTool(Tool):
                     error=f"Path is not a file: {file_path}"
                 )
 
-            with open(path, "r", encoding="utf-8") as f:
-                content = f.read()
+            # Determine bounds
+            start = max(1, start_line or 1)  # 1-indexed, minimum 1
+            effective_max = min(
+                max_lines or self.MAX_LINES_DEFAULT,
+                self.MAX_LINES_LIMIT
+            )
+
+            # Calculate end_line if not specified
+            if end_line is not None:
+                # User specified end_line - use it (exclusive)
+                end = end_line
+            else:
+                # Default: start + max_lines
+                end = start + effective_max
+
+            # STREAMING READ - bounded memory
+            # Only stores lines we need, stops early
+            collected_lines: List[str] = []
+            total_lines = 0
+            stopped_at_end = False
+
+            try:
+                with open(path, "r", encoding="utf-8", errors="replace") as f:
+                    for lineno, line in enumerate(f, start=1):
+                        total_lines = lineno
+
+                        # Skip lines before start
+                        if lineno < start:
+                            continue
+
+                        # Stop if we hit end_line (exclusive)
+                        if lineno >= end:
+                            stopped_at_end = True
+                            break
+
+                        # Stop if we have enough lines
+                        if len(collected_lines) >= effective_max:
+                            break
+
+                        # Format line with line number (cat -n style)
+                        line_content = line.rstrip('\n\r')
+
+                        # Truncate long lines
+                        if len(line_content) > self.MAX_LINE_LENGTH:
+                            line_content = line_content[:self.MAX_LINE_LENGTH] + "... [truncated]"
+
+                        # Format: 6-digit line number + tab + content
+                        collected_lines.append(f"{lineno:6}\t{line_content}")
+
+            except PermissionError:
+                return ToolResult(
+                    tool_name=self.name,
+                    status=ToolStatus.ERROR,
+                    output=None,
+                    error=f"Permission denied reading file: {file_path}"
+                )
+            except UnicodeDecodeError as e:
+                return ToolResult(
+                    tool_name=self.name,
+                    status=ToolStatus.ERROR,
+                    output=None,
+                    error=f"Encoding error reading file: {file_path} - {str(e)}"
+                )
+
+            # If we stopped early (not at end_line), count remaining lines
+            if not stopped_at_end and len(collected_lines) >= effective_max:
+                # We stopped due to max_lines, need to count rest of file
+                try:
+                    with open(path, "r", encoding="utf-8", errors="replace") as f:
+                        total_lines = sum(1 for _ in f)
+                except Exception:
+                    pass  # Keep the count we had
+
+            # Build output
+            content = "\n".join(collected_lines)
+
+            # Calculate actual end line returned
+            actual_start = start
+            actual_end = start + len(collected_lines)  # Exclusive
+            has_more = actual_end <= total_lines
+
+            # Add hint if there's more content
+            if has_more and len(collected_lines) > 0:
+                content += f"\n\n[Lines {actual_start}-{actual_end - 1} of {total_lines} | Continue: start_line={actual_end}, max_lines={self.MAX_LINES_LIMIT}]"
 
             return ToolResult(
                 tool_name=self.name,
                 status=ToolStatus.SUCCESS,
                 output=content,
-                metadata={"file_path": str(path), "size": len(content)}
+                metadata={
+                    "file_path": str(path),
+                    "total_lines": total_lines,
+                    "lines_returned": len(collected_lines),
+                    "start_line": actual_start,
+                    "end_line": actual_end,  # Exclusive
+                    "has_more": has_more
+                }
             )
 
         except Exception as e:
@@ -55,21 +271,9 @@ class ReadFileTool(Tool):
                 error=f"Failed to read file: {str(e)}"
             )
 
-    def _get_parameters(self) -> Dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "file_path": {
-                    "type": "string",
-                    "description": "Path to the file to read"
-                }
-            },
-            "required": ["file_path"]
-        }
 
-
-class WriteFileTool(Tool):
-    """Tool for writing files."""
+class WriteFileTool(FileOperationTool):
+    """Tool for writing files with security validation."""
 
     def __init__(self):
         super().__init__(
@@ -77,10 +281,30 @@ class WriteFileTool(Tool):
             description="Write content to a file (creates or overwrites)"
         )
 
+    def _get_parameters(self) -> Dict[str, Any]:
+        """Get parameter schema."""
+        return {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Path to file"},
+                "content": {"type": "string", "description": "Content to write"}
+            },
+            "required": ["file_path", "content"]
+        }
+
     def execute(self, file_path: str, content: str, **kwargs: Any) -> ToolResult:
         """Write content to file."""
         try:
-            path = Path(file_path)
+            # Validate path security (must_exist=False for new files)
+            try:
+                path = self._validate_path(file_path, must_exist=False)
+            except ValueError as e:
+                return ToolResult(
+                    tool_name=self.name,
+                    status=ToolStatus.ERROR,
+                    output=None,
+                    error=str(e)
+                )
 
             # Create parent directories if needed
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -103,25 +327,9 @@ class WriteFileTool(Tool):
                 error=f"Failed to write file: {str(e)}"
             )
 
-    def _get_parameters(self) -> Dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "file_path": {
-                    "type": "string",
-                    "description": "Path to the file to write"
-                },
-                "content": {
-                    "type": "string",
-                    "description": "Content to write to the file"
-                }
-            },
-            "required": ["file_path", "content"]
-        }
 
-
-class ListDirectoryTool(Tool):
-    """Tool for listing directory contents."""
+class ListDirectoryTool(FileOperationTool):
+    """Tool for listing directory contents with security validation."""
 
     def __init__(self):
         super().__init__(
@@ -129,12 +337,30 @@ class ListDirectoryTool(Tool):
             description="List contents of a directory with file details"
         )
 
+    def _get_parameters(self) -> Dict[str, Any]:
+        """Get parameter schema."""
+        return {
+            "type": "object",
+            "properties": {
+                "directory_path": {"type": "string", "description": "Path to directory"}
+            },
+            "required": ["directory_path"]
+        }
+
     def execute(self, directory_path: str, **kwargs: Any) -> ToolResult:
         """List directory contents."""
         try:
-            path = Path(directory_path)
-
-            if not path.exists():
+            # Validate path security
+            try:
+                path = self._validate_path(directory_path, must_exist=True)
+            except ValueError as e:
+                return ToolResult(
+                    tool_name=self.name,
+                    status=ToolStatus.ERROR,
+                    output=None,
+                    error=str(e)
+                )
+            except FileNotFoundError:
                 return ToolResult(
                     tool_name=self.name,
                     status=ToolStatus.ERROR,
@@ -177,27 +403,27 @@ class ListDirectoryTool(Tool):
                 error=f"Failed to list directory: {str(e)}"
             )
 
-    def _get_parameters(self) -> Dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "directory_path": {
-                    "type": "string",
-                    "description": "Path to the directory to list"
-                }
-            },
-            "required": ["directory_path"]
-        }
 
-
-class EditFileTool(Tool):
-    """Tool for editing files with find/replace."""
+class EditFileTool(FileOperationTool):
+    """Tool for editing files with find/replace and security validation."""
 
     def __init__(self):
         super().__init__(
             name="edit_file",
             description="Edit a file by replacing old text with new text"
         )
+
+    def _get_parameters(self) -> Dict[str, Any]:
+        """Get parameter schema."""
+        return {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Path to file"},
+                "old_text": {"type": "string", "description": "Text to find"},
+                "new_text": {"type": "string", "description": "Text to replace with"}
+            },
+            "required": ["file_path", "old_text", "new_text"]
+        }
 
     def execute(
         self,
@@ -208,9 +434,17 @@ class EditFileTool(Tool):
     ) -> ToolResult:
         """Edit file with find/replace."""
         try:
-            path = Path(file_path)
-
-            if not path.exists():
+            # Validate path security
+            try:
+                path = self._validate_path(file_path, must_exist=True)
+            except ValueError as e:
+                return ToolResult(
+                    tool_name=self.name,
+                    status=ToolStatus.ERROR,
+                    output=None,
+                    error=str(e)
+                )
+            except FileNotFoundError:
                 return ToolResult(
                     tool_name=self.name,
                     status=ToolStatus.ERROR,
@@ -256,29 +490,9 @@ class EditFileTool(Tool):
                 error=f"Failed to edit file: {str(e)}"
             )
 
-    def _get_parameters(self) -> Dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "file_path": {
-                    "type": "string",
-                    "description": "Path to the file to edit"
-                },
-                "old_text": {
-                    "type": "string",
-                    "description": "Text to find and replace"
-                },
-                "new_text": {
-                    "type": "string",
-                    "description": "New text to replace with"
-                }
-            },
-            "required": ["file_path", "old_text", "new_text"]
-        }
 
-
-class AppendToFileTool(Tool):
-    """Tool for appending content to files."""
+class AppendToFileTool(FileOperationTool):
+    """Tool for appending content to files with security validation."""
 
     def __init__(self):
         super().__init__(
@@ -286,30 +500,41 @@ class AppendToFileTool(Tool):
             description="Append content to an existing file (or create if doesn't exist)"
         )
 
+    def _get_parameters(self) -> Dict[str, Any]:
+        """Get parameter schema."""
+        return {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Path to file"},
+                "content": {"type": "string", "description": "Content to append"}
+            },
+            "required": ["file_path", "content"]
+        }
+
     def execute(self, file_path: str, content: str, **kwargs: Any) -> ToolResult:
-        """Append content to file.
-
-        Args:
-            file_path: Path to the file to append to
-            content: Content to append
-
-        Returns:
-            ToolResult with operation status
-        """
+        """Append content to file."""
         try:
-            path = Path(file_path)
+            # Validate path security (must_exist=False for new files)
+            try:
+                path = self._validate_path(file_path, must_exist=False)
+            except ValueError as e:
+                return ToolResult(
+                    tool_name=self.name,
+                    status=ToolStatus.ERROR,
+                    output=None,
+                    error=str(e)
+                )
 
             # Create parent directories if needed
             path.parent.mkdir(parents=True, exist_ok=True)
 
-            # Determine if we need a leading newline
+            # Determine if we need a leading newline (efficient: seek to end)
             needs_newline = False
-            if path.exists():
-                with open(path, "r", encoding="utf-8") as f:
-                    existing = f.read()
-                    # Add newline if file doesn't end with one
-                    if existing and not existing.endswith('\n'):
-                        needs_newline = True
+            if path.exists() and path.stat().st_size > 0:
+                with open(path, "rb") as f:
+                    f.seek(-1, 2)  # Seek to last byte
+                    last_byte = f.read(1)
+                    needs_newline = last_byte != b'\n'
 
             # Append content
             with open(path, "a", encoding="utf-8") as f:
@@ -317,10 +542,10 @@ class AppendToFileTool(Tool):
                     f.write('\n')
                 f.write(content)
 
-            # Get total file size after append
+            # Get total file stats (efficient line count)
             total_size = path.stat().st_size
             with open(path, "r", encoding="utf-8") as f:
-                total_lines = len(f.readlines())
+                total_lines = sum(1 for _ in f)
 
             return ToolResult(
                 tool_name=self.name,
@@ -342,31 +567,32 @@ class AppendToFileTool(Tool):
                 error=f"Failed to append to file: {str(e)}"
             )
 
-    def _get_parameters(self) -> Dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "file_path": {
-                    "type": "string",
-                    "description": "Path to the file to append to (creates if doesn't exist)"
-                },
-                "content": {
-                    "type": "string",
-                    "description": "Content to append to the file"
-                }
-            },
-            "required": ["file_path", "content"]
-        }
-
 
 class RunCommandTool(Tool):
-    """Tool for running shell commands safely."""
+    """
+    Tool for running shell commands safely.
+
+    Note: Does not inherit from FileOperationTool as it doesn't
+    operate on files directly. Security handled via command validation.
+    """
 
     def __init__(self):
         super().__init__(
             name="run_command",
             description="Execute a shell command and return its output"
         )
+
+    def _get_parameters(self) -> Dict[str, Any]:
+        """Get parameter schema."""
+        return {
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "description": "Shell command to execute"},
+                "working_directory": {"type": "string", "description": "Working directory"},
+                "timeout": {"type": "integer", "description": "Timeout in seconds"}
+            },
+            "required": ["command"]
+        }
 
     def execute(
         self,
@@ -375,16 +601,7 @@ class RunCommandTool(Tool):
         timeout: int = 30,
         **kwargs: Any
     ) -> ToolResult:
-        """Execute a shell command.
-
-        Args:
-            command: The shell command to execute
-            working_directory: Optional working directory (defaults to current directory)
-            timeout: Command timeout in seconds (default: 30)
-
-        Returns:
-            ToolResult with command output
-        """
+        """Execute a shell command."""
         try:
             # Validate inputs
             if not command or not command.strip():
@@ -417,15 +634,16 @@ class RunCommandTool(Tool):
 
             # Execute command
             # On Windows, use PowerShell instead of cmd.exe for better Unix compatibility
-            # (PowerShell has aliases for common Unix commands like pwd, ls, cat, etc.)
+            # Use explicit UTF-8 encoding with error replacement to avoid cp1252 decode errors
             if platform.system() == "Windows":
-                # Use PowerShell with the command
                 result = subprocess.run(
                     ["powershell", "-NoProfile", "-Command", command],
                     cwd=cwd,
                     capture_output=True,
                     text=True,
-                    timeout=timeout
+                    timeout=timeout,
+                    encoding='utf-8',
+                    errors='replace'  # Replace undecodable chars to prevent crashes
                 )
             else:
                 # On Unix-like systems, use the default shell
@@ -435,7 +653,9 @@ class RunCommandTool(Tool):
                     cwd=cwd,
                     capture_output=True,
                     text=True,
-                    timeout=timeout
+                    timeout=timeout,
+                    encoding='utf-8',
+                    errors='replace'
                 )
 
             # Prepare output
@@ -462,7 +682,6 @@ class RunCommandTool(Tool):
                     }
                 )
             else:
-                # Non-zero exit code - treat as error but include output
                 return ToolResult(
                     tool_name=self.name,
                     status=ToolStatus.ERROR,
@@ -489,24 +708,3 @@ class RunCommandTool(Tool):
                 output=None,
                 error=f"Failed to execute command: {str(e)}"
             )
-
-    def _get_parameters(self) -> Dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "command": {
-                    "type": "string",
-                    "description": "The shell command to execute"
-                },
-                "working_directory": {
-                    "type": "string",
-                    "description": "Optional working directory for command execution"
-                },
-                "timeout": {
-                    "type": "integer",
-                    "description": "Command timeout in seconds (default: 30)",
-                    "default": 30
-                }
-            },
-            "required": ["command"]
-        }

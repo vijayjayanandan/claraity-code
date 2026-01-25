@@ -183,6 +183,10 @@ class ContextBuilder:
         """
         Build complete context for LLM.
 
+        Conversation history is obtained from MemoryManager.get_context_for_llm(),
+        which uses MessageStore when configured (Option A: Single Source of Truth).
+        This provides unified handling for both new and resumed sessions.
+
         Args:
             user_query: User's query/request
             task_type: Type of task
@@ -258,7 +262,9 @@ class ContextBuilder:
         if rag_context:
             tokens['rag'] = self.optimizer.count_tokens(rag_context)
 
-        # 3. Get memory context
+        # 3. Get memory context from MemoryManager
+        # MemoryManager uses MessageStore when configured (Option A: Single Source of Truth)
+        # This provides unified handling for both new and resumed sessions
         memory_context = self.memory.get_context_for_llm(
             system_prompt="",  # We'll add system prompt separately
             include_episodic=True,
@@ -267,12 +273,16 @@ class ContextBuilder:
 
         # Count memory tokens by type
         for msg in memory_context:
-            if msg["role"] == "system":
+            if msg.get("role") == "system":
                 # System messages from memory are episodic summaries
-                tokens['episodic_memory'] += self.optimizer.count_tokens(msg["content"])
+                content = msg.get("content", "")
+                if isinstance(content, str):
+                    tokens['episodic_memory'] += self.optimizer.count_tokens(content)
             else:
-                # User/assistant messages are working memory
-                tokens['working_memory'] += self.optimizer.count_tokens(msg["content"])
+                # User/assistant/tool messages are working memory
+                content = msg.get("content", "")
+                if isinstance(content, str):
+                    tokens['working_memory'] += self.optimizer.count_tokens(content)
 
         # 4. Assemble final context
         context = []
@@ -496,6 +506,9 @@ class ContextBuilder:
         2. If over budget, triggers memory compaction
         3. Rebuilds and re-measures
         4. Logs warnings if still over budget after compaction
+
+        Conversation history is obtained from MemoryManager.get_context_for_llm(),
+        which uses MessageStore when configured (Option A: Single Source of Truth).
 
         Args:
             user_query: User's query/request

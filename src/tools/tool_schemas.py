@@ -13,13 +13,25 @@ from src.llm.base import ToolDefinition
 
 READ_FILE_TOOL = ToolDefinition(
     name="read_file",
-    description="Read the contents of a file from the filesystem. THIS IS YOUR PRIMARY TOOL for understanding any file - use it FIRST before analyze_code or get_file_outline. You are an LLM and can understand code better than static analyzers.",
+    description="Read file contents with streaming line-range support. For large files, use start_line/end_line/max_lines to read in chunks. Returns content with line numbers (cat -n format). THIS IS YOUR PRIMARY TOOL for understanding any file.",
     parameters={
         "type": "object",
         "properties": {
             "file_path": {
                 "type": "string",
                 "description": "Absolute or relative path to the file to read"
+            },
+            "start_line": {
+                "type": "integer",
+                "description": "Start line number (1-indexed, inclusive). Default: 1"
+            },
+            "end_line": {
+                "type": "integer",
+                "description": "End line number (1-indexed, EXCLUSIVE). Default: start_line + max_lines"
+            },
+            "max_lines": {
+                "type": "integer",
+                "description": "Maximum lines to return (default: 1000, limit: 2000 per read)."
             }
         },
         "required": ["file_path"]

@@ -42,7 +42,12 @@ DEFAULT_CONNECT_TIMEOUT = 10.0  # Time to establish connection
 DEFAULT_WRITE_TIMEOUT = 10.0   # Time to send request
 DEFAULT_POOL_TIMEOUT = 10.0    # Time to get connection from pool
 
-from .base import LLMBackend, LLMConfig, LLMResponse, StreamChunk, ToolDefinition, ToolCall
+from .base import (
+    LLMBackend, LLMConfig, LLMResponse, StreamChunk, ToolDefinition,
+    ProviderDelta, ToolCallDelta
+)
+# Use Session Model ToolCall as the canonical type
+from src.session.models.message import ToolCall, ToolCallFunction
 from .failure_handler import LLMFailureHandler
 
 
@@ -378,15 +383,18 @@ class OpenAIBackend(LLMBackend):
             if message.tool_calls:
                 tool_calls = []
                 for tc in message.tool_calls:
-                    # Parse arguments (they come as JSON string from API)
-                    # Use robust parsing to handle LLM-generated JSON errors
-                    arguments = self._parse_tool_arguments(tc.function.arguments, tc.function.name)
+                    # Parse arguments to validate/fix malformed JSON, then re-serialize
+                    # Session Model ToolCall expects arguments as JSON string
+                    parsed_args = self._parse_tool_arguments(tc.function.arguments, tc.function.name)
+                    args_json = json.dumps(parsed_args) if isinstance(parsed_args, dict) else str(parsed_args)
 
                     tool_calls.append(
                         ToolCall(
                             id=tc.id,
-                            name=tc.function.name,
-                            arguments=arguments  # Already a dict
+                            function=ToolCallFunction(
+                                name=tc.function.name,
+                                arguments=args_json
+                            )
                         )
                     )
 
@@ -560,17 +568,21 @@ class OpenAIBackend(LLMBackend):
                 for idx in sorted(tool_calls_accumulator.keys()):
                     tc_data = tool_calls_accumulator[idx]
 
-                    # Parse accumulated JSON arguments
-                    arguments = self._parse_tool_arguments(
+                    # Parse accumulated JSON arguments, then re-serialize
+                    # Session Model ToolCall expects arguments as JSON string
+                    parsed_args = self._parse_tool_arguments(
                         tc_data["arguments"],
                         tc_data["name"]
                     )
+                    args_json = json.dumps(parsed_args) if isinstance(parsed_args, dict) else str(parsed_args)
 
                     tool_calls.append(
                         ToolCall(
                             id=tc_data["id"],
-                            name=tc_data["name"],
-                            arguments=arguments
+                            function=ToolCallFunction(
+                                name=tc_data["name"],
+                                arguments=args_json
+                            )
                         )
                     )
 
@@ -778,17 +790,21 @@ class OpenAIBackend(LLMBackend):
                 for idx in sorted(tool_calls_accumulator.keys()):
                     tc_data = tool_calls_accumulator[idx]
 
-                    # Parse accumulated JSON arguments
-                    arguments = self._parse_tool_arguments(
+                    # Parse accumulated JSON arguments, then re-serialize
+                    # Session Model ToolCall expects arguments as JSON string
+                    parsed_args = self._parse_tool_arguments(
                         tc_data["arguments"],
                         tc_data["name"]
                     )
+                    args_json = json.dumps(parsed_args) if isinstance(parsed_args, dict) else str(parsed_args)
 
                     tool_calls.append(
                         ToolCall(
                             id=tc_data["id"],
-                            name=tc_data["name"],
-                            arguments=arguments
+                            function=ToolCallFunction(
+                                name=tc_data["name"],
+                                arguments=args_json
+                            )
                         )
                     )
 
@@ -841,6 +857,290 @@ class OpenAIBackend(LLMBackend):
             raise RuntimeError(
                 f"OpenAI async streaming tool calling error: {error_type}: {error_msg}"
             ) from e
+
+    # =========================================================================
+    # ProviderDelta Methods (Unified Persistence Architecture)
+    # =========================================================================
+
+    def generate_provider_deltas(
+        self,
+        messages: List[Dict[str, str]],
+        tools: Optional[List[ToolDefinition]] = None,
+        tool_choice: str = "auto",
+        stream_id: Optional[str] = None,
+        **kwargs: Any
+    ) -> Iterator[ProviderDelta]:
+        """
+        Generate streaming completion as ProviderDelta objects.
+
+        This is the canonical interface for the Unified Persistence Architecture.
+        Emits raw deltas that can be consumed by StreamingPipeline.
+
+        Args:
+            messages: List of message dicts with 'role' and 'content'
+            tools: Optional list of tools (function definitions)
+            tool_choice: "auto", "required", "none", or specific tool
+            stream_id: Optional stream ID (auto-generated if not provided)
+            **kwargs: Additional generation parameters
+
+        Yields:
+            ProviderDelta objects with text_delta, tool_call_delta, finish_reason, usage
+
+        Example:
+            >>> for delta in backend.generate_provider_deltas(messages, tools):
+            ...     message = pipeline.process_delta(delta)
+            ...     if message:
+            ...         print(f"Complete: {len(message.segments)} segments")
+        """
+        from src.session.models.base import generate_stream_id
+
+        self.validate_messages(messages)
+        sid = stream_id or generate_stream_id()
+
+        # Build parameters
+        params = {
+            "model": self.config.model_name,
+            "messages": messages,
+            "temperature": kwargs.get("temperature", self.config.temperature),
+            "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
+            "top_p": kwargs.get("top_p", self.config.top_p),
+            "stream": True,
+        }
+
+        # Add tools if provided
+        if tools:
+            params["tools"] = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.parameters
+                    }
+                }
+                for tool in tools
+            ]
+            params["tool_choice"] = tool_choice
+
+        # Add stream_options for usage tracking
+        if getattr(self.config, 'stream_usage', True):
+            params["stream_options"] = {"include_usage": True}
+
+        stream = None
+        try:
+            stream = self.client.chat.completions.create(**params)
+
+            # Track tool call accumulation by index
+            tool_call_ids: Dict[int, str] = {}
+            tool_call_names: Dict[int, str] = {}
+            finish_reason = None
+            usage_dict = None
+
+            try:
+                for chunk in stream:
+                    # Capture usage
+                    if hasattr(chunk, 'usage') and chunk.usage:
+                        usage_dict = {
+                            "input_tokens": chunk.usage.prompt_tokens,
+                            "output_tokens": chunk.usage.completion_tokens,
+                        }
+
+                    # Skip chunks with no choices
+                    if not chunk.choices or len(chunk.choices) == 0:
+                        continue
+
+                    delta = chunk.choices[0].delta
+                    finish_reason = chunk.choices[0].finish_reason
+
+                    # Emit text delta
+                    if delta.content:
+                        yield ProviderDelta(
+                            stream_id=sid,
+                            text_delta=delta.content,
+                        )
+
+                    # Emit tool call deltas
+                    if delta.tool_calls:
+                        for tc_delta in delta.tool_calls:
+                            idx = tc_delta.index
+
+                            # Track ID and name for this index
+                            if tc_delta.id:
+                                tool_call_ids[idx] = tc_delta.id
+                            if tc_delta.function and tc_delta.function.name:
+                                tool_call_names[idx] = tc_delta.function.name
+
+                            # Emit tool call delta
+                            yield ProviderDelta(
+                                stream_id=sid,
+                                tool_call_delta=ToolCallDelta(
+                                    index=idx,
+                                    id=tc_delta.id if tc_delta.id else None,
+                                    name=tc_delta.function.name if tc_delta.function and tc_delta.function.name else None,
+                                    arguments_delta=tc_delta.function.arguments if tc_delta.function and tc_delta.function.arguments else "",
+                                ),
+                            )
+
+            finally:
+                if stream is not None and hasattr(stream, 'close'):
+                    stream.close()
+
+            # Emit final delta with finish_reason and usage
+            yield ProviderDelta(
+                stream_id=sid,
+                finish_reason=finish_reason or "stop",
+                usage=usage_dict,
+            )
+
+        except Exception as e:
+            error_type = type(e).__name__
+            error_msg = str(e).strip() or repr(e)
+            logger.exception(
+                "openai_provider_delta_error",
+                error_type=error_type,
+                model=self.config.model_name,
+            )
+            raise RuntimeError(f"OpenAI provider delta error: {error_type}: {error_msg}") from e
+
+    async def generate_provider_deltas_async(
+        self,
+        messages: List[Dict[str, str]],
+        tools: Optional[List[ToolDefinition]] = None,
+        tool_choice: str = "auto",
+        stream_id: Optional[str] = None,
+        **kwargs: Any
+    ) -> AsyncIterator[ProviderDelta]:
+        """
+        Generate async streaming completion as ProviderDelta objects.
+
+        This is the async version of generate_provider_deltas() for use with
+        asyncio-based applications like the TUI.
+
+        Args:
+            messages: List of message dicts with 'role' and 'content'
+            tools: Optional list of tools (function definitions)
+            tool_choice: "auto", "required", "none", or specific tool
+            stream_id: Optional stream ID (auto-generated if not provided)
+            **kwargs: Additional generation parameters
+
+        Yields:
+            ProviderDelta objects with text_delta, tool_call_delta, finish_reason, usage
+
+        Example:
+            >>> async for delta in backend.generate_provider_deltas_async(messages, tools):
+            ...     message = pipeline.process_delta(delta)
+            ...     if message:
+            ...         print(f"Complete: {len(message.segments)} segments")
+        """
+        from src.session.models.base import generate_stream_id
+
+        self.validate_messages(messages)
+        sid = stream_id or generate_stream_id()
+
+        # Build parameters
+        params = {
+            "model": self.config.model_name,
+            "messages": messages,
+            "temperature": kwargs.get("temperature", self.config.temperature),
+            "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
+            "top_p": kwargs.get("top_p", self.config.top_p),
+            "stream": True,
+        }
+
+        # Add tools if provided
+        if tools:
+            params["tools"] = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.parameters
+                    }
+                }
+                for tool in tools
+            ]
+            params["tool_choice"] = tool_choice
+
+        # Add stream_options for usage tracking
+        if getattr(self.config, 'stream_usage', True):
+            params["stream_options"] = {"include_usage": True}
+
+        stream = None
+        try:
+            stream = await self.async_client.chat.completions.create(**params)
+
+            # Track tool call accumulation by index
+            tool_call_ids: Dict[int, str] = {}
+            tool_call_names: Dict[int, str] = {}
+            finish_reason = None
+            usage_dict = None
+
+            try:
+                async for chunk in stream:
+                    # Capture usage
+                    if hasattr(chunk, 'usage') and chunk.usage:
+                        usage_dict = {
+                            "input_tokens": chunk.usage.prompt_tokens,
+                            "output_tokens": chunk.usage.completion_tokens,
+                        }
+
+                    # Skip chunks with no choices
+                    if not chunk.choices or len(chunk.choices) == 0:
+                        continue
+
+                    delta = chunk.choices[0].delta
+                    finish_reason = chunk.choices[0].finish_reason
+
+                    # Emit text delta
+                    if delta.content:
+                        yield ProviderDelta(
+                            stream_id=sid,
+                            text_delta=delta.content,
+                        )
+
+                    # Emit tool call deltas
+                    if delta.tool_calls:
+                        for tc_delta in delta.tool_calls:
+                            idx = tc_delta.index
+
+                            # Track ID and name for this index
+                            if tc_delta.id:
+                                tool_call_ids[idx] = tc_delta.id
+                            if tc_delta.function and tc_delta.function.name:
+                                tool_call_names[idx] = tc_delta.function.name
+
+                            # Emit tool call delta
+                            yield ProviderDelta(
+                                stream_id=sid,
+                                tool_call_delta=ToolCallDelta(
+                                    index=idx,
+                                    id=tc_delta.id if tc_delta.id else None,
+                                    name=tc_delta.function.name if tc_delta.function and tc_delta.function.name else None,
+                                    arguments_delta=tc_delta.function.arguments if tc_delta.function and tc_delta.function.arguments else "",
+                                ),
+                            )
+
+            finally:
+                if stream is not None and hasattr(stream, 'close'):
+                    await stream.close()
+
+            # Emit final delta with finish_reason and usage
+            yield ProviderDelta(
+                stream_id=sid,
+                finish_reason=finish_reason or "stop",
+                usage=usage_dict,
+            )
+
+        except Exception as e:
+            error_type = type(e).__name__
+            error_msg = str(e).strip() or repr(e)
+            logger.exception(
+                "openai_async_provider_delta_error",
+                error_type=error_type,
+                model=self.config.model_name,
+            )
+            raise RuntimeError(f"OpenAI async provider delta error: {error_type}: {error_msg}") from e
 
     def count_tokens(self, text: str) -> int:
         """

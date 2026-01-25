@@ -1,6 +1,6 @@
 """Memory Manager - Orchestrates all memory layers."""
 
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, TYPE_CHECKING
 from pathlib import Path
 from datetime import datetime
 import uuid
@@ -24,6 +24,14 @@ from .models import (
     TaskContext,
     MemoryType,
 )
+
+from src.core.render_meta import RenderMetaRegistry
+
+if TYPE_CHECKING:
+    from src.session.store.memory_store import MessageStore
+    from src.session.models.message import Message as SessionMessage
+    from src.core.streaming import StreamingPipeline
+    from src.llm.base import ProviderDelta
 
 
 class MemoryManager:
@@ -108,24 +116,121 @@ class MemoryManager:
         )
         self._current_turn_id = 0  # Stable turn ID incremented per user message
 
-    def add_user_message(
-        self, content: str, metadata: Optional[Dict] = None
+        # MessageStore integration (Option A: Single Source of Truth)
+        # When set, this becomes the primary source for conversation history
+        self._message_store: Optional["MessageStore"] = None
+        self._message_store_session_id: Optional[str] = None
+        self._last_parent_uuid: Optional[str] = None  # Track threading for new messages
+
+        # StreamingPipeline (Unified Persistence Architecture)
+        # Owned by MemoryManager - the single canonical parser for LLM deltas
+        self._streaming_pipeline: Optional["StreamingPipeline"] = None
+
+        # Ephemeral render metadata registry (session-scoped)
+        # Agent writes approval policy when tool name becomes known during streaming.
+        # TUI queries when rendering tool cards. NOT persisted to JSONL.
+        self._render_meta = RenderMetaRegistry()
+
+    def set_message_store(
+        self,
+        store: "MessageStore",
+        session_id: str,
     ) -> None:
         """
-        Add user message to working memory.
+        Set MessageStore as the primary source of truth for conversation history.
+
+        When set, all conversation context will come from MessageStore.get_llm_context()
+        instead of WorkingMemory. New messages will be added to MessageStore.
+
+        This enables unified handling of both new and resumed sessions:
+        - New sessions: MessageStore is created, set here, populated as conversation progresses
+        - Resumed sessions: JSONL is loaded into MessageStore via SessionHydrator, set here
+
+        Args:
+            store: The MessageStore instance (may contain hydrated messages)
+            session_id: Session ID for new messages
+
+        Example:
+            # For resumed sessions:
+            hydrator = SessionHydrator()
+            result = hydrator.hydrate(jsonl_path)
+            memory_manager.set_message_store(result.store, session_id)
+
+            # For new sessions:
+            store = MessageStore()
+            memory_manager.set_message_store(store, session_id)
+        """
+        self._message_store = store
+        self._message_store_session_id = session_id
+
+        # Set last_parent_uuid from last message in store (for threading new messages)
+        messages = store.get_ordered_messages()
+        if messages:
+            self._last_parent_uuid = messages[-1].uuid
+        else:
+            self._last_parent_uuid = None
+
+    @property
+    def has_message_store(self) -> bool:
+        """Check if MessageStore is configured."""
+        return self._message_store is not None
+
+    @property
+    def message_store(self) -> Optional["MessageStore"]:
+        """Get the MessageStore if configured."""
+        return self._message_store
+
+    @property
+    def render_meta(self) -> RenderMetaRegistry:
+        """Get the ephemeral render metadata registry.
+
+        Agent writes approval policy when tool name becomes known.
+        TUI queries when rendering tool cards.
+        """
+        return self._render_meta
+
+    def add_user_message(
+        self, content: str, metadata: Optional[Dict] = None
+    ) -> Optional["SessionMessage"]:
+        """
+        Add user message to memory.
+
+        When MessageStore is configured, adds to MessageStore (single source of truth).
+        Also adds to WorkingMemory for backward compatibility and token counting.
 
         Args:
             content: Message content
             metadata: Optional metadata
+
+        Returns:
+            SessionMessage if MessageStore is configured, None otherwise
         """
         # Increment turn_id for each user message (stable turn tracking)
         self._current_turn_id += 1
 
+        session_message: Optional["SessionMessage"] = None
+
+        # Add to MessageStore if configured (Option A: Single Source of Truth)
+        if self._message_store is not None and self._message_store_session_id is not None:
+            from src.session.models.message import Message as SessionMessage
+
+            session_message = SessionMessage.create_user(
+                content=content,
+                session_id=self._message_store_session_id,
+                parent_uuid=self._last_parent_uuid,
+                seq=self._message_store.next_seq(),
+            )
+            self._message_store.add_message(session_message)
+            self._last_parent_uuid = session_message.uuid
+
+        # Also add to WorkingMemory for backward compatibility and token counting
         self.working_memory.add_message(
             role=MessageRole.USER,
             content=content,
             metadata=metadata,
         )
+
+        return session_message
 
     @property
     def current_turn_id(self) -> int:
@@ -137,15 +242,58 @@ class MemoryManager:
         content: str,
         tool_calls: Optional[List[Dict]] = None,
         metadata: Optional[Dict] = None,
-    ) -> None:
+        stream_id: Optional[str] = None,
+        stop_reason: Optional[str] = None,
+    ) -> Optional["SessionMessage"]:
         """
         Add assistant message and create conversation turn.
 
+        When MessageStore is configured, adds to MessageStore (single source of truth).
+        Also adds to WorkingMemory for backward compatibility and token counting.
+
         Args:
             content: Message content
-            tool_calls: Optional tool calls made
+            tool_calls: Optional tool calls made (OpenAI format dicts)
             metadata: Optional metadata
+            stream_id: Optional stream ID for streaming message collapse
+            stop_reason: Optional stop reason (e.g., "complete", "tool_use")
+
+        Returns:
+            SessionMessage if MessageStore is configured, None otherwise
         """
+        session_message: Optional["SessionMessage"] = None
+
+        # Add to MessageStore if configured (Option A: Single Source of Truth)
+        if self._message_store is not None and self._message_store_session_id is not None:
+            from src.session.models.message import Message as SessionMessage, ToolCall, ToolCallFunction
+
+            # Convert tool_calls dicts to ToolCall objects
+            session_tool_calls = []
+            if tool_calls:
+                for tc in tool_calls:
+                    function_data = tc.get("function", {})
+                    session_tool_calls.append(ToolCall(
+                        id=tc.get("id", ""),
+                        function=ToolCallFunction(
+                            name=function_data.get("name", ""),
+                            arguments=function_data.get("arguments", "{}")
+                        ),
+                        type=tc.get("type", "function")
+                    ))
+
+            session_message = SessionMessage.create_assistant(
+                content=content,
+                session_id=self._message_store_session_id,
+                parent_uuid=self._last_parent_uuid,
+                seq=self._message_store.next_seq(),
+                tool_calls=session_tool_calls if session_tool_calls else None,
+                stream_id=stream_id,
+                stop_reason=stop_reason,
+            )
+            self._message_store.add_message(session_message)
+            self._last_parent_uuid = session_message.uuid
+
+        # Also add to WorkingMemory for backward compatibility and token counting
         self.working_memory.add_message(
             role=MessageRole.ASSISTANT,
             content=content,
@@ -174,6 +322,188 @@ class MemoryManager:
                 )
 
                 self.episodic_memory.add_turn(turn)
+
+        return session_message
+
+    def add_tool_result(
+        self,
+        tool_call_id: str,
+        content: str,
+        tool_name: Optional[str] = None,
+        status: str = "success",
+        duration_ms: Optional[int] = None,
+        exit_code: Optional[int] = None,
+    ) -> Optional["SessionMessage"]:
+        """
+        Add tool result message to MessageStore.
+
+        This creates a proper tool result message that matches the tool_call_id
+        from the assistant's tool call. Required for valid LLM context.
+
+        Args:
+            tool_call_id: ID of the tool call this result responds to
+            content: Tool output content
+            tool_name: Optional tool name (for logging/display)
+            status: Tool execution status ("success", "error", "timeout")
+            duration_ms: Optional execution duration in milliseconds
+            exit_code: Optional exit code (for command tools)
+
+        Returns:
+            SessionMessage if MessageStore is configured, None otherwise
+        """
+        session_message: Optional["SessionMessage"] = None
+
+        if self._message_store is not None and self._message_store_session_id is not None:
+            from src.session.models.message import Message as SessionMessage
+
+            session_message = SessionMessage.create_tool(
+                tool_call_id=tool_call_id,
+                content=content,
+                session_id=self._message_store_session_id,
+                parent_uuid=self._last_parent_uuid,
+                seq=self._message_store.next_seq(),
+                status=status,
+                duration_ms=duration_ms,
+                exit_code=exit_code,
+            )
+            self._message_store.add_message(session_message)
+            self._last_parent_uuid = session_message.uuid
+
+        return session_message
+
+    # =========================================================================
+    # Streaming Pipeline (Unified Persistence Architecture)
+    # =========================================================================
+
+    def start_assistant_stream(
+        self,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+    ) -> None:
+        """
+        Initialize streaming pipeline for new assistant message.
+
+        Call this before processing provider deltas for a new assistant response.
+        The pipeline will accumulate deltas and produce a finalized Message
+        when the stream completes.
+
+        Args:
+            provider: Provider name (e.g., "openai", "anthropic")
+            model: Model name
+
+        Example:
+            >>> memory.start_assistant_stream(provider="openai", model="gpt-4")
+            >>> for delta in llm_stream:
+            ...     message = memory.process_provider_delta(delta)
+            ...     if message:
+            ...         print(f"Stream complete: {len(message.segments)} segments")
+        """
+        from src.core.streaming import StreamingPipeline
+
+        if self._message_store is None or self._message_store_session_id is None:
+            raise RuntimeError(
+                "MessageStore not configured. Call set_message_store() first."
+            )
+
+        self._streaming_pipeline = StreamingPipeline(
+            session_id=self._message_store_session_id,
+            parent_uuid=self._last_parent_uuid,
+            provider=provider,
+            model=model,
+        )
+
+    def process_provider_delta(
+        self,
+        delta: "ProviderDelta",
+    ) -> Optional["SessionMessage"]:
+        """
+        Process a provider delta through the canonical streaming pipeline.
+
+        This is the SINGLE entry point for processing LLM streaming responses.
+        The pipeline handles all structural parsing (code fences, tool calls,
+        thinking blocks) and produces fully-parsed segments.
+
+        When the stream finalizes (delta.finish_reason is set), the complete
+        Message is written to MessageStore and returned.
+
+        Args:
+            delta: ProviderDelta from provider adapter
+
+        Returns:
+            Finalized SessionMessage when stream completes, None during streaming.
+
+        Raises:
+            RuntimeError: If start_assistant_stream() wasn't called first.
+
+        Example:
+            >>> memory.start_assistant_stream()
+            >>> for delta in llm_stream:
+            ...     message = memory.process_provider_delta(delta)
+            ...     if message:
+            ...         # Stream complete - message has segments
+            ...         for seg in message.segments:
+            ...             print(f"Segment: {type(seg).__name__}")
+        """
+        if self._streaming_pipeline is None:
+            raise RuntimeError(
+                "No active stream. Call start_assistant_stream() first."
+            )
+
+        if self._message_store is None:
+            raise RuntimeError(
+                "MessageStore not configured. Call set_message_store() first."
+            )
+
+        # Process delta through canonical pipeline
+        message = self._streaming_pipeline.process_delta(delta)
+
+        if message is not None:
+            # Stream finalized - write to MessageStore (SINGLE WRITER)
+            message.meta.seq = self._message_store.next_seq()
+            self._message_store.add_message(message)
+            self._last_parent_uuid = message.uuid
+
+            # Reset pipeline for next stream
+            self._streaming_pipeline = None
+
+            # Also add to WorkingMemory for backward compatibility
+            self.working_memory.add_message(
+                role=MessageRole.ASSISTANT,
+                content=message.content or "",
+                metadata=None,
+            )
+
+            return message
+
+        return None
+
+    def get_streaming_state(self) -> Optional["SessionMessage"]:
+        """
+        Get current in-flight message state for live UI updates.
+
+        This returns the current accumulated state of the streaming message
+        without finalizing it. Use this for live UI rendering during streaming.
+
+        Returns:
+            Current Message state (not finalized), or None if not streaming.
+
+        Example:
+            >>> memory.start_assistant_stream()
+            >>> # During streaming, get current state for UI
+            >>> current = memory.get_streaming_state()
+            >>> if current:
+            ...     for seg in current.segments:
+            ...         render_segment(seg)
+        """
+        if self._streaming_pipeline is None:
+            return None
+
+        return self._streaming_pipeline.get_current_state()
+
+    @property
+    def is_streaming(self) -> bool:
+        """Check if currently processing an assistant stream."""
+        return self._streaming_pipeline is not None
 
     def add_tool_observation(
         self,
@@ -342,15 +672,23 @@ class MemoryManager:
         include_episodic: bool = True,
         include_semantic_query: Optional[str] = None,
         include_file_memories: bool = True,
+        max_context_messages: Optional[int] = None,
     ) -> List[Dict[str, str]]:
         """
         Build complete context for LLM from all memory layers.
+
+        When MessageStore is configured (Option A), conversation history comes from
+        MessageStore.get_llm_context() instead of WorkingMemory. This provides:
+        - Unified handling for both new and resumed sessions
+        - Full message fidelity (tool_calls, tool_call_id preserved)
+        - Proper streaming collapse and compaction awareness
 
         Args:
             system_prompt: System prompt to include
             include_episodic: Whether to include episodic memory summary
             include_semantic_query: Optional query to retrieve from semantic memory
             include_file_memories: Whether to include file-based memories (default: True)
+            max_context_messages: Optional limit on conversation messages
 
         Returns:
             List of message dictionaries for LLM
@@ -370,7 +708,8 @@ class MemoryManager:
             )
 
         # 3. Episodic memory summary (if requested)
-        if include_episodic and self.episodic_memory.conversation_turns:
+        # Skip if using MessageStore (it has its own compaction handling)
+        if include_episodic and self._message_store is None and self.episodic_memory.conversation_turns:
             episodic_summary = self.episodic_memory.get_context_summary()
             if episodic_summary:
                 context.append(
@@ -396,9 +735,35 @@ class MemoryManager:
                     }
                 )
 
-        # 5. Working memory (current conversation)
-        working_context = self.working_memory.get_context_for_llm()
-        context.extend(working_context)
+        # 5. Conversation history
+        # Option A: Use MessageStore if configured (single source of truth)
+        if self._message_store is not None:
+            # Get LLM-ready context from MessageStore
+            # This handles compaction, streaming collapse, and proper message format
+            conversation_context = self._message_store.get_llm_context(
+                max_messages=max_context_messages
+            )
+
+            # Debug: Log tool messages being retrieved
+            tool_msgs = [m for m in conversation_context if m.get("role") == "tool"]
+            if tool_msgs:
+                from src.observability import get_logger
+                logger = get_logger("memory")
+                logger.warning(
+                    f"[CONTEXT_BUILD] Retrieved {len(tool_msgs)} tool messages from MessageStore: "
+                    f"{[m.get('tool_call_id') for m in tool_msgs]}"
+                )
+
+            # Filter out system messages (we have our own system prompt)
+            conversation_context = [
+                msg for msg in conversation_context
+                if msg.get("role") != "system"
+            ]
+            context.extend(conversation_context)
+        else:
+            # Fallback: Use WorkingMemory (legacy path)
+            working_context = self.working_memory.get_context_for_llm()
+            context.extend(working_context)
 
         return context
 
@@ -667,10 +1032,14 @@ class MemoryManager:
         self.episodic_memory.clear()
 
     def clear_all(self) -> None:
-        """Clear all memory layers."""
+        """Clear all memory layers and ephemeral state."""
         self.working_memory.clear()
         self.episodic_memory.clear()
         self.semantic_memory.clear()
+        # Clear ephemeral session state
+        self._render_meta.clear()
+        if self._message_store:
+            self._message_store.clear_tool_state()
 
     def load_file_memories(self, starting_dir: Optional[Path] = None) -> str:
         """

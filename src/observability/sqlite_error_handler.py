@@ -3,15 +3,25 @@ Custom logging.Handler for SQLite error persistence.
 
 Features:
 - Only handles ERROR+ or records with exc_info
-- Extracts structured fields from structlog _structlog_event_dict
+- Extracts structured fields from record.msg dict (set by wrap_for_formatter)
 - Internal queue to prevent blocking QueueListener thread
 - Non-recursive: failures go to sys.__stderr__, never back through logging
+
+Integration with structlog:
+- structlog.configure() uses ProcessorFormatter.wrap_for_formatter as final processor
+- This sets record.msg to the event_dict (as a dict, not JSON string)
+- SQLiteErrorHandler extracts structured fields directly from record.msg
 
 Engineering Principles:
 - No emojis in code (Windows cp1252 compatibility)
 - Non-blocking with internal queue
 - Bounded queue to prevent memory exhaustion
 - No recursion: insert failures write to sys.__stderr__ only
+
+Thread Safety:
+- emit() uses contextvars for re-entry guard (works with async coroutines)
+- Writer thread has exclusive access to ErrorStore
+- Module-level atexit registration prevents duplicate handlers
 """
 
 import atexit
@@ -20,9 +30,35 @@ import queue
 import sys
 import threading
 import traceback
-from typing import Any, Dict, Optional
+from contextvars import ContextVar
+from typing import Any, Dict, Optional, Set
 
-from .error_store import ErrorStore, ErrorCategory, get_error_store
+from .error_store import ErrorStore, ErrorCategory, get_error_store, MAX_TRACEBACK_LENGTH
+
+# =============================================================================
+# CONSTANTS
+# =============================================================================
+
+# Maximum queue size for pending error records
+ERROR_QUEUE_SIZE = 1000
+
+# Timeout for writer thread to wait for queue items (seconds)
+WRITER_QUEUE_TIMEOUT = 1.0
+
+# Timeout for writer thread to join on shutdown (seconds)
+WRITER_SHUTDOWN_TIMEOUT = 5.0
+
+# =============================================================================
+# MODULE-LEVEL STATE (for atexit deduplication)
+# =============================================================================
+
+# Track registered handler instances for atexit cleanup
+_registered_handlers: Set["SQLiteErrorHandler"] = set()
+_atexit_registered: bool = False
+_atexit_lock = threading.Lock()
+
+# Re-entry guard using contextvars (works with async coroutines)
+_in_emit: ContextVar[bool] = ContextVar('sqlite_handler_in_emit', default=False)
 
 
 class SQLiteErrorHandler(logging.Handler):
@@ -35,12 +71,18 @@ class SQLiteErrorHandler(logging.Handler):
 
     Uses an internal queue to prevent blocking the QueueListener thread.
     All failures write to sys.__stderr__ to prevent recursion.
+
+    Thread Safety:
+    - emit() is safe to call from multiple threads/coroutines
+    - Re-entry guard uses contextvars (works with async)
+    - Writer thread has exclusive access to ErrorStore
+    - Module-level atexit handler prevents duplicate registration
     """
 
     def __init__(
         self,
         db_path: str = ".clarity/metrics.db",
-        queue_size: int = 1000,
+        queue_size: int = ERROR_QUEUE_SIZE,
     ):
         """
         Initialize SQLite error handler.
@@ -48,14 +90,16 @@ class SQLiteErrorHandler(logging.Handler):
         Args:
             db_path: Path to SQLite database
             queue_size: Max queue size (bounded to prevent memory exhaustion)
+
+        Thread Safety:
+            Safe to create multiple instances, but atexit cleanup is shared.
         """
         super().__init__()
 
         self.db_path = db_path
         self._queue: queue.Queue = queue.Queue(maxsize=queue_size)
         self._shutdown = threading.Event()
-        self._error_store: Optional[ErrorStore] = None
-        self._in_emit = threading.local()  # Re-entry guard
+        self._closed = False
 
         # Start writer thread
         self._writer_thread = threading.Thread(
@@ -65,14 +109,36 @@ class SQLiteErrorHandler(logging.Handler):
         )
         self._writer_thread.start()
 
-        # Register shutdown handler
-        atexit.register(self._shutdown_handler)
+        # Register for module-level atexit cleanup (prevents duplicate registration)
+        self._register_for_atexit()
+
+    def _register_for_atexit(self) -> None:
+        """
+        Register this handler for atexit cleanup.
+
+        Uses module-level registration to prevent duplicate atexit handlers
+        when multiple SQLiteErrorHandler instances are created.
+        """
+        global _atexit_registered, _registered_handlers
+
+        with _atexit_lock:
+            _registered_handlers.add(self)
+
+            if not _atexit_registered:
+                atexit.register(_module_shutdown_handler)
+                _atexit_registered = True
 
     def _get_error_store(self) -> ErrorStore:
-        """Lazy initialization of error store."""
-        if self._error_store is None:
-            self._error_store = ErrorStore(self.db_path)
-        return self._error_store
+        """
+        Get error store instance.
+
+        Uses the global singleton from get_error_store() which is thread-safe.
+        This ensures all handlers share the same ErrorStore instance.
+
+        Returns:
+            Thread-safe ErrorStore singleton
+        """
+        return get_error_store()
 
     def _safe_stderr(self, message: str) -> None:
         """
@@ -89,8 +155,8 @@ class SQLiteErrorHandler(logging.Handler):
         """Background thread that writes errors to SQLite."""
         while not self._shutdown.is_set():
             try:
-                # Block for up to 1 second waiting for items
-                record_data = self._queue.get(timeout=1.0)
+                # Block for up to WRITER_QUEUE_TIMEOUT waiting for items
+                record_data = self._queue.get(timeout=WRITER_QUEUE_TIMEOUT)
 
                 if record_data is None:
                     # Shutdown signal
@@ -115,6 +181,10 @@ class SQLiteErrorHandler(logging.Handler):
 
     def _shutdown_handler(self):
         """Graceful shutdown - flush remaining items."""
+        if self._closed:
+            return  # Already shut down
+        self._closed = True
+
         self._shutdown.set()
 
         # Signal writer thread to stop
@@ -124,7 +194,11 @@ class SQLiteErrorHandler(logging.Handler):
             pass
 
         # Wait for writer thread to finish (with timeout)
-        self._writer_thread.join(timeout=5.0)
+        self._writer_thread.join(timeout=WRITER_SHUTDOWN_TIMEOUT)
+
+        # Unregister from module-level tracking
+        with _atexit_lock:
+            _registered_handlers.discard(self)
 
     def emit(self, record: logging.LogRecord):
         """
@@ -133,20 +207,25 @@ class SQLiteErrorHandler(logging.Handler):
         Only processes ERROR+ or records with exc_info.
         Non-recursive: all failures go to sys.__stderr__.
 
+        Thread Safety:
+            Uses contextvars for re-entry guard, safe for both threads and
+            async coroutines. Multiple coroutines on the same thread each
+            have their own guard state.
+
         Args:
             record: Log record to process
         """
-        # Re-entry guard (per-thread)
-        if getattr(self._in_emit, 'active', False):
+        # Re-entry guard using contextvars (works with async coroutines)
+        if _in_emit.get():
             return
 
         # Filter: only errors or records with exceptions
         if record.levelno < logging.ERROR and not record.exc_info:
             return
 
+        # Set re-entry guard and save token for reset
+        token = _in_emit.set(True)
         try:
-            self._in_emit.active = True
-
             # Extract data from record
             record_data = self._extract_record_data(record)
 
@@ -161,13 +240,16 @@ class SQLiteErrorHandler(logging.Handler):
             # Non-recursive: don't call handleError which could log
             self._safe_stderr(f"Error in emit: {e}")
         finally:
-            self._in_emit.active = False
+            # Reset re-entry guard to previous state
+            _in_emit.reset(token)
 
     def _extract_record_data(self, record: logging.LogRecord) -> Dict[str, Any]:
         """
         Extract structured data from log record.
 
-        Prioritizes structlog _structlog_event_dict for consistent field extraction.
+        With structlog's ProcessorFormatter.wrap_for_formatter(), record.msg
+        is a dict containing the event_dict. For non-structlog stdlib logs,
+        record.msg is a plain string.
 
         Args:
             record: Log record
@@ -179,19 +261,21 @@ class SQLiteErrorHandler(logging.Handler):
         data = {
             'level': record.levelname,
             'error_type': 'LogRecord',
-            'message': record.getMessage(),
+            'message': '',
             'component': record.name,
             'category': ErrorCategory.UNEXPECTED,
         }
 
         # =====================================================================
-        # Extract from structlog _structlog_event_dict (primary source)
-        # This is set by our add_structlog_context processor
+        # Extract from record.msg (structlog wrap_for_formatter sets this as dict)
         # =====================================================================
-        if hasattr(record, '_structlog_event_dict') and isinstance(record._structlog_event_dict, dict):
-            event_dict = record._structlog_event_dict
+        if isinstance(record.msg, dict):
+            event_dict = record.msg.copy()
+            # Remove internal structlog metadata
+            event_dict.pop('_record', None)
+            event_dict.pop('_from_structlog', None)
 
-            # Event name
+            # Event name -> message
             if 'event' in event_dict:
                 data['message'] = event_dict['event']
 
@@ -213,7 +297,7 @@ class SQLiteErrorHandler(logging.Handler):
                 if field in event_dict:
                     data[field] = event_dict[field]
 
-            # Timeout debugging fields (standardized to elapsed_ms)
+            # Timeout debugging fields
             for field in ('elapsed_ms', 'timeout_read_s', 'timeout_write_s',
                           'timeout_connect_s', 'timeout_pool_s', 'retry_attempt', 'retry_max',
                           'root_cause_type', 'root_cause_message'):
@@ -233,37 +317,9 @@ class SQLiteErrorHandler(logging.Handler):
             if 'exception' in event_dict:
                 data['traceback'] = event_dict['exception']
 
-        # =====================================================================
-        # Fallback: legacy extra.event_dict pattern (for backwards compat)
-        # =====================================================================
-        elif hasattr(record, 'event_dict') and isinstance(record.event_dict, dict):
-            event_dict = record.event_dict
-
-            data['category'] = event_dict.get('category', ErrorCategory.UNEXPECTED)
-            data['error_type'] = event_dict.get('error_type', data['error_type'])
-            data['message'] = event_dict.get('event', data['message'])
-
-            # Context fields
-            for field in ('run_id', 'session_id', 'stream_id', 'request_id', 'operation'):
-                if field in event_dict:
-                    data[field] = event_dict[field]
-
-            # LLM fields
-            for field in ('model', 'backend', 'payload_bytes', 'prompt_tokens', 'completion_tokens'):
-                if field in event_dict:
-                    data[field] = event_dict[field]
-
-            # Tool fields
-            for field in ('tool_name', 'tool_timeout_s'):
-                if field in event_dict:
-                    data[field] = event_dict[field]
-
-            # Timing (standardized to elapsed_ms)
-            if 'elapsed_ms' in event_dict:
-                data['elapsed_ms'] = event_dict['elapsed_ms']
-
-            if 'traceback' in event_dict:
-                data['traceback'] = event_dict['traceback']
+        else:
+            # Plain string message (non-structlog stdlib logs)
+            data['message'] = record.getMessage()
 
         # =====================================================================
         # Add exception info if present (from exc_info)
@@ -272,15 +328,17 @@ class SQLiteErrorHandler(logging.Handler):
             exc_type, exc_value, exc_tb = record.exc_info
             if exc_type:
                 data['error_type'] = exc_type.__name__
-            if exc_value:
-                # Only override message if we don't have a better one
-                if data['message'] == record.getMessage():
-                    data['message'] = str(exc_value) or data['message']
+            if exc_value and not data['message']:
+                data['message'] = str(exc_value)
             if exc_tb:
-                data['traceback'] = ''.join(traceback.format_exception(exc_type, exc_value, exc_tb))[:32768]
+                data['traceback'] = ''.join(traceback.format_exception(exc_type, exc_value, exc_tb))[:MAX_TRACEBACK_LENGTH]
 
             # Classify exception type
             data['category'] = self._classify_exception(exc_type, exc_value, data.get('category'))
+
+        # Ensure message is not empty
+        if not data['message']:
+            data['message'] = f"Error from {record.name}"
 
         return data
 
@@ -330,3 +388,26 @@ class SQLiteErrorHandler(logging.Handler):
         """Close the handler and flush remaining items."""
         self._shutdown_handler()
         super().close()
+
+
+# =============================================================================
+# MODULE-LEVEL SHUTDOWN HANDLER
+# =============================================================================
+
+def _module_shutdown_handler() -> None:
+    """
+    Module-level atexit handler that shuts down all registered handlers.
+
+    This ensures proper cleanup even if multiple SQLiteErrorHandler instances
+    were created. Only registered once via atexit, regardless of instance count.
+    """
+    # Take a copy to avoid modification during iteration
+    with _atexit_lock:
+        handlers = list(_registered_handlers)
+
+    for handler in handlers:
+        try:
+            handler._shutdown_handler()
+        except Exception:
+            # Ignore errors during shutdown - we're exiting anyway
+            pass

@@ -1401,4 +1401,317 @@ tests/ui/
 
 ---
 
+## 11. SESSION PERSISTENCE INTEGRATION POINTS
+
+This section documents the integration points for adding session persistence to the TUI, enabling conversation resume across restarts.
+
+### 11.1 Current State Tracking Summary
+
+The TUI currently tracks state at multiple levels without persistence:
+
+| Component | State | Current Storage | Persistence Target |
+|-----------|-------|-----------------|-------------------|
+| `CodingAgentApp` | `_current_message`, `_tool_cards` | In-memory | Session JSONL |
+| `MessageWidget` | `_blocks`, role, content | Widget tree | Session JSONL |
+| `UIProtocol` | `_auto_approve`, `_pending_approvals` | In-memory | Session metadata |
+| `CodingAgent.memory` | Conversation history | `MemoryManager` | Session JSONL |
+| `CodingAgent.todo_state` | Task list | Dict | Session JSONL |
+
+### 11.2 Integration Architecture
+
+```
++-------------------------------------------------------------------+
+|                       Session Persistence                         |
++-------------------------------------------------------------------+
+|                                                                   |
+|  +---------------------+                                          |
+|  |  SessionManager     |  - Lifecycle: create/resume/close        |
+|  |  (session/manager/) |  - Owns store + writer                   |
+|  +----------+----------+                                          |
+|             |                                                     |
+|  +----------v----------+      +-------------------+               |
+|  |   MessageStore      |<---->|  SessionWriter    |               |
+|  |   (In-Memory)       |      |  (JSONL Output)   |               |
+|  +----------+----------+      +-------------------+               |
+|             |                                                     |
+|             | Events trigger writes                               |
+|             |                                                     |
++-------------------------------------------------------------------+
+                              ^
+                              | Hook into
++-----------------------------+-----------------------------+
+|                    CodingAgentApp                         |
+|  - _handle_event() processes UIEvents                     |
+|  - Mount MessageWidget, CodeBlock, ToolCard               |
+|  - Receive StreamEnd with complete message content        |
++-----------------------------------------------------------+
+```
+
+### 11.3 Where Messages Are Created (Hook Points)
+
+#### User Messages
+
+**Location:** `CodingAgentApp.on_input_submitted_message()`
+
+```python
+# Current code (app.py, ~line 400)
+async def on_input_submitted_message(self, message: InputSubmittedMessage):
+    user_input = message.content.strip()
+    attachments = message.attachments
+
+    # UI: Mount user message widget
+    await self._add_user_message(user_input + attachment_summary)
+
+    # HOOK POINT: Persist user message here
+    # if self.session_manager and self.session_manager.is_active:
+    #     self.session_manager.store.add_message(
+    #         role="user",
+    #         content=user_input,
+    #         attachments=[att.to_dict() for att in attachments],
+    #     )
+
+    # Start streaming
+    self._stream_worker = self.run_worker(...)
+```
+
+#### Assistant Messages
+
+**Location:** `CodingAgentApp._handle_event()` (StreamStart/StreamEnd)
+
+```python
+# Current code (app.py, ~line 600)
+case StreamStart():
+    msg = AssistantMessage()
+    self._current_message = msg
+    await conversation.mount(msg)
+    # HOOK POINT: Generate message ID for tracking
+    # self._current_message_id = generate_uuid()
+
+case StreamEnd(total_tokens=tokens, duration_ms=duration):
+    await self._flush_segment()
+    self._finalize_current_message(msg)
+    # HOOK POINT: Persist complete assistant message
+    # content = self._current_message.get_plain_text()
+    # if self.session_manager:
+    #     self.session_manager.store.add_message(
+    #         id=self._current_message_id,
+    #         role="assistant",
+    #         content=content,
+    #         token_count=tokens,
+    #         duration_ms=duration,
+    #     )
+```
+
+#### Tool Calls
+
+**Location:** `CodingAgentApp._handle_event()` (ToolCallStart/ToolCallResult)
+
+```python
+# Current code (app.py, ~line 650)
+case ToolCallStart(call_id, name, arguments, requires_approval):
+    card = self._current_message.add_tool_card(...)
+    self._tool_cards[call_id] = card
+    # HOOK POINT: Persist tool call
+    # if self.session_manager:
+    #     self.session_manager.store.add_tool_call(
+    #         message_id=self._current_message_id,
+    #         call_id=call_id,
+    #         name=name,
+    #         arguments=arguments,
+    #     )
+
+case ToolCallResult(call_id, status, result, error, duration_ms):
+    card.set_result(result, duration_ms)
+    # HOOK POINT: Persist tool result
+    # if self.session_manager:
+    #     self.session_manager.store.update_tool_result(
+    #         call_id=call_id,
+    #         status=status.value,
+    #         result=result,
+    #         error=error,
+    #         duration_ms=duration_ms,
+    #     )
+```
+
+### 11.4 Session Resume Flow
+
+To restore a conversation from a persisted session:
+
+```python
+# In CodingAgentApp
+async def _restore_conversation(self) -> None:
+    """Restore conversation from session store."""
+    if not self.session_manager or not self.session_manager.store:
+        return
+
+    messages = self.session_manager.store.get_ordered_messages()
+    conversation = self.query_one("#conversation")
+
+    for msg in messages:
+        if msg.role == "user":
+            # Restore user message
+            widget = UserMessage()
+            await conversation.mount(widget)
+            await widget.add_text(msg.content)
+
+        elif msg.role == "assistant":
+            # Restore assistant message
+            widget = AssistantMessage()
+            await conversation.mount(widget)
+
+            # Restore content blocks in order
+            for block in msg.blocks:
+                if block.type == "text":
+                    await widget.add_text(block.content)
+                elif block.type == "code":
+                    code_block = widget.start_code_block(block.language)
+                    code_block.set_code(block.content)
+                    widget.end_code_block()
+                elif block.type == "tool":
+                    card = widget.add_tool_card(
+                        call_id=block.call_id,
+                        tool_name=block.name,
+                        args=block.arguments,
+                        requires_approval=False,  # Don't re-approve
+                    )
+                    if block.result:
+                        card.set_result(block.result, block.duration_ms)
+                    elif block.error:
+                        card.set_error(block.error)
+
+    # Scroll to end
+    conversation.scroll_end(animate=False)
+```
+
+### 11.5 Recommended Integration Strategy
+
+#### Option A: TUI-Level Persistence (Recommended)
+
+Hook into `_handle_event()` to persist as events are processed:
+
+**Pros:**
+- Complete control over what gets persisted
+- Can capture UI-specific state (collapsed thinking, etc.)
+- Natural fit with event-driven architecture
+
+**Cons:**
+- Requires passing SessionManager to TUI
+- Duplicates some logic from agent
+
+```python
+class CodingAgentApp(App):
+    def __init__(self, session_manager: SessionManager = None, ...):
+        self.session_manager = session_manager
+        ...
+
+    async def on_mount(self) -> None:
+        if self.session_manager:
+            await self.session_manager.start_writer()
+            if not self.session_manager.info.is_new:
+                await self._restore_conversation()
+```
+
+#### Option B: Agent-Level Persistence
+
+Let the agent handle all persistence in `stream_response()`:
+
+**Pros:**
+- Single source of truth (agent)
+- Cleaner separation
+
+**Cons:**
+- TUI doesn't know about message IDs
+- Harder to correlate UI widgets with persisted messages
+
+#### Option C: Dual Persistence (Most Robust)
+
+Persist at both levels with reconciliation:
+
+```python
+# Agent persists messages as they're generated
+# TUI persists UI state (collapsed blocks, scroll position)
+# On resume: agent provides messages, TUI applies UI state
+```
+
+### 11.6 Session File Format (JSONL)
+
+The existing session infrastructure uses JSONL format:
+
+```jsonl
+{"type": "session_start", "session_id": "abc-123", "version": "1.0.0", "ts": "..."}
+{"type": "message", "id": "msg-1", "role": "user", "content": "Hello", "ts": "..."}
+{"type": "message", "id": "msg-2", "role": "assistant", "content": "Hi!", "ts": "..."}
+{"type": "tool_call", "message_id": "msg-2", "call_id": "tc-1", "name": "read_file", "args": {...}}
+{"type": "tool_result", "call_id": "tc-1", "status": "success", "result": "...", "duration_ms": 42}
+```
+
+### 11.7 Implementation Checklist
+
+```
+[ ] 1. Add SessionManager parameter to CodingAgentApp.__init__()
+[ ] 2. Call session_manager.start_writer() in on_mount() (async context)
+[ ] 3. Generate message IDs on StreamStart
+[ ] 4. Persist user messages in on_input_submitted_message()
+[ ] 5. Persist assistant messages on StreamEnd
+[ ] 6. Persist tool calls on ToolCallStart
+[ ] 7. Persist tool results on ToolCallResult
+[ ] 8. Implement _restore_conversation() for session resume
+[ ] 9. Add session resume CLI flag (--session <id>)
+[ ] 10. Handle graceful shutdown (close writer on exit)
+[ ] 11. Add tests for session persistence roundtrip
+[ ] 12. Update CLAUDE.md with session commands
+```
+
+### 11.8 Current Gaps (What Session Persistence Fills)
+
+| Gap | Current Behavior | With Persistence |
+|-----|-----------------|------------------|
+| Session resume | Conversation lost on exit | Resume from last state |
+| Message IDs | No tracking | Unique IDs per message |
+| Tool call history | In-memory only | Persisted to JSONL |
+| Conversation compaction | Memory only | Persist before/after |
+| Crash recovery | Total loss | Resume from checkpoint |
+| Session listing | N/A | `--list-sessions` command |
+| Session deletion | N/A | `--delete-session <id>` |
+
+### 11.9 Existing Session Infrastructure
+
+The session persistence infrastructure already exists in `src/session/`:
+
+```
+src/session/
+├── manager/
+│   └── session_manager.py   # SessionManager class
+├── store/
+│   └── memory_store.py      # MessageStore (in-memory)
+├── persistence/
+│   ├── parser.py            # JSONL parser (load_session)
+│   └── writer.py            # JSONL writer (SessionWriter)
+└── models/
+    ├── base.py              # SessionContext, generate_uuid
+    └── message.py           # Message models
+```
+
+Key classes:
+
+```python
+# SessionManager - Lifecycle management
+session_manager = SessionManager(sessions_dir=".claraity/sessions")
+info = session_manager.create_session(cwd=os.getcwd())
+# or
+info = session_manager.resume_session(session_id="abc-123")
+await session_manager.start_writer()
+await session_manager.close()
+
+# MessageStore - In-memory storage
+store = session_manager.store
+store.add_message(role="user", content="Hello")
+messages = store.get_ordered_messages()
+
+# SessionWriter - JSONL output
+# Automatically writes when bound to store via start_writer()
+```
+
+---
+
 **End of Documentation**

@@ -20,6 +20,8 @@ from .observation_store import (
     Importance,
     classify_importance,
 )
+from .context_injector import ContextInjector
+from .compaction import PrioritizedSummarizer, SummarySection
 
 __all__ = [
     # Data models
@@ -41,4 +43,8 @@ __all__ = [
     "ObservationPointer",
     "Importance",
     "classify_importance",
+    # Context injection and compaction
+    "ContextInjector",
+    "PrioritizedSummarizer",
+    "SummarySection",
 ]

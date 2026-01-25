@@ -1,10 +1,16 @@
 """Base LLM interface and models."""
 
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional, AsyncIterator, Iterator
+from typing import List, Dict, Any, Optional, AsyncIterator, Iterator, TYPE_CHECKING
 from pydantic import BaseModel, Field
 from enum import Enum
 import os
+
+if TYPE_CHECKING:
+    from src.session.models.message import TokenUsage as SessionTokenUsage
+
+# Import Session Model ToolCall as the canonical type
+from src.session.models.message import ToolCall
 
 
 class LLMBackendType(str, Enum):
@@ -94,12 +100,8 @@ class ToolDefinition(BaseModel):
         }
 
 
-class ToolCall(BaseModel):
-    """A tool call returned by LLM."""
-
-    id: str  # Unique ID for this call
-    name: str  # Tool name
-    arguments: Dict[str, Any]  # Parsed arguments (dict, not JSON string)
+# ToolCall imported from src.session.models.message (canonical type)
+# Removed redundant LLM Backend ToolCall class - use Session Model ToolCall
 
 
 class LLMResponse(BaseModel):
@@ -136,6 +138,48 @@ class StreamChunk(BaseModel):
     prompt_tokens: Optional[int] = None
     completion_tokens: Optional[int] = None
     total_tokens: Optional[int] = None
+
+
+# =============================================================================
+# Provider Delta Contract (Unified Persistence Architecture)
+# =============================================================================
+
+class ToolCallDelta(BaseModel):
+    """
+    Incremental tool call data from provider.
+
+    Used during streaming to accumulate tool call information
+    before the full tool call is complete.
+    """
+    index: int                         # Tool call index in current message
+    id: Optional[str] = None           # Tool call ID (first delta only)
+    name: Optional[str] = None         # Function name (first delta only)
+    arguments_delta: str = ""          # JSON arguments chunk (accumulated)
+
+
+class ProviderDelta(BaseModel):
+    """
+    Raw delta from LLM provider - the canonical input to StreamingPipeline.
+
+    This is the contract between provider adapters and the streaming pipeline.
+    Providers MUST emit ProviderDelta objects. They MUST NOT:
+    - Parse markdown or code fences
+    - Decide message boundaries (except finish_reason)
+    - Emit UI events or segments
+    - Make structural decisions
+
+    The StreamingPipeline is the ONLY place that converts these raw deltas
+    into structured segments (TextSegment, CodeBlockSegment, etc.).
+    """
+    stream_id: str                              # Self-describing, stable across deltas
+    text_delta: Optional[str] = None            # Raw text chunk
+    tool_call_delta: Optional[ToolCallDelta] = None  # Incremental tool call
+    thinking_delta: Optional[str] = None        # Native thinking (if provider supports)
+    finish_reason: Optional[str] = None         # "stop", "tool_calls", etc.
+    usage: Optional[Dict[str, Any]] = None      # Token counts as dict (on finish)
+
+    class Config:
+        arbitrary_types_allowed = True
 
 
 class LLMBackend(ABC):

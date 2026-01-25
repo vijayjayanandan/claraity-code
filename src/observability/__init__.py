@@ -84,6 +84,11 @@ from .error_store import (
     error_store,
 )
 
+from .transcript_logger import (
+    TranscriptLogger,
+    TranscriptEvent,
+)
+
 __all__ = [
     # Core
     'LANGFUSE_AVAILABLE',
@@ -127,4 +132,8 @@ __all__ = [
     'ErrorCategory',
     'get_error_store',
     'error_store',
+
+    # Transcript Logger (JSONL-based)
+    'TranscriptLogger',
+    'TranscriptEvent',
 ]

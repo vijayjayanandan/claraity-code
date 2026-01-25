@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 from src.memory import MemoryManager, TaskContext
 from src.rag import CodeIndexer, Embedder, HybridRetriever, CodeChunk
 from src.llm import LLMBackend, OllamaBackend, OpenAIBackend, LLMConfig, LLMBackendType
+from src.llm.base import ProviderDelta
 from src.llm.failure_handler import LLMError, RateLimitError, TimeoutError
 from src.platform import safe_print, remove_emojis
 from src.tools import (
@@ -154,6 +155,35 @@ class AgentResponse:
         self.content = content
         self.tool_calls = tool_calls or []
         self.metadata = metadata or {}
+
+
+class ToolExecutionResult:
+    """
+    Result from tool execution loop.
+
+    Contains the exact ordered transcript of messages produced during the tool loop.
+    This preserves:
+    - Exact ordering (tool A before tool B)
+    - Correct grouping (which tool result maps to which call)
+    - Multi-iteration structure (assistant -> tool -> assistant -> tool -> ...)
+    - Replay/debug determinism
+
+    The turn_messages list contains OpenAI-format messages in exact order:
+    - {"role": "assistant", "content": "...", "tool_calls": [...]}
+    - {"role": "tool", "tool_call_id": "...", "name": "...", "content": "..."}
+    - {"role": "assistant", "content": "final answer"}
+    """
+
+    def __init__(self, content: str, turn_messages: Optional[List[Dict[str, Any]]] = None):
+        """
+        Initialize tool execution result.
+
+        Args:
+            content: Final assistant content (convenience accessor)
+            turn_messages: Exact ordered transcript of messages to persist
+        """
+        self.content = content
+        self.turn_messages = turn_messages or []
 
 
 class CodingAgent(AgentInterface):
@@ -557,7 +587,7 @@ class CodingAgent(AgentInterface):
         stream: bool = False,
         debug: bool = False,
         on_stream_start: Optional[Callable[[], None]] = None
-    ) -> str:
+    ) -> ToolExecutionResult:
         """
         Execute LLM with native function calling loop.
 
@@ -572,10 +602,11 @@ class CodingAgent(AgentInterface):
             on_stream_start: Optional callback invoked when streaming starts (for progress indicators)
 
         Returns:
-            Final response content
+            ToolExecutionResult with final content and ordered transcript of messages
         """
         iteration = 0
         current_context = context.copy()
+        turn_messages = []  # Ordered transcript of messages to persist
 
         while iteration < max_iterations:
             iteration += 1
@@ -669,7 +700,13 @@ class CodingAgent(AgentInterface):
                 # No tool calls - we're done
                 if debug:
                     print("[Tool Loop] No tool calls detected - finishing")
-                return response_content if response_content else "Task completed."
+                # Add final assistant message to transcript (no tool_calls)
+                final_content = response_content if response_content else "Task completed."
+                turn_messages.append({
+                    "role": "assistant",
+                    "content": final_content
+                })
+                return ToolExecutionResult(content=final_content, turn_messages=turn_messages)
 
             # Execute tool calls
             if debug:
@@ -679,8 +716,8 @@ class CodingAgent(AgentInterface):
             tool_messages = []  # For function calling API format
 
             for i, tool_call in enumerate(tool_calls, 1):
-                tool_name = tool_call.name
-                tool_args = tool_call.arguments
+                tool_name = tool_call.function.name
+                tool_args = tool_call.function.get_parsed_arguments()
 
                 # Print tool announcement (clean format for CLI)
                 self._print_tool_announcement(tool_name, tool_args)
@@ -703,7 +740,8 @@ class CodingAgent(AgentInterface):
                                 print(f"  [CANCEL] User rejected operation - stopping execution")
 
                             # Return immediately - conversation stops, waiting for user input
-                            return ""  # Empty response = no LLM text, user can continue conversation
+                            # Persist any messages accumulated so far (partial transcript)
+                            return ToolExecutionResult(content="", turn_messages=turn_messages)
 
                 try:
                     # Execute the tool
@@ -809,9 +847,9 @@ class CodingAgent(AgentInterface):
                     if debug:
                         print(f"  [FAIL] Exception: {e}")
 
-            # Add assistant's tool calls to context
+            # Build assistant message with tool_calls
             import json
-            current_context.append({
+            assistant_msg = {
                 "role": "assistant",
                 "content": response_content,
                 "tool_calls": [
@@ -819,15 +857,20 @@ class CodingAgent(AgentInterface):
                         "id": tc.id,
                         "type": "function",
                         "function": {
-                            "name": tc.name,
-                            "arguments": json.dumps(tc.arguments) if isinstance(tc.arguments, dict) else str(tc.arguments)
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments  # Already JSON string
                         }
                     }
                     for tc in tool_calls
                 ]
-            })
+            }
 
-            # Add tool results to context
+            # Add to transcript (for persistence) and context (for LLM)
+            turn_messages.append(assistant_msg)
+            current_context.append(assistant_msg)
+
+            # Add tool results to transcript and context
+            turn_messages.extend(tool_messages)
             current_context.extend(tool_messages)
 
         # Max iterations reached - generate final summary
@@ -846,7 +889,13 @@ class CodingAgent(AgentInterface):
             tools=ALL_TOOLS,
             tool_choice="none"  # Force text response only
         )
-        return final_response.content or "Task completed based on tool results."
+        final_content = final_response.content or "Task completed based on tool results."
+        # Add final assistant message to transcript
+        turn_messages.append({
+            "role": "assistant",
+            "content": final_content
+        })
+        return ToolExecutionResult(content=final_content, turn_messages=turn_messages)
 
     async def _execute_with_tools_async(
         self,
@@ -854,7 +903,7 @@ class CodingAgent(AgentInterface):
         max_iterations: int = 3,
         on_chunk: Optional[Callable[[str], Awaitable[None]]] = None,
         request_approval: Optional[Callable[[str, Dict[str, Any]], Awaitable[bool]]] = None,
-    ) -> str:
+    ) -> ToolExecutionResult:
         """
         Execute LLM with native function calling loop (async version).
 
@@ -868,12 +917,13 @@ class CodingAgent(AgentInterface):
             request_approval: Async callback for requesting user approval (TUI-native)
 
         Returns:
-            Final response content
+            ToolExecutionResult with final content and ordered transcript of messages
         """
         import json
 
         iteration = 0
         current_context = context.copy()
+        turn_messages = []  # Ordered transcript of messages to persist
 
         while iteration < max_iterations:
             iteration += 1
@@ -905,14 +955,20 @@ class CodingAgent(AgentInterface):
 
             # Check if there are tool calls
             if not tool_calls:
-                return response_content if response_content else "Task completed."
+                # Add final assistant message to transcript (no tool_calls)
+                final_content = response_content if response_content else "Task completed."
+                turn_messages.append({
+                    "role": "assistant",
+                    "content": final_content
+                })
+                return ToolExecutionResult(content=final_content, turn_messages=turn_messages)
 
             # Execute tool calls asynchronously
             tool_messages = []
 
             for tool_call in tool_calls:
-                tool_name = tool_call.name
-                tool_args = tool_call.arguments
+                tool_name = tool_call.function.name
+                tool_args = tool_call.function.get_parsed_arguments()
 
                 # Check if approval is required (NORMAL mode)
                 if self.permission_manager and self.permission_manager.mode == PermissionMode.NORMAL:
@@ -927,7 +983,8 @@ class CodingAgent(AgentInterface):
                             approved = self._prompt_tool_approval(tool_name, tool_args)
 
                         if not approved:
-                            return ""  # User rejected, stop execution
+                            # Persist any messages accumulated so far (partial transcript)
+                            return ToolExecutionResult(content="", turn_messages=turn_messages)
 
                 try:
                     # Execute tool asynchronously (doesn't block event loop)
@@ -1004,8 +1061,8 @@ class CodingAgent(AgentInterface):
                         "error": str(e)
                     })
 
-            # Add assistant's tool calls to context
-            current_context.append({
+            # Build assistant message with tool_calls
+            assistant_msg = {
                 "role": "assistant",
                 "content": response_content,
                 "tool_calls": [
@@ -1013,15 +1070,20 @@ class CodingAgent(AgentInterface):
                         "id": tc.id,
                         "type": "function",
                         "function": {
-                            "name": tc.name,
-                            "arguments": json.dumps(tc.arguments) if isinstance(tc.arguments, dict) else str(tc.arguments)
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments  # Already JSON string
                         }
                     }
                     for tc in tool_calls
                 ]
-            })
+            }
 
-            # Add tool results to context
+            # Add to transcript (for persistence) and context (for LLM)
+            turn_messages.append(assistant_msg)
+            current_context.append(assistant_msg)
+
+            # Add tool results to transcript and context
+            turn_messages.extend(tool_messages)
             current_context.extend(tool_messages)
 
         # Max iterations reached - generate final summary
@@ -1035,7 +1097,139 @@ class CodingAgent(AgentInterface):
             tools=ALL_TOOLS,
             tool_choice="none"
         )
-        return final_response.content or "Task completed based on tool results."
+        final_content = final_response.content or "Task completed based on tool results."
+        # Add final assistant message to transcript
+        turn_messages.append({
+            "role": "assistant",
+            "content": final_content
+        })
+        return ToolExecutionResult(content=final_content, turn_messages=turn_messages)
+
+    def _fix_orphaned_tool_calls(self, context: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Fix tool_call/tool_result ordering to satisfy Claude API requirements.
+
+        Claude API requires:
+        1. Every tool_use must have a corresponding tool_result
+        2. tool_result must come IMMEDIATELY AFTER the assistant message with tool_use
+
+        This method:
+        1. Detects orphaned tool_calls (missing tool_result) and creates synthetic ones
+        2. Reorders ALL tool_results to be immediately after their assistant messages
+
+        The reordering is critical because when context is rebuilt from MessageStore,
+        tool_results may have later seq numbers and appear in wrong positions.
+
+        Args:
+            context: The conversation context (list of messages)
+
+        Returns:
+            The context with proper tool_call/tool_result ordering
+        """
+        from src.core.tool_status import ToolStatus as CoreToolStatus
+        from src.observability import get_logger
+        logger = get_logger("agent")
+
+        logger.debug(f"[ORPHAN_CHECK] Scanning context with {len(context)} messages")
+
+        # Collect all tool_call_ids from assistant messages
+        tool_call_ids_needed = set()
+        tool_call_info = {}  # tool_call_id -> (tool_name, index in context)
+
+        for i, msg in enumerate(context):
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                for tc in msg["tool_calls"]:
+                    tc_id = tc.get("id")
+                    tc_name = tc.get("function", {}).get("name", "unknown")
+                    if tc_id:
+                        tool_call_ids_needed.add(tc_id)
+                        tool_call_info[tc_id] = (tc_name, i)
+
+        # Collect all existing tool_results (by tool_call_id -> message)
+        existing_tool_results = {}
+        for msg in context:
+            if msg.get("role") == "tool":
+                tc_id = msg.get("tool_call_id")
+                if tc_id:
+                    existing_tool_results[tc_id] = msg
+
+        # Find orphans (tool_calls without tool_results)
+        orphaned_ids = tool_call_ids_needed - set(existing_tool_results.keys())
+
+        logger.debug(
+            f"[ORPHAN_CHECK] tool_calls_needed: {list(tool_call_ids_needed)}, "
+            f"tool_results_found: {list(existing_tool_results.keys())}, "
+            f"orphans: {list(orphaned_ids)}"
+        )
+
+        # Create synthetic tool_results for orphans
+        for tc_id in orphaned_ids:
+            tc_name, _ = tool_call_info.get(tc_id, ("unknown", -1))
+            synthetic_msg = {
+                "role": "tool",
+                "tool_call_id": tc_id,
+                "name": tc_name,
+                "content": "Tool call rejected by user."
+            }
+            existing_tool_results[tc_id] = synthetic_msg
+
+            logger.debug(f"[ORPHAN_FIX] Created synthetic tool_result for orphan: {tc_id}")
+
+            # Persist to MessageStore so this fix is permanent
+            persisted_msg = self.memory.add_tool_result(
+                tool_call_id=tc_id,
+                content=synthetic_msg["content"],
+                tool_name=tc_name,
+                status="interrupted",
+            )
+            if persisted_msg:
+                logger.debug(
+                    f"[ORPHAN_FIX] Persisted synthetic tool_result: "
+                    f"uuid={persisted_msg.uuid}, seq={persisted_msg.seq}, "
+                    f"tool_call_id={tc_id}"
+                )
+            else:
+                logger.error(
+                    f"[ORPHAN_FIX] FAILED to persist synthetic tool_result for {tc_id}! "
+                    "MessageStore may not be configured."
+                )
+
+            # Update tool_state if message_store exists
+            if self.memory.message_store:
+                self.memory.message_store.update_tool_state(
+                    tc_id,
+                    CoreToolStatus.ERROR  # Mark as error since it was interrupted
+                )
+
+        # CRITICAL: Rebuild context with tool_results in correct positions
+        # Tool_results MUST come immediately after their assistant messages
+        # This handles both orphans AND mispositioned existing tool_results
+        result_context = []
+        tool_results_placed = set()
+
+        for msg in context:
+            # Skip tool messages - we'll insert them in the correct position
+            if msg.get("role") == "tool":
+                continue
+
+            result_context.append(msg)
+
+            # After each assistant message with tool_calls, insert ALL its tool_results
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                for tc in msg["tool_calls"]:
+                    tc_id = tc.get("id")
+                    if tc_id and tc_id in existing_tool_results:
+                        result_context.append(existing_tool_results[tc_id])
+                        tool_results_placed.add(tc_id)
+
+        # Log reordering
+        if tool_call_ids_needed:
+            logger.debug(
+                f"[ORPHAN_FIX] Rebuilt context: {len(tool_results_placed)} tool_results "
+                f"placed immediately after their assistant messages"
+            )
+
+        return result_context
 
     def _prompt_tool_approval(self, tool_name: str, tool_args: Dict[str, Any]) -> bool:
         """
@@ -1424,6 +1618,7 @@ class CodingAgent(AgentInterface):
             print(f"\n{summary}\n")
 
         # Build context (with agent state for task continuation)
+        # MemoryManager uses MessageStore when configured (Option A: Single Source of Truth)
         context = self.context_builder.build_context(
             user_query=task_description,
             task_type=task_type,
@@ -1435,14 +1630,33 @@ class CodingAgent(AgentInterface):
         )
 
         # Execute with tool calling loop
-        response_content = self._execute_with_tools(
+        execution_result = self._execute_with_tools(
             context=context,
             max_iterations=3,
             stream=stream,
             debug=False  # Production mode - hide debug output
         )
 
-        return response_content
+        # Persist the ordered transcript to working memory
+        from src.memory.models import MessageRole
+        for msg in execution_result.turn_messages:
+            if msg["role"] == "assistant":
+                self.memory.working_memory.add_message(
+                    role=MessageRole.ASSISTANT,
+                    content=msg.get("content", ""),
+                    metadata={"tool_calls": msg.get("tool_calls")} if msg.get("tool_calls") else None
+                )
+            elif msg["role"] == "tool":
+                self.memory.working_memory.add_message(
+                    role=MessageRole.TOOL,
+                    content=msg.get("content", ""),
+                    metadata={
+                        "tool_call_id": msg.get("tool_call_id"),
+                        "name": msg.get("name")
+                    }
+                )
+
+        return execution_result.content
 
     def index_codebase(
         self,
@@ -1738,6 +1952,7 @@ class CodingAgent(AgentInterface):
 
         # Build context with enhanced system prompt for decision-making
         # Include agent state for task continuation support
+        # MemoryManager uses MessageStore when configured (Option A: Single Source of Truth)
         context = self.context_builder.build_context(
             user_query=message,
             task_type="chat",
@@ -1751,7 +1966,7 @@ class CodingAgent(AgentInterface):
         # Execute with tool calling loop (LLM decides what to do)
         import os
         debug_mode = os.getenv("DEBUG_MODE", "false").lower() == "true"
-        response_content = self._execute_with_tools(
+        execution_result = self._execute_with_tools(
             context=context,
             max_iterations=10,  # Increased for complex tasks
             stream=stream,
@@ -1759,9 +1974,29 @@ class CodingAgent(AgentInterface):
             on_stream_start=on_stream_start  # Progress indicator callback
         )
 
-        # Add assistant response to memory
-        self.memory.add_assistant_message(response_content)
+        # Persist the ordered transcript to working memory
+        # This preserves: assistant(tool_calls) -> tool(result) -> assistant(final)
+        from src.memory.models import MessageRole
+        for msg in execution_result.turn_messages:
+            if msg["role"] == "assistant":
+                # Assistant message (may have tool_calls in metadata)
+                self.memory.working_memory.add_message(
+                    role=MessageRole.ASSISTANT,
+                    content=msg.get("content", ""),
+                    metadata={"tool_calls": msg.get("tool_calls")} if msg.get("tool_calls") else None
+                )
+            elif msg["role"] == "tool":
+                # Tool result message
+                self.memory.working_memory.add_message(
+                    role=MessageRole.TOOL,
+                    content=msg.get("content", ""),
+                    metadata={
+                        "tool_call_id": msg.get("tool_call_id"),
+                        "name": msg.get("name")
+                    }
+                )
 
+        response_content = execution_result.content
         return AgentResponse(
             content=response_content,
             metadata={
@@ -1851,6 +2086,8 @@ class CodingAgent(AgentInterface):
             ToolCallStart, ToolCallStatus, ToolCallResult, ToolStatus,
             PausePromptStart, PausePromptEnd, ContextUpdated, ContextCompacted,
         )
+        from src.core.tool_status import ToolStatus as CoreToolStatus
+        from src.core.render_meta import ToolApprovalMeta
         from src.tools.tool_schemas import ALL_TOOLS
         import json
         import time
@@ -1925,6 +2162,7 @@ class CodingAgent(AgentInterface):
             file_references = self.file_reference_parser.parse_and_load(user_input)
 
             # Build initial context (with agent state for task continuation)
+            # MemoryManager uses MessageStore when configured (Option A: Single Source of Truth)
             context = self.context_builder.build_context(
                 user_query=user_input,
                 task_type="chat",
@@ -2065,37 +2303,59 @@ class CodingAgent(AgentInterface):
                 tool_calls = None
 
                 try:
-                    # Get LLM stream - yields (StreamChunk, Optional[List[ToolCall]])
-                    llm_stream = self.llm.generate_with_tools_stream_async(
+                    # === SAFETY NET: Fix any orphaned tool_calls before LLM call ===
+                    # This handles Ctrl+C interrupts, crashes, and any edge cases
+                    # where tool_use exists without tool_result
+                    current_context = self._fix_orphaned_tool_calls(current_context)
+
+                    # === UNIFIED ARCHITECTURE: Use ProviderDelta + StreamingPipeline ===
+                    # 1. Start assistant stream through MemoryManager
+                    self.memory.start_assistant_stream(
+                        provider=self.backend_name,
+                        model=self.model_name
+                    )
+
+                    # 2. Get LLM stream - yields ProviderDelta objects
+                    llm_stream = self.llm.generate_provider_deltas_async(
                         messages=current_context,
                         tools=ALL_TOOLS,
                         tool_choice="auto"
                     )
 
-                    # Process stream chunks
-                    async for chunk, tc in llm_stream:
-                        # Yield text content as TextDelta
-                        if chunk.content:
-                            response_content += chunk.content
-                            yield TextDelta(content=chunk.content)
+                    # 3. Process ProviderDelta objects through MemoryManager
+                    finalized_message = None
+                    last_usage = None
 
-                        # Capture tool calls from final chunk
-                        if chunk.done:
-                            if tc:
-                                tool_calls = tc
-                            # Emit context usage update with real token count from LLM
-                            if (chunk.prompt_tokens is not None
-                                and self.context_builder
-                                and self.context_builder.max_context_tokens > 0):
-                                yield ContextUpdated(
-                                    used=chunk.prompt_tokens,
-                                    limit=self.context_builder.max_context_tokens,
-                                    pressure_level=self._get_pressure_level(chunk.prompt_tokens),
-                                )
+                    async for delta in llm_stream:
+                        # Feed delta to MemoryManager (uses StreamingPipeline internally)
+                        finalized_message = self.memory.process_provider_delta(delta)
+
+                        # Emit UIEvents for backward compatibility with TUI
+                        if delta.text_delta:
+                            response_content += delta.text_delta
+                            yield TextDelta(content=delta.text_delta)
+
+                        # Track usage for context update
+                        if delta.usage:
+                            last_usage = delta.usage
 
                         # Check for interrupt
                         if ui.check_interrupted():
                             break
+
+                    # 4. Extract tool_calls from finalized message
+                    if finalized_message and finalized_message.tool_calls:
+                        tool_calls = finalized_message.tool_calls
+
+                    # Emit context usage update with real token count from LLM
+                    if (last_usage and last_usage.get("input_tokens") is not None
+                        and self.context_builder
+                        and self.context_builder.max_context_tokens > 0):
+                        yield ContextUpdated(
+                            used=last_usage.get("input_tokens"),
+                            limit=self.context_builder.max_context_tokens,
+                            pressure_level=self._get_pressure_level(last_usage.get("input_tokens")),
+                        )
 
                 except Exception as e:
                     # Provider error (ReadTimeout, connection error, API error)
@@ -2254,9 +2514,9 @@ class CodingAgent(AgentInterface):
                     break
 
                 # If no tool calls, we're done
+                # NOTE: Message already added to store by process_provider_delta() at line 2198
+                # Do NOT call add_assistant_message() again - it would create duplicate
                 if not tool_calls:
-                    if response_content:
-                        self.memory.add_assistant_message(response_content)
                     break
 
                 # Process tool calls
@@ -2268,7 +2528,7 @@ class CodingAgent(AgentInterface):
 
                     # Check if this exact call has failed before (ENFORCEMENT IN CODE)
                     is_repeat, call_summary = self._error_tracker.is_repeated_failed_call(
-                        tc.name, tc.arguments
+                        tc.function.name, tc.function.get_parsed_arguments()
                     )
                     if is_repeat:
                         # Block this call - add to blocked_calls for controller constraint
@@ -2277,8 +2537,8 @@ class CodingAgent(AgentInterface):
                         # User visibility: Show that call was skipped
                         yield ToolCallStart(
                             call_id=call_id,
-                            name=tc.name,
-                            arguments=tc.arguments,
+                            name=tc.function.name,
+                            arguments=tc.function.get_parsed_arguments(),
                             requires_approval=False,
                         )
                         yield ToolCallStatus(
@@ -2291,18 +2551,36 @@ class CodingAgent(AgentInterface):
                         tool_messages.append({
                             "role": "tool",
                             "tool_call_id": call_id,
-                            "name": tc.name,
+                            "name": tc.function.name,
                             "content": "[BLOCKED] This exact call failed previously. You must try a different approach or different arguments."
                         })
                         continue  # Move to next tool call
 
-                    requires_approval = needs_approval(tc.name)
+                    requires_approval = needs_approval(tc.function.name)
+
+                    # Freeze approval policy in render meta registry (store-driven UI)
+                    # This captures the policy at tool-call creation time (freeze semantics)
+                    mode = self.permission_manager.get_mode() if self.permission_manager else PermissionMode.NORMAL
+                    self.memory.render_meta.set_approval_meta(
+                        call_id,
+                        ToolApprovalMeta(
+                            requires_approval=requires_approval,
+                            permission_mode=mode.value if hasattr(mode, 'value') else str(mode)
+                        )
+                    )
+
+                    # Initialize tool state in message store (for TUI rendering)
+                    if self.memory.message_store:
+                        self.memory.message_store.update_tool_state(
+                            call_id,
+                            CoreToolStatus.PENDING
+                        )
 
                     # Yield ToolCallStart event
                     yield ToolCallStart(
                         call_id=call_id,
-                        name=tc.name,
-                        arguments=tc.arguments,
+                        name=tc.function.name,
+                        arguments=tc.function.get_parsed_arguments(),
                         requires_approval=requires_approval,
                     )
 
@@ -2310,6 +2588,13 @@ class CodingAgent(AgentInterface):
                     if requires_approval:
                         # Set approval state to prevent pause prompts during approval wait
                         self._awaiting_approval = True
+
+                        # Update tool state in message store
+                        if self.memory.message_store:
+                            self.memory.message_store.update_tool_state(
+                                call_id,
+                                CoreToolStatus.AWAITING_APPROVAL
+                            )
 
                         yield ToolCallStatus(
                             call_id=call_id,
@@ -2319,7 +2604,7 @@ class CodingAgent(AgentInterface):
 
                         try:
                             # Wait for user approval via UI (no timeout - user may be multitasking)
-                            approval_result = await ui.wait_for_approval(call_id, tc.name, timeout=None)
+                            approval_result = await ui.wait_for_approval(call_id, tc.function.name, timeout=None)
 
                             if not approval_result.approved:
                                 # Build rejection message with optional feedback
@@ -2333,13 +2618,29 @@ class CodingAgent(AgentInterface):
                                         message=rejection_msg
                                     )
 
+                                    # Update tool_state in message store
+                                    if self.memory.message_store:
+                                        self.memory.message_store.update_tool_state(
+                                            call_id,
+                                            CoreToolStatus.REJECTED
+                                        )
+
                                     # Add feedback to tool messages so LLM sees it
                                     tool_messages.append({
                                         "role": "tool",
                                         "tool_call_id": call_id,
-                                        "name": tc.name,
+                                        "name": tc.function.name,
                                         "content": rejection_msg
                                     })
+
+                                    # Persist tool result to MessageStore for session replay
+                                    self.memory.add_tool_result(
+                                        tool_call_id=call_id,
+                                        content=rejection_msg,
+                                        tool_name=tc.function.name,
+                                        status="rejected",
+                                    )
+
                                     # Continue to next tool call (don't stop - LLM will see feedback)
                                     continue
                                 else:
@@ -2352,10 +2653,41 @@ class CodingAgent(AgentInterface):
                                         message=rejection_msg
                                     )
 
+                                    # CRITICAL: Update tool_state in message store
+                                    if self.memory.message_store:
+                                        self.memory.message_store.update_tool_state(
+                                            call_id,
+                                            CoreToolStatus.REJECTED
+                                        )
+
+                                    # CRITICAL: Add tool_result for rejected call
+                                    # Claude API requires every tool_use to have a tool_result
+                                    tool_messages.append({
+                                        "role": "tool",
+                                        "tool_call_id": call_id,
+                                        "name": tc.function.name,
+                                        "content": rejection_msg
+                                    })
+
+                                    # Persist tool result to MessageStore for session replay
+                                    self.memory.add_tool_result(
+                                        tool_call_id=call_id,
+                                        content=rejection_msg,
+                                        tool_name=tc.function.name,
+                                        status="rejected",
+                                    )
+
                                     # User rejected without feedback - stop execution immediately
                                     # Don't continue processing, let user decide next action
                                     user_rejected = True
                                     break  # Exit tool loop immediately
+
+                            # Update tool state in message store
+                            if self.memory.message_store:
+                                self.memory.message_store.update_tool_state(
+                                    call_id,
+                                    CoreToolStatus.APPROVED
+                                )
 
                             yield ToolCallStatus(
                                 call_id=call_id,
@@ -2372,28 +2704,63 @@ class CodingAgent(AgentInterface):
                             tool_messages.append({
                                 "role": "tool",
                                 "tool_call_id": call_id,
-                                "name": tc.name,
+                                "name": tc.function.name,
                                 "content": "Tool call approval timed out"
                             })
                             continue
 
                         except asyncio.CancelledError:
+                            cancelled_msg = "Tool call cancelled by user (stream interrupted)"
+
                             yield ToolCallStatus(
                                 call_id=call_id,
                                 status=ToolStatus.CANCELLED,
                                 message="Cancelled"
                             )
-                            raise  # Re-raise to exit the loop
+
+                            # CRITICAL: Update tool_state in message store
+                            if self.memory.message_store:
+                                self.memory.message_store.update_tool_state(
+                                    call_id,
+                                    CoreToolStatus.CANCELLED
+                                )
+
+                            # CRITICAL: Add tool_result for cancelled call
+                            tool_messages.append({
+                                "role": "tool",
+                                "tool_call_id": call_id,
+                                "name": tc.function.name,
+                                "content": cancelled_msg
+                            })
+
+                            # Persist tool result to MessageStore for session replay
+                            self.memory.add_tool_result(
+                                tool_call_id=call_id,
+                                content=cancelled_msg,
+                                tool_name=tc.function.name,
+                                status="cancelled",
+                            )
+
+                            # Mark as cancelled (similar to user_rejected)
+                            user_rejected = True
+                            break  # Exit tool loop, don't re-raise
 
                         finally:
                             # ALWAYS reset approval state, even on exception/cancel
                             self._awaiting_approval = False
 
                     # Execute tool
+                    # Update tool state in message store
+                    if self.memory.message_store:
+                        self.memory.message_store.update_tool_state(
+                            call_id,
+                            CoreToolStatus.RUNNING
+                        )
+
                     yield ToolCallStatus(
                         call_id=call_id,
                         status=ToolStatus.RUNNING,
-                        message=f"Executing {tc.name}..."
+                        message=f"Executing {tc.function.name}..."
                     )
 
                     start_time = time.monotonic()
@@ -2401,8 +2768,8 @@ class CodingAgent(AgentInterface):
                     # OVERWRITE GUARD: Block destructive todo_write BEFORE execution.
                     # Rationale: TodoWriteTool mutates agent_state['todos'] during execution.
                     # If we validate after execution, the state may already be overwritten.
-                    if tc.name == 'todo_write':
-                        new_todos = tc.arguments.get('todos', [])
+                    if tc.function.name == 'todo_write':
+                        new_todos = tc.function.get_parsed_arguments().get('todos', [])
                         if self._is_destructive_todo_update(new_todos) and not self._user_confirmed_reset:
                             # Block the destructive update
                             incomplete = [t for t in self.todo_state.get('todos', [])
@@ -2412,18 +2779,38 @@ class CodingAgent(AgentInterface):
                                 task_ids += f"... and {len(incomplete) - 3} more"
 
                             duration_ms = int((time.monotonic() - start_time) * 1000)
+                            error_content = f"Cannot overwrite incomplete todos ({task_ids}). Complete them first, or say 'reset todos' to discard."
+
+                            # Update tool state in message store
+                            if self.memory.message_store:
+                                self.memory.message_store.update_tool_state(
+                                    call_id,
+                                    CoreToolStatus.ERROR,
+                                    error=error_content,
+                                    duration_ms=duration_ms
+                                )
+
                             yield ToolCallResult(
                                 call_id=call_id,
                                 status=ToolStatus.FAILED,
-                                error=f"Cannot overwrite incomplete todos ({task_ids}). Complete them first, or say 'reset todos' to discard.",
+                                error=error_content,
+                                duration_ms=duration_ms,
+                            )
+
+                            # Persist tool result to MessageStore for session replay
+                            self.memory.add_tool_result(
+                                tool_call_id=call_id,
+                                content=f"Error: {error_content}",
+                                tool_name=tc.function.name,
+                                status="error",
                                 duration_ms=duration_ms,
                             )
 
                             tool_messages.append({
                                 "role": "tool",
                                 "tool_call_id": call_id,
-                                "name": tc.name,
-                                "content": f"Error: Cannot overwrite incomplete todos ({task_ids}). Complete them first, or say 'reset todos' to discard."
+                                "name": tc.function.name,
+                                "content": f"Error: {error_content}"
                             })
                             continue  # Skip to next tool call
 
@@ -2432,8 +2819,8 @@ class CodingAgent(AgentInterface):
 
                     try:
                         result = await self.tool_executor.execute_tool_async(
-                            tc.name,
-                            **tc.arguments
+                            tc.function.name,
+                            **tc.function.get_parsed_arguments()
                         )
 
                         duration_ms = int((time.monotonic() - start_time) * 1000)
@@ -2449,31 +2836,67 @@ class CodingAgent(AgentInterface):
                                     f"For grep/search: use head_limit parameter to limit results. "
                                     f"For command output: consider piping through head/tail."
                                 )
+
+                                # Update tool state in message store
+                                if self.memory.message_store:
+                                    self.memory.message_store.update_tool_state(
+                                        call_id,
+                                        CoreToolStatus.ERROR,
+                                        error=error_msg,
+                                        duration_ms=duration_ms
+                                    )
+
                                 yield ToolCallResult(
                                     call_id=call_id,
                                     status=ToolStatus.FAILED,
                                     error=error_msg,
                                     duration_ms=duration_ms,
                                 )
+                                # Persist tool result to MessageStore for session replay
+                                self.memory.add_tool_result(
+                                    tool_call_id=call_id,
+                                    content=error_msg,
+                                    tool_name=tc.function.name,
+                                    status="error",
+                                    duration_ms=duration_ms,
+                                )
                                 tool_messages.append({
                                     "role": "tool",
                                     "tool_call_id": call_id,
-                                    "name": tc.name,
+                                    "name": tc.function.name,
                                     "content": error_msg
                                 })
                                 # Track in execution history for debugging/testing
                                 self.tool_execution_history.append({
-                                    "tool": tc.name,
-                                    "arguments": tc.arguments,
+                                    "tool": tc.function.name,
+                                    "arguments": tc.function.get_parsed_arguments(),
                                     "success": False,
                                     "error": error_msg
                                 })
                                 continue  # Skip to next tool call
 
+                            # Update tool state in message store
+                            if self.memory.message_store:
+                                self.memory.message_store.update_tool_state(
+                                    call_id,
+                                    CoreToolStatus.SUCCESS,
+                                    result=output,
+                                    duration_ms=duration_ms
+                                )
+
                             yield ToolCallResult(
                                 call_id=call_id,
                                 status=ToolStatus.SUCCESS,
                                 result=output,
+                                duration_ms=duration_ms,
+                            )
+
+                            # Persist tool result to MessageStore for session replay
+                            self.memory.add_tool_result(
+                                tool_call_id=call_id,
+                                content=str(output),
+                                tool_name=tc.function.name,
+                                status="success",
                                 duration_ms=duration_ms,
                             )
 
@@ -2484,9 +2907,9 @@ class CodingAgent(AgentInterface):
 
                             # Handle todo_write success: apply stable IDs and notify UI
                             # NOTE: Always run merge, even on first write (empty existing list is handled)
-                            if tc.name == 'todo_write':
+                            if tc.function.name == 'todo_write':
                                 # Apply stable ID merge (preserves IDs across updates)
-                                raw_todos = tc.arguments.get('todos', [])
+                                raw_todos = tc.function.get_parsed_arguments().get('todos', [])
                                 merged_todos = self._merge_todos_with_stable_ids(raw_todos)
                                 self.todo_state['todos'] = merged_todos
 
@@ -2504,10 +2927,19 @@ class CodingAgent(AgentInterface):
                             tool_messages.append({
                                 "role": "tool",
                                 "tool_call_id": call_id,
-                                "name": tc.name,
+                                "name": tc.function.name,
                                 "content": str(output)
                             })
                         else:
+                            # Update tool state in message store
+                            if self.memory.message_store:
+                                self.memory.message_store.update_tool_state(
+                                    call_id,
+                                    CoreToolStatus.ERROR,
+                                    error=result.error,
+                                    duration_ms=duration_ms
+                                )
+
                             yield ToolCallResult(
                                 call_id=call_id,
                                 status=ToolStatus.FAILED,
@@ -2519,23 +2951,32 @@ class CodingAgent(AgentInterface):
                             error_type = self._classify_tool_error(result.error or "Unknown error")
                             error_context = self._error_tracker.record_failure(
                                 error_type=error_type,
-                                tool_name=tc.name,
-                                tool_args=tc.arguments,
+                                tool_name=tc.function.name,
+                                tool_args=tc.function.get_parsed_arguments(),
                                 error_message=result.error or "Unknown error",
                                 exit_code=getattr(result, 'exit_code', None),
                                 stdout=getattr(result, 'stdout', None),
                                 stderr=getattr(result, 'stderr', None)
                             )
 
+                            # Persist tool result to MessageStore for session replay
+                            self.memory.add_tool_result(
+                                tool_call_id=call_id,
+                                content=error_context.to_prompt_block(),
+                                tool_name=tc.function.name,
+                                status="error",
+                                duration_ms=duration_ms,
+                            )
+
                             # Check if retry should be allowed
-                            allowed, reason = self._error_tracker.should_allow_retry(tc.name, error_type)
+                            allowed, reason = self._error_tracker.should_allow_retry(tc.function.name, error_type)
 
                             if allowed:
                                 # Inject structured error context for LLM
                                 tool_messages.append({
                                     "role": "tool",
                                     "tool_call_id": call_id,
-                                    "name": tc.name,
+                                    "name": tc.function.name,
                                     "content": error_context.to_prompt_block()
                                 })
                             else:
@@ -2546,7 +2987,7 @@ class CodingAgent(AgentInterface):
                                     tool_messages.append({
                                         "role": "tool",
                                         "tool_call_id": call_id,
-                                        "name": tc.name,
+                                        "name": tc.function.name,
                                         "content": error_context.to_prompt_block()
                                     })
                                     continue  # Let approval resolve first
@@ -2611,7 +3052,7 @@ class CodingAgent(AgentInterface):
                                         self.todo_state['successful_tools_since_resume'] = 0
 
                                         # Reset tool error counts (allow retries)
-                                        self._error_tracker.reset_tool_error_counts(tool_name=tc.name)
+                                        self._error_tracker.reset_tool_error_counts(tool_name=tc.function.name)
 
                                         # Always inject hint to LLM
                                         current_context.append({
@@ -2629,7 +3070,7 @@ class CodingAgent(AgentInterface):
                                         tool_messages.append({
                                             "role": "tool",
                                             "tool_call_id": call_id,
-                                            "name": tc.name,
+                                            "name": tc.function.name,
                                             "content": error_context.to_prompt_block()
                                         })
 
@@ -2643,6 +3084,16 @@ class CodingAgent(AgentInterface):
 
                     except Exception as e:
                         duration_ms = int((time.monotonic() - start_time) * 1000)
+
+                        # Update tool state in message store
+                        if self.memory.message_store:
+                            self.memory.message_store.update_tool_state(
+                                call_id,
+                                CoreToolStatus.ERROR,
+                                error=str(e),
+                                duration_ms=duration_ms
+                            )
+
                         yield ToolCallResult(
                             call_id=call_id,
                             status=ToolStatus.FAILED,
@@ -2654,20 +3105,29 @@ class CodingAgent(AgentInterface):
                         error_type = self._classify_tool_error(str(e))
                         error_context = self._error_tracker.record_failure(
                             error_type=error_type,
-                            tool_name=tc.name,
-                            tool_args=tc.arguments,
+                            tool_name=tc.function.name,
+                            tool_args=tc.function.get_parsed_arguments(),
                             error_message=str(e)
                         )
 
+                        # Persist tool result to MessageStore for session replay
+                        self.memory.add_tool_result(
+                            tool_call_id=call_id,
+                            content=error_context.to_prompt_block(),
+                            tool_name=tc.function.name,
+                            status="error",
+                            duration_ms=duration_ms,
+                        )
+
                         # Check if retry should be allowed
-                        allowed, reason = self._error_tracker.should_allow_retry(tc.name, error_type)
+                        allowed, reason = self._error_tracker.should_allow_retry(tc.function.name, error_type)
 
                         if allowed:
                             # Inject structured error context for LLM
                             tool_messages.append({
                                 "role": "tool",
                                 "tool_call_id": call_id,
-                                "name": tc.name,
+                                "name": tc.function.name,
                                 "content": error_context.to_prompt_block()
                             })
                         else:
@@ -2678,7 +3138,7 @@ class CodingAgent(AgentInterface):
                                 tool_messages.append({
                                     "role": "tool",
                                     "tool_call_id": call_id,
-                                    "name": tc.name,
+                                    "name": tc.function.name,
                                     "content": error_context.to_prompt_block()
                                 })
                                 continue  # Let approval resolve first
@@ -2743,7 +3203,7 @@ class CodingAgent(AgentInterface):
                                     self.todo_state['successful_tools_since_resume'] = 0
 
                                     # Reset tool error counts (allow retries)
-                                    self._error_tracker.reset_tool_error_counts(tool_name=tc.name)
+                                    self._error_tracker.reset_tool_error_counts(tool_name=tc.function.name)
 
                                     # Always inject hint to LLM
                                     current_context.append({
@@ -2761,7 +3221,7 @@ class CodingAgent(AgentInterface):
                                     tool_messages.append({
                                         "role": "tool",
                                         "tool_call_id": call_id,
-                                        "name": tc.name,
+                                        "name": tc.function.name,
                                         "content": error_context.to_prompt_block()
                                     })
 
@@ -2773,8 +3233,54 @@ class CodingAgent(AgentInterface):
                                 yield TextDelta(content=self._build_pause_message('error_budget'))
                                 break  # Returns to user, they can continue
 
-                # If user rejected a tool, stop execution and wait for user input
+                # If user rejected a tool, add tool_results for remaining unprocessed calls
+                # Claude API requires every tool_use to have a corresponding tool_result
                 if user_rejected:
+                    # Find tool calls that weren't processed (after the rejected one)
+                    processed_call_ids = {msg.get("tool_call_id") for msg in tool_messages if msg.get("role") == "tool"}
+                    for tc in tool_calls:
+                        tc_id = tc.id or f"call_{tool_calls.index(tc)}"
+                        if tc_id not in processed_call_ids:
+                            skipped_msg = "Tool call skipped (previous tool rejected by user)"
+                            tool_messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc_id,
+                                "name": tc.function.name,
+                                "content": skipped_msg
+                            })
+                            # Persist to MessageStore
+                            self.memory.add_tool_result(
+                                tool_call_id=tc_id,
+                                content=skipped_msg,
+                                tool_name=tc.function.name,
+                                status="skipped",
+                            )
+                            # Update tool_state
+                            if self.memory.message_store:
+                                self.memory.message_store.update_tool_state(
+                                    tc_id,
+                                    CoreToolStatus.SKIPPED
+                                )
+
+                    # Still add assistant message and tool_results to context
+                    # so next turn has complete conversation history
+                    current_context.append({
+                        "role": "assistant",
+                        "content": response_content,
+                        "tool_calls": [
+                            {
+                                "id": tc.id or f"call_{i}",
+                                "type": "function",
+                                "function": {
+                                    "name": tc.function.name,
+                                    "arguments": json.dumps(tc.function.get_parsed_arguments())
+                                }
+                            }
+                            for i, tc in enumerate(tool_calls)
+                        ]
+                    })
+                    current_context.extend(tool_messages)
+
                     break  # Exit main while loop
 
                 # Add assistant's response with tool calls to context
@@ -2786,8 +3292,8 @@ class CodingAgent(AgentInterface):
                             "id": tc.id or f"call_{i}",
                             "type": "function",
                             "function": {
-                                "name": tc.name,
-                                "arguments": json.dumps(tc.arguments)
+                                "name": tc.function.name,
+                                "arguments": json.dumps(tc.function.get_parsed_arguments())
                             }
                         }
                         for i, tc in enumerate(tool_calls)
@@ -2921,6 +3427,7 @@ REQUIRED: Choose a DIFFERENT approach:
         file_references = self.file_reference_parser.parse_and_load(message)
 
         # Build context (with agent state for task continuation)
+        # MemoryManager uses MessageStore when configured (Option A: Single Source of Truth)
         context = self.context_builder.build_context(
             user_query=message,
             task_type="chat",
@@ -2932,16 +3439,33 @@ REQUIRED: Choose a DIFFERENT approach:
         )
 
         # Execute with async tool calling loop
-        response_content = await self._execute_with_tools_async(
+        execution_result = await self._execute_with_tools_async(
             context=context,
             max_iterations=10,
             on_chunk=on_chunk,
             request_approval=request_approval,  # TUI-native approval
         )
 
-        # Add assistant response to memory
-        self.memory.add_assistant_message(response_content)
+        # Persist the ordered transcript to working memory
+        from src.memory.models import MessageRole
+        for msg in execution_result.turn_messages:
+            if msg["role"] == "assistant":
+                self.memory.working_memory.add_message(
+                    role=MessageRole.ASSISTANT,
+                    content=msg.get("content", ""),
+                    metadata={"tool_calls": msg.get("tool_calls")} if msg.get("tool_calls") else None
+                )
+            elif msg["role"] == "tool":
+                self.memory.working_memory.add_message(
+                    role=MessageRole.TOOL,
+                    content=msg.get("content", ""),
+                    metadata={
+                        "tool_call_id": msg.get("tool_call_id"),
+                        "name": msg.get("name")
+                    }
+                )
 
+        response_content = execution_result.content
         return AgentResponse(
             content=response_content,
             metadata={
@@ -3112,6 +3636,69 @@ REQUIRED: Choose a DIFFERENT approach:
     def load_session(self, session_path: Path) -> None:
         """Load a saved session."""
         self.memory.load_session(session_path)
+
+    def resume_session_from_jsonl(self, jsonl_path: Path) -> "HydrationResult":
+        """
+        Resume session from JSONL file using SessionHydrator.
+
+        This implements Option A (MessageStore as Single Source of Truth):
+        1. Hydrates MessageStore from JSONL
+        2. Injects MessageStore into MemoryManager as conversation source
+        3. Restores agent runtime state (todos, etc.)
+
+        The key innovation is that resumed sessions use the SAME code path
+        as fresh sessions - MemoryManager.get_context_for_llm() always provides
+        conversation history, whether from MessageStore (resumed) or WorkingMemory (legacy).
+
+        Args:
+            jsonl_path: Path to session.jsonl file
+
+        Returns:
+            HydrationResult with store, base_llm_messages, agent_state, report
+
+        Usage:
+            result = agent.resume_session_from_jsonl(Path(".sessions/abc/session.jsonl"))
+            # MemoryManager now uses MessageStore for conversation history
+            # agent.todo_state is restored
+        """
+        from src.session import SessionHydrator, HydrationResult
+
+        hydrator = SessionHydrator()
+        result = hydrator.hydrate(jsonl_path)
+
+        # Store session reference
+        self._session_store = result.store
+
+        # Extract session_id from hydration result
+        session_id = result.report.session_id
+
+        # OPTION A: Inject MessageStore into MemoryManager as single source of truth
+        # This replaces the old dual-path approach (_resumed_base_context + _sync_to_working_memory)
+        # Now MemoryManager.get_context_for_llm() uses MessageStore directly
+        self.memory.set_message_store(result.store, session_id)
+
+        # Restore agent state
+        if result.agent_state.todos:
+            self.todo_state['todos'] = result.agent_state.todos
+        if result.agent_state.current_todo_id:
+            self.todo_state['current_todo_id'] = result.agent_state.current_todo_id
+        if result.agent_state.last_stop_reason:
+            self.todo_state['last_stop_reason'] = result.agent_state.last_stop_reason
+
+        # Update _next_id based on restored todos
+        if result.agent_state.todos:
+            max_id = max(
+                (int(t.get('id', '0').split('-')[-1]) for t in result.agent_state.todos if t.get('id')),
+                default=0
+            )
+            self.todo_state['_next_id'] = max_id + 1
+
+        from src.observability import get_logger
+        logger = get_logger(__name__)
+        logger.info(f"Session resumed: {result.report.context_messages} context messages, "
+                   f"todos={len(result.agent_state.todos)}, using MessageStore")
+
+        return result
 
     def get_statistics(self) -> Dict[str, Any]:
         """Get agent statistics."""

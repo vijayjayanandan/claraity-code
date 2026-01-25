@@ -9,10 +9,13 @@ Architecture:
 Flow:
     structlog.get_logger() -> stdlib Logger -> QueueHandler -> QueueListener
                                                                     |
-                                         +-------------+------------+------------+
-                                         |             |            |            |
-                                   RotatingFile   StreamHandler  SQLiteError   (TUI: stderr only)
-                                   (JSONL)        (CLI only)     Handler
+                                                   +----------------+----------------+
+                                                   |                                 |
+                                             RotatingFile                      SQLiteError
+                                             (JSONL)                           Handler
+
+NO console/stderr output - all logs go to file only.
+User-facing messages should use Rich console.print() instead.
 
 Engineering Principles:
 - No emojis in code (Windows cp1252 compatibility)
@@ -40,6 +43,23 @@ from typing import Any, Dict, Literal, Optional
 
 import structlog
 from structlog.stdlib import BoundLogger
+
+# =============================================================================
+# CONSTANTS
+# =============================================================================
+
+# Queue size for non-blocking logging (drops when full)
+LOG_QUEUE_SIZE = 10000
+
+# Maximum length for redacted strings (longer strings are truncated)
+REDACT_MAX_LENGTH = 500
+
+# Rate limit interval for drop warnings (seconds)
+DROP_WARNING_INTERVAL_SECONDS = 10.0
+
+# Maximum traceback length to store (prevents log/DB bloat from huge stack traces)
+# Same value as error_store.MAX_TRACEBACK_LENGTH for consistency
+MAX_TRACEBACK_LENGTH = 32768
 
 # =============================================================================
 # CONTEXT VARIABLES (for async propagation)
@@ -70,16 +90,48 @@ _original_sigterm_handler = None
 
 # Patterns to redact (compiled for performance)
 _REDACT_PATTERNS = [
+    # Generic key=value patterns for common sensitive fields
     (re.compile(r'(api[_-]?key|apikey|authorization|auth[_-]?token|bearer|secret|password|passwd|pwd)\s*[=:]\s*["\']?[\w\-\.]+["\']?', re.IGNORECASE), r'\1=***REDACTED***'),
-    (re.compile(r'(sk-[a-zA-Z0-9]{20,})', re.IGNORECASE), '***API_KEY***'),
+
+    # OpenAI API keys (sk-...)
+    (re.compile(r'(sk-[a-zA-Z0-9]{20,})', re.IGNORECASE), '***OPENAI_API_KEY***'),
+
+    # Anthropic API keys (sk-ant-...)
+    (re.compile(r'(sk-ant-[a-zA-Z0-9\-_]{20,})', re.IGNORECASE), '***ANTHROPIC_API_KEY***'),
+
+    # AWS Access Key IDs (AKIA...)
+    (re.compile(r'(AKIA[0-9A-Z]{16})', re.IGNORECASE), '***AWS_ACCESS_KEY***'),
+
+    # AWS Secret Access Keys (40 character base64-like strings after aws_secret)
+    (re.compile(r'(aws_secret_access_key\s*[=:]\s*["\']?)[A-Za-z0-9/+=]{40}["\']?', re.IGNORECASE), r'\1***AWS_SECRET_KEY***'),
+
+    # Bearer tokens
     (re.compile(r'(Bearer\s+[\w\-\.]+)', re.IGNORECASE), 'Bearer ***REDACTED***'),
+
+    # Private keys (PEM format) - match the header only to avoid huge replacements
+    (re.compile(r'-----BEGIN\s+(RSA\s+|EC\s+|DSA\s+|OPENSSH\s+)?PRIVATE\s+KEY-----', re.IGNORECASE), '***PRIVATE_KEY_HEADER***'),
+
+    # Database connection strings with passwords
+    (re.compile(r'((?:postgres|mysql|mongodb|redis)://[^:]+:)[^@]+(@)', re.IGNORECASE), r'\1***PASSWORD***\2'),
+
+    # Generic token patterns (token=..., access_token=...)
+    (re.compile(r'((?:access_|refresh_|auth_)?token\s*[=:]\s*["\']?)[a-zA-Z0-9\-_.]{20,}["\']?', re.IGNORECASE), r'\1***TOKEN***'),
 ]
 
 # Keys to fully redact in dicts
-_REDACT_KEYS = {'api_key', 'apikey', 'api-key', 'authorization', 'auth_token', 'secret', 'password', 'passwd', 'pwd', 'bearer'}
+_REDACT_KEYS = {
+    'api_key', 'apikey', 'api-key',
+    'authorization', 'auth_token', 'access_token', 'refresh_token',
+    'secret', 'secret_key', 'private_key',
+    'password', 'passwd', 'pwd',
+    'bearer', 'token',
+    'aws_secret_access_key', 'aws_access_key_id',
+    'anthropic_api_key', 'openai_api_key',
+    'database_url', 'connection_string',
+}
 
 
-def _redact_value(value: Any, max_length: int = 500) -> Any:
+def _redact_value(value: Any, max_length: int = REDACT_MAX_LENGTH) -> Any:
     """Redact sensitive values and truncate long strings."""
     if isinstance(value, str):
         # Truncate long strings (like prompts)
@@ -96,7 +148,7 @@ def _redact_value(value: Any, max_length: int = 500) -> Any:
     return value
 
 
-def _redact_dict(d: Dict[str, Any], max_length: int = 500) -> Dict[str, Any]:
+def _redact_dict(d: Dict[str, Any], max_length: int = REDACT_MAX_LENGTH) -> Dict[str, Any]:
     """Recursively redact sensitive keys in dictionaries."""
     result = {}
     for key, value in d.items():
@@ -142,22 +194,99 @@ def add_context(logger: Any, method_name: str, event_dict: Dict[str, Any]) -> Di
 
 
 # =============================================================================
-# CUSTOM FORMATTER FOR JSONL OUTPUT
+# PROCESSOR FORMATTER FACTORIES
+# =============================================================================
+#
+# These factory functions create ProcessorFormatter instances for different
+# output formats. ProcessorFormatter extracts the event_dict from record.msg
+# (set by wrap_for_formatter) and applies final rendering processors.
+#
+
+def create_json_formatter() -> structlog.stdlib.ProcessorFormatter:
+    """
+    Create a ProcessorFormatter that renders to JSON lines.
+
+    Used for JSONL file output (.clarity/logs/app.jsonl).
+    """
+    return structlog.stdlib.ProcessorFormatter(
+        # These processors run on the event_dict extracted from record.msg
+        processors=[
+            # Remove internal structlog metadata (_record, _from_structlog)
+            structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+            # Add source location from LogRecord
+            _add_source_location,
+            # Render to JSON
+            structlog.processors.JSONRenderer(),
+        ],
+        # For non-structlog records (plain logging calls), use these processors
+        foreign_pre_chain=[
+            structlog.contextvars.merge_contextvars,
+            structlog.stdlib.add_log_level,
+            structlog.stdlib.add_logger_name,
+            structlog.processors.TimeStamper(fmt="iso"),
+            add_context,
+        ],
+    )
+
+
+def create_console_formatter() -> structlog.stdlib.ProcessorFormatter:
+    """
+    Create a ProcessorFormatter that renders for console output.
+
+    Used for CLI stdout and TUI stderr.
+    """
+    return structlog.stdlib.ProcessorFormatter(
+        processors=[
+            structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+            _console_renderer,
+        ],
+        foreign_pre_chain=[
+            structlog.contextvars.merge_contextvars,
+            structlog.stdlib.add_log_level,
+            structlog.stdlib.add_logger_name,
+            add_context,
+        ],
+    )
+
+
+def _add_source_location(
+    logger: Any, method_name: str, event_dict: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Processor to add source location from LogRecord."""
+    record = event_dict.get('_record')
+    if record:
+        event_dict['source'] = {
+            'file': record.filename,
+            'line': record.lineno,
+            'function': record.funcName,
+        }
+    return event_dict
+
+
+def _console_renderer(
+    logger: Any, method_name: str, event_dict: Dict[str, Any]
+) -> str:
+    """Simple console renderer: [LEVEL] logger: event"""
+    level = event_dict.get('level', 'INFO').upper()
+    logger_name = event_dict.get('logger', 'root')
+    event = event_dict.get('event', str(event_dict))
+    return f"[{level}] {logger_name}: {event}"
+
+
+# =============================================================================
+# LEGACY FORMATTERS (for backwards compatibility with non-structlog records)
 # =============================================================================
 
 class StructlogJSONFormatter(logging.Formatter):
     """
-    JSON formatter that extracts structlog event dict from LogRecord.
+    Fallback JSON formatter for non-structlog records.
 
-    structlog.stdlib puts the pre-rendered message in record.msg.
-    We need to extract structured data and format as clean JSON.
+    NOTE: With ProcessorFormatter, this is rarely needed. Kept for backwards
+    compatibility with any code that might reference it directly.
     """
 
     def format(self, record: logging.LogRecord) -> str:
         """Format log record as JSON line."""
-        # Check if this is a structlog message (contains JSON-like content)
-        msg = record.getMessage()
-
         # Base entry with timestamp
         log_entry = {
             'ts': datetime.now(timezone.utc).isoformat(),
@@ -165,39 +294,25 @@ class StructlogJSONFormatter(logging.Formatter):
             'logger': record.name,
         }
 
-        # Try to extract structlog event dict
-        if hasattr(record, '_structlog_event_dict'):
-            event_dict = record._structlog_event_dict
-            if isinstance(event_dict, dict):
-                for key, value in event_dict.items():
-                    if key == 'event':
-                        log_entry['event'] = value
-                    elif key not in ('_logger', '_record', 'level', 'logger', 'timestamp'):
-                        log_entry[key] = value
+        # Check if record.msg is a dict (from wrap_for_formatter)
+        if isinstance(record.msg, dict):
+            event_dict = record.msg.copy()
+            # Remove internal keys
+            event_dict.pop('_record', None)
+            event_dict.pop('_from_structlog', None)
+            for key, value in event_dict.items():
+                if key == 'event':
+                    log_entry['event'] = value
+                elif key not in ('level', 'logger', 'timestamp'):
+                    log_entry[key] = value
         else:
-            # Check if message is JSON (from structlog JSONRenderer)
-            if msg.startswith('{') and msg.endswith('}'):
-                try:
-                    parsed = json.loads(msg)
-                    if isinstance(parsed, dict):
-                        for key, value in parsed.items():
-                            if key == 'event':
-                                log_entry['event'] = value
-                            elif key not in ('level', 'logger', 'timestamp'):
-                                log_entry[key] = value
-                except json.JSONDecodeError:
-                    log_entry['event'] = msg
-            else:
-                log_entry['event'] = msg
+            # Plain string message
+            log_entry['event'] = record.getMessage()
 
         # Add exception info if present
         if record.exc_info and record.exc_info[0] is not None:
             exc_type, exc_value, exc_tb = record.exc_info
-            log_entry['exception'] = {
-                'type': exc_type.__name__ if exc_type else 'Unknown',
-                'message': str(exc_value) if exc_value else '',
-                'traceback': self.formatException(record.exc_info)[:32768],
-            }
+            log_entry['exception'] = self.formatException(record.exc_info)[:MAX_TRACEBACK_LENGTH]
 
         # Add source location
         log_entry['source'] = {
@@ -209,32 +324,34 @@ class StructlogJSONFormatter(logging.Formatter):
         return json.dumps(log_entry, default=str, ensure_ascii=False)
 
 
-# =============================================================================
-# SIMPLE CONSOLE FORMATTER
-# =============================================================================
-
 class StructlogConsoleFormatter(logging.Formatter):
-    """Simple console formatter that shows structlog events nicely."""
+    """
+    Fallback console formatter for non-structlog records.
+
+    NOTE: With ProcessorFormatter, this is rarely needed. Kept for backwards
+    compatibility with any code that might reference it directly.
+    """
 
     def format(self, record: logging.LogRecord) -> str:
         """Format for console output."""
-        msg = record.getMessage()
+        # Check if record.msg is a dict (from wrap_for_formatter)
+        if isinstance(record.msg, dict):
+            event = record.msg.get('event', str(record.msg))
+            return f"[{record.levelname}] {record.name}: {event}"
 
-        # If it's JSON from structlog, parse and format nicely
-        if msg.startswith('{') and msg.endswith('}'):
-            try:
-                parsed = json.loads(msg)
-                event = parsed.get('event', msg)
-                return f"[{record.levelname}] {record.name}: {event}"
-            except json.JSONDecodeError:
-                pass
-
-        return f"[{record.levelname}] {record.name}: {msg}"
+        return f"[{record.levelname}] {record.name}: {record.getMessage()}"
 
 
 # =============================================================================
 # BOUNDED QUEUE HANDLER (with drop policy)
 # =============================================================================
+
+# Module-level drop statistics (shared across all BoundedQueueHandler instances)
+# This aggregation is intentional: we want a single drop count for all logging
+_total_drop_count: int = 0
+_last_drop_warning_time: float = 0.0
+_drop_stats_lock = threading.Lock()
+
 
 class BoundedQueueHandler(logging.handlers.QueueHandler):
     """
@@ -242,33 +359,85 @@ class BoundedQueueHandler(logging.handlers.QueueHandler):
 
     This prevents log producers from being blocked by slow consumers,
     which is critical for non-blocking async code.
+
+    IMPORTANT: We override prepare() to NOT modify record.msg, because
+    ProcessorFormatter expects record.msg to remain a dict (from wrap_for_formatter).
+    The default QueueHandler.prepare() calls self.format(record) which converts
+    the dict to a string, breaking ProcessorFormatter.
+
+    Drop Statistics:
+        Drop count is tracked at module level (shared across all instances).
+        This is intentional: we want aggregate drop metrics regardless of
+        how many handler instances exist. Access via get_drop_count().
     """
 
-    _drop_count: int = 0
-    _last_drop_warning: float = 0.0
+    def __init__(self, queue: queue.Queue):
+        """
+        Initialize bounded queue handler.
+
+        Args:
+            queue: Queue to write log records to
+        """
+        super().__init__(queue)
+        # Instance-level drop count (for per-handler tracking if needed)
+        self._instance_drop_count: int = 0
+
+    def prepare(self, record: logging.LogRecord) -> logging.LogRecord:
+        """
+        Prepare record for queuing WITHOUT modifying record.msg.
+
+        The default QueueHandler.prepare() calls self.format(record) which
+        converts record.msg to a formatted string. This breaks ProcessorFormatter
+        which expects record.msg to be a dict (from wrap_for_formatter).
+
+        We preserve the record as-is so handlers can format it themselves.
+        We also preserve exc_info so handlers can access exception details.
+        """
+        # Don't call self.format(record) - let handlers do their own formatting
+        # Preserve exc_info for handlers (ProcessorFormatter needs it)
+        return record
 
     def enqueue(self, record: logging.LogRecord) -> None:
         """
         Put record on queue, dropping if full.
 
-        Periodically writes drop count to stderr (at most every 10 seconds).
+        Periodically writes drop count to stderr (rate limited).
         """
+        global _total_drop_count, _last_drop_warning_time
+
         try:
             self.queue.put_nowait(record)
         except queue.Full:
-            BoundedQueueHandler._drop_count += 1
+            # Update drop counts (thread-safe)
+            with _drop_stats_lock:
+                _total_drop_count += 1
+                self._instance_drop_count += 1
+                current_drop_count = _total_drop_count
+
             # Rate-limit drop warnings to stderr
             import time
             now = time.time()
-            if now - BoundedQueueHandler._last_drop_warning > 10.0:
-                try:
-                    print(
-                        f"[WARN] Log queue full, dropped {BoundedQueueHandler._drop_count} messages",
-                        file=sys.__stderr__,
-                    )
-                except Exception:
-                    pass
-                BoundedQueueHandler._last_drop_warning = now
+            with _drop_stats_lock:
+                if now - _last_drop_warning_time > DROP_WARNING_INTERVAL_SECONDS:
+                    try:
+                        print(
+                            f"[WARN] Log queue full, dropped {current_drop_count} messages",
+                            file=sys.__stderr__,
+                        )
+                    except Exception:
+                        pass
+                    _last_drop_warning_time = now
+
+
+def get_drop_count() -> int:
+    """
+    Get total number of dropped log messages across all handlers.
+
+    Returns:
+        Total drop count (module-level aggregate)
+    """
+    with _drop_stats_lock:
+        return _total_drop_count
 
 
 # =============================================================================
@@ -288,7 +457,7 @@ def _uncaught_exception_handler(exc_type, exc_value, exc_tb):
         category='unexpected',
         error_type=exc_type.__name__,
         message=str(exc_value),
-        traceback=''.join(traceback.format_exception(exc_type, exc_value, exc_tb))[:32768],
+        traceback=''.join(traceback.format_exception(exc_type, exc_value, exc_tb))[:MAX_TRACEBACK_LENGTH],
     )
 
     # Ensure logs are flushed
@@ -304,7 +473,7 @@ def _thread_exception_handler(args):
         error_type=args.exc_type.__name__,
         message=str(args.exc_value),
         thread_name=args.thread.name if args.thread else 'unknown',
-        traceback=''.join(traceback.format_exception(args.exc_type, args.exc_value, args.exc_traceback))[:32768],
+        traceback=''.join(traceback.format_exception(args.exc_type, args.exc_value, args.exc_traceback))[:MAX_TRACEBACK_LENGTH],
     )
 
 
@@ -332,7 +501,7 @@ def _asyncio_exception_handler(loop, context):
     if exception:
         error_type = type(exception).__name__
         log_data['error_type'] = error_type
-        tb_str = ''.join(traceback.format_exception(type(exception), exception, exception.__traceback__))[:32768]
+        tb_str = ''.join(traceback.format_exception(type(exception), exception, exception.__traceback__))[:MAX_TRACEBACK_LENGTH]
         log_data['traceback'] = tb_str
 
         # Classify timeout exceptions
@@ -394,7 +563,8 @@ def _signal_handler(signum, frame):
     Handle SIGINT/SIGTERM signals for graceful shutdown.
 
     Flushes logs before exiting. Re-raises the signal after cleanup
-    to allow normal shutdown behavior (e.g., KeyboardInterrupt).
+    to allow normal shutdown behavior (e.g., KeyboardInterrupt for SIGINT,
+    proper termination tracking by process managers for SIGTERM).
     """
     global _original_sigint_handler, _original_sigterm_handler
 
@@ -407,8 +577,16 @@ def _signal_handler(signum, frame):
         raise KeyboardInterrupt
     elif signum == signal.SIGTERM:
         signal.signal(signal.SIGTERM, _original_sigterm_handler or signal.SIG_DFL)
-        # On Windows SIGTERM doesn't exist, but handle gracefully
-        sys.exit(0)
+        # Re-raise SIGTERM to allow proper process termination tracking
+        # by process managers (systemd, supervisor, etc.)
+        # On Unix: os.kill re-raises the signal with original handler
+        # On Windows: SIGTERM exists but can only be sent internally, fallback to sys.exit
+        import os
+        try:
+            os.kill(os.getpid(), signal.SIGTERM)
+        except (OSError, AttributeError):
+            # Fallback for Windows or if os.kill fails
+            sys.exit(0)
 
 
 def _install_crash_hooks():
@@ -453,8 +631,11 @@ def configure_logging(
     """
     Configure production-grade logging infrastructure.
 
+    All logs go to JSONL file only - NO console output in any mode.
+    Console is reserved for user-facing messages via Rich console.print().
+
     Args:
-        mode: "cli" for console+file, "tui" for file-only (WARN+ to stderr)
+        mode: "cli" or "tui" (both behave the same - file-only logging)
         log_level: Override log level (default: from LOG_LEVEL env or INFO)
         log_dir: Directory for log files
         max_bytes: Max size per log file before rotation
@@ -490,23 +671,19 @@ def configure_logging(
         backupCount=backup_count,
         encoding='utf-8',
     )
-    file_handler.setFormatter(StructlogJSONFormatter())
-    file_handler.setLevel(logging.DEBUG)  # Capture all levels to file
+    file_handler.setFormatter(create_json_formatter())
+    # INFO level for development - DEBUG is too verbose and can flood the queue
+    # Set LOG_LEVEL=DEBUG env var if you need debug logs for troubleshooting
+    file_handler.setLevel(logging.INFO)
     handlers.append(file_handler)
 
-    # 2. Console/stderr handler based on mode
-    if mode == "cli":
-        # CLI mode: console output at configured level
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setFormatter(StructlogConsoleFormatter())
-        console_handler.setLevel(level)
-        handlers.append(console_handler)
-    elif mode == "tui":
-        # TUI mode: WARN+ to stderr only (avoid interfering with TUI)
-        stderr_handler = logging.StreamHandler(sys.__stderr__)
-        stderr_handler.setFormatter(StructlogConsoleFormatter())
-        stderr_handler.setLevel(logging.WARNING)
-        handlers.append(stderr_handler)
+    # 2. Console handler - DISABLED for both modes
+    # All logs go to JSONL file only. Console output is reserved for:
+    # - Rich console.print() for user-facing messages
+    # - Actual application output
+    # Log messages should never appear in user's terminal.
+    # This also eliminates the "race condition" where module-level get_logger()
+    # calls would auto-configure logging before the mode was known.
 
     # 3. SQLite error handler (always enabled)
     try:
@@ -519,12 +696,14 @@ def configure_logging(
         pass  # SQLite handler not available yet
 
     # Create bounded queue for non-blocking logging (drops when full)
-    _log_queue = queue.Queue(maxsize=10000)
+    _log_queue = queue.Queue(maxsize=LOG_QUEUE_SIZE)
     queue_handler = BoundedQueueHandler(_log_queue)
 
     # Configure root logger
+    # INFO level for development - prevents DEBUG messages from flooding the queue
+    # Set LOG_LEVEL=DEBUG env var if you need debug logs for troubleshooting
     root_logger = logging.getLogger()
-    root_logger.setLevel(logging.DEBUG)  # Capture all, let handlers filter
+    root_logger.setLevel(level)  # Use configured level (default: INFO)
 
     # Remove existing handlers
     for handler in root_logger.handlers[:]:
@@ -553,8 +732,12 @@ def configure_logging(
     # 5. Inject context from contextvars
     # 6. Redact sensitive data
     # 7. Format exceptions
-    # 8. Render to JSON string
+    # 8. Wrap for ProcessorFormatter (keeps event_dict as dict on record.msg)
     # 9. Pass to stdlib logger (which routes to QueueHandler)
+    #
+    # NOTE: We use ProcessorFormatter.wrap_for_formatter() instead of JSONRenderer()
+    # so that handlers (especially SQLiteErrorHandler) can access the structured
+    # event_dict directly from record.msg, rather than parsing JSON strings.
     #
     structlog.configure(
         processors=[
@@ -588,8 +771,9 @@ def configure_logging(
             structlog.stdlib.PositionalArgumentsFormatter(),
             # Unicode decode
             structlog.processors.UnicodeDecoder(),
-            # Render to JSON string (this becomes the log message)
-            structlog.processors.JSONRenderer(),
+            # Wrap for ProcessorFormatter - keeps event_dict as dict on record.msg
+            # Handlers use ProcessorFormatter to do final rendering (JSON, console, etc.)
+            structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
         ],
         wrapper_class=structlog.stdlib.BoundLogger,
         context_class=dict,
@@ -598,9 +782,14 @@ def configure_logging(
     )
 
     # Suppress noisy third-party loggers
+    # These libraries generate excessive DEBUG/INFO logs during streaming/HTTP operations
+    # which can flood the log queue (10,000 items) and cause message drops
     noisy_loggers = [
         'httpx', 'httpcore', 'openai', 'multilspy', 'chromadb',
         'urllib3', 'asyncio', 'hpack', 'h2',
+        # LiteLLM generates DEBUG logs per streaming chunk - extremely noisy
+        'litellm', 'LiteLLM', 'litellm.proxy', 'litellm.llms',
+        'litellm.router', 'litellm.caching',
     ]
     for logger_name in noisy_loggers:
         logging.getLogger(logger_name).setLevel(logging.WARNING)
