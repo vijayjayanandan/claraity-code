@@ -386,9 +386,9 @@ graph TD
 
 ## Remaining Work
 
-### MemoryManager-StreamingPipeline Integration
+### ~~MemoryManager-StreamingPipeline Integration~~ COMPLETE (v0.3.1)
 
-Currently the agent accumulates `response_content` as a string and calls `working_memory.add_message()` after stream completes. Target: MemoryManager owns StreamingPipeline, calls `process_provider_delta()` to update store in real-time.
+Dual text accumulation eliminated. `response_content` is now derived from `finalized_message.content` (success) or `memory.get_partial_text()` (error/interrupt). Single source of truth: StreamingPipeline.
 
 ### Testing Gaps
 
@@ -440,6 +440,7 @@ src/ui/
 
 ## Changelog
 
+- **v2.1 (2026-01-27):** Updated for v0.3.1: dual text accumulation eliminated, MemoryManager integration complete.
 - **v2.0 (2026-01-27):** Complete rewrite for LLM optimization. Reflects v0.3.0 refactor: agent-UI decoupling, deleted legacy files, single store-driven rendering path.
 - **v1.2 (2026-01-25):** Added MessageStore index diagrams, thread safety model, error handling tree.
 - **v1.0 (2026-01-24):** Initial architecture document.
