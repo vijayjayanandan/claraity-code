@@ -1997,7 +1997,6 @@ class CodingAgent(AgentInterface):
         from typing import AsyncIterator, Optional, List
         from src.ui.events import (
             UIEvent, StreamStart, StreamEnd, TextDelta,
-            ToolCallStart, ToolCallStatus, ToolStatus,
             PausePromptStart, PausePromptEnd, ContextUpdated, ContextCompacted,
         )
         from src.core.tool_status import ToolStatus as CoreToolStatus
@@ -2444,18 +2443,12 @@ class CodingAgent(AgentInterface):
                         # Block this call - add to blocked_calls for controller constraint
                         blocked_calls.append(call_summary)
 
-                        # User visibility: Show that call was skipped
-                        yield ToolCallStart(
-                            call_id=call_id,
-                            name=tc.function.name,
-                            arguments=tc.function.get_parsed_arguments(),
-                            requires_approval=False,
-                        )
-                        yield ToolCallStatus(
-                            call_id=call_id,
-                            status=ToolStatus.SKIPPED,
-                            message=f"Blocked: Previously failed with same arguments"
-                        )
+                        # Update tool state in store (skipped)
+                        if self.memory.message_store:
+                            self.memory.message_store.update_tool_state(
+                                call_id,
+                                CoreToolStatus.SKIPPED
+                            )
 
                         # LLM feedback: Add tool message so LLM knows to try different approach
                         tool_messages.append({
@@ -2470,18 +2463,13 @@ class CodingAgent(AgentInterface):
                     tool_args = tc.function.get_parsed_arguments()
                     plan_gate_result = self._check_plan_mode_gate(tc.function.name, tool_args)
                     if plan_gate_result is not None:
-                        # Tool is gated in plan mode - show as blocked, not pending approval
-                        yield ToolCallStart(
-                            call_id=call_id,
-                            name=tc.function.name,
-                            arguments=tool_args,
-                            requires_approval=False,
-                        )
-                        yield ToolCallStatus(
-                            call_id=call_id,
-                            status=ToolStatus.FAILED,
-                            message=plan_gate_result["message"]
-                        )
+                        # Tool is gated in plan mode - update store
+                        if self.memory.message_store:
+                            self.memory.message_store.update_tool_state(
+                                call_id,
+                                CoreToolStatus.ERROR,
+                                error=plan_gate_result["message"]
+                            )
 
                         # Add gated response to tool messages for LLM feedback
                         import json
@@ -2522,14 +2510,6 @@ class CodingAgent(AgentInterface):
                             CoreToolStatus.PENDING
                         )
 
-                    # Yield ToolCallStart event
-                    yield ToolCallStart(
-                        call_id=call_id,
-                        name=tc.function.name,
-                        arguments=tc.function.get_parsed_arguments(),
-                        requires_approval=requires_approval,
-                    )
-
                     # Handle approval if required
                     if requires_approval:
                         # Set approval state to prevent pause prompts during approval wait
@@ -2542,12 +2522,6 @@ class CodingAgent(AgentInterface):
                                 CoreToolStatus.AWAITING_APPROVAL
                             )
 
-                        yield ToolCallStatus(
-                            call_id=call_id,
-                            status=ToolStatus.AWAITING_APPROVAL,
-                            message="Waiting for user approval..."
-                        )
-
                         try:
                             # Wait for user approval via UI (no timeout - user may be multitasking)
                             approval_result = await ui.wait_for_approval(call_id, tc.function.name, timeout=None)
@@ -2557,12 +2531,6 @@ class CodingAgent(AgentInterface):
                                 if approval_result.feedback:
                                     # User provided feedback - pass to LLM so it can try again
                                     rejection_msg = f"User rejected with feedback: {approval_result.feedback}"
-
-                                    yield ToolCallStatus(
-                                        call_id=call_id,
-                                        status=ToolStatus.REJECTED,
-                                        message=rejection_msg
-                                    )
 
                                     # Update tool_state in message store
                                     if self.memory.message_store:
@@ -2592,12 +2560,6 @@ class CodingAgent(AgentInterface):
                                 else:
                                     # Pure rejection (Escape) - stop completely
                                     rejection_msg = "Tool call rejected by user"
-
-                                    yield ToolCallStatus(
-                                        call_id=call_id,
-                                        status=ToolStatus.REJECTED,
-                                        message=rejection_msg
-                                    )
 
                                     # CRITICAL: Update tool_state in message store
                                     if self.memory.message_store:
@@ -2635,18 +2597,12 @@ class CodingAgent(AgentInterface):
                                     CoreToolStatus.APPROVED
                                 )
 
-                            yield ToolCallStatus(
-                                call_id=call_id,
-                                status=ToolStatus.APPROVED,
-                                message="User approved"
-                            )
-
                         except asyncio.TimeoutError:
-                            yield ToolCallStatus(
-                                call_id=call_id,
-                                status=ToolStatus.CANCELLED,
-                                message="Approval timed out"
-                            )
+                            if self.memory.message_store:
+                                self.memory.message_store.update_tool_state(
+                                    call_id,
+                                    CoreToolStatus.CANCELLED
+                                )
                             tool_messages.append({
                                 "role": "tool",
                                 "tool_call_id": call_id,
@@ -2657,12 +2613,6 @@ class CodingAgent(AgentInterface):
 
                         except asyncio.CancelledError:
                             cancelled_msg = "Tool call cancelled by user (stream interrupted)"
-
-                            yield ToolCallStatus(
-                                call_id=call_id,
-                                status=ToolStatus.CANCELLED,
-                                message="Cancelled"
-                            )
 
                             # CRITICAL: Update tool_state in message store
                             if self.memory.message_store:
@@ -2702,12 +2652,6 @@ class CodingAgent(AgentInterface):
                             call_id,
                             CoreToolStatus.RUNNING
                         )
-
-                    yield ToolCallStatus(
-                        call_id=call_id,
-                        status=ToolStatus.RUNNING,
-                        message=f"Executing {tc.function.name}..."
-                    )
 
                     start_time = time.monotonic()
 
