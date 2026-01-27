@@ -1995,7 +1995,7 @@ class CodingAgent(AgentInterface):
             UIEvent instances (StreamStart, TextDelta, ToolCallStart, etc.)
         """
         from typing import AsyncIterator, Optional, List
-        from src.ui.events import (
+        from src.core.events import (
             UIEvent, StreamStart, StreamEnd, TextDelta,
             PausePromptStart, PausePromptEnd, ContextUpdated, ContextCompacted,
         )
@@ -2329,7 +2329,7 @@ class CodingAgent(AgentInterface):
 
                     # Emit ErrorEvent for TUI visibility (recoverable)
                     # Use root_cause_type (not error_type) to correctly classify wrapped exceptions
-                    from src.ui.events import ErrorEvent
+                    from src.core.events import ErrorEvent
                     yield ErrorEvent(
                         error_type="provider_timeout" if is_timeout else "network",
                         user_message=user_message,

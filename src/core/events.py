@@ -3,26 +3,13 @@ Agent Events - Shared contract between Agent and all UI handlers.
 
 These events are emitted by the Agent and consumed by:
 - CLI Handler (prints formatted output)
-- TUI Handler (via StreamProcessor → UIEvents → widgets)
+- TUI Handler (store notifications + these events for ephemeral signals)
 
 Design Principles:
 - Frozen dataclasses for immutability
 - Agent emits these, never prints directly
 - UI handlers subscribe and render however they want
-
-Event Flow:
-                        AgentEvent
-                            │
-              ┌─────────────┴─────────────┐
-              │                           │
-              ▼                           ▼
-    CLI Handler (direct)         StreamProcessor
-              │                           │
-              │                           ▼
-              │                       UIEvent
-              │                           │
-              ▼                           ▼
-        Rich console              Textual widgets
+- This module lives in core/ so agent has no UI dependency
 """
 
 from dataclasses import dataclass
@@ -31,70 +18,129 @@ from typing import Any, Union
 
 
 class ToolStatus(Enum):
-    """Tool execution lifecycle."""
-    STARTED = auto()       # Tool call parsed, about to execute
-    RUNNING = auto()       # Execution in progress
-    SUCCESS = auto()       # Completed successfully
-    FAILED = auto()        # Completed with error
-    CANCELLED = auto()     # User cancelled
+    """Tool execution lifecycle states."""
+
+    PENDING = auto()            # Queued, not yet started
+    AWAITING_APPROVAL = auto()  # Waiting for user confirmation
+    APPROVED = auto()           # User approved, about to execute
+    REJECTED = auto()           # User rejected
+    RUNNING = auto()            # Currently executing
+    SUCCESS = auto()            # Completed successfully
+    FAILED = auto()             # Completed with error
+    ERROR = auto()              # Tool execution error (alias for FAILED)
+    TIMEOUT = auto()            # Tool execution timed out
+    CANCELLED = auto()          # User cancelled mid-execution
+    SKIPPED = auto()            # Blocked (e.g., repeated failed call)
 
 
 # =============================================================================
-# Content Events
+# Stream Lifecycle Events
 # =============================================================================
 
 @dataclass(frozen=True)
-class ContentDelta:
-    """
-    Incremental LLM content.
+class StreamStart:
+    """New assistant response starting.
 
-    This is raw LLM output - no formatting, no tool announcements.
-    May contain markdown, code fences, thinking tags, etc.
-    StreamProcessor will parse these for TUI rendering.
+    UI should create a new MessageWidget for the assistant.
+    """
+    pass
+
+
+@dataclass(frozen=True)
+class StreamEnd:
+    """Stream complete (normal termination).
+
+    UI should finalize the current message and re-focus input.
+    """
+    total_tokens: int | None = None
+    duration_ms: int | None = None
+
+
+# =============================================================================
+# Text Content Events
+# =============================================================================
+
+@dataclass(frozen=True)
+class TextDelta:
+    """Incremental text content to append to the current markdown block.
+
+    These arrive debounced (not per-token) for smooth rendering.
+    The UI should accumulate and render as Markdown.
     """
     content: str
 
 
+# =============================================================================
+# Code Block Events
+# =============================================================================
+
 @dataclass(frozen=True)
-class ContentComplete:
-    """LLM finished generating content (before tool calls)."""
+class CodeBlockStart:
+    """Start a new syntax-highlighted code block.
+
+    The UI should create a new CodeBlock widget.
+    Subsequent CodeBlockDelta events append to this block.
+    """
+    language: str
+
+    def __post_init__(self):
+        # Normalize empty/None language to "text"
+        if not self.language:
+            object.__setattr__(self, 'language', 'text')
+
+
+@dataclass(frozen=True)
+class CodeBlockDelta:
+    """Incremental code content to append to the current code block."""
+    content: str
+
+
+@dataclass(frozen=True)
+class CodeBlockEnd:
+    """Current code block is complete.
+
+    UI should finalize the block (update border, stop streaming indicator).
+    """
     pass
 
 
 # =============================================================================
-# Tool Events
+# Tool Call Events (legacy - kept for backward compatibility)
 # =============================================================================
 
 @dataclass(frozen=True)
-class ToolCallParsed:
-    """
-    Tool call fully parsed and ready to execute.
+class ToolCallStart:
+    """A complete, parsed tool call ready for execution.
 
-    Emitted when we have complete tool name + valid JSON arguments.
-    Never emit partial tool calls or raw JSON.
+    Note: No longer yielded by the agent. Kept for backward compatibility.
+    Tool cards are now created from store notifications.
     """
     call_id: str
     name: str
-    arguments: dict
+    arguments: dict[str, Any]
+    requires_approval: bool
 
 
 @dataclass(frozen=True)
-class ToolExecutionStarted:
-    """Tool execution has begun."""
+class ToolCallStatus:
+    """Tool execution status update.
+
+    Note: No longer yielded by the agent. Kept for backward compatibility.
+    Tool status is now driven by store notifications.
+    """
     call_id: str
-    name: str
+    status: ToolStatus
+    message: str | None = None
 
 
 @dataclass(frozen=True)
-class ToolExecutionResult:
-    """
-    Tool execution completed.
+class ToolCallResult:
+    """Tool execution completed with result.
 
-    For CLI: format and print the result
-    For TUI: update the ToolCard widget
+    Note: No longer yielded by the agent. Kept for backward compatibility.
+    Tool results are now persisted to the store directly.
     """
     call_id: str
-    name: str
     status: ToolStatus
     result: Any = None
     error: str | None = None
@@ -102,64 +148,135 @@ class ToolExecutionResult:
 
 
 # =============================================================================
-# Stream Lifecycle
+# Thinking/Reasoning Events (for models with extended thinking)
 # =============================================================================
 
 @dataclass(frozen=True)
-class StreamStarted:
-    """New response stream started."""
+class ThinkingStart:
+    """Model started extended thinking/reasoning.
+
+    UI should create a collapsible ThinkingBlock.
+    """
     pass
 
 
 @dataclass(frozen=True)
-class StreamEnded:
-    """Response stream completed."""
-    total_tokens: int | None = None
+class ThinkingDelta:
+    """Incremental thinking content."""
+    content: str
 
 
 @dataclass(frozen=True)
-class StreamError:
-    """Error during streaming."""
-    error_type: str  # "network", "rate_limit", "api_error"
-    message: str
+class ThinkingEnd:
+    """Thinking phase complete.
+
+    UI should finalize the thinking block and show token count.
+    """
+    token_count: int | None = None
+
+
+# =============================================================================
+# Pause/Continue Events
+# =============================================================================
+
+@dataclass(frozen=True)
+class PausePromptStart:
+    """Agent paused and awaiting user decision to continue or stop.
+
+    Emitted when agent hits a budget limit (tool calls, wall time, iterations).
+    UI should display a pause widget with Continue/Stop options.
+    """
+    reason: str
+    reason_code: str
+    pending_todos: list[str]
+    stats: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class PausePromptEnd:
+    """User responded to pause prompt."""
+    continue_work: bool
+    feedback: str | None = None
+
+
+# =============================================================================
+# Context Window Events
+# =============================================================================
+
+@dataclass(frozen=True)
+class ContextUpdated:
+    """Context window usage updated.
+
+    Emitted after each context build so UI can display usage progress bar.
+    """
+    used: int
+    limit: int
+    pressure_level: str = "green"
+
+
+@dataclass(frozen=True)
+class ContextCompacted:
+    """Context was compacted to free up space.
+
+    Emitted when orchestrator triggers compaction due to threshold breach.
+    """
+    messages_removed: int
+    tokens_before: int
+    tokens_after: int
+
+
+# =============================================================================
+# Error Events
+# =============================================================================
+
+@dataclass(frozen=True)
+class ErrorEvent:
+    """Error during streaming.
+
+    Attributes:
+        error_type: Category for determining recovery behavior
+            - "provider_timeout": LLM request timed out
+            - "network": Connection error (auto-retry)
+            - "rate_limit": Rate limited (auto-retry with countdown)
+            - "api_error": Provider API error
+            - "auth": Authentication error (fatal)
+        user_message: Safe, user-friendly message (NO stack traces)
+        error_id: Reference ID for looking up full details in logs
+        recoverable: Whether automatic retry is possible
+        retry_after: Seconds to wait before retry (for rate limits)
+    """
+    error_type: str
+    user_message: str
+    error_id: str = ""
     recoverable: bool = True
-    retry_after: int | None = None  # For rate limits
+    retry_after: int | None = None
 
 
 # =============================================================================
-# Type Union
+# Type Union for Pattern Matching
 # =============================================================================
 
-AgentEvent = Union[
-    ContentDelta,
-    ContentComplete,
-    ToolCallParsed,
-    ToolExecutionStarted,
-    ToolExecutionResult,
-    StreamStarted,
-    StreamEnded,
-    StreamError,
+UIEvent = Union[
+    StreamStart, StreamEnd,
+    TextDelta,
+    CodeBlockStart, CodeBlockDelta, CodeBlockEnd,
+    ToolCallStart, ToolCallStatus, ToolCallResult,
+    ThinkingStart, ThinkingDelta, ThinkingEnd,
+    PausePromptStart, PausePromptEnd,
+    ContextUpdated, ContextCompacted,
+    ErrorEvent
 ]
 
-
-# =============================================================================
-# Exports
-# =============================================================================
-
+# Export all event types
 __all__ = [
-    # Enums
     'ToolStatus',
-    # Content Events
-    'ContentDelta',
-    'ContentComplete',
-    # Tool Events
-    'ToolCallParsed',
-    'ToolExecutionStarted',
-    'ToolExecutionResult',
-    # Stream Lifecycle
-    'StreamStarted',
-    'StreamEnded',
-    'StreamError',
-    # Type Union
-    'AgentEvent',
+    'StreamStart', 'StreamEnd',
+    'TextDelta',
+    'CodeBlockStart', 'CodeBlockDelta', 'CodeBlockEnd',
+    'ToolCallStart', 'ToolCallStatus', 'ToolCallResult',
+    'ThinkingStart', 'ThinkingDelta', 'ThinkingEnd',
+    'PausePromptStart', 'PausePromptEnd',
+    'ContextUpdated', 'ContextCompacted',
+    'ErrorEvent',
+    'UIEvent',
 ]

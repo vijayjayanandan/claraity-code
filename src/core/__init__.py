@@ -8,15 +8,15 @@ from .file_reference_parser import FileReferenceParser, FileReference
 from .session_manager import SessionManager, SessionMetadata
 from .events import (
     ToolStatus,
-    ContentDelta,
-    ContentComplete,
-    ToolCallParsed,
-    ToolExecutionStarted,
-    ToolExecutionResult,
-    StreamStarted,
-    StreamEnded,
-    StreamError,
-    AgentEvent,
+    StreamStart, StreamEnd,
+    TextDelta,
+    CodeBlockStart, CodeBlockDelta, CodeBlockEnd,
+    ToolCallStart, ToolCallStatus, ToolCallResult,
+    ThinkingStart, ThinkingDelta, ThinkingEnd,
+    PausePromptStart, PausePromptEnd,
+    ContextUpdated, ContextCompacted,
+    ErrorEvent,
+    UIEvent,
 )
 
 __all__ = [
@@ -33,15 +33,15 @@ __all__ = [
     "FileReference",
     "SessionManager",
     "SessionMetadata",
-    # Agent Events
+    # Events
     "ToolStatus",
-    "ContentDelta",
-    "ContentComplete",
-    "ToolCallParsed",
-    "ToolExecutionStarted",
-    "ToolExecutionResult",
-    "StreamStarted",
-    "StreamEnded",
-    "StreamError",
-    "AgentEvent",
+    "StreamStart", "StreamEnd",
+    "TextDelta",
+    "CodeBlockStart", "CodeBlockDelta", "CodeBlockEnd",
+    "ToolCallStart", "ToolCallStatus", "ToolCallResult",
+    "ThinkingStart", "ThinkingDelta", "ThinkingEnd",
+    "PausePromptStart", "PausePromptEnd",
+    "ContextUpdated", "ContextCompacted",
+    "ErrorEvent",
+    "UIEvent",
 ]
