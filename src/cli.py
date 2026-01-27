@@ -73,13 +73,12 @@ def chat_mode(agent: CodingAgent, controller: Optional[LongRunningController] = 
         # Phase 6: Initialize MessageStore and SessionWriter for persistence
         from src.session.store.memory_store import MessageStore
         from src.session.persistence.writer import SessionWriter
-        from src.ui.app import TUI_RENDER_FROM_STORE
         import uuid
         from datetime import datetime
 
         # Create session directory
         session_id = f"session-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
-        sessions_dir = Path(".sessions")
+        sessions_dir = Path(".clarity/sessions")
         session_dir = sessions_dir / session_id
         session_dir.mkdir(parents=True, exist_ok=True)
         jsonl_path = session_dir / "session.jsonl"
@@ -114,8 +113,6 @@ def chat_mode(agent: CodingAgent, controller: Optional[LongRunningController] = 
         # Agent freezes approval policy when tool call name becomes known during streaming
         # TUI queries registry when creating tool cards from store notifications
         app.set_render_meta_registry(agent.memory.render_meta)
-
-        console.print(f"[dim]Store-driven rendering: {TUI_RENDER_FROM_STORE}[/dim]")
 
         app.run()
         console.print(f"[dim]Session saved to: {jsonl_path}[/dim]")

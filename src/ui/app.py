@@ -10,7 +10,7 @@ This is the top-level application that:
 
 from textual.app import App, ComposeResult
 from textual.containers import ScrollableContainer, Vertical
-from textual.widgets import Input, Footer, Header, TextArea, Static
+from textual.widgets import Footer, Header, TextArea, Static
 from textual.widgets.text_area import Selection
 from textual.binding import Binding
 from textual.css.query import NoMatches
@@ -19,15 +19,13 @@ from textual.events import Paste
 from typing import TYPE_CHECKING, AsyncIterator, Callable, Any, Optional, Literal, List
 from pathlib import Path
 import asyncio
-import logging
 import time
 import os
 
-# Phase 6: Feature flag for store-driven rendering (default: enabled)
-TUI_RENDER_FROM_STORE = os.getenv("TUI_RENDER_FROM_STORE", "true").lower() in ("1", "true", "yes")
+from src.observability import get_logger
 
 # Module-level logger for debugging silent exceptions
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 from src.core.attachment import Attachment
 from src.core.tool_status import ToolStatus as CoreToolStatus
@@ -44,9 +42,10 @@ from .events import (
 from .messages import (
     ApprovalResponseMessage, StreamInterruptMessage,
     RetryRequestMessage, InputSubmittedMessage,
-    PauseResponseMessage,
+    PauseResponseMessage, ClarifyResponseMessage,
+    PlanApprovalResponseMessage,
 )
-from .protocol import UIProtocol, ApprovalResult, InterruptSignal, RetrySignal, PauseResult
+from .protocol import UIProtocol, ApprovalResult, InterruptSignal, RetrySignal, PauseResult, ClarifyResult, PlanApprovalResult
 from .widgets.message import MessageWidget, UserMessage, AssistantMessage
 from .widgets.code_block import CodeBlock
 from .widgets.tool_card import ToolCard
@@ -56,6 +55,8 @@ from .widgets.autocomplete_dropdown import AutocompleteDropdown
 from .widgets.attachment_bar import AttachmentBar
 from .widgets.todo_bar import TodoBar
 from .widgets.pause_widget import PausePromptWidget
+from .widgets.clarify_widget import ClarifyWidget
+from .widgets.plan_approval_widget import PlanApprovalWidget
 from .autocomplete import FileAutocomplete
 
 if TYPE_CHECKING:
@@ -170,6 +171,58 @@ def _generate_error_reference() -> str:
     return uuid.uuid4().hex[:8]
 
 
+def _extract_user_content_text(content: Any) -> str:
+    """
+    Extract displayable text from user message content.
+    
+    Handles both simple string content and multimodal content (list).
+    For multimodal content, extracts text parts and adds placeholders for attachments.
+    
+    Args:
+        content: Message content (string or list of content parts)
+        
+    Returns:
+        String representation suitable for display
+    """
+    if isinstance(content, str):
+        return content
+    
+    if not isinstance(content, list):
+        return str(content) if content is not None else ""
+    
+    parts = []
+    for item in content:
+        if not isinstance(item, dict):
+            continue
+            
+        item_type = item.get("type", "")
+        
+        if item_type == "text":
+            # Extract text content
+            text = item.get("text", "")
+            if text:
+                parts.append(text)
+                
+        elif item_type == "image_url":
+            # Show image placeholder
+            image_url = item.get("image_url", {})
+            url = image_url.get("url", "") if isinstance(image_url, dict) else str(image_url)
+            
+            # Extract filename from data URL if present
+            if url.startswith("data:image/"):
+                # Format: data:image/png;base64,<data>
+                parts.append("[IMAGE]")
+            else:
+                parts.append(f"[IMAGE: {url}]")
+                
+        elif item_type == "file":
+            # Show file placeholder (if we add file support)
+            filename = item.get("filename", "unknown")
+            parts.append(f"[FILE: {filename}]")
+    
+    return "\n".join(parts) if parts else ""
+
+
 def _format_user_error(e: Exception, include_reference: bool = True) -> str:
     """
     Format an exception as a user-friendly error message.
@@ -281,47 +334,10 @@ class ChatInput(TextArea):
             self._index_task.cancel()
 
     def on_key(self, event) -> None:
-        """Handle Enter to submit, Ctrl+Enter for newline, Ctrl+V for paste, @ autocomplete."""
-        # Handle Ctrl+V - check for image/file first, then text
-        if event.key == "ctrl+v":
-            try:
-                from PIL import ImageGrab
-                result = ImageGrab.grabclipboard()
-
-                if result is not None and not isinstance(result, list):
-                    # It's an image - handle it and STOP event
-                    event.prevent_default()
-                    event.stop()
-                    import asyncio
-                    asyncio.create_task(self._attach_clipboard_image(result))
-                    return
-
-                if isinstance(result, list):
-                    # It's files - handle them and STOP event
-                    event.prevent_default()
-                    event.stop()
-                    import asyncio
-                    asyncio.create_task(self._attach_clipboard_files(result))
-                    return
-            except Exception as e:
-                logger.debug(f"PIL ImageGrab failed (falling back to text): {e}")
-
-            # No image/file - get text from clipboard using our fixed handler
-            event.prevent_default()
-            event.stop()
-            try:
-                from .clipboard_handler import ClipboardHandler
-                _, _, text = ClipboardHandler.get_clipboard_content()
-                if text:
-                    # Normalize newlines for cross-platform compatibility
-                    text = text.replace("\r\n", self.document.newline)
-                    text = text.replace("\r", self.document.newline)
-                    # Checkpoint for clean undo history
-                    self.history.checkpoint()
-                    self.insert(text)
-            except Exception as e:
-                self.app.notify(f"Paste failed: {e}", severity="error")
-            return
+        """Handle Enter to submit, Ctrl+Enter for newline, @ autocomplete.
+        
+        Note: Ctrl+V paste is handled by on_paste() event handler, not here.
+        """
 
         # If autocomplete is active, handle navigation first
         if self._autocomplete_active:
@@ -504,13 +520,34 @@ class ChatInput(TextArea):
     async def on_paste(self, event: Paste) -> None:
         """Handle paste events - intercept before TextArea's default handler.
 
-        The Paste event contains text in event.text. For images/files,
-        we need to check the clipboard separately via on_key().
+        Check for images/files first, then fall back to text.
+        This handles both Ctrl+V and right-click paste, supporting:
+        - Screenshots (image data in clipboard)
+        - Files copied from Explorer (file paths in clipboard)
+        - Plain text
         """
         event.prevent_default()
         event.stop()
 
-        # Paste event only fires for text - use event.text directly
+        # Check for image/file in clipboard first (same logic as on_key)
+        try:
+            from PIL import ImageGrab
+            result = ImageGrab.grabclipboard()
+
+            if result is not None and not isinstance(result, list):
+                # It's an image (screenshot) - handle it as image attachment
+                await self._attach_clipboard_image(result)
+                return
+
+            if isinstance(result, list):
+                # It's files (copied from Explorer) - handle them as file attachments
+                # These can be images OR text files, determined by MIME type
+                await self._attach_clipboard_files(result)
+                return
+        except Exception as e:
+            logger.debug(f"PIL ImageGrab failed (falling back to text): {e}")
+
+        # No image/file - paste as plain text into the input
         if event.text:
             self.insert(event.text)
 
@@ -695,6 +732,12 @@ class CodingAgentApp(App):
         # Track pause widget
         self._pause_widget: PausePromptWidget | None = None
 
+        # Track clarify widget
+        self._clarify_widget: ClarifyWidget | None = None
+
+        # Track plan approval widget
+        self._plan_approval_widget: PlanApprovalWidget | None = None
+
         # Cache conversation reference (avoid repeated query_one per flush)
         self._conversation: ConversationContainer | None = None
 
@@ -705,15 +748,9 @@ class CodingAgentApp(App):
         self._last_status_update_ts: float = 0.0
         self._status_update_interval_sec: float = 0.2  # Update at most every 200ms
 
-        # Segmented Streaming mode (default)
-        # - segmented: Accumulate text, render as Markdown only at boundaries
-        # - full: Stream text incrementally (for debugging)
-        self._streaming_mode: Literal["segmented", "full"] = "segmented"
-
-        # Phase 6: Store-driven rendering (optional)
-        # When enabled via TUI_RENDER_FROM_STORE=1, TUI renders from MessageStore
-        # instead of direct UIEvent handling. This enables session persistence.
-        self._render_from_store = TUI_RENDER_FROM_STORE
+        # Phase 6: Store-driven rendering
+        # TUI renders from MessageStore notifications. UIEvents are forwarded
+        # to StoreAdapter for persistence; store notifications handle rendering.
         self._message_store: Optional["MessageStore"] = None
         self._store_adapter: Optional["StoreAdapter"] = None  # Bridges UIEvents to store
         self._store_unsubscribe: Optional[Callable[[], None]] = None
@@ -738,13 +775,6 @@ class CodingAgentApp(App):
         self._segment_flush_handle: asyncio.TimerHandle | None = None  # Timer for delayed flush
         self._segment_flush_interval_sec: float = 0.5  # Flush after 0.5s (Fix #4: faster feedback)
         self._segment_flush_running: bool = False  # Prevent overlapping flushes (Fix #4)
-
-        # Full streaming mode buffers (kept for debug mode)
-        self._delta_buffer: list[str] = []
-        self._flush_task: asyncio.Task | None = None
-        self._flush_interval_sec: float = 0.050  # 50ms
-        self._flush_chars_threshold: int = 512
-        self._delta_chars: int = 0
 
     def _create_agent_stream_handler(
         self,
@@ -885,70 +915,26 @@ class CodingAgentApp(App):
             name="stream-response",
         )
 
-    # Message limit disabled - show all messages
-    # Root cause of performance issue was CSS :hover effects, not widget count
-    MAX_MOUNTED_MESSAGES = None  # None = no limit
-
-    async def _prune_old_messages(self, conversation: ScrollableContainer) -> None:
-        """Remove oldest messages from DOM if over limit.
-
-        Currently disabled (MAX_MOUNTED_MESSAGES = None) since the root cause
-        of performance issues was CSS :hover effects, not widget count.
-        """
-        # No limit - show all messages
-        if self.MAX_MOUNTED_MESSAGES is None:
-            return
-
-        from .widgets.message import MessageWidget, UserMessage
-
-        # Get all message widgets (both user and assistant)
-        messages = list(conversation.query(MessageWidget)) + list(conversation.query(UserMessage))
-
-        if len(messages) > self.MAX_MOUNTED_MESSAGES:
-            # Remove oldest messages (they're at the start of the list)
-            num_to_remove = len(messages) - self.MAX_MOUNTED_MESSAGES
-            for i in range(num_to_remove):
-                try:
-                    messages[i].remove()
-                except Exception:
-                    pass  # Widget may already be removed
-
     async def _add_user_message(self, content: str) -> None:
         """Add user message to conversation.
 
-        Phase 6: When store-driven rendering is enabled, only adds to store
-        and lets the store notification handle rendering. Otherwise renders
-        directly and also persists to store.
+        Store-driven rendering: only adds to store and lets the store
+        notification handle rendering.
 
-        IMPORTANT: When agent is present, the agent adds user messages via
-        MemoryManager.add_user_message() during stream_response(). We skip
-        adding here to avoid duplicate store notifications and double rendering.
-        This applies to both fresh and resumed sessions (unified architecture).
+        When agent is present, the agent adds user messages via
+        MemoryManager.add_user_message() during stream_response().
+        We skip adding here to avoid duplicate store notifications.
         """
-        # When agent is present: agent adds user message via MemoryManager
-        # When store-driven rendering is enabled: wait for store notification to render
-        if self.agent and self._render_from_store:
-            # Agent will add message, store notification will trigger rendering
+        # Agent adds user message via MemoryManager -- store notification renders
+        if self.agent:
             return
 
-        # Phase 6: Add user message to store for persistence (no agent case)
+        # No agent case: add to store, store notification handles rendering
         if self._store_adapter:
             try:
                 self._store_adapter.add_user_message(content)
             except Exception as e:
                 logger.warning(f"Failed to add user message to store: {e}")
-
-            # When store-driven rendering is enabled, let store notification handle rendering
-            if self._render_from_store:
-                return
-
-        # Direct rendering (when store-driven rendering is disabled)
-        conversation = self.query_one("#conversation", ScrollableContainer)
-        user_msg = UserMessage(content=content)
-        await conversation.mount(user_msg)
-        # Prune old messages to keep DOM small
-        await self._prune_old_messages(conversation)
-        conversation.scroll_end()
 
     # -------------------------------------------------------------------------
     # Attachment Bar Handlers
@@ -996,7 +982,7 @@ class CodingAgentApp(App):
         from .session_picker import SessionPickerScreen
 
         # Determine sessions directory
-        sessions_dir = Path(".sessions")
+        sessions_dir = Path(".clarity/sessions")
 
         def on_session_selected(session_id: str | None) -> None:
             """Callback when session is selected or picker is cancelled."""
@@ -1029,7 +1015,7 @@ class CodingAgentApp(App):
         """
         from src.session.persistence.writer import SessionWriter
 
-        sessions_dir = Path(".sessions")
+        sessions_dir = Path(".clarity/sessions")
 
         # Find session file
         session_path = sessions_dir / session_id / "session.jsonl"
@@ -1162,55 +1148,38 @@ class CodingAgentApp(App):
             # 3. Internal timeouts - silent cleanup
             if self._user_interrupt_requested:
                 # True user interrupt - show [Interrupted]
-                if self._streaming_mode == "segmented":
-                    # Cancel pending timer before flush
-                    if self._segment_flush_handle:
-                        self._segment_flush_handle.cancel()
-                        self._segment_flush_handle = None
-                    await self._flush_segment()
-                    if self._current_message:
-                        await self._current_message.add_text("\n\n[Interrupted]")
-                else:
-                    await self._cleanup_flush()
-                    if self._current_message:
-                        self._current_message.append_streaming_text("\n\n[Interrupted]")
-                self.notify("Stream interrupted", severity="information", timeout=2)
-            else:
-                # Non-user cancellation (exclusive worker replacement / lifecycle)
-                # Silent cleanup - no [Interrupted] marker
-                self.log("Stream worker cancelled (non-user). Silent cleanup.")
-                if self._streaming_mode == "segmented":
-                    # Cancel pending timer before flush
-                    if self._segment_flush_handle:
-                        self._segment_flush_handle.cancel()
-                        self._segment_flush_handle = None
-                    await self._flush_segment()
-                else:
-                    await self._cleanup_flush()
-
-        except KeyboardInterrupt:
-            # Ctrl+C raised as exception (common on Windows)
-            if self._streaming_mode == "segmented":
                 # Cancel pending timer before flush
                 if self._segment_flush_handle:
                     self._segment_flush_handle.cancel()
                     self._segment_flush_handle = None
                 await self._flush_segment()
                 if self._current_message:
-                    await self._current_message.add_text("\n\n[Interrupted by Ctrl+C]")
+                    await self._current_message.add_text("\n\n[Interrupted]")
+                self.notify("Stream interrupted", severity="information", timeout=2)
             else:
-                await self._cleanup_flush()
-                if self._current_message:
-                    self._current_message.append_streaming_text("\n\n[Interrupted by Ctrl+C]")
+                # Non-user cancellation (exclusive worker replacement / lifecycle)
+                # Silent cleanup - no [Interrupted] marker
+                self.log("Stream worker cancelled (non-user). Silent cleanup.")
+                # Cancel pending timer before flush
+                if self._segment_flush_handle:
+                    self._segment_flush_handle.cancel()
+                    self._segment_flush_handle = None
+                await self._flush_segment()
+
+        except KeyboardInterrupt:
+            # Ctrl+C raised as exception (common on Windows)
+            # Cancel pending timer before flush
+            if self._segment_flush_handle:
+                self._segment_flush_handle.cancel()
+                self._segment_flush_handle = None
+            await self._flush_segment()
+            if self._current_message:
+                await self._current_message.add_text("\n\n[Interrupted by Ctrl+C]")
             self.notify("Stream interrupted by Ctrl+C", severity="information", timeout=2)
 
         finally:
             # Capture current message to finalize (prevents racing with new stream)
             msg_to_finalize = self._current_message
-
-            # Cleanup based on mode
-            if self._streaming_mode == "full":
-                await self._cleanup_flush()
 
             # Notify store_adapter that stream ended (prevents "already streaming" warning)
             # This ensures _state is cleared even if StreamEnd event wasn't emitted
@@ -1274,7 +1243,7 @@ class CodingAgentApp(App):
                 await self._handle_event(event, conversation)
 
                 # NOTE: scroll_end() removed here for performance
-                # Scrolling is now handled by _flush_deltas() at controlled intervals
+                # Scrolling is now handled by _flush_segment() at controlled intervals
 
             self.log(f"Stream completed with {event_count} events")
 
@@ -1303,27 +1272,17 @@ class CodingAgentApp(App):
                 pass
 
             # Flush what we have and show friendly error in UI
-            if self._streaming_mode == "segmented":
-                # Cancel pending timer before flush
-                if self._segment_flush_handle:
-                    self._segment_flush_handle.cancel()
-                    self._segment_flush_handle = None
-                await self._flush_segment()
-                if self._current_message:
-                    await self._current_message.add_text(f"\n\n{user_error}")
-                else:
-                    error_widget = AssistantMessage()
-                    await conversation.mount(error_widget)
-                    await error_widget.add_text(user_error)
+            # Cancel pending timer before flush
+            if self._segment_flush_handle:
+                self._segment_flush_handle.cancel()
+                self._segment_flush_handle = None
+            await self._flush_segment()
+            if self._current_message:
+                await self._current_message.add_text(f"\n\n{user_error}")
             else:
-                await self._cleanup_flush()
-                if self._current_message:
-                    self._current_message.append_streaming_text(f"\n\n{user_error}")
-                else:
-                    error_widget = AssistantMessage()
-                    await conversation.mount(error_widget)
-                    error_widget.start_streaming_text()
-                    error_widget.append_streaming_text(user_error)
+                error_widget = AssistantMessage()
+                await conversation.mount(error_widget)
+                await error_widget.add_text(user_error)
 
             # Don't re-raise: error is already displayed in UI
             # Re-raising would leak raw traceback to Textual's worker error handler
@@ -1333,326 +1292,15 @@ class CodingAgentApp(App):
         event: UIEvent,
         conversation: ScrollableContainer
     ) -> None:
-        """Dispatch event to appropriate handler.
+        """Forward event to store adapter for persistence.
 
-        Phase 6: When store adapter is bound, events are forwarded to the
-        adapter which updates the MessageStore for JSONL persistence.
-
-        Rendering behavior depends on TUI_RENDER_FROM_STORE flag:
-        - False: Direct rendering here (proven path) + persistence via adapter
-        - True: Skip direct rendering, let store subscription handle it
+        All rendering is handled by store subscription notifications.
         """
-        # Phase 6: Forward events to store adapter for persistence
         if self._store_adapter:
             try:
                 self._store_adapter.handle_event(event)
             except Exception as e:
                 logger.warning(f"Store adapter error: {e}")
-
-            # When store-driven rendering is enabled, skip ALL direct rendering
-            # The store subscription handles rendering from MESSAGE_* events
-            # Tool lifecycle is now fully store-driven:
-            # - Tool cards created from store MESSAGE_UPDATED + render_meta registry
-            # - Tool state updates from store TOOL_STATE_UPDATED
-            if self._render_from_store:
-                return  # Skip all UIEvents - store is single rendering path
-
-        match event:
-            # Stream lifecycle
-            case StreamStart():
-                # Capture stream_id to detect stale events after restart/interrupt
-                sid = self._stream_id
-
-                # Use local variable to survive race condition where
-                # _finalize_current_message() runs during await and sets
-                # self._current_message = None
-                msg = AssistantMessage()
-                self._current_message = msg
-
-                await conversation.mount(msg)
-
-                # Prune old messages to keep DOM small (performance)
-                await self._prune_old_messages(conversation)
-
-                # Guard: If interrupted during mount, cleanup may have run
-                if msg.parent is None:
-                    return  # Widget was removed, stale event
-                if self._current_message is not msg:
-                    return  # A newer message replaced this one
-                if sid != self._stream_id:
-                    return  # A new stream started, this event is stale
-
-                # Show loading indicator (with CancelledError protection)
-                try:
-                    await msg.set_loading(True)
-                except asyncio.CancelledError:
-                    return  # Cancellation during shutdown/interrupt: safe to ignore
-
-                # Reset segment buffer for new response
-                self._segment_chunks = []
-                self._segment_chars = 0
-
-                # Full mode: start streaming widget
-                if self._streaming_mode == "full" and msg.parent is not None and self._current_message is msg:
-                    msg.start_streaming_text()
-                    self._delta_buffer = []
-                    self._delta_chars = 0
-
-            case StreamEnd(total_tokens=tokens, duration_ms=duration):
-                # RACE CONDITION FIX: Capture local reference BEFORE any await
-                msg = self._current_message
-
-                # Clear loading on stream end (all end states)
-                if msg:
-                    try:
-                        await msg.set_loading(False)
-                    except asyncio.CancelledError:
-                        pass  # Safe to ignore during shutdown
-
-                if self._streaming_mode == "segmented":
-                    # Cancel pending timer before final flush
-                    if self._segment_flush_handle:
-                        self._segment_flush_handle.cancel()
-                        self._segment_flush_handle = None
-                    # Render final segment as Markdown
-                    await self._flush_segment()
-                else:
-                    # Full mode: cleanup and finalize streaming
-                    await self._cleanup_flush()
-                    # Use captured reference - check parent to ensure still mounted
-                    if msg and msg.parent is not None:
-                        msg.finalize_streaming_text()
-
-                # Pass captured msg to only clear if it's still current
-                self._finalize_current_message(msg)
-
-                # Clear buffers
-                self._segment_chunks = []
-                self._segment_chars = 0
-
-                if tokens:
-                    try:
-                        status = self.query_one("#status", StatusBar)
-                        status.update_tokens(tokens)
-                    except NoMatches:
-                        pass
-
-            # Text content
-            case TextDelta(content=text):
-                if not self._current_message:
-                    return
-
-                if self._streaming_mode == "segmented":
-                    # Segmented mode: accumulate text, flush after delay if no boundary
-                    self._segment_chunks.append(text)
-                    self._segment_chars += len(text)
-
-                    # Cancel existing timer, schedule new one (resets countdown on each chunk)
-                    # Fix #4: Use method reference instead of lambda to avoid closure issues
-                    if self._segment_flush_handle:
-                        self._segment_flush_handle.cancel()
-                    loop = asyncio.get_running_loop()
-                    self._segment_flush_handle = loop.call_later(
-                        self._segment_flush_interval_sec,
-                        self._schedule_segment_flush  # Method reference, not lambda
-                    )
-
-                    # Fix #3: Time-based throttling for buffered char updates (200ms)
-                    # Reduces reactive attribute spam from 100+ to ~5 per response
-                    now = time.monotonic()
-                    if self._status_bar and (now - self._last_status_update_ts) >= self._status_update_interval_sec:
-                        self._status_bar.update_buffered_chars(self._segment_chars)
-                        self._last_status_update_ts = now
-                else:
-                    # Full mode: coalesced streaming (for debugging)
-                    self._delta_buffer.append(text)
-                    self._delta_chars += len(text)
-                    if self._buffer_len() >= self._flush_chars_threshold:
-                        await self._flush_deltas()
-                    else:
-                        self._schedule_flush()
-
-            # Code blocks
-            case CodeBlockStart(language=lang):
-                if self._current_message:
-                    # Flush accumulated text before code block
-                    if self._streaming_mode == "segmented":
-                        # Cancel pending timer before boundary flush
-                        if self._segment_flush_handle:
-                            self._segment_flush_handle.cancel()
-                            self._segment_flush_handle = None
-                        await self._flush_segment()
-                    else:
-                        await self._flush_deltas()
-                    self._current_code = self._current_message.start_code_block(lang)
-
-            case CodeBlockDelta(content=code):
-                if self._current_message:
-                    self._current_message.append_code(code)
-
-            case CodeBlockEnd():
-                if self._current_message:
-                    self._current_message.end_code_block()
-                self._current_code = None
-
-            # Tool calls
-            case ToolCallStart(call_id=cid, name=name, arguments=args, requires_approval=req):
-                if self._current_message:
-                    # Flush accumulated text before tool card
-                    if self._streaming_mode == "segmented":
-                        # Cancel pending timer before boundary flush
-                        if self._segment_flush_handle:
-                            self._segment_flush_handle.cancel()
-                            self._segment_flush_handle = None
-                        await self._flush_segment()
-                    else:
-                        await self._flush_deltas()
-                    card = self._current_message.add_tool_card(cid, name, args, req)
-                    self._tool_cards[cid] = card
-                    # Track pending approval
-                    if req:
-                        self._pending_approval_ids.add(cid)
-                        # Extra yield to ensure approval widget mounts and can receive focus
-                        await asyncio.sleep(0)
-                    # Scroll to make approval UI visible
-                    card.scroll_visible()
-
-            case ToolCallStatus(call_id=cid, status=status, message=msg):
-                if cid in self._tool_cards:
-                    self._tool_cards[cid].status = status
-                    # Clear pending approval when no longer awaiting
-                    if status != ToolStatus.AWAITING_APPROVAL:
-                        self._pending_approval_ids.discard(cid)
-
-            case ToolCallResult(call_id=cid, status=status, result=result, error=err, duration_ms=dur):
-                if cid in self._tool_cards:
-                    card = self._tool_cards[cid]
-                    if status == ToolStatus.SUCCESS:
-                        card.set_result(result, dur)
-                    elif err:
-                        card.set_error(err)
-                    else:
-                        card.status = status
-                    # Clear pending approval on result
-                    self._pending_approval_ids.discard(cid)
-
-            # Thinking
-            case ThinkingStart():
-                if self._current_message:
-                    # Flush accumulated text before thinking block
-                    if self._streaming_mode == "segmented":
-                        # Cancel pending timer before boundary flush
-                        if self._segment_flush_handle:
-                            self._segment_flush_handle.cancel()
-                            self._segment_flush_handle = None
-                        await self._flush_segment()
-                    else:
-                        await self._flush_deltas()
-                    self._current_thinking = self._current_message.start_thinking()
-
-            case ThinkingDelta(content=text):
-                if self._current_message:
-                    self._current_message.append_thinking(text)
-
-            case ThinkingEnd(token_count=count):
-                if self._current_message:
-                    self._current_message.end_thinking(count)
-                self._current_thinking = None
-
-            # Errors
-            case ErrorEvent(error_type=etype, user_message=err_msg, error_id=eid, recoverable=rec, retry_after=retry):
-                # RACE CONDITION FIX: Capture local reference BEFORE await
-                current_msg = self._current_message
-                if current_msg:
-                    try:
-                        await current_msg.set_loading(False)
-                    except asyncio.CancelledError:
-                        pass  # Safe to ignore during shutdown
-                await self._handle_error(etype, err_msg, eid, rec, retry)
-
-            # Pause prompt
-            case PausePromptStart(reason=reason, reason_code=code, pending_todos=todos, stats=stats):
-                # DEBUG: Log pause event receipt
-                self.log(f"[PAUSE] PausePromptStart received: reason_code={code}, reason={reason[:50]}...")
-
-                # RACE CONDITION FIX: Capture local references BEFORE any await
-                # During _flush_segment(), interrupt/cleanup can set _current_message = None
-                msg = self._current_message
-                sid = self._stream_id
-
-                self.log(f"[PAUSE] Pre-flush state: msg={msg is not None}, sid={sid}")
-
-                # Cancel pending timer before flush
-                if self._segment_flush_handle:
-                    self._segment_flush_handle.cancel()
-                    self._segment_flush_handle = None
-
-                # Flush any pending text first
-                await self._flush_segment()
-
-                # Guard: Check for stale/interrupted state after await
-                if msg is None:
-                    # No message was active - can't mount pause widget
-                    self.log("[PAUSE] GUARD: msg is None - skipping widget mount!")
-                    return
-                if msg.parent is None:
-                    # Message was removed from DOM (interrupted/cleaned up)
-                    self.log("[PAUSE] GUARD: msg.parent is None - skipping widget mount!")
-                    return
-                if sid != self._stream_id:
-                    # A new stream started - this event is stale
-                    self.log(f"[PAUSE] GUARD: stream_id mismatch ({sid} vs {self._stream_id}) - skipping!")
-                    return
-
-                self.log("[PAUSE] Guards passed, mounting widget...")
-
-                # Create and mount pause widget using captured reference
-                self._pause_widget = PausePromptWidget(
-                    reason=reason,
-                    reason_code=code,
-                    pending_todos=todos,
-                    stats=stats,
-                )
-                try:
-                    await msg.mount(self._pause_widget)
-                except asyncio.CancelledError:
-                    # Shutdown during mount - cleanup
-                    self._pause_widget = None
-                    raise
-
-                # Give time for mount before focusing
-                await asyncio.sleep(0)
-
-            case PausePromptEnd(continue_work=cont, feedback=fb):
-                # Remove pause widget if still present
-                if self._pause_widget:
-                    self._pause_widget.remove()
-                    self._pause_widget = None
-
-                # If continuing, clear error and show spinner (same as normal streaming)
-                if cont:
-                    try:
-                        status_bar = self.query_one("#status", StatusBar)
-                        status_bar.clear_error()  # Clear "Request timed out" message
-                        status_bar.set_streaming(True)
-                    except NoMatches:
-                        pass
-
-            # Context window updates
-            case ContextUpdated(used=used, limit=limit, pressure_level=pressure):
-                try:
-                    status_bar = self.query_one("#status", StatusBar)
-                    status_bar.update_context(used, limit, pressure)
-                except NoMatches:
-                    pass
-
-            # Context compaction notification
-            case ContextCompacted(messages_removed=removed, tokens_before=before, tokens_after=after):
-                try:
-                    status_bar = self.query_one("#status", StatusBar)
-                    status_bar.show_info(f"Compacting conversation history... ({removed} messages removed)", duration=4.0)
-                except NoMatches:
-                    pass
 
     def _finalize_current_message(self, msg: Optional[MessageWidget] = None) -> None:
         """Finalize current message and reset state.
@@ -1773,73 +1421,6 @@ class CodingAgentApp(App):
             await self._flush_segment()
         finally:
             self._segment_flush_running = False
-
-    # -------------------------------------------------------------------------
-    # Delta Coalescing (Full Streaming Mode - for debugging)
-    # -------------------------------------------------------------------------
-
-    def _buffer_len(self) -> int:
-        """Get total characters in delta buffer (O(1) via counter)."""
-        return self._delta_chars
-
-    def _schedule_flush(self) -> None:
-        """Schedule a flush if not already scheduled."""
-        if self._flush_task is None or self._flush_task.done():
-            self._flush_task = asyncio.create_task(self._delayed_flush())
-
-    async def _delayed_flush(self) -> None:
-        """Wait then flush buffered deltas."""
-        await asyncio.sleep(self._flush_interval_sec)
-        await self._flush_deltas()
-
-    async def _flush_deltas(self) -> None:
-        """Flush all buffered deltas to the message widget."""
-        if not self._delta_buffer or not self._current_message:
-            return
-
-        # CRITICAL: Snapshot scroll position BEFORE appending
-        # (appending moves "bottom", so checking after would be wrong)
-        was_at_bottom = (
-            self._conversation.is_vertical_scroll_end
-            if self._conversation else True
-        )
-
-        # Join all buffered text - O(n) once per flush, not O(n^2)
-        chunk = "".join(self._delta_buffer)
-        self._delta_buffer.clear()
-        self._delta_chars = 0  # Reset O(1) counter
-
-        # Use streaming-optimized append (Static + Rich Text)
-        self._current_message.append_streaming_text(chunk)
-
-        # Scroll only if user WAS at bottom before append
-        if self._auto_scroll and was_at_bottom and self._conversation:
-            self._conversation.scroll_end(animate=False)
-
-    async def _cleanup_flush(self) -> None:
-        """
-        Cleanup flush task and flush remaining buffer.
-
-        CRITICAL: Call this before finalize to prevent late appends!
-        """
-        # RACE CONDITION FIX: Capture local reference BEFORE any await
-        msg = self._current_message
-
-        # Cancel pending delayed flush FIRST to prevent race
-        if self._flush_task and not self._flush_task.done():
-            self._flush_task.cancel()
-            try:
-                await self._flush_task
-            except asyncio.CancelledError:
-                pass
-        self._flush_task = None
-
-        # Now flush any remaining content (using captured reference)
-        if self._delta_buffer and msg and msg.parent is not None:
-            chunk = "".join(self._delta_buffer)
-            self._delta_buffer.clear()
-            self._delta_chars = 0  # Reset O(1) counter
-            msg.append_streaming_text(chunk)
 
     async def _handle_error(
         self,
@@ -2007,6 +1588,150 @@ class CodingAgentApp(App):
                 pass
 
     # -------------------------------------------------------------------------
+    # Clarify Widget Handling
+    # -------------------------------------------------------------------------
+
+    async def _on_clarify_request(
+        self,
+        message: "Message",
+        conversation: ScrollableContainer
+    ) -> None:
+        """Handle clarify_request system message - mount ClarifyWidget.
+
+        Called when a clarify_request message is added to the store.
+        Mounts ClarifyWidget to capture user's answers.
+        """
+        extra = message.meta.extra if message.meta else {}
+        call_id = extra.get("call_id")
+        questions = extra.get("questions", [])
+        context = extra.get("context")
+
+        if not call_id or not questions:
+            return
+
+        # Don't mount if we already have a clarify widget for this call_id
+        if self._clarify_widget and self._clarify_widget.call_id == call_id:
+            return
+
+        # Create and mount clarify widget
+        self._clarify_widget = ClarifyWidget(
+            call_id=call_id,
+            questions=questions,
+            context=context
+        )
+
+        # Mount in current assistant message or conversation
+        if self._current_message:
+            try:
+                await self._current_message.mount(self._clarify_widget)
+            except Exception:
+                # Fallback to conversation
+                await conversation.mount(self._clarify_widget)
+        else:
+            await conversation.mount(self._clarify_widget)
+
+        # Scroll to make widget visible
+        conversation.scroll_end(animate=False)
+
+    def on_clarify_response_message(self, message: ClarifyResponseMessage) -> None:
+        """Handle ClarifyResponseMessage from ClarifyWidget.
+
+        Single-writer architecture: We do NOT persist here. The agent persists
+        clarify_response via MemoryManager after receiving the ClarifyResult.
+
+        We only:
+        1. Remove the widget
+        2. Submit ClarifyResult to ui_protocol (unblocks agent)
+        """
+        # Remove the clarify widget
+        if self._clarify_widget:
+            self._clarify_widget.remove()
+            self._clarify_widget = None
+
+        # Signal agent with user's response (agent will persist)
+        self.ui_protocol.submit_action(ClarifyResult(
+            call_id=message.call_id,
+            submitted=message.submitted,
+            responses=message.responses,
+            chat_instead=message.chat_instead,
+            chat_message=message.chat_message,
+        ))
+
+        # Re-focus input if cancelled/completed
+        if not self._is_streaming:
+            try:
+                self.query_one("#input", ChatInput).focus()
+            except NoMatches:
+                pass
+
+    async def mount_plan_approval(
+        self,
+        plan_hash: str,
+        excerpt: str,
+        truncated: bool = False,
+        plan_path: str | None = None
+    ) -> None:
+        """
+        Mount PlanApprovalWidget when agent exits plan mode.
+
+        Called when exit_plan_mode tool returns with plan for approval.
+        """
+        # Avoid duplicates
+        if self._plan_approval_widget and self._plan_approval_widget.plan_hash == plan_hash:
+            return
+
+        self._plan_approval_widget = PlanApprovalWidget(
+            plan_hash=plan_hash,
+            excerpt=excerpt,
+            truncated=truncated,
+            plan_path=plan_path,
+        )
+
+        # Mount in conversation area
+        try:
+            conversation = self.query_one("#conversation", ScrollableContainer)
+            if self._current_message:
+                await self._current_message.mount(self._plan_approval_widget)
+            else:
+                await conversation.mount(self._plan_approval_widget)
+        except NoMatches:
+            conversation = self.query_one("#conversation", ConversationContainer)
+            await conversation.mount(self._plan_approval_widget)
+
+        # Scroll to make widget visible
+        conversation.scroll_end(animate=False)
+
+    def on_plan_approval_response_message(self, message: PlanApprovalResponseMessage) -> None:
+        """Handle PlanApprovalResponseMessage from PlanApprovalWidget.
+
+        Single-writer architecture: We do NOT persist here. The agent persists
+        plan_approved/plan_rejected via MemoryManager after receiving the PlanApprovalResult.
+
+        We only:
+        1. Remove the widget
+        2. Submit PlanApprovalResult to ui_protocol (unblocks agent)
+        """
+        # Remove the plan approval widget
+        if self._plan_approval_widget:
+            self._plan_approval_widget.remove()
+            self._plan_approval_widget = None
+
+        # Signal agent with user's response (agent will persist)
+        self.ui_protocol.submit_action(PlanApprovalResult(
+            plan_hash=message.plan_hash,
+            approved=message.approved,
+            auto_accept_edits=message.auto_accept_edits,
+            feedback=message.feedback,
+        ))
+
+        # Re-focus input if cancelled/completed
+        if not self._is_streaming:
+            try:
+                self.query_one("#input", ChatInput).focus()
+            except NoMatches:
+                pass
+
+    # -------------------------------------------------------------------------
     # Scroll Handling
     # -------------------------------------------------------------------------
 
@@ -2120,7 +1845,7 @@ class CodingAgentApp(App):
         cycle = {"plan": "normal", "normal": "auto", "auto": "plan"}
         next_mode = cycle.get(current, "normal")
 
-        # Update agent
+        # Update agent (this also handles plan_mode_state activation/deactivation)
         self.agent.set_permission_mode(next_mode)
 
         # Update status bar
@@ -2130,9 +1855,13 @@ class CodingAgentApp(App):
         except NoMatches:
             pass
 
-        # Brief notification
-        mode_labels = {"plan": "PLAN", "normal": "NORMAL", "auto": "AUTO"}
-        self.notify(f"Mode: {mode_labels.get(next_mode, next_mode.upper())}", timeout=1)
+        # Notification with plan mode details
+        if next_mode == "plan":
+            plan_path = self.agent.plan_mode_state.plan_file_path
+            self.notify(f"PLAN MODE - Write plan to: {plan_path}", timeout=3)
+        else:
+            mode_labels = {"normal": "NORMAL", "auto": "AUTO"}
+            self.notify(f"Mode: {mode_labels.get(next_mode, next_mode.upper())}", timeout=1)
 
     def action_toggle_todos(self) -> None:
         """Toggle todo bar expand/collapse."""
@@ -2200,20 +1929,11 @@ class CodingAgentApp(App):
 
     def bind_store(self, store: "MessageStore", session_id: Optional[str] = None) -> None:
         """
-        Bind a MessageStore for session persistence (Phase 6).
+        Bind a MessageStore for session persistence and store-driven rendering.
 
-        Always creates a StoreAdapter for JSONL persistence.
-        Rendering behavior depends on TUI_RENDER_FROM_STORE flag:
-
-        - TUI_RENDER_FROM_STORE=false (default): Direct UIEvent rendering + persistence
-          - UIEvents render directly to TUI (proven path)
-          - UIEvents also forwarded to StoreAdapter for JSONL persistence
-          - No store subscription (avoids duplicate rendering)
-
-        - TUI_RENDER_FROM_STORE=true: Store-driven rendering
-          - UIEvents forwarded to StoreAdapter only (no direct rendering)
-          - TUI subscribes to store notifications for rendering
-          - Single rendering path for live and replay
+        Creates a StoreAdapter for JSONL persistence and subscribes to store
+        notifications for rendering. UIEvents are forwarded to the adapter;
+        store notifications drive all TUI rendering.
 
         Args:
             store: MessageStore to bind
@@ -2230,12 +1950,8 @@ class CodingAgentApp(App):
             flush_on_boundary=True  # Update store at each content boundary
         )
 
-        # Only subscribe to store notifications if store-driven rendering is enabled
-        if self._render_from_store:
-            self._subscribe_to_store()
-            logger.info(f"TUI bound to MessageStore with store-driven rendering (session={self._session_id})")
-        else:
-            logger.info(f"TUI bound to MessageStore for persistence only (session={self._session_id})")
+        self._subscribe_to_store()
+        logger.info(f"TUI bound to MessageStore with store-driven rendering (session={self._session_id})")
 
     def set_session_writer(self, writer) -> None:
         """
@@ -2338,12 +2054,28 @@ class CodingAgentApp(App):
             case StoreEvent.TOOL_STATE_UPDATED:
                 await self._on_store_tool_state_updated(notification)
 
-    async def _on_store_message_added(
+    async def _render_store_message(
         self,
         message: "Message",
-        conversation: ScrollableContainer
+        conversation: ScrollableContainer,
+        bulk_load: bool = False
     ) -> None:
-        """Handle MESSAGE_ADDED: mount new widget."""
+        """Render a single message from the store into the conversation.
+
+        This is the SINGLE rendering path for all store-driven messages.
+        Both live notifications and bulk load (session replay) use this method
+        to ensure consistent rendering behavior.
+
+        Args:
+            message: The message to render
+            conversation: The conversation container to mount widgets into
+            bulk_load: If True, applies bulk load optimizations:
+                - defer_tool_mount=True (mount tool diffs lazily)
+                - use_store_hydration=True (hydrate tool results from store)
+                - Renders tool_calls in fallback path (no segments)
+                - Finalizes assistant widgets immediately
+                - Skips per-message auto-scroll
+        """
         if not message:
             return
 
@@ -2352,28 +2084,29 @@ class CodingAgentApp(App):
 
         # Create appropriate widget based on role
         if message.is_user:
-            widget = UserMessage(content=message.content or "")
+            # Extract text from multimodal content if needed
+            content_text = _extract_user_content_text(message.content or "")
+            widget = UserMessage(content=content_text)
         elif message.is_assistant:
-            # When _render_from_store=False, UIEvents handle widget creation
-            # Skip store-based widget creation to avoid duplicates
-            if not self._render_from_store:
-                # UIEvent path handles widget creation, just track for updates
-                if self._current_message is not None and stream_id:
-                    self._store_message_widgets[stream_id] = self._current_message
-                return  # Skip - UIEvent already created widget
-
-            # _render_from_store=True: Store notification creates widget
-            # Check if widget already exists for this stream_id
-            if stream_id and stream_id in self._store_message_widgets:
-                return  # Widget already exists
+            if not bulk_load:
+                # Check if widget already exists for this stream_id
+                if stream_id and stream_id in self._store_message_widgets:
+                    return  # Widget already exists
 
             widget = AssistantMessage()
         elif message.is_tool:
             # Tool result message - update the corresponding ToolCard
             await self._apply_tool_result_to_card(message)
             return  # No new widget needed, ToolCard updated in place
+        elif message.is_system:
+            # Check for clarify_request system event
+            event_type = message.meta.event_type if message.meta else None
+            if event_type == "clarify_request":
+                await self._on_clarify_request(message, conversation)
+            # Other system messages - skip
+            return
         else:
-            # System messages - skip
+            # Unknown message type - skip
             return
 
         if stream_id:
@@ -2383,68 +2116,46 @@ class CodingAgentApp(App):
 
         # Render content for assistant messages using segments for correct interleaving
         if message.is_assistant:
-            import json
-            from src.session.models.message import (
-                TextSegment, ToolCallSegment, CodeBlockSegment,
-                ToolCallRefSegment, ThinkingSegment
-            )
-
             segments = message.meta.segments if message.meta and message.meta.segments else []
 
             if segments:
-                # Render segments in order (preserves text/tool interleaving)
-                for segment in segments:
-                    if isinstance(segment, TextSegment):
-                        if segment.content and segment.content.strip():
-                            await widget.add_text(segment.content)
-                    elif isinstance(segment, CodeBlockSegment):
-                        # Render code block from segment
-                        code_widget = widget.start_code_block(segment.language)
-                        widget.append_code(segment.content)
-                        widget.end_code_block()
-                    elif isinstance(segment, ThinkingSegment):
-                        # Render thinking block from segment
-                        if segment.content and segment.content.strip():
-                            widget.start_thinking()
-                            widget.append_thinking(segment.content)
-                            widget.end_thinking()
-                    elif isinstance(segment, ToolCallRefSegment):
-                        # New: reference by ID (stable)
-                        tc = self._get_tool_call_by_id(message, segment.tool_call_id)
-                        if tc:
-                            args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-                            card = widget.add_tool_card(tc.id, tc.function.name, args, requires_approval=False)
-                            self._tool_cards[tc.id] = card
-                            # Query store for current status (handles race condition)
-                            if not self._is_replaying and self._message_store:
-                                tool_state = self._message_store.get_tool_state(tc.id)
-                                if tool_state and tool_state.status == CoreToolStatus.AWAITING_APPROVAL:
-                                    card.status = ToolStatus.AWAITING_APPROVAL
-                    elif isinstance(segment, ToolCallSegment):
-                        # Legacy: reference by index (deprecated)
-                        tc_idx = segment.tool_call_index
-                        tc = self._get_tool_call_safe(message, tc_idx, "message_added")
-                        if tc:
-                            args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-                            card = widget.add_tool_card(tc.id, tc.function.name, args, requires_approval=False)
-                            self._tool_cards[tc.id] = card
-                            # Query store for current status (handles race condition)
-                            if not self._is_replaying and self._message_store:
-                                tool_state = self._message_store.get_tool_state(tc.id)
-                                if tool_state and tool_state.status == CoreToolStatus.AWAITING_APPROVAL:
-                                    card.status = ToolStatus.AWAITING_APPROVAL
+                rendered = await self._render_segments(
+                    widget, message, segments,
+                    defer_tool_mount=bulk_load,
+                    use_store_hydration=bulk_load
+                )
+                # Track segment index for future updates (live path only)
+                if not bulk_load and stream_id:
+                    self._store_rendered_segment_idx[stream_id] = rendered
             else:
-                # Fallback: no segments (early in stream), render content if present
+                # Fallback: no segments, render content if present
                 if message.content:
                     await widget.add_text(message.content)
+                # Bulk load: also render tool calls in fallback path
+                if bulk_load and message.tool_calls:
+                    import json
+                    for tc in message.tool_calls:
+                        args = json.loads(tc.function.arguments) if tc.function.arguments else {}
+                        card = widget.add_tool_card(tc.id, tc.function.name, args, requires_approval=False)
+                        card.set_defer_diff_mount(True)
+                        self._tool_cards[tc.id] = card
+                        self._hydrate_tool_card_from_store(card, tc.id)
 
-            # Track segment index for future updates
-            if stream_id and segments:
-                self._store_rendered_segment_idx[stream_id] = len(segments)
+            # Bulk load: finalize widget immediately (replay shows final state)
+            if bulk_load:
+                widget.finalize()
 
-        # Auto-scroll if not replaying
-        if not self._is_replaying:
+        # Auto-scroll only during live rendering (not replay)
+        if not bulk_load and not self._is_replaying:
             conversation.scroll_end(animate=False)
+
+    async def _on_store_message_added(
+        self,
+        message: "Message",
+        conversation: ScrollableContainer
+    ) -> None:
+        """Handle MESSAGE_ADDED: mount new widget (live path)."""
+        await self._render_store_message(message, conversation, bulk_load=False)
 
     async def _on_store_message_updated(
         self,
@@ -2496,73 +2207,24 @@ class CodingAgentApp(App):
         if not self._store_pending_updates:
             return
 
-        import json
-        from src.session.models.message import (
-            TextSegment, ToolCallSegment, CodeBlockSegment,
-            ToolCallRefSegment, ThinkingSegment
-        )
-
         # Process all pending updates
         for stream_id, message in self._store_pending_updates.items():
             if stream_id not in self._store_message_widgets:
                 continue
 
             widget = self._store_message_widgets[stream_id]
-
-            # Get segments from message metadata (preserves interleaving order)
             segments = message.meta.segments if message.meta and message.meta.segments else []
-
-            # Get last rendered segment index for this stream
             last_idx = self._store_rendered_segment_idx.get(stream_id, 0)
 
-            # Render only NEW segments (from last_idx onwards)
-            for i, segment in enumerate(segments[last_idx:], start=last_idx):
-                if isinstance(segment, TextSegment):
-                    # Render text segment
-                    if segment.content and segment.content.strip():
-                        await widget.add_text(segment.content)
-                elif isinstance(segment, CodeBlockSegment):
-                    # Render code block from segment
-                    widget.start_code_block(segment.language)
-                    widget.append_code(segment.content)
-                    widget.end_code_block()
-                elif isinstance(segment, ThinkingSegment):
-                    # Render thinking block from segment
-                    if segment.content and segment.content.strip():
-                        widget.start_thinking()
-                        widget.append_thinking(segment.content)
-                        widget.end_thinking()
-                elif isinstance(segment, ToolCallRefSegment):
-                    # New: reference by ID (stable)
-                    tc = self._get_tool_call_by_id(message, segment.tool_call_id)
-                    if tc:
-                        if tc.id not in self._tool_cards:
-                            args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-                            card = widget.add_tool_card(tc.id, tc.function.name, args, requires_approval=False)
-                            self._tool_cards[tc.id] = card
-                            # Query store for current status (handles race condition)
-                            if not self._is_replaying and self._message_store:
-                                tool_state = self._message_store.get_tool_state(tc.id)
-                                if tool_state and tool_state.status == CoreToolStatus.AWAITING_APPROVAL:
-                                    card.status = ToolStatus.AWAITING_APPROVAL
-                elif isinstance(segment, ToolCallSegment):
-                    # Legacy: reference by index (deprecated)
-                    tc_idx = segment.tool_call_index
-                    tc = self._get_tool_call_safe(message, tc_idx, "flush_updates")
-                    if tc:
-                        if tc.id not in self._tool_cards:
-                            args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-                            card = widget.add_tool_card(tc.id, tc.function.name, args, requires_approval=False)
-                            self._tool_cards[tc.id] = card
-                            # Query store for current status (handles race condition)
-                            if not self._is_replaying and self._message_store:
-                                tool_state = self._message_store.get_tool_state(tc.id)
-                                if tool_state and tool_state.status == CoreToolStatus.AWAITING_APPROVAL:
-                                    card.status = ToolStatus.AWAITING_APPROVAL
+            # Use unified helper to render only NEW segments (skip existing cards)
+            rendered = await self._render_segments(
+                widget, message, segments,
+                start_idx=last_idx, skip_existing_cards=True
+            )
 
             # Update last rendered segment index
             if segments:
-                self._store_rendered_segment_idx[stream_id] = len(segments)
+                self._store_rendered_segment_idx[stream_id] = last_idx + rendered
 
         # Clear pending updates
         self._store_pending_updates.clear()
@@ -2583,64 +2245,17 @@ class CodingAgentApp(App):
         # PR4: Flush any pending updates for this stream before finalizing
         if stream_id in self._store_pending_updates:
             try:
-                conversation = self.query_one("#conversation", ScrollableContainer)
-                # Update with final state using segment-based rendering
                 final_msg = self._store_pending_updates.pop(stream_id)
                 if stream_id in self._store_message_widgets:
                     widget = self._store_message_widgets[stream_id]
-
-                    # Render remaining segments in order
-                    import json
-                    from src.session.models.message import (
-                        TextSegment, ToolCallSegment, CodeBlockSegment,
-                        ToolCallRefSegment, ThinkingSegment
-                    )
-
                     segments = final_msg.meta.segments if final_msg.meta and final_msg.meta.segments else []
                     last_idx = self._store_rendered_segment_idx.get(stream_id, 0)
 
-                    for segment in segments[last_idx:]:
-                        if isinstance(segment, TextSegment):
-                            if segment.content and segment.content.strip():
-                                await widget.add_text(segment.content)
-                        elif isinstance(segment, CodeBlockSegment):
-                            # Render code block from segment
-                            widget.start_code_block(segment.language)
-                            widget.append_code(segment.content)
-                            widget.end_code_block()
-                        elif isinstance(segment, ThinkingSegment):
-                            # Render thinking block from segment
-                            if segment.content and segment.content.strip():
-                                widget.start_thinking()
-                                widget.append_thinking(segment.content)
-                                widget.end_thinking()
-                        elif isinstance(segment, ToolCallRefSegment):
-                            # New: reference by ID (stable)
-                            tc = self._get_tool_call_by_id(final_msg, segment.tool_call_id)
-                            if tc:
-                                if tc.id not in self._tool_cards:
-                                    args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-                                    card = widget.add_tool_card(tc.id, tc.function.name, args, requires_approval=False)
-                                    self._tool_cards[tc.id] = card
-                                    # Query store for current status (handles race condition)
-                                    if not self._is_replaying and self._message_store:
-                                        tool_state = self._message_store.get_tool_state(tc.id)
-                                        if tool_state and tool_state.status == CoreToolStatus.AWAITING_APPROVAL:
-                                            card.status = ToolStatus.AWAITING_APPROVAL
-                        elif isinstance(segment, ToolCallSegment):
-                            # Legacy: reference by index (deprecated)
-                            tc_idx = segment.tool_call_index
-                            tc = self._get_tool_call_safe(final_msg, tc_idx, "finalize")
-                            if tc:
-                                if tc.id not in self._tool_cards:
-                                    args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-                                    card = widget.add_tool_card(tc.id, tc.function.name, args, requires_approval=False)
-                                    self._tool_cards[tc.id] = card
-                                    # Query store for current status (handles race condition)
-                                    if not self._is_replaying and self._message_store:
-                                        tool_state = self._message_store.get_tool_state(tc.id)
-                                        if tool_state and tool_state.status == CoreToolStatus.AWAITING_APPROVAL:
-                                            card.status = ToolStatus.AWAITING_APPROVAL
+                    # Use unified helper to render remaining segments (skip existing cards)
+                    await self._render_segments(
+                        widget, final_msg, segments,
+                        start_idx=last_idx, skip_existing_cards=True
+                    )
             except NoMatches:
                 pass
 
@@ -2650,6 +2265,96 @@ class CodingAgentApp(App):
             widget.finalize()
             # Cleanup segment index tracking for this stream
             self._store_rendered_segment_idx.pop(stream_id, None)
+
+    async def _render_segments(
+        self,
+        widget: "AssistantMessage",
+        message: "Message",
+        segments: list,
+        start_idx: int = 0,
+        skip_existing_cards: bool = False,
+        defer_tool_mount: bool = False,
+        use_store_hydration: bool = False
+    ) -> int:
+        """
+        Render segments to a message widget.
+
+        This is the unified segment rendering helper that consolidates duplicate
+        logic from _on_store_message_added, _flush_store_updates,
+        _on_store_message_finalized, and _on_store_bulk_load_complete.
+
+        Args:
+            widget: Target AssistantMessage widget
+            message: Message containing tool_calls for reference
+            segments: List of segments to render
+            start_idx: Start rendering from this index (for incremental updates)
+            skip_existing_cards: Skip tool cards that already exist in _tool_cards
+            defer_tool_mount: Defer DiffWidget mounting (for bulk load)
+            use_store_hydration: Use _hydrate_tool_card_from_store() for results
+
+        Returns:
+            Number of segments rendered
+        """
+        import json
+        from src.session.models.message import (
+            TextSegment, ToolCallSegment, CodeBlockSegment,
+            ToolCallRefSegment, ThinkingSegment
+        )
+
+        rendered = 0
+        for segment in segments[start_idx:]:
+            if isinstance(segment, TextSegment):
+                if segment.content and segment.content.strip():
+                    await widget.add_text(segment.content)
+            elif isinstance(segment, CodeBlockSegment):
+                widget.start_code_block(segment.language)
+                widget.append_code(segment.content)
+                widget.end_code_block()
+            elif isinstance(segment, ThinkingSegment):
+                if segment.content and segment.content.strip():
+                    widget.start_thinking()
+                    widget.append_thinking(segment.content)
+                    widget.end_thinking()
+            elif isinstance(segment, ToolCallRefSegment):
+                # Reference by ID (stable)
+                tc = self._get_tool_call_by_id(message, segment.tool_call_id)
+                if tc:
+                    if skip_existing_cards and tc.id in self._tool_cards:
+                        rendered += 1
+                        continue
+                    args = json.loads(tc.function.arguments) if tc.function.arguments else {}
+                    card = widget.add_tool_card(tc.id, tc.function.name, args, requires_approval=False)
+                    if defer_tool_mount:
+                        card.set_defer_diff_mount(True)
+                    self._tool_cards[tc.id] = card
+                    if use_store_hydration:
+                        self._hydrate_tool_card_from_store(card, tc.id)
+                    elif not self._is_replaying and self._message_store:
+                        # Query store for current status (handles race condition)
+                        tool_state = self._message_store.get_tool_state(tc.id)
+                        if tool_state and tool_state.status == CoreToolStatus.AWAITING_APPROVAL:
+                            card.status = ToolStatus.AWAITING_APPROVAL
+            elif isinstance(segment, ToolCallSegment):
+                # Legacy: reference by index (deprecated)
+                tc = self._get_tool_call_safe(message, segment.tool_call_index, "render_segments")
+                if tc:
+                    if skip_existing_cards and tc.id in self._tool_cards:
+                        rendered += 1
+                        continue
+                    args = json.loads(tc.function.arguments) if tc.function.arguments else {}
+                    card = widget.add_tool_card(tc.id, tc.function.name, args, requires_approval=False)
+                    if defer_tool_mount:
+                        card.set_defer_diff_mount(True)
+                    self._tool_cards[tc.id] = card
+                    if use_store_hydration:
+                        self._hydrate_tool_card_from_store(card, tc.id)
+                    elif not self._is_replaying and self._message_store:
+                        # Query store for current status (handles race condition)
+                        tool_state = self._message_store.get_tool_state(tc.id)
+                        if tool_state and tool_state.status == CoreToolStatus.AWAITING_APPROVAL:
+                            card.status = ToolStatus.AWAITING_APPROVAL
+            rendered += 1
+        return rendered
 
     def _get_tool_call_safe(
         self,
@@ -2672,8 +2377,6 @@ class CodingAgentApp(App):
             ToolCall if valid, None if out of bounds or missing
         """
         if not message.tool_calls:
-            from src.observability import get_logger
-            logger = get_logger(__name__)
             logger.warning(
                 f"Segment references tool_call_index={tc_idx} but message has no tool_calls. "
                 f"Context: {context}, message_uuid={message.uuid if hasattr(message, 'uuid') else 'unknown'}"
@@ -2681,8 +2384,6 @@ class CodingAgentApp(App):
             return None
 
         if tc_idx >= len(message.tool_calls):
-            from src.observability import get_logger
-            logger = get_logger(__name__)
             logger.warning(
                 f"Segment tool_call_index={tc_idx} out of bounds (message has {len(message.tool_calls)} tool_calls). "
                 f"Context: {context}, message_uuid={message.uuid if hasattr(message, 'uuid') else 'unknown'}"
@@ -2712,8 +2413,6 @@ class CodingAgentApp(App):
             ToolCall if found, None if not found
         """
         if not message.tool_calls:
-            from src.observability import get_logger
-            logger = get_logger(__name__)
             logger.warning(
                 f"Segment references tool_call_id={tool_call_id} but message has no tool_calls. "
                 f"Context: {context}, message_uuid={message.uuid if hasattr(message, 'uuid') else 'unknown'}"
@@ -2724,8 +2423,6 @@ class CodingAgentApp(App):
             if tc.id == tool_call_id:
                 return tc
 
-        from src.observability import get_logger
-        logger = get_logger(__name__)
         logger.warning(
             f"No tool call found with id={tool_call_id}. "
             f"Context: {context}, message_uuid={message.uuid if hasattr(message, 'uuid') else 'unknown'}"
@@ -2743,9 +2440,6 @@ class CodingAgentApp(App):
         Args:
             message: Tool result message with tool_call_id and meta.status
         """
-        from src.observability import get_logger
-        logger = get_logger(__name__)
-
         if not message.tool_call_id:
             logger.warning("Tool result message missing tool_call_id, cannot update ToolCard")
             return
@@ -2785,7 +2479,9 @@ class CodingAgentApp(App):
         """Handle BULK_LOAD_COMPLETE: render all loaded messages.
 
         During bulk load, individual MESSAGE_ADDED events are suppressed.
-        This handler renders the complete conversation from the store snapshot.
+        This handler iterates all messages and renders each through the
+        shared _render_store_message() method with bulk_load=True for
+        performance optimizations (deferred tool mounts, no per-message scroll).
         """
         if not self._message_store:
             self._is_replaying = False
@@ -2794,87 +2490,13 @@ class CodingAgentApp(App):
         # Render all messages from store (in seq order)
         messages = []
         try:
-            messages = self._message_store.get_ordered_messages()  # Fix 1.1: correct method name
+            messages = self._message_store.get_ordered_messages()
 
             for message in messages:
-                # Create appropriate widget based on role
-                if message.is_user:
-                    widget = UserMessage(content=message.content or "")
-                    await conversation.mount(widget)
-                elif message.is_assistant:
-                    widget = AssistantMessage()
-                    await conversation.mount(widget)
-
-                    # Track by stream_id for potential future updates
-                    stream_id = message.meta.stream_id if message.meta else None
-                    if stream_id:
-                        self._store_message_widgets[stream_id] = widget
-
-                    # Render content using segments for correct interleaving
-                    import json
-                    from src.session.models.message import (
-                        TextSegment, ToolCallSegment, CodeBlockSegment,
-                        ToolCallRefSegment, ThinkingSegment
-                    )
-
-                    segments = message.meta.segments if message.meta and message.meta.segments else []
-
-                    if segments:
-                        # Render segments in order (preserves text/tool interleaving)
-                        for segment in segments:
-                            if isinstance(segment, TextSegment):
-                                if segment.content and segment.content.strip():
-                                    await widget.add_text(segment.content)
-                            elif isinstance(segment, CodeBlockSegment):
-                                # Render code block from segment
-                                widget.start_code_block(segment.language)
-                                widget.append_code(segment.content)
-                                widget.end_code_block()
-                            elif isinstance(segment, ThinkingSegment):
-                                # Render thinking block from segment
-                                if segment.content and segment.content.strip():
-                                    widget.start_thinking()
-                                    widget.append_thinking(segment.content)
-                                    widget.end_thinking()
-                            elif isinstance(segment, ToolCallRefSegment):
-                                # New: reference by ID (stable)
-                                tc = self._get_tool_call_by_id(message, segment.tool_call_id)
-                                if tc:
-                                    args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-                                    card = widget.add_tool_card(tc.id, tc.function.name, args, requires_approval=False)
-                                    card.set_defer_diff_mount(True)  # Fix 3.2: Defer DiffWidget during bulk load
-                                    self._tool_cards[tc.id] = card
-                                    # Hydrate tool result from store (deduplicated helper)
-                                    self._hydrate_tool_card_from_store(card, tc.id)
-                            elif isinstance(segment, ToolCallSegment):
-                                # Legacy: reference by index (deprecated)
-                                tc_idx = segment.tool_call_index
-                                tc = self._get_tool_call_safe(message, tc_idx, "bulk_load")
-                                if tc:
-                                    args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-                                    card = widget.add_tool_card(tc.id, tc.function.name, args, requires_approval=False)
-                                    card.set_defer_diff_mount(True)  # Fix 3.2: Defer DiffWidget during bulk load
-                                    self._tool_cards[tc.id] = card
-                                    # Hydrate tool result from store (deduplicated helper)
-                                    self._hydrate_tool_card_from_store(card, tc.id)
-                    else:
-                        # Fallback: no segments, render content then tool calls
-                        if message.content:
-                            await widget.add_text(message.content)
-                        if message.tool_calls:
-                            for tc in message.tool_calls:
-                                args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-                                card = widget.add_tool_card(tc.id, tc.function.name, args, requires_approval=False)
-                                card.set_defer_diff_mount(True)  # Fix 3.2: Defer DiffWidget during bulk load
-                                self._tool_cards[tc.id] = card
-                                # Hydrate tool result from store (deduplicated helper)
-                                self._hydrate_tool_card_from_store(card, tc.id)
-
-                    # Finalize the widget
-                    widget.finalize()
+                await self._render_store_message(message, conversation, bulk_load=True)
 
         except Exception as e:
-            # Tweak 1: Log full stack trace for debuggability
+            # Log full stack trace for debuggability
             import traceback
             logger.error(f"Error rendering bulk-loaded messages: {e}\n{traceback.format_exc()}")
             # Show UI banner so user knows resume failed
@@ -2894,7 +2516,7 @@ class CodingAgentApp(App):
         except NoMatches:
             pass
 
-        logger.info(f"Session replay complete: {len(messages) if 'messages' in dir() else 0} messages rendered")
+        logger.info(f"Session replay complete: {len(messages)} messages rendered")
 
     async def _on_store_tool_state_updated(
         self,
@@ -3048,8 +2670,6 @@ class CodingAgentApp(App):
             )
             self._message_store.add_message(approval_msg)
         except Exception as e:
-            from src.observability import get_logger
-            logger = get_logger(__name__)
             logger.warning(f"Failed to persist tool approval: {e}")
 
     async def _show_resume_error_banner(self, error_message: str) -> None:
@@ -3083,88 +2703,6 @@ class CodingAgentApp(App):
         self._store_adapter = None
         self._store_message_widgets.clear()
         self._session_id = None
-
-    async def replay_session(self, jsonl_path: str) -> bool:
-        """
-        Replay a session from a JSONL file (PR5).
-
-        Loads the JSONL file, parses messages into the store, and renders
-        them in the TUI. During replay:
-        - Tool cards show historical status, not approval UI
-        - Input is disabled until replay completes
-        - No approval prompts are triggered
-
-        Args:
-            jsonl_path: Path to the session.jsonl file
-
-        Returns:
-            True if replay succeeded, False otherwise
-        """
-        if not self._message_store:
-            logger.warning("Cannot replay: no MessageStore bound")
-            return False
-
-        try:
-            from ..session.persistence.parser import load_session
-            from pathlib import Path
-
-            path = Path(jsonl_path)
-            if not path.exists():
-                logger.warning(f"Session file not found: {jsonl_path}")
-                return False
-
-            # Set replay mode BEFORE loading
-            self._is_replaying = True
-
-            # Disable input during replay
-            try:
-                input_widget = self.query_one("#input", ChatInput)
-                input_widget.disabled = True
-            except NoMatches:
-                pass
-
-            # Show replay notification
-            self.notify("Restoring session...", timeout=2)
-
-            # Load session into store (runs in thread pool to avoid blocking)
-            # The store's begin_bulk_load/end_bulk_load handles notification suppression
-            # and emits BULK_LOAD_COMPLETE at the end
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(
-                None,
-                lambda: load_session(path, self._message_store)
-            )
-
-            logger.info(f"Session replayed from {jsonl_path}")
-            return True
-
-        except Exception as e:
-            logger.error(f"Session replay failed: {e}")
-            self._is_replaying = False
-            # Re-enable input on failure
-            try:
-                input_widget = self.query_one("#input", ChatInput)
-                input_widget.disabled = False
-                input_widget.focus()
-            except NoMatches:
-                pass
-            return False
-
-    def start_replay_mode(self) -> None:
-        """
-        Enter replay mode before loading session data.
-
-        Call this before bulk-loading messages into the store to ensure:
-        - Tool cards don't show approval UI
-        - No approval prompts are triggered
-        - Input stays disabled until BULK_LOAD_COMPLETE
-        """
-        self._is_replaying = True
-        try:
-            input_widget = self.query_one("#input", ChatInput)
-            input_widget.disabled = True
-        except NoMatches:
-            pass
 
     def action_scroll_up(self) -> None:
         """Scroll conversation up."""
