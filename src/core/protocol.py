@@ -16,7 +16,10 @@ from dataclasses import dataclass
 from typing import AsyncIterator, Callable, List, Dict, Any, Optional
 import asyncio
 
+from src.observability import get_logger
 from src.core.events import UIEvent
+
+logger = get_logger("core.protocol")
 
 
 # =============================================================================
@@ -224,9 +227,6 @@ class UIProtocol:
             CancelledError and TimeoutError are caught and converted to
             PauseResult(continue_work=False) to prevent cascading failures.
         """
-        import logging
-        logger = logging.getLogger("ui.protocol")
-
         # Create future for pause response
         future: asyncio.Future[PauseResult] = asyncio.Future()
         self._pending_pause = future
@@ -279,9 +279,6 @@ class UIProtocol:
             asyncio.CancelledError: If stream was interrupted
             asyncio.TimeoutError: If timeout exceeded
         """
-        import logging
-        logger = logging.getLogger("ui.protocol")
-
         # Create future for this specific call
         future: asyncio.Future[ClarifyResult] = asyncio.Future()
         self._pending_clarify[call_id] = future
@@ -334,9 +331,6 @@ class UIProtocol:
             asyncio.CancelledError: If stream was interrupted
             asyncio.TimeoutError: If timeout exceeded
         """
-        import logging
-        logger = logging.getLogger("ui.protocol")
-
         # Create future for this specific plan
         future: asyncio.Future[PlanApprovalResult] = asyncio.Future()
         self._pending_plan_approval[plan_hash] = future
@@ -441,11 +435,10 @@ class UIProtocol:
         except asyncio.QueueFull:
             # Queue full (shouldn't happen with unbounded queue)
             # Log warning and drop oldest to make room for critical action
-            import logging
-            logging.warning(f"Action queue full, dropping oldest action to queue: {action}")
+            logger.warning(f"Action queue full, dropping oldest action to queue: {action}")
             try:
                 dropped = self._action_queue.get_nowait()
-                logging.warning(f"Dropped action: {dropped}")
+                logger.warning(f"Dropped action: {dropped}")
                 self._action_queue.put_nowait(action)
             except asyncio.QueueEmpty:
                 pass

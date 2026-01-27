@@ -86,19 +86,19 @@ class SessionWriter:
 
         MUST be called from the async context where events will be processed.
         
-        Note: File is not created until first write to avoid empty session files.
+        Note: File and parent directory are not created until first write to avoid empty session folders.
         """
         self._loop = asyncio.get_running_loop()
         self._write_lock = asyncio.Lock()
         self._drain_complete = asyncio.Event()
         self._drain_complete.set()  # Initially "drained" (nothing pending)
 
-        # Ensure parent directory exists
-        self._file_path.parent.mkdir(parents=True, exist_ok=True)
-
+        # DO NOT create parent directory yet - will be created on first write
+        # This prevents empty session folders from appearing in /sessions
+        
         # DO NOT open file yet - will be opened on first write
         # This prevents empty session files from appearing in /resume
-        logger.info(f"SessionWriter ready (file will be created on first write): {self._file_path}")
+        logger.info(f"SessionWriter ready (file and directory will be created on first write): {self._file_path}")
 
     async def close(self) -> None:
         """
@@ -290,12 +290,22 @@ class SessionWriter:
         """Write a single JSON line.
         
         Opens the file on first write if not already open.
-        This prevents empty session files from being created.
+        Creates parent directory on first write to prevent empty session folders.
         """
+        # Check if writer was opened
+        if self._write_lock is None:
+            error_msg = "Writer not open - call open() first"
+            logger.error(error_msg)
+            if self._on_error:
+                self._on_error(RuntimeError(error_msg))
+            return WriteResult(success=False, error=error_msg)
+        
         try:
             async with self._write_lock:
                 # Open file on first write (lazy creation)
                 if not self._file:
+                    # Create parent directory on first write
+                    self._file_path.parent.mkdir(parents=True, exist_ok=True)
                     self._file = open(self._file_path, 'a', encoding='utf-8')
                     logger.info(f"SessionWriter file created on first write: {self._file_path}")
                 

@@ -76,12 +76,15 @@ def chat_mode(agent: CodingAgent, controller: Optional[LongRunningController] = 
         import uuid
         from datetime import datetime
 
-        # Create session directory
+        # Prepare session path (directory will be created on first message write)
         session_id = f"session-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
         sessions_dir = Path(".clarity/sessions")
         session_dir = sessions_dir / session_id
-        session_dir.mkdir(parents=True, exist_ok=True)
+        # DO NOT create directory yet - SessionWriter will create it on first write
         jsonl_path = session_dir / "session.jsonl"
+
+        # Set session ID on agent for plan mode and other session-scoped features
+        agent.set_session_id(session_id, is_new_session=True)
 
         # Initialize store (writer will be opened by app in its event loop)
         store = MessageStore()
@@ -93,9 +96,6 @@ def chat_mode(agent: CodingAgent, controller: Optional[LongRunningController] = 
         # - Store notifications trigger TUI rendering
         # - Single source of truth for conversation history
         agent.memory.set_message_store(store, session_id)
-
-        console.print(f"[dim]Session: {session_id}[/dim]")
-        console.print(f"[dim]JSONL: {jsonl_path}[/dim]")
 
         # Create and run Textual app with agent directly
         # The app will internally call agent.stream_response() which yields UIEvents
@@ -115,7 +115,8 @@ def chat_mode(agent: CodingAgent, controller: Optional[LongRunningController] = 
         app.set_render_meta_registry(agent.memory.render_meta)
 
         app.run()
-        console.print(f"[dim]Session saved to: {jsonl_path}[/dim]")
+        
+        # Session is auto-saved - no need to show path to users (implementation detail)
 
     except Exception as e:
         # Fallback to simple mode

@@ -802,6 +802,42 @@ This agent includes ClarAIty, an architectural intelligence layer.
 """
 
 # ---------------------------------------------------------------------------
+# Environment Info
+# ---------------------------------------------------------------------------
+
+def _get_environment_info() -> str:
+    """Return dynamic environment info (date, platform, git status, cwd)."""
+    import os
+    import platform
+    import subprocess
+    from datetime import datetime
+
+    cwd = os.getcwd()
+
+    # Check if cwd is inside a git repo
+    try:
+        subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=cwd, capture_output=True, timeout=5, check=True
+        )
+        is_git = "Yes"
+    except Exception:
+        is_git = "No"
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    plat = platform.system()
+    os_version = platform.version()
+
+    return f"""# Environment
+Working directory: {cwd}
+Is directory a git repo: {is_git}
+Platform: {plat}
+OS Version: {os_version}
+Today's date: {today}
+"""
+
+
+# ---------------------------------------------------------------------------
 # Prompt Assembly
 # ---------------------------------------------------------------------------
 
@@ -880,6 +916,9 @@ Context window: {context_size:,} tokens.
 Work efficiently; summarize older context when approaching limits.
 See Resource Budgets for threshold actions.
 """)
+
+    # Dynamic environment info (date, platform, git, cwd)
+    sections.append(_get_environment_info())
 
     return "\n\n".join([s.strip() for s in sections if s and s.strip()])
 

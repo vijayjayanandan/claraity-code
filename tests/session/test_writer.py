@@ -36,26 +36,38 @@ class TestSessionWriterLifecycle:
     """Tests for SessionWriter lifecycle."""
 
     @pytest.mark.asyncio
-    async def test_open_creates_file(self):
+    async def test_open_does_not_create_file(self):
+        """Test that open() does NOT create file (lazy creation on first write)."""
         with tempfile.TemporaryDirectory() as tmpdir:
             file_path = Path(tmpdir) / "test.jsonl"
             writer = SessionWriter(file_path)
 
             await writer.open()
-            assert writer.is_open == True
-            assert file_path.exists()
+            # File should NOT exist yet (lazy creation)
+            assert not file_path.exists()
+            assert not writer.is_open  # File not opened yet
 
             await writer.close()
-            assert writer.is_open == False
+            assert not writer.is_open
 
     @pytest.mark.asyncio
-    async def test_open_creates_parent_directories(self):
+    async def test_first_write_creates_parent_directories(self):
+        """Test that parent directories are created on first write, not on open()."""
         with tempfile.TemporaryDirectory() as tmpdir:
             file_path = Path(tmpdir) / "nested" / "path" / "session.jsonl"
             writer = SessionWriter(file_path)
 
             await writer.open()
+            # Parent directory should NOT exist yet (lazy creation)
+            assert not file_path.parent.exists()
+
+            # Write a message - this should create parent directories
+            msg = Message.create_user("Test", "sess-1", None, 1)
+            await writer.write_message(msg)
+            
+            # Now parent directory should exist
             assert file_path.parent.exists()
+            assert file_path.exists()
 
             await writer.close()
 

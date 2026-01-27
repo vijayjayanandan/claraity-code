@@ -1,12 +1,13 @@
 """Main coding agent orchestration."""
 
 import asyncio
-import logging
 import os
 import traceback
 import uuid
 from typing import Optional, List, Dict, Any, TYPE_CHECKING, Callable, Awaitable
 from pathlib import Path
+
+from src.observability import get_logger
 
 if TYPE_CHECKING:
     from src.hooks import HookManager, HookDecision
@@ -131,6 +132,8 @@ except ImportError:
     def new_request_id():
         return ''
     def get_logger(name=None):
+        # Fallback when observability not available - use standard logging
+        import logging
         return logging.getLogger(name or __name__)
     class ErrorCategory:
         PROVIDER_TIMEOUT = 'provider_timeout'
@@ -141,10 +144,7 @@ except ImportError:
 
 
 # Module-level logger for agent operations (use structlog if available)
-if OBSERVABILITY_AVAILABLE:
-    logger = get_logger("core.agent")
-else:
-    logger = logging.getLogger("core.agent")
+logger = get_logger("core.agent")
 
 
 class AgentResponse:
@@ -385,11 +385,9 @@ class CodingAgent(AgentInterface):
         if enable_clarity and CLARITY_AVAILABLE:
             try:
                 self.clarity_hook = ClarityAgentHook()
-                import logging
-                logging.getLogger(__name__).info("ClarAIty integration enabled")
+                logger.info("ClarAIty integration enabled")
             except Exception as e:
-                import logging
-                logging.getLogger(__name__).warning(f"Failed to initialize ClarAIty: {e}")
+                logger.warning(f"Failed to initialize ClarAIty: {e}", exc_info=True)
 
         # SESSION START HOOK
         if self.hook_manager:
@@ -406,8 +404,7 @@ class CodingAgent(AgentInterface):
 
             except Exception as e:
                 # SessionStart hooks don't block, just log errors
-                import logging
-                logging.getLogger(__name__).warning(f"SessionStart hook error: {e}")
+                logger.warning(f"SessionStart hook error: {e}", exc_info=True)
 
     def delegate_to_subagent(
         self,
@@ -438,9 +435,6 @@ class CodingAgent(AgentInterface):
             >>> if result.success:
             ...     print(result.output)
         """
-        import logging
-        logger = logging.getLogger(__name__)
-
         logger.info(f"Delegating to subagent '{subagent_name}': {task_description[:100]}...")
 
         # Delegate to subagent
@@ -1757,8 +1751,7 @@ class CodingAgent(AgentInterface):
                         metadata={"blocked": True}
                     )
                 # Other errors, log and continue
-                import logging
-                logging.getLogger(__name__).warning(f"UserPromptSubmit hook error: {e}")
+                logger.warning(f"UserPromptSubmit hook error: {e}", exc_info=True)
 
         # CLARAITY HOOK - Generate blueprint and get approval
         if self.clarity_hook:
@@ -1786,15 +1779,13 @@ class CodingAgent(AgentInterface):
                 # Store blueprint in memory context if approved
                 if clarity_result.blueprint:
                     self.memory.add_metadata("clarity_blueprint", clarity_result.blueprint.to_dict())
-                    import logging
-                    logging.getLogger(__name__).info(
+                    logger.info(
                         f"Blueprint approved: {len(clarity_result.blueprint.components)} components"
                     )
 
             except Exception as e:
                 # ClarAIty errors shouldn't break the agent
-                import logging
-                logging.getLogger(__name__).warning(f"ClarAIty hook error: {e}")
+                logger.warning(f"ClarAIty hook error: {e}", exc_info=True)
 
         # Create task context
         task_context = TaskContext(
@@ -1890,8 +1881,7 @@ class CodingAgent(AgentInterface):
                         metadata={"blocked": True}
                     )
                 # Other errors, log and continue
-                import logging
-                logging.getLogger(__name__).warning(f"UserPromptSubmit hook error: {e}")
+                logger.warning(f"UserPromptSubmit hook error: {e}", exc_info=True)
 
         # Reset web tools budget for new turn
         if hasattr(self, '_web_run_budget') and self._web_run_budget:
@@ -2240,10 +2230,6 @@ class CodingAgent(AgentInterface):
                         # Feed delta to MemoryManager (uses StreamingPipeline internally)
                         finalized_message = self.memory.process_provider_delta(delta)
 
-                        if delta.text_delta:
-                            response_content += delta.text_delta
-                            # Store gets text via process_provider_delta -> MESSAGE_UPDATED
-
                         # Track usage for context update
                         if delta.usage:
                             last_usage = delta.usage
@@ -2252,9 +2238,12 @@ class CodingAgent(AgentInterface):
                         if ui.check_interrupted():
                             break
 
-                    # 4. Extract tool_calls from finalized message
+                    # 4. Extract tool_calls and response_content from finalized message
                     if finalized_message and finalized_message.tool_calls:
                         tool_calls = finalized_message.tool_calls
+
+                    # Derive response_content from pipeline (single source of truth)
+                    response_content = (finalized_message.content or "") if finalized_message else self.memory.get_partial_text()
 
                     # Emit context usage update with real token count from LLM
                     if (last_usage and last_usage.get("input_tokens") is not None
@@ -3280,8 +3269,7 @@ REQUIRED: Choose a DIFFERENT approach:
                         content=f"Prompt blocked by hook: {str(e)}",
                         metadata={"blocked": True}
                     )
-                import logging
-                logging.getLogger(__name__).warning(f"UserPromptSubmit hook error: {e}")
+                logger.warning(f"UserPromptSubmit hook error: {e}", exc_info=True)
 
         # Reset web tools budget for new turn
         if hasattr(self, '_web_run_budget') and self._web_run_budget:
@@ -3646,7 +3634,7 @@ REQUIRED: Choose a DIFFERENT approach:
             Pressure level string: 'green', 'yellow', 'orange', or 'red'
         """
         if self.context_builder.max_context_tokens <= 0:
-            logging.getLogger(__name__).warning(
+            logger.warning(
                 f"Invalid max_context_tokens: {self.context_builder.max_context_tokens}"
             )
             return "green"
@@ -4133,5 +4121,4 @@ REQUIRED: Choose a DIFFERENT approach:
                 )
 
             except Exception as e:
-                import logging
-                logging.getLogger(__name__).warning(f"SessionEnd hook error: {e}")
+                logger.warning(f"SessionEnd hook error: {e}", exc_info=True)

@@ -606,6 +606,12 @@ class MemoryManager:
 
         return self._streaming_pipeline.get_current_state()
 
+    def get_partial_text(self) -> str:
+        """Return accumulated text from in-flight stream, or empty string."""
+        if self._streaming_pipeline and self._streaming_pipeline._state:
+            return self._streaming_pipeline._state.full_text_content
+        return ""
+
     @property
     def is_streaming(self) -> bool:
         """Check if currently processing an assistant stream."""

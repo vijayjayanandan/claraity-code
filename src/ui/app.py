@@ -1774,74 +1774,91 @@ class CodingAgentApp(App):
         - If streaming (no approvals): Interrupt the stream
         - If not streaming: First press shows hint, second quick press exits
         """
-        import time
+        try:
+            import time
 
-        now = time.time()
+            now = time.time()
 
-        # FIX: Safe loading clear (no lambdas, no create_task)
-        self._schedule_clear_loading()
+            # FIX: Safe loading clear (no lambdas, no create_task)
+            self._schedule_clear_loading()
 
-        # If there are pending approvals, cancel them instead of interrupting stream
-        if self._pending_approval_ids:
-            # Reject all pending approvals - notify agent for persistence
-            for call_id in list(self._pending_approval_ids):
-                self.ui_protocol.submit_action(ApprovalResult(
-                    call_id=call_id,
-                    approved=False,
-                ))
-                # DIRECT UI CLEANUP: Update card status immediately
-                # Don't wait for async store notification - user expects immediate feedback
-                if call_id in self._tool_cards:
-                    self._tool_cards[call_id].status = ToolStatus.CANCELLED
-            # Clear pending approvals
-            self._pending_approval_ids.clear()
-            self.notify("Approval cancelled", severity="information", timeout=2)
-            return
+            # If there are pending approvals, cancel them instead of interrupting stream
+            if self._pending_approval_ids:
+                # Reject all pending approvals - notify agent for persistence
+                for call_id in list(self._pending_approval_ids):
+                    try:
+                        self.ui_protocol.submit_action(ApprovalResult(
+                            call_id=call_id,
+                            approved=False,
+                        ))
+                    except Exception as e:
+                        logger.error(f"Error submitting approval cancellation for {call_id}: {e}", exc_info=True)
+                    
+                    # DIRECT UI CLEANUP: Update card status immediately
+                    # Don't wait for async store notification - user expects immediate feedback
+                    try:
+                        if call_id in self._tool_cards:
+                            self._tool_cards[call_id].status = ToolStatus.CANCELLED
+                    except Exception as e:
+                        logger.error(f"Error updating tool card status for {call_id}: {e}", exc_info=True)
+                
+                # Clear pending approvals
+                self._pending_approval_ids.clear()
+                self.notify("Approval cancelled", severity="information", timeout=2)
+                return
 
-        if self._is_streaming:
-            # Interrupt the current stream
-            self.log("Ctrl+C: Interrupting stream")
-            self.notify("Interrupting stream...", severity="warning", timeout=2)
+            if self._is_streaming:
+                # Interrupt the current stream
+                self.log("Ctrl+C: Interrupting stream")
+                self.notify("Interrupting stream...", severity="warning", timeout=2)
 
-            # DIRECT UI CLEANUP: Cancel any approval widgets immediately
-            # This handles cases where _pending_approval_ids might be out of sync
-            for call_id, card in self._tool_cards.items():
-                if card.status == ToolStatus.AWAITING_APPROVAL:
-                    card.status = ToolStatus.CANCELLED  # triggers watch_status()
-            self._pending_approval_ids.clear()
+                # DIRECT UI CLEANUP: Cancel any approval widgets immediately
+                # This handles cases where _pending_approval_ids might be out of sync
+                for call_id, card in self._tool_cards.items():
+                    if card.status == ToolStatus.AWAITING_APPROVAL:
+                        card.status = ToolStatus.CANCELLED  # triggers watch_status()
+                self._pending_approval_ids.clear()
 
-            # Set flag BEFORE cancelling so handler knows this is user-initiated
-            self._user_interrupt_requested = True
+                # Set flag BEFORE cancelling so handler knows this is user-initiated
+                self._user_interrupt_requested = True
 
-            self.ui_protocol.submit_action(InterruptSignal())
+                self.ui_protocol.submit_action(InterruptSignal())
 
-            # Cancel the worker (primary cancellation mechanism)
-            if self._stream_worker is not None:
-                self._stream_worker.cancel()
+                # Cancel the worker (primary cancellation mechanism)
+                if self._stream_worker is not None:
+                    self._stream_worker.cancel()
 
-            # Also cancel the task (belt and suspenders)
-            if self._streaming_task and not self._streaming_task.done():
-                self._streaming_task.cancel()
+                # Also cancel the task (belt and suspenders)
+                if self._streaming_task and not self._streaming_task.done():
+                    self._streaming_task.cancel()
 
-            # Also show feedback in status bar
-            try:
-                status_bar = self.query_one("#status", StatusBar)
-                status_bar.show_error("Interrupting...", countdown=2)
-            except NoMatches:
-                pass
-        else:
-            # Double Ctrl+C to exit (within 1 second)
-            if hasattr(self, '_last_ctrl_c_time') and (now - self._last_ctrl_c_time) < 1.0:
-                self.exit()
-            else:
-                self._last_ctrl_c_time = now
-                # Show hint
-                self.notify("Press Ctrl+C again to quit, or Ctrl+D to exit", severity="warning", timeout=2)
+                # Also show feedback in status bar
                 try:
                     status_bar = self.query_one("#status", StatusBar)
-                    status_bar.show_error("Ctrl+C again to quit | Ctrl+D to exit", countdown=2)
+                    status_bar.show_error("Interrupting...", countdown=2)
                 except NoMatches:
                     pass
+            else:
+                # Double Ctrl+C to exit (within 1 second)
+                if hasattr(self, '_last_ctrl_c_time') and (now - self._last_ctrl_c_time) < 1.0:
+                    self.exit()
+                else:
+                    self._last_ctrl_c_time = now
+                    # Show hint
+                    self.notify("Press Ctrl+C again to quit, or Ctrl+D to exit", severity="warning", timeout=2)
+                    try:
+                        status_bar = self.query_one("#status", StatusBar)
+                        status_bar.show_error("Ctrl+C again to quit | Ctrl+D to exit", countdown=2)
+                    except NoMatches:
+                        pass
+        except Exception as e:
+            logger.error(f"Critical error in action_interrupt: {e}", exc_info=True)
+            # Try to recover gracefully
+            try:
+                self._pending_approval_ids.clear()
+                self.notify("Error handling interrupt", severity="error", timeout=2)
+            except Exception:
+                pass  # Last resort - don't crash on error handling error
 
     def action_clear_screen(self) -> None:
         """Handle Ctrl+L - clear conversation."""
@@ -1853,31 +1870,35 @@ class CodingAgentApp(App):
 
     def action_toggle_mode(self) -> None:
         """Toggle permission mode: plan -> normal -> auto -> plan"""
-        if not self.agent:
-            return
-
-        # Cycle through modes
-        current = self.agent.get_permission_mode()
-        cycle = {"plan": "normal", "normal": "auto", "auto": "plan"}
-        next_mode = cycle.get(current, "normal")
-
-        # Update agent (this also handles plan_mode_state activation/deactivation)
-        self.agent.set_permission_mode(next_mode)
-
-        # Update status bar
         try:
-            status = self.query_one("#status", StatusBar)
-            status.set_mode(next_mode)
-        except NoMatches:
-            pass
+            if not self.agent:
+                return
 
-        # Notification with plan mode details
-        if next_mode == "plan":
-            plan_path = self.agent.plan_mode_state.plan_file_path
-            self.notify(f"PLAN MODE - Write plan to: {plan_path}", timeout=3)
-        else:
-            mode_labels = {"normal": "NORMAL", "auto": "AUTO"}
-            self.notify(f"Mode: {mode_labels.get(next_mode, next_mode.upper())}", timeout=1)
+            # Cycle through modes
+            current = self.agent.get_permission_mode()
+            cycle = {"plan": "normal", "normal": "auto", "auto": "plan"}
+            next_mode = cycle.get(current, "normal")
+
+            # Update agent (this also handles plan_mode_state activation/deactivation)
+            self.agent.set_permission_mode(next_mode)
+
+            # Update status bar
+            try:
+                status = self.query_one("#status", StatusBar)
+                status.set_mode(next_mode)
+            except NoMatches:
+                pass
+
+            # Notification with plan mode details
+            if next_mode == "plan":
+                plan_path = self.agent.plan_mode_state.plan_file_path
+                self.notify(f"PLAN MODE - Write plan to: {plan_path}", timeout=3)
+            else:
+                mode_labels = {"normal": "NORMAL", "auto": "AUTO"}
+                self.notify(f"Mode: {mode_labels.get(next_mode, next_mode.upper())}", timeout=1)
+        except Exception as e:
+            logger.error(f"Error toggling mode: {e}", exc_info=True)
+            self.notify("Error toggling mode", severity="error", timeout=2)
 
     def action_toggle_todos(self) -> None:
         """Toggle todo bar expand/collapse."""
