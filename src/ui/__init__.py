@@ -10,7 +10,6 @@ from .events import (
     StreamStart, StreamEnd,
     TextDelta,
     CodeBlockStart, CodeBlockDelta, CodeBlockEnd,
-    ToolCallStart, ToolCallStatus, ToolCallResult,
     ThinkingStart, ThinkingDelta, ThinkingEnd,
     ErrorEvent,
     UIEvent,
@@ -30,14 +29,7 @@ from .protocol import (
     UIProtocol,
 )
 
-# Session 2: Stream Processor
-from .stream_processor import (
-    StreamState,
-    ToolCallAccumulator,
-    StreamProcessor,
-)
-
-# Session 3: Widgets
+# Widgets
 from .widgets import (
     CodeBlock,
     ThinkingBlock,
@@ -47,13 +39,8 @@ from .widgets import (
     StatusBar,
 )
 
-# Session 4: App and Integration
+# App
 from .app import CodingAgentApp, ChatInput, run_app
-from .agent_adapter import (
-    AgentStreamAdapter,
-    create_stream_handler,
-    demo_stream_handler,
-)
 
 __all__ = [
     # Existing (prompt_toolkit)
@@ -63,7 +50,6 @@ __all__ = [
     "StreamStart", "StreamEnd",
     "TextDelta",
     "CodeBlockStart", "CodeBlockDelta", "CodeBlockEnd",
-    "ToolCallStart", "ToolCallStatus", "ToolCallResult",
     "ThinkingStart", "ThinkingDelta", "ThinkingEnd",
     "ErrorEvent",
     "UIEvent",
@@ -79,10 +65,6 @@ __all__ = [
     "RetrySignal",
     "UserAction",
     "UIProtocol",
-    # Stream Processor
-    "StreamState",
-    "ToolCallAccumulator",
-    "StreamProcessor",
     # Widgets
     "CodeBlock",
     "ThinkingBlock",
@@ -90,11 +72,8 @@ __all__ = [
     "ToolApprovalOptions",
     "MessageWidget",
     "StatusBar",
-    # App and Integration
+    # App
     "CodingAgentApp",
     "ChatInput",
     "run_app",
-    "AgentStreamAdapter",
-    "create_stream_handler",
-    "demo_stream_handler",
 ]
