@@ -11,6 +11,10 @@ from typing import List
 import mimetypes
 import asyncio
 
+from src.observability import get_logger
+
+logger = get_logger(__name__)
+
 # Import the core Attachment model (provider-agnostic)
 from src.core.attachment import (
     Attachment,
@@ -68,12 +72,22 @@ class AttachmentManager:
         if size_mb > MAX_IMAGE_SIZE_MB:
             raise ValueError(f"Image too large: {size_mb:.1f}MB (max {MAX_IMAGE_SIZE_MB}MB)")
 
+        # Generate unique filename with timestamp
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         self._screenshot_counter += 1
+        filename = f"screenshot_{timestamp}_{self._screenshot_counter}.{format}"
+        
+        logger.debug("screenshot_filename_generated", filename=filename, counter=self._screenshot_counter)
+        
         attachment = create_image_attachment(
             image_bytes=image_bytes,
-            filename=f"screenshot_{self._screenshot_counter}.{format}",
+            filename=filename,
             mime=f"image/{format}",
         )
+        
+        logger.debug("attachment_created", filename=attachment.filename, size_kb=attachment.size_kb)
+        
         self._attachments.append(attachment)
         return attachment
 

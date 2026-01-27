@@ -190,7 +190,7 @@ class MemoryManager:
         return self._render_meta
 
     def add_user_message(
-        self, content: str, metadata: Optional[Dict] = None
+        self, content: str, metadata: Optional[Dict] = None, attachments: Optional[List] = None
     ) -> Optional["SessionMessage"]:
         """
         Add user message to memory.
@@ -199,8 +199,9 @@ class MemoryManager:
         Also adds to WorkingMemory for backward compatibility and token counting.
 
         Args:
-            content: Message content
+            content: Message content (text)
             metadata: Optional metadata
+            attachments: Optional list of Attachment objects (images, text files)
 
         Returns:
             SessionMessage if MessageStore is configured, None otherwise
@@ -210,12 +211,15 @@ class MemoryManager:
 
         session_message: Optional["SessionMessage"] = None
 
+        # Build multimodal content if attachments present
+        message_content = self._build_multimodal_content(content, attachments)
+
         # Add to MessageStore if configured (Option A: Single Source of Truth)
         if self._message_store is not None and self._message_store_session_id is not None:
             from src.session.models.message import Message as SessionMessage
 
             session_message = SessionMessage.create_user(
-                content=content,
+                content=message_content,  # Can be str or list (multimodal)
                 session_id=self._message_store_session_id,
                 parent_uuid=self._last_parent_uuid,
                 seq=self._message_store.next_seq(),
@@ -224,13 +228,75 @@ class MemoryManager:
             self._last_parent_uuid = session_message.uuid
 
         # Also add to WorkingMemory for backward compatibility and token counting
+        # Note: WorkingMemory only stores text for token counting, not full multimodal
         self.working_memory.add_message(
             role=MessageRole.USER,
-            content=content,
+            content=content,  # Keep as text for token counting
             metadata=metadata,
         )
 
         return session_message
+
+    def _build_multimodal_content(
+        self,
+        user_input: str,
+        attachments: Optional[List] = None
+    ) -> 'str | list':
+        """
+        Convert user text + attachments to OpenAI-compatible multimodal format.
+
+        Uses OpenAI's vision API format which is compatible with:
+        - OpenAI GPT-4V / GPT-4o
+        - Claude via OpenAI-compatible proxy
+        - Other vision-capable models
+
+        Args:
+            user_input: User's text message
+            attachments: Optional list of Attachment objects
+
+        Returns:
+            str: If no attachments, returns plain text
+            list: If attachments present, returns content array:
+                  [{"type": "text", "text": "..."}, {"type": "image_url", ...}]
+        """
+        if not attachments:
+            return user_input
+
+        # Build multimodal content array
+        content = []
+
+        # Add user text first (if any)
+        if user_input.strip():
+            content.append({
+                "type": "text",
+                "text": user_input
+            })
+
+        # Add each attachment
+        for att in attachments:
+            if att.kind == "image":
+                # Image attachment - use OpenAI vision format with data URL
+                # Enhanced: Add structured filename and mime fields
+                content.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": att.data_url  # data:image/png;base64,...
+                    },
+                    "filename": att.filename,  # Structured field for TUI rendering
+                    "mime": att.mime  # Structured field for file type
+                })
+            else:
+                # Text file attachment - include as text block with filename context
+                # Enhanced: Add structured filename and mime fields
+                text_content = att.truncated_text() if hasattr(att, 'truncated_text') else (att.text or "")
+                content.append({
+                    "type": "text",
+                    "text": f"--- BEGIN FILE: {att.filename} ---\n{text_content}\n--- END FILE: {att.filename} ---",
+                    "filename": att.filename,  # Structured field (no parsing needed)
+                    "mime": att.mime  # Structured field for file type
+                })
+
+        return content
 
     @property
     def current_turn_id(self) -> int:
@@ -324,6 +390,46 @@ class MemoryManager:
                 self.episodic_memory.add_turn(turn)
 
         return session_message
+
+    def persist_system_event(
+        self,
+        *,
+        event_type: str,
+        content: str,
+        extra: Dict[str, Any],
+        include_in_llm_context: bool = False,
+    ) -> Optional["SessionMessage"]:
+        """
+        SINGLE WRITER path to persist system events to MessageStore.
+
+        This is the canonical method for persisting system events like
+        clarify_request, clarify_response, etc. Agents and UI components
+        should use this method instead of directly calling message_store.add_message().
+
+        Args:
+            event_type: Event type (e.g., "clarify_request", "clarify_response")
+            content: Human-readable content for display
+            extra: Event-specific data dict
+            include_in_llm_context: Whether to include in LLM context (default: False)
+
+        Returns:
+            SessionMessage if MessageStore is configured, None otherwise
+        """
+        if self._message_store is None or self._message_store_session_id is None:
+            return None
+
+        from src.session.models.message import Message as SessionMessage
+
+        msg = SessionMessage.create_system(
+            content=content,
+            session_id=self._message_store_session_id,
+            seq=self._message_store.next_seq(),
+            event_type=event_type,
+            include_in_llm_context=include_in_llm_context,
+            extra=extra,
+        )
+        self._message_store.add_message(msg)
+        return msg
 
     def add_tool_result(
         self,

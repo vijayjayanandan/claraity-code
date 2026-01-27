@@ -87,6 +87,9 @@ class SessionManager:
 
         Store starts with _max_seq=0, so first message gets seq=1.
         Per v3.1 Patch 1: NO reset_seq() call - Store handles this internally.
+        
+        Note: Session file is NOT created until the first message is written.
+        This prevents empty session files from cluttering the sessions directory.
         """
         session_id = generate_uuid()
         file_path = self._sessions_dir / f"{session_id}.jsonl"
@@ -103,8 +106,8 @@ class SessionManager:
         # Create store (starts at _max_seq=0)
         self._store = MessageStore()
 
-        # Create file
-        create_session_file(file_path)
+        # DO NOT create file yet - it will be created on first write
+        # This prevents empty session files from appearing in /resume
 
         # Create writer (not opened yet - call start_writer())
         self._writer = SessionWriter(file_path)

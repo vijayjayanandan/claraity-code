@@ -663,23 +663,320 @@ class MessageWidget(Vertical):
         self._markdown_text = ""
 
 
+class ClickableAttachmentPlaceholder(Static):
+    """Clickable attachment placeholder that opens file in external viewer."""
+    
+    DEFAULT_CSS = """
+    ClickableAttachmentPlaceholder {
+        width: auto;
+        height: 1;
+        color: $accent;
+        text-style: underline;
+    }
+    
+    ClickableAttachmentPlaceholder:hover {
+        color: $accent-lighten-2;
+        text-style: bold underline;
+    }
+    """
+    
+    def __init__(self, attachment_type: str, attachment_num: int, attachment_data: str, 
+                 filename: str = "", message_uuid: str = ""):
+        """
+        Initialize clickable attachment placeholder.
+        
+        Args:
+            attachment_type: Type of attachment ("image" or "file")
+            attachment_num: Attachment sequence number (1-indexed)
+            attachment_data: Data (base64 data URL for images, text content for files)
+            filename: Original filename (for files)
+            message_uuid: UUID of the message containing this attachment
+        """
+        if attachment_type == "image":
+            label = f"[Image #{attachment_num}]"
+        else:
+            label = f"[File #{attachment_num}: {filename}]"
+        
+        super().__init__(label)
+        self.attachment_type = attachment_type
+        self.attachment_num = attachment_num
+        self.attachment_data = attachment_data
+        self.filename = filename
+        self.message_uuid = message_uuid
+    
+    def on_click(self, event) -> None:
+        """Handle click to open attachment in external viewer."""
+        event.stop()
+        self._open_attachment()
+    
+    def _open_attachment(self) -> None:
+        """Open attachment in system viewer."""
+        import tempfile
+        import base64
+        import subprocess
+        import platform
+        import os
+        
+        try:
+            if self.attachment_type == "image":
+                self._open_image()
+            else:
+                self._open_file()
+        except Exception as e:
+            self.app.notify(f"Failed to open attachment: {e}", severity="error", timeout=3)
+    
+    def _open_image(self) -> None:
+        """Decode base64 image and open in system viewer."""
+        import tempfile
+        import base64
+        import subprocess
+        import platform
+        import os
+        
+        # Extract base64 data from data URL
+        if not self.attachment_data.startswith("data:image/"):
+            self.app.notify("Invalid image data", severity="error", timeout=3)
+            return
+        
+        # Parse data URL: data:image/png;base64,<data>
+        parts = self.attachment_data.split(",", 1)
+        if len(parts) != 2:
+            self.app.notify("Invalid image format", severity="error", timeout=3)
+            return
+        
+        # Extract MIME type and extension
+        header = parts[0]  # data:image/png;base64
+        data = parts[1]    # base64 data
+        
+        # Decode base64
+        img_bytes = base64.b64decode(data)
+        
+        # Save to temporary file with original filename
+        if self.filename:
+            # Use original filename in temp directory
+            temp_dir = tempfile.gettempdir()
+            temp_path = os.path.join(temp_dir, self.filename)
+            
+            with open(temp_path, 'wb') as f:
+                f.write(img_bytes)
+        else:
+            # Fallback: generate temp name with extension from MIME type
+            ext = self._get_extension_from_mime(header)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as f:
+                f.write(img_bytes)
+                temp_path = f.name
+        
+        # Open in system viewer
+        system = platform.system()
+        if system == "Windows":
+            os.startfile(temp_path)
+        elif system == "Darwin":  # macOS
+            subprocess.run(["open", temp_path])
+        else:  # Linux
+            subprocess.run(["xdg-open", temp_path])
+        
+        # Show notification with actual filename
+        actual_filename = os.path.basename(temp_path)
+        self.app.notify(f"Opening: {actual_filename}", timeout=3)
+    
+    def _get_extension_from_mime(self, mime_header: str) -> str:
+        """Extract file extension from MIME type header."""
+        if "png" in mime_header:
+            return ".png"
+        elif "jpeg" in mime_header or "jpg" in mime_header:
+            return ".jpg"
+        elif "gif" in mime_header:
+            return ".gif"
+        elif "webp" in mime_header:
+            return ".webp"
+        else:
+            return ".png"  # Default
+    
+    def _open_file(self) -> None:
+        """Save text file and open in system viewer."""
+        import tempfile
+        import subprocess
+        import platform
+        import os
+        
+        # Save to temporary file with original filename
+        temp_dir = tempfile.gettempdir()
+        temp_path = os.path.join(temp_dir, self.filename)
+        
+        with open(temp_path, 'w', encoding='utf-8') as f:
+            f.write(self.attachment_data)
+        
+        # Open in system viewer
+        system = platform.system()
+        if system == "Windows":
+            os.startfile(temp_path)
+        elif system == "Darwin":  # macOS
+            subprocess.run(["open", temp_path])
+        else:  # Linux
+            subprocess.run(["xdg-open", temp_path])
+        
+        self.app.notify(f"Opening {self.filename}...", timeout=2)
+
+
 class UserMessage(MessageWidget):
     """Convenience class for user messages."""
 
-    def __init__(self, content: str = "", **kwargs):
+    def __init__(self, content: Any = "", message_uuid: str = "", **kwargs):
+        """
+        Initialize user message.
+        
+        Args:
+            content: Message content (string or multimodal list)
+            message_uuid: UUID of the message (for image retrieval)
+            **kwargs: Additional arguments for MessageWidget
+        """
         super().__init__(role="user", **kwargs)
-        self._initial_content = content
+        self._raw_content = content
+        self._message_uuid = message_uuid
+        self._has_attachments = isinstance(content, list) and any(
+            isinstance(item, dict) and item.get("type") in ("image_url", "text")
+            for item in content
+        )
 
     def compose(self) -> ComposeResult:
-        """Compose the header and initial content."""
+        """Compose the header and content with clickable attachment placeholders."""
         # Yield header with copy button from parent
         yield from super().compose()
-        # Add initial content
-        if self._initial_content:
-            self._markdown_text = self._initial_content
-            self._current_markdown = Markdown(self._initial_content)
-            self._blocks.append(self._current_markdown)
-            yield self._current_markdown
+        
+        # Handle multimodal content with clickable attachments
+        if self._has_attachments:
+            yield from self._compose_multimodal_content()
+        else:
+            # Simple text content
+            text_content = self._extract_text_only(self._raw_content)
+            if text_content:
+                self._markdown_text = text_content
+                self._current_markdown = Markdown(text_content)
+                self._blocks.append(self._current_markdown)
+                yield self._current_markdown
+    
+    def _compose_multimodal_content(self) -> ComposeResult:
+        """Compose multimodal content with clickable attachment placeholders."""
+        if not isinstance(self._raw_content, list):
+            return
+        
+        image_count = 0
+        file_count = 0
+        text_parts = []
+        
+        for item in self._raw_content:
+            if not isinstance(item, dict):
+                continue
+            
+            item_type = item.get("type", "")
+            
+            if item_type == "text":
+                text = item.get("text", "")
+                if not text:
+                    continue
+                
+                # Check if this is a file attachment (has file header)
+                if text.startswith("--- BEGIN FILE:"):
+                    # Flush accumulated text before file
+                    if text_parts:
+                        text_content = " ".join(text_parts)
+                        markdown = Markdown(text_content)
+                        self._blocks.append(markdown)
+                        yield markdown
+                        text_parts = []
+                    
+                    # Extract filename from structured field (with backward compatibility)
+                    filename = item.get("filename")
+                    
+                    if not filename:
+                        # Backward compatibility: parse from text header
+                        # Format: --- BEGIN FILE: filename.txt ---
+                        try:
+                            header_line = text.split("\n")[0]
+                            filename = header_line.split("--- BEGIN FILE:")[1].split("---")[0].strip()
+                        except:
+                            filename = "attachment.txt"
+                    
+                    # Create clickable file placeholder
+                    file_count += 1
+                    placeholder = ClickableAttachmentPlaceholder(
+                        attachment_type="file",
+                        attachment_num=file_count,
+                        attachment_data=text,
+                        filename=filename,
+                        message_uuid=self._message_uuid
+                    )
+                    self._blocks.append(placeholder)
+                    yield placeholder
+                else:
+                    # Regular text - accumulate
+                    text_parts.append(text)
+            
+            elif item_type == "image_url":
+                # Flush accumulated text before image
+                if text_parts:
+                    text_content = " ".join(text_parts)
+                    markdown = Markdown(text_content)
+                    self._blocks.append(markdown)
+                    yield markdown
+                    text_parts = []
+                
+                # Create clickable image placeholder
+                image_count += 1
+                image_url = item.get("image_url", {})
+                data_url = image_url.get("url", "") if isinstance(image_url, dict) else str(image_url)
+                
+                # Extract filename from structured field (with fallback)
+                filename = item.get("filename", f"image_{image_count}.png")
+                
+                # Debug: Log extracted filename
+                from src.observability import get_logger
+                logger = get_logger(__name__)
+                logger.debug("image_filename_extracted", filename=filename, has_filename_field=("filename" in item))
+                
+                placeholder = ClickableAttachmentPlaceholder(
+                    attachment_type="image",
+                    attachment_num=image_count,
+                    attachment_data=data_url,
+                    filename=filename,
+                    message_uuid=self._message_uuid
+                )
+                self._blocks.append(placeholder)
+                yield placeholder
+        
+        # Flush remaining text
+        if text_parts:
+            text_content = " ".join(text_parts)
+            markdown = Markdown(text_content)
+            self._blocks.append(markdown)
+            yield markdown
+    
+    @staticmethod
+    def _extract_text_only(content: Any) -> str:
+        """
+        Extract plain text from content (for simple text messages).
+        
+        Args:
+            content: Message content (string or list)
+            
+        Returns:
+            Plain text string
+        """
+        if isinstance(content, str):
+            return content
+        
+        if not isinstance(content, list):
+            return str(content) if content is not None else ""
+        
+        # Extract text parts only (images handled separately)
+        parts = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                text = item.get("text", "")
+                if text:
+                    parts.append(text)
+        
+        return " ".join(parts) if parts else ""
 
 
 class AssistantMessage(MessageWidget):

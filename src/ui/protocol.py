@@ -58,8 +58,31 @@ class PauseResult:
     feedback: str | None = None  # Optional guidance for next steps
 
 
+@dataclass(frozen=True)
+class ClarifyResult:
+    """
+    User's response to a clarify request.
+    """
+    call_id: str
+    submitted: bool
+    responses: Dict[str, Any] | None = None  # question_id -> selected_option_id(s)
+    chat_instead: bool = False  # User chose to chat instead
+    chat_message: str | None = None  # User's chat message if chat_instead=True
+
+
+@dataclass(frozen=True)
+class PlanApprovalResult:
+    """
+    User's response to a plan approval request.
+    """
+    plan_hash: str
+    approved: bool
+    auto_accept_edits: bool = False  # If True, auto-approve edit_file calls during implementation
+    feedback: str | None = None  # User feedback for revisions
+
+
 # Union type for pattern matching
-UserAction = ApprovalResult | InterruptSignal | RetrySignal | PauseResult
+UserAction = ApprovalResult | InterruptSignal | RetrySignal | PauseResult | ClarifyResult | PlanApprovalResult
 
 
 # =============================================================================
@@ -119,6 +142,12 @@ class UIProtocol:
 
         # Track pending pause (only one at a time)
         self._pending_pause: asyncio.Future[PauseResult] | None = None
+
+        # Track pending clarify requests (call_id -> future)
+        self._pending_clarify: dict[str, asyncio.Future[ClarifyResult]] = {}
+
+        # Track pending plan approval (plan_hash -> future)
+        self._pending_plan_approval: dict[str, asyncio.Future[PlanApprovalResult]] = {}
 
         # Auto-approve rules (tool_name -> True)
         self._auto_approve: set[str] = set()
@@ -230,6 +259,112 @@ class UIProtocol:
         """
         return True  # TUI supports pause widget
 
+    async def wait_for_clarify_response(
+        self,
+        call_id: str,
+        timeout: float | None = None
+    ) -> ClarifyResult:
+        """
+        Wait for user to complete clarify interview.
+
+        Args:
+            call_id: The tool call ID to wait for
+            timeout: Optional timeout in seconds (None = wait forever)
+
+        Returns:
+            ClarifyResult with user's answers or cancellation
+
+        Raises:
+            asyncio.CancelledError: If stream was interrupted
+            asyncio.TimeoutError: If timeout exceeded
+        """
+        import logging
+        logger = logging.getLogger("ui.protocol")
+
+        # Create future for this specific call
+        future: asyncio.Future[ClarifyResult] = asyncio.Future()
+        self._pending_clarify[call_id] = future
+        logger.debug(f"[CLARIFY] wait_for_clarify_response called, call_id={call_id}, timeout={timeout}")
+
+        try:
+            if timeout:
+                result = await asyncio.wait_for(future, timeout)
+            else:
+                result = await future
+            logger.debug(f"[CLARIFY] Future resolved: submitted={result.submitted}")
+            return result
+        except asyncio.CancelledError:
+            logger.warning(f"[CLARIFY] Future cancelled for call_id={call_id}")
+            return ClarifyResult(
+                call_id=call_id,
+                submitted=False,
+                responses=None,
+                chat_instead=False,
+                chat_message="Clarify cancelled"
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"[CLARIFY] Timed out after {timeout}s for call_id={call_id}")
+            return ClarifyResult(
+                call_id=call_id,
+                submitted=False,
+                responses=None,
+                chat_instead=False,
+                chat_message="Timed out waiting for response"
+            )
+        finally:
+            self._pending_clarify.pop(call_id, None)
+
+    async def wait_for_plan_approval(
+        self,
+        plan_hash: str,
+        timeout: float | None = None
+    ) -> PlanApprovalResult:
+        """
+        Wait for user to approve or reject a plan.
+
+        Args:
+            plan_hash: The hash of the plan being submitted for approval
+            timeout: Optional timeout in seconds (None = wait forever)
+
+        Returns:
+            PlanApprovalResult with user's decision
+
+        Raises:
+            asyncio.CancelledError: If stream was interrupted
+            asyncio.TimeoutError: If timeout exceeded
+        """
+        import logging
+        logger = logging.getLogger("ui.protocol")
+
+        # Create future for this specific plan
+        future: asyncio.Future[PlanApprovalResult] = asyncio.Future()
+        self._pending_plan_approval[plan_hash] = future
+        logger.debug(f"[PLAN] wait_for_plan_approval called, plan_hash={plan_hash}, timeout={timeout}")
+
+        try:
+            if timeout:
+                result = await asyncio.wait_for(future, timeout)
+            else:
+                result = await future
+            logger.debug(f"[PLAN] Future resolved: approved={result.approved}")
+            return result
+        except asyncio.CancelledError:
+            logger.warning(f"[PLAN] Future cancelled for plan_hash={plan_hash}")
+            return PlanApprovalResult(
+                plan_hash=plan_hash,
+                approved=False,
+                feedback="Plan approval cancelled"
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"[PLAN] Timed out after {timeout}s for plan_hash={plan_hash}")
+            return PlanApprovalResult(
+                plan_hash=plan_hash,
+                approved=False,
+                feedback="Timed out waiting for response"
+            )
+        finally:
+            self._pending_plan_approval.pop(plan_hash, None)
+
     def check_interrupted(self) -> bool:
         """Check if user has requested interruption."""
         return self._interrupted.is_set()
@@ -268,6 +403,18 @@ class UIProtocol:
             if self._pending_pause and not self._pending_pause.done():
                 self._pending_pause.set_result(action)
 
+        elif isinstance(action, ClarifyResult):
+            # Deliver to specific pending clarify future
+            pending = self._pending_clarify.get(action.call_id)
+            if pending and not pending.done():
+                pending.set_result(action)
+
+        elif isinstance(action, PlanApprovalResult):
+            # Deliver to specific pending plan approval future
+            pending = self._pending_plan_approval.get(action.plan_hash)
+            if pending and not pending.done():
+                pending.set_result(action)
+
         elif isinstance(action, InterruptSignal):
             self._interrupted.set()
             # Cancel all pending approvals
@@ -277,6 +424,14 @@ class UIProtocol:
             # Cancel pending pause
             if self._pending_pause and not self._pending_pause.done():
                 self._pending_pause.cancel()
+            # Cancel all pending clarify
+            for pending in self._pending_clarify.values():
+                if not pending.done():
+                    pending.cancel()
+            # Cancel all pending plan approvals
+            for pending in self._pending_plan_approval.values():
+                if not pending.done():
+                    pending.cancel()
 
         # Also put in general queue for other consumers
         # Note: Queue is unbounded so QueueFull shouldn't occur, but handle defensively
@@ -307,6 +462,19 @@ class UIProtocol:
         if self._pending_pause and not self._pending_pause.done():
             self._pending_pause.cancel()
         self._pending_pause = None
+
+        # Cancel pending clarify futures
+        for pending in self._pending_clarify.values():
+            if not pending.done():
+                pending.cancel()
+        self._pending_clarify.clear()
+
+        # Cancel pending plan approval futures
+        for pending in self._pending_plan_approval.values():
+            if not pending.done():
+                pending.cancel()
+        self._pending_plan_approval.clear()
+
         # Don't clear auto_approve - persists within session
 
     def clear_auto_approve(self) -> None:
@@ -373,6 +541,8 @@ __all__ = [
     'InterruptSignal',
     'RetrySignal',
     'PauseResult',
+    'ClarifyResult',
+    'PlanApprovalResult',
     'UserAction',
     'PendingApproval',
     'UIProtocol',

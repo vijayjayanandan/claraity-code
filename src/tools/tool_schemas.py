@@ -898,6 +898,111 @@ WEB_FETCH_TOOL = ToolDefinition(
 )
 
 
+# Plan Mode Tools - Enter/exit plan mode for structured planning workflow
+
+ENTER_PLAN_MODE_TOOL = ToolDefinition(
+    name="enter_plan_mode",
+    description="Enter plan mode to design an implementation approach before making changes. Creates a plan file where you write your implementation plan. While in plan mode, only read-only tools are available (plus writing to the plan file). Use for complex tasks that benefit from upfront planning.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "reason": {
+                "type": "string",
+                "description": "Brief reason for entering plan mode (e.g., 'Complex refactoring with multiple dependencies')"
+            }
+        },
+        "required": []
+    }
+)
+
+EXIT_PLAN_MODE_TOOL = ToolDefinition(
+    name="exit_plan_mode",
+    description="Exit plan mode and submit your plan for user approval. Call this after writing your implementation plan to the plan file. The user will review the plan and approve or request changes.",
+    parameters={
+        "type": "object",
+        "properties": {},
+        "required": []
+    }
+)
+
+
+# Clarify Tool - Ask user structured questions before proceeding with ambiguous tasks
+
+CLARIFY_TOOL = ToolDefinition(
+    name="clarify",
+    description="Ask the user clarifying questions before proceeding with ambiguous tasks. Use this when the task is unclear, has multiple valid approaches, or requires user preference. Provides a structured interview interface with 1-4 questions.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "questions": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 4,
+                "description": "Questions to ask (1-4 questions)",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {
+                            "type": "string",
+                            "description": "Unique identifier for this question (e.g., 'approach', 'framework')"
+                        },
+                        "label": {
+                            "type": "string",
+                            "description": "Short tab label (max 12 chars, e.g., 'Approach', 'Framework')"
+                        },
+                        "question": {
+                            "type": "string",
+                            "description": "The full question text to display"
+                        },
+                        "options": {
+                            "type": "array",
+                            "minItems": 1,
+                            "description": "Available answer options",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {
+                                        "type": "string",
+                                        "description": "Unique identifier for this option"
+                                    },
+                                    "label": {
+                                        "type": "string",
+                                        "description": "Short option label"
+                                    },
+                                    "description": {
+                                        "type": "string",
+                                        "description": "Detailed description of this option"
+                                    },
+                                    "recommended": {
+                                        "type": "boolean",
+                                        "description": "Mark this option as recommended (shows '(Recommended)' tag)"
+                                    }
+                                },
+                                "required": ["id", "label"]
+                            }
+                        },
+                        "multi_select": {
+                            "type": "boolean",
+                            "description": "Allow multiple options to be selected (default: false)"
+                        },
+                        "allow_custom": {
+                            "type": "boolean",
+                            "description": "Allow user to type a custom response (default: false)"
+                        }
+                    },
+                    "required": ["id", "label", "question", "options"]
+                }
+            },
+            "context": {
+                "type": "string",
+                "description": "Brief explanation of why clarification is needed (shown to user)"
+            }
+        },
+        "required": ["questions"]
+    }
+)
+
+
 # Tool Collections
 
 ALL_TOOLS = [
@@ -939,6 +1044,14 @@ ALL_TOOLS = [
     DETECT_TEST_FRAMEWORK_TOOL,
     WEB_SEARCH_TOOL,
     WEB_FETCH_TOOL,
+    CLARIFY_TOOL,
+    ENTER_PLAN_MODE_TOOL,
+    EXIT_PLAN_MODE_TOOL,
+]
+
+PLAN_MODE_TOOLS = [
+    ENTER_PLAN_MODE_TOOL,
+    EXIT_PLAN_MODE_TOOL,
 ]
 
 WEB_TOOLS = [
@@ -1041,5 +1154,9 @@ __all__ = [
     "GIT_TOOLS",
     "EXECUTION_TOOLS",
     "CLARITY_TOOLS",
+    "CLARIFY_TOOL",
+    "ENTER_PLAN_MODE_TOOL",
+    "EXIT_PLAN_MODE_TOOL",
+    "PLAN_MODE_TOOLS",
     "get_tools_for_task",
 ]

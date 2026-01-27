@@ -9,7 +9,7 @@ Usage:
     from src.session.manager.hydrator import SessionHydrator, HydrationResult
 
     hydrator = SessionHydrator()
-    result = hydrator.hydrate(Path(".sessions/abc123/session.jsonl"))
+    result = hydrator.hydrate(Path(".clarity/sessions/abc123/session.jsonl"))
 
     # result.store - MessageStore with all messages
     # result.base_llm_messages - OpenAI-format messages for LLM context
@@ -124,7 +124,7 @@ class SessionHydrator:
         errors: List[str] = []
 
         # Extract session_id from path
-        # Supports both: .sessions/abc123/session.jsonl and .sessions/abc123.jsonl
+        # Supports both: .clarity/sessions/abc123/session.jsonl and .clarity/sessions/abc123.jsonl
         if jsonl_path.name == "session.jsonl":
             session_id = jsonl_path.parent.name
         else:

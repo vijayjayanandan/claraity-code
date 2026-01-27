@@ -1295,12 +1295,27 @@ class CodingAgentApp(App):
         """Forward event to store adapter for persistence.
 
         All rendering is handled by store subscription notifications.
+        ErrorEvents are handled directly since they need UI interaction
+        (status bar, retry logic) that the store doesn't handle.
         """
         if self._store_adapter:
             try:
                 self._store_adapter.handle_event(event)
             except Exception as e:
                 logger.warning(f"Store adapter error: {e}")
+
+        # ErrorEvents need direct UI handling (retry, status bar)
+        if isinstance(event, ErrorEvent):
+            current_msg = self._current_message
+            if current_msg:
+                try:
+                    await current_msg.set_loading(False)
+                except asyncio.CancelledError:
+                    pass
+            await self._handle_error(
+                event.error_type, event.user_message,
+                event.error_id, event.recoverable, event.retry_after
+            )
 
     def _finalize_current_message(self, msg: Optional[MessageWidget] = None) -> None:
         """Finalize current message and reset state.
@@ -1630,8 +1645,9 @@ class CodingAgentApp(App):
         else:
             await conversation.mount(self._clarify_widget)
 
-        # Scroll to make widget visible
-        conversation.scroll_end(animate=False)
+        # Scroll to make widget visible (only if user is at bottom)
+        if self._auto_scroll:
+            conversation.scroll_end(animate=False)
 
     def on_clarify_response_message(self, message: ClarifyResponseMessage) -> None:
         """Handle ClarifyResponseMessage from ClarifyWidget.
@@ -1698,8 +1714,9 @@ class CodingAgentApp(App):
             conversation = self.query_one("#conversation", ConversationContainer)
             await conversation.mount(self._plan_approval_widget)
 
-        # Scroll to make widget visible
-        conversation.scroll_end(animate=False)
+        # Scroll to make widget visible (only if user is at bottom)
+        if self._auto_scroll:
+            conversation.scroll_end(animate=False)
 
     def on_plan_approval_response_message(self, message: PlanApprovalResponseMessage) -> None:
         """Handle PlanApprovalResponseMessage from PlanApprovalWidget.
@@ -2084,9 +2101,9 @@ class CodingAgentApp(App):
 
         # Create appropriate widget based on role
         if message.is_user:
-            # Extract text from multimodal content if needed
-            content_text = _extract_user_content_text(message.content or "")
-            widget = UserMessage(content=content_text)
+            # Pass raw content and UUID for clickable image support
+            message_uuid = message.meta.uuid if message.meta else ""
+            widget = UserMessage(content=message.content or "", message_uuid=message_uuid)
         elif message.is_assistant:
             if not bulk_load:
                 # Check if widget already exists for this stream_id
@@ -2145,8 +2162,8 @@ class CodingAgentApp(App):
             if bulk_load:
                 widget.finalize()
 
-        # Auto-scroll only during live rendering (not replay)
-        if not bulk_load and not self._is_replaying:
+        # Auto-scroll only during live rendering (not replay) and if user is at bottom
+        if not bulk_load and not self._is_replaying and self._auto_scroll:
             conversation.scroll_end(animate=False)
 
     async def _on_store_message_added(
@@ -2229,8 +2246,8 @@ class CodingAgentApp(App):
         # Clear pending updates
         self._store_pending_updates.clear()
 
-        # Auto-scroll during streaming (once after batch)
-        if not self._is_replaying:
+        # Auto-scroll during streaming (once after batch), only if user is at bottom
+        if not self._is_replaying and self._auto_scroll:
             conversation.scroll_end(animate=False)
 
     async def _on_store_message_finalized(self, message: "Message") -> None:

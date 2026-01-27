@@ -10,6 +10,7 @@ from pathlib import Path
 
 if TYPE_CHECKING:
     from src.hooks import HookManager, HookDecision
+    from src.ui.protocol import UIProtocol
 
 from src.memory import MemoryManager, TaskContext
 from src.rag import CodeIndexer, Embedder, HybridRetriever, CodeChunk
@@ -55,6 +56,8 @@ from src.tools import (
     UpdateMethodTool,
     UpdateAcceptanceCriterionTool,
     UpdateImplementationPatternTool,
+    EnterPlanModeTool,
+    ExitPlanModeTool,
 )
 from src.tools.tool_parser import ToolCallParser, ParsedResponse
 from src.tools.tool_schemas import ALL_TOOLS
@@ -65,10 +68,11 @@ from .agent_interface import AgentInterface
 from .error_recovery import ErrorRecoveryTracker
 from .error_context import ErrorContext
 
-# Workflow components
-from src.workflow import TaskAnalyzer, TaskPlanner, TaskAnalysis, ExecutionPlan, TaskType as WorkflowTaskType
-from src.workflow.execution_engine import ExecutionEngine, ExecutionResult
-from src.workflow.permission_manager import PermissionManager, PermissionMode
+# Permission mode (simplified - workflow system deprecated)
+from src.core.permission_mode import PermissionManager, PermissionMode
+
+# Plan mode (Claude Code-style planning workflow)
+from src.core.plan_mode import PlanModeState, PlanGateDecision
 
 # Subagent components
 from src.subagents import SubAgentManager, SubAgentResult
@@ -320,6 +324,15 @@ class CodingAgent(AgentInterface):
         # Tool output size limit (parsed once, not on every tool call)
         self._max_tool_output_chars = int(os.getenv("TOOL_OUTPUT_MAX_CHARS", "100000"))
 
+        # Initialize plan mode state (Claude Code-style planning workflow)
+        # Must be initialized before tools registration since plan mode tools need it
+        self.plan_mode_state = PlanModeState(
+            clarity_dir=self.working_directory / ".clarity"
+        )
+
+        # Session ID for plan mode (will be set when session starts)
+        self._session_id: Optional[str] = None
+
         # Initialize tools
         self.tool_executor = ToolExecutor(hook_manager=hook_manager)
         self._register_tools()
@@ -341,24 +354,6 @@ class CodingAgent(AgentInterface):
         self.file_reference_parser = FileReferenceParser(
             base_dir=self.working_directory,
             max_file_size=100_000  # 100K chars max
-        )
-
-        # Initialize workflow components
-        self.task_analyzer = TaskAnalyzer(self.llm)
-        self.task_planner = TaskPlanner(self.llm)
-        self.execution_engine = ExecutionEngine(
-            tool_executor=self.tool_executor,
-            llm_backend=self.llm,
-            progress_callback=self._workflow_progress_callback
-        )
-
-        # Register planning tool (now that workflow components are initialized)
-        from src.tools import CreateExecutionPlanTool
-        self.tool_executor.register_tool(
-            CreateExecutionPlanTool(
-                task_analyzer=self.task_analyzer,
-                task_planner=self.task_planner
-            )
         )
 
         # Initialize permission manager
@@ -499,6 +494,66 @@ class CodingAgent(AgentInterface):
         """
         return self.subagent_manager.get_available_subagents()
 
+    def set_session_id(self, session_id: str, is_new_session: bool = True) -> None:
+        """
+        Set the session ID for plan mode and other session-scoped features.
+
+        This should be called when a session is started or resumed.
+
+        Args:
+            session_id: The session ID
+            is_new_session: If True, reset plan mode state (for new sessions).
+                           If False, preserve existing state (for resumed sessions).
+        """
+        self._session_id = session_id
+
+        # Reset plan mode state for new sessions to avoid stale state
+        if is_new_session and hasattr(self, 'plan_mode_state'):
+            self.plan_mode_state.reset()
+
+        # Update the plan mode tool with the session ID
+        if hasattr(self, '_enter_plan_mode_tool'):
+            self._enter_plan_mode_tool.session_id = session_id
+
+    def is_in_plan_mode(self) -> bool:
+        """Check if currently in plan mode."""
+        return self.plan_mode_state.is_active
+
+    def _check_plan_mode_gate(
+        self,
+        tool_name: str,
+        tool_args: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Check if a tool call is allowed under plan mode restrictions.
+
+        Args:
+            tool_name: Name of the tool being called
+            tool_args: Arguments to the tool
+
+        Returns:
+            None if allowed, or a gated response dict if denied
+        """
+        # Extract target path from common argument names
+        target_path = tool_args.get("file_path") or tool_args.get("path")
+
+        decision = self.plan_mode_state.gate_tool(tool_name, target_path)
+
+        if decision == PlanGateDecision.DENY:
+            return {
+                "status": "denied",
+                "error_code": "PLAN_MODE_GATED",
+                "message": f"Tool '{tool_name}' is not allowed in plan mode. Only read-only tools and writing to the plan file are permitted.",
+                "plan_path": str(self.plan_mode_state.plan_file_path) if self.plan_mode_state.plan_file_path else None,
+                "allowed_actions": [
+                    "Use read-only tools (read_file, grep, glob, etc.)",
+                    f"Write to plan file: {self.plan_mode_state.plan_file_path}",
+                    "Call exit_plan_mode when ready for approval"
+                ]
+            }
+
+        return None  # Allowed
+
     def _register_tools(self) -> None:
         """Register available tools."""
         # File operations
@@ -571,9 +626,18 @@ class CodingAgent(AgentInterface):
         self.tool_executor.register_tool(self._web_search_tool)
         self.tool_executor.register_tool(self._web_fetch_tool)
 
-        # Planning tool (requires task_analyzer and task_planner to be initialized)
-        # This is registered after workflow components are initialized in __init__
-        # Will be registered separately via _register_planning_tool()
+        # Plan mode tools (Claude Code-style planning workflow)
+        # Note: These tools need plan_mode_state and session_id set
+        # They are registered here but the state is passed during execution
+        self._enter_plan_mode_tool = EnterPlanModeTool(
+            plan_mode_state=self.plan_mode_state,
+            session_id=None  # Will be set when session starts
+        )
+        self._exit_plan_mode_tool = ExitPlanModeTool(
+            plan_mode_state=self.plan_mode_state
+        )
+        self.tool_executor.register_tool(self._enter_plan_mode_tool)
+        self.tool_executor.register_tool(self._exit_plan_mode_tool)
 
         # Subagent delegation (requires subagent_manager to be initialized)
         # This is registered after subagent_manager is initialized in __init__
@@ -725,6 +789,32 @@ class CodingAgent(AgentInterface):
                 if debug:
                     print(f"  Arguments: {tool_args}")
 
+                # Check plan mode gating BEFORE approval and execution
+                plan_gate_result = self._check_plan_mode_gate(tool_name, tool_args)
+                if plan_gate_result is not None:
+                    # Tool is gated in plan mode
+                    if debug:
+                        print(f"  [GATED] {plan_gate_result['message']}")
+
+                    # Return gated response to LLM
+                    import json
+                    gated_output = json.dumps(plan_gate_result, indent=2)
+                    tool_result = {
+                        "tool": tool_name,
+                        "arguments": tool_args,
+                        "success": False,
+                        "error": plan_gate_result["message"]
+                    }
+                    tool_results.append(tool_result)
+                    tool_messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "name": tool_name,
+                        "content": gated_output
+                    })
+                    self.tool_execution_history.append(tool_result)
+                    continue  # Skip to next tool call
+
                 # Check if approval is required (NORMAL mode only)
                 if self.permission_manager and self.permission_manager.mode == PermissionMode.NORMAL:
                     # Only ask for risky operations
@@ -753,29 +843,13 @@ class CodingAgent(AgentInterface):
                     if result.is_success():
                         output = result.output
                         # Check for oversized outputs - return error with guidance instead of silent truncation
-                        # This matches Claude Code behavior: user/LLM should know when output is too large
                         if isinstance(output, str) and len(output) > self._max_tool_output_chars:
-                            # Return error to LLM with guidance on how to handle large outputs
-                            error_msg = (
-                                f"Error: Output too large ({len(output):,} characters, limit is {self._max_tool_output_chars:,}). "
-                                f"For read_file: use offset and limit parameters to read specific portions of the file. "
-                                f"For grep/search: use head_limit parameter to limit results. "
-                                f"For command output: consider piping through head/tail."
+                            error_msg, tool_msg, history = self._format_oversized_output_error(
+                                len(output), tool_name, tool_args, tool_call.id
                             )
-                            tool_result = {
-                                "tool": tool_name,
-                                "arguments": tool_args,
-                                "success": False,
-                                "error": error_msg
-                            }
-                            tool_results.append(tool_result)
-                            tool_messages.append({
-                                "role": "tool",
-                                "tool_call_id": tool_call.id,
-                                "name": tool_name,
-                                "content": error_msg
-                            })
-                            self.tool_execution_history.append(tool_result)
+                            tool_results.append(history)
+                            tool_messages.append(tool_msg)
+                            self.tool_execution_history.append(history)
                             if debug:
                                 print(f"  [LIMIT] Output too large: {len(output):,} chars")
                             continue  # Skip to next tool call
@@ -903,6 +977,7 @@ class CodingAgent(AgentInterface):
         max_iterations: int = 3,
         on_chunk: Optional[Callable[[str], Awaitable[None]]] = None,
         request_approval: Optional[Callable[[str, Dict[str, Any]], Awaitable[bool]]] = None,
+        ui_protocol: Optional['UIProtocol'] = None,
     ) -> ToolExecutionResult:
         """
         Execute LLM with native function calling loop (async version).
@@ -970,6 +1045,46 @@ class CodingAgent(AgentInterface):
                 tool_name = tool_call.function.name
                 tool_args = tool_call.function.get_parsed_arguments()
 
+                # Special handling for clarify tool (requires UI interaction)
+                if tool_name == "clarify":
+                    clarify_result = await self._handle_clarify_tool(
+                        tool_call.id,
+                        tool_args,
+                        ui_protocol
+                    )
+                    tool_messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "name": tool_name,
+                        "content": json.dumps(clarify_result)
+                    })
+                    self.tool_execution_history.append({
+                        "tool": tool_name,
+                        "arguments": tool_args,
+                        "success": True,
+                        "result": clarify_result
+                    })
+                    continue  # Skip to next tool call
+
+                # Check plan mode gating BEFORE approval and execution
+                plan_gate_result = self._check_plan_mode_gate(tool_name, tool_args)
+                if plan_gate_result is not None:
+                    # Tool is gated in plan mode
+                    gated_output = json.dumps(plan_gate_result, indent=2)
+                    tool_messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "name": tool_name,
+                        "content": gated_output
+                    })
+                    self.tool_execution_history.append({
+                        "tool": tool_name,
+                        "arguments": tool_args,
+                        "success": False,
+                        "error": plan_gate_result["message"]
+                    })
+                    continue  # Skip to next tool call
+
                 # Check if approval is required (NORMAL mode)
                 if self.permission_manager and self.permission_manager.mode == PermissionMode.NORMAL:
                     risky_tools = ['write_file', 'edit_file', 'append_to_file', 'run_command', 'git_commit']
@@ -997,24 +1112,11 @@ class CodingAgent(AgentInterface):
                         output = result.output
                         # Check for oversized outputs - return error with guidance instead of silent truncation
                         if isinstance(output, str) and len(output) > self._max_tool_output_chars:
-                            error_msg = (
-                                f"Error: Output too large ({len(output):,} characters, limit is {self._max_tool_output_chars:,}). "
-                                f"For read_file: use offset and limit parameters to read specific portions of the file. "
-                                f"For grep/search: use head_limit parameter to limit results. "
-                                f"For command output: consider piping through head/tail."
+                            _, tool_msg, history = self._format_oversized_output_error(
+                                len(output), tool_name, tool_args, tool_call.id
                             )
-                            tool_messages.append({
-                                "role": "tool",
-                                "tool_call_id": tool_call.id,
-                                "name": tool_name,
-                                "content": error_msg
-                            })
-                            self.tool_execution_history.append({
-                                "tool": tool_name,
-                                "arguments": tool_args,
-                                "success": False,
-                                "error": error_msg
-                            })
+                            tool_messages.append(tool_msg)
+                            self.tool_execution_history.append(history)
                             continue  # Skip to next tool call
 
                         tool_messages.append({
@@ -1296,6 +1398,112 @@ class CodingAgent(AgentInterface):
             safe_print("\n[CANCEL] Interrupted - operation cancelled\n")
             return False
 
+    async def _handle_clarify_tool(
+        self,
+        call_id: str,
+        tool_args: Dict[str, Any],
+        ui_protocol: Optional['UIProtocol'] = None,
+    ) -> Dict[str, Any]:
+        """
+        Handle the clarify tool - ask structured questions before proceeding.
+
+        Single-writer flow:
+        1. Validate questions
+        2. Persist clarify_request via MemoryManager (triggers TUI notification)
+        3. Wait for user response via UIProtocol (or CLI fallback)
+        4. Persist clarify_response via MemoryManager
+        5. Return result to LLM
+
+        Args:
+            call_id: Tool call ID for correlation
+            tool_args: Tool arguments (questions, context)
+            ui_protocol: Optional UIProtocol for TUI mode
+
+        Returns:
+            Dict with user responses or error/cancellation status
+        """
+        questions = tool_args.get("questions", [])
+        context = tool_args.get("context")
+
+        # Validate questions
+        if not questions:
+            return {"error": "clarify.questions is empty"}
+
+        if len(questions) > 4:
+            return {"error": "clarify.questions has more than 4 questions (max: 4)"}
+
+        # 1. Persist clarify_request via MemoryManager (SINGLE WRITER)
+        if self.memory.has_message_store:
+            self.memory.persist_system_event(
+                event_type="clarify_request",
+                content="[Clarification requested]",
+                extra={
+                    "call_id": call_id,
+                    "questions": questions,
+                    "context": context,
+                },
+                include_in_llm_context=False,
+            )
+
+        # 2. Wait for user response
+        if ui_protocol:
+            # TUI mode - use UIProtocol
+            try:
+                from src.ui.protocol import ClarifyResult
+                result = await ui_protocol.wait_for_clarify_response(call_id)
+
+                # 3. Persist clarify_response via MemoryManager (SINGLE WRITER)
+                if self.memory.has_message_store:
+                    status = "submitted" if result.submitted else ("chat" if result.chat_instead else "cancelled")
+                    self.memory.persist_system_event(
+                        event_type="clarify_response",
+                        content=f"[Clarification {status}]",
+                        extra={
+                            "call_id": call_id,
+                            "submitted": result.submitted,
+                            "responses": result.responses,
+                            "chat_instead": result.chat_instead,
+                            "chat_message": result.chat_message,
+                        },
+                        include_in_llm_context=False,
+                    )
+
+                # 4. Return result to LLM
+                if result.submitted:
+                    return {"submitted": True, "responses": result.responses}
+                if result.chat_instead:
+                    return {"mode": "chat", "message": result.chat_message}
+                return {"cancelled": True}
+
+            except asyncio.CancelledError:
+                return {"cancelled": True, "reason": "interrupted"}
+
+        else:
+            # CLI fallback
+            from src.tools.clarify_tool import ClarifyTool
+            clarify_tool = ClarifyTool()
+            result = clarify_tool._cli_prompt(questions, context)
+
+            # Persist response via MemoryManager
+            if self.memory.has_message_store:
+                submitted = result.get("submitted", False)
+                cancelled = result.get("cancelled", False)
+                status = "submitted" if submitted else "cancelled"
+                self.memory.persist_system_event(
+                    event_type="clarify_response",
+                    content=f"[Clarification {status}]",
+                    extra={
+                        "call_id": call_id,
+                        "submitted": submitted,
+                        "responses": result.get("responses"),
+                        "chat_instead": False,
+                        "chat_message": None,
+                    },
+                    include_in_llm_context=False,
+                )
+
+            return result
+
     def _print_tool_announcement(self, tool_name: str, tool_args: Dict[str, Any]) -> None:
         """
         Print a clean tool announcement for CLI output.
@@ -1365,226 +1573,6 @@ class CodingAgent(AgentInterface):
             # Generic announcement for other tools
             safe_print(f"\n[TOOL] {tool_name}")
 
-    def _format_tool_results(self, results: List[Dict[str, Any]]) -> str:
-        """Format tool results for LLM consumption."""
-        formatted = []
-
-        for i, result in enumerate(results, 1):
-            if result["success"]:
-                formatted.append(
-                    f"Tool {i}: {result['tool']}\n"
-                    f"Arguments: {result['arguments']}\n"
-                    f"Result:\n{result['result']}\n"
-                )
-            else:
-                formatted.append(
-                    f"Tool {i}: {result['tool']}\n"
-                    f"Arguments: {result['arguments']}\n"
-                    f"Error: {result['error']}\n"
-                )
-
-        return "\n".join(formatted)
-
-
-    def _display_analysis(self, analysis: TaskAnalysis) -> None:
-        """Display task analysis to user."""
-        safe_print("\n" + "="*60)
-        safe_print("[INFO] TASK ANALYSIS")
-        safe_print("="*60)
-        print(f"Task Type: {analysis.task_type.value}")
-        print(f"Complexity: {analysis.complexity.name}")
-        print(f"Risk Level: {analysis.risk_level.upper()}")
-        print(f"Estimated Files: {analysis.estimated_files}")
-        print(f"Estimated Iterations: {analysis.estimated_iterations}")
-        print(f"Requires Planning: {analysis.requires_planning}")
-        print(f"Requires Approval: {analysis.requires_approval}")
-        print(f"Requires Git: {analysis.requires_git}")
-        print(f"Requires Tests: {analysis.requires_tests}")
-        if analysis.key_concepts:
-            print(f"Key Concepts: {', '.join(analysis.key_concepts)}")
-        if analysis.affected_systems:
-            print(f"Affected Systems: {', '.join(analysis.affected_systems)}")
-        print("="*60 + "\n")
-
-    def _workflow_progress_callback(self, step_id: int, status: str, message: str) -> None:
-        """
-        Callback for workflow execution progress.
-
-        Args:
-            step_id: ID of the current step
-            status: Status (starting, completed, failed)
-            message: Progress message
-        """
-        status_marker = {
-            "starting": "[>]",
-            "completed": "[OK]",
-            "failed": "[FAIL]",
-            "skipped": "[SKIP]"
-        }
-
-        marker = status_marker.get(status, "[INFO]")
-        safe_print(f"{marker} Step {step_id}: {message}")
-
-    def _execute_with_workflow(
-        self,
-        task_description: str,
-        task_type: str,
-        language: str,
-        stream: bool = False,
-    ) -> str:
-        """
-        Execute task using full workflow (Analyze → Plan → Execute).
-
-        Args:
-            task_description: Description of the task
-            task_type: Type of task (implement, debug, etc.)
-            language: Programming language
-            stream: Whether to stream responses
-
-        Returns:
-            Final response content
-        """
-        safe_print("\n" + "="*60)
-        safe_print("[INFO] WORKFLOW MODE ACTIVATED")
-        safe_print("="*60)
-        safe_print(f"Task: {task_description}\n")
-
-        # Step 1: Analyze the task
-        safe_print("[>] Step 1/3: Analyzing task...")
-        analysis = self.task_analyzer.analyze(task_description)
-        self._display_analysis(analysis)
-
-        # Step 2: Create execution plan
-        safe_print("[>] Step 2/3: Creating execution plan...")
-        plan = self.task_planner.create_plan(task_description, analysis)
-
-        # Display plan to user
-        safe_print("\n" + "="*60)
-        safe_print("[INFO] EXECUTION PLAN")
-        print("="*60)
-        formatted_plan = self.task_planner.format_plan_for_user(plan)
-        print(formatted_plan)
-        print("\n")
-
-        # Get user approval if required (via PermissionManager)
-        approved = self.permission_manager.get_approval(plan, analysis)
-        if not approved:
-            return "Task cancelled by user - approval denied."
-
-        # Step 3: Execute the plan
-        safe_print("[>] Step 3/3: Executing plan...\n")
-        safe_print("="*60)
-        safe_print("[EXECUTE] EXECUTION IN PROGRESS")
-        safe_print("="*60 + "\n")
-
-        result = self.execution_engine.execute_plan(plan)
-
-        # Populate tool_execution_history from workflow results
-        # (For orchestration/validation to track what files were created)
-        for step_result in result.step_results:
-            # Find corresponding plan step to get arguments
-            plan_step = plan.get_step_by_id(step_result.step_id)
-            if plan_step and step_result.tool_used:
-                tool_call_record = {
-                    "tool": step_result.tool_used,
-                    "arguments": plan_step.arguments if hasattr(plan_step, 'arguments') else {},
-                    "success": step_result.success,
-                    "output": step_result.output if step_result.success else step_result.error,
-                    "metadata": step_result.metadata or {}
-                }
-                self.tool_execution_history.append(tool_call_record)
-
-        # Format final report
-        safe_print("\n" + "="*60)
-        safe_print("[INFO] EXECUTION SUMMARY")
-        safe_print("="*60)
-        safe_print(f"Status: {'[OK] SUCCESS' if result.success else '[FAIL] FAILED'}")
-        print(f"Steps Completed: {len(result.completed_steps)}/{len(plan.steps)}")
-        print(f"Total Time: ~{plan.total_estimated_time}")
-
-        if result.completed_steps:
-            print("\nCompleted Steps:")
-            for step_id in result.completed_steps:
-                step = plan.get_step_by_id(step_id)
-                if step:
-                    safe_print(f"  [OK] Step {step_id}: {step.description}")
-
-        if result.failed_steps:
-            print("\nFailed Steps:")
-            for step_id in result.failed_steps:
-                step = plan.get_step_by_id(step_id)
-                step_result = next((r for r in result.step_results if r.step_id == step_id), None)
-                if step and step_result:
-                    safe_print(f"  [FAIL] Step {step_id}: {step.description}")
-                    print(f"     Error: {step_result.error}")
-
-        print("="*60 + "\n")
-
-        # Generate final response based on results
-        if result.success:
-            response = self._generate_success_response(result, plan)
-        else:
-            response = self._generate_failure_response(result, plan)
-
-        return response
-
-    def _generate_success_response(self, result: ExecutionResult, plan: ExecutionPlan) -> str:
-        """Generate success response from execution result."""
-        parts = [
-            f"[OK] Task completed successfully!\n",
-            f"\nI've completed the task: {plan.task_description}\n",
-            f"\nSteps executed:",
-        ]
-
-        for step_id in result.completed_steps:
-            step = plan.get_step_by_id(step_id)
-            step_result = next((r for r in result.step_results if r.step_id == step_id), None)
-            if step and step_result:
-                parts.append(f"  • {step.description}")
-                if step_result.output:
-                    # Include brief output summary
-                    output_preview = str(step_result.output)[:200]
-                    if len(str(step_result.output)) > 200:
-                        output_preview += "..."
-                    parts.append(f"    → {output_preview}")
-
-        if plan.success_criteria:
-            parts.append(f"\n✓ Success criteria met:")
-            for criterion in plan.success_criteria:
-                parts.append(f"  • {criterion}")
-
-        return "\n".join(parts)
-
-    def _generate_failure_response(self, result: ExecutionResult, plan: ExecutionPlan) -> str:
-        """Generate failure response from execution result."""
-        parts = [
-            f"[FAIL] Task execution failed.\n",
-            f"\nTask: {plan.task_description}\n",
-            f"\nCompleted {len(result.completed_steps)} of {len(plan.steps)} steps.",
-        ]
-
-        if result.completed_steps:
-            parts.append(f"\n✓ Completed steps:")
-            for step_id in result.completed_steps:
-                step = plan.get_step_by_id(step_id)
-                if step:
-                    parts.append(f"  • {step.description}")
-
-        if result.failed_steps:
-            parts.append(f"\n✗ Failed steps:")
-            for step_id in result.failed_steps:
-                step = plan.get_step_by_id(step_id)
-                step_result = next((r for r in result.step_results if r.step_id == step_id), None)
-                if step and step_result:
-                    parts.append(f"  • {step.description}")
-                    parts.append(f"    Error: {step_result.error}")
-
-        if plan.rollback_strategy:
-            parts.append(f"\n[WARN] Rollback available:")
-            parts.append(f"  {plan.rollback_strategy}")
-
-        return "\n".join(parts)
-
     @observe_agent_method("execute_direct", capture_input=True, capture_output=True)
     def _execute_direct(
         self,
@@ -1627,6 +1615,7 @@ class CodingAgent(AgentInterface):
             available_chunks=self.indexed_chunks if use_rag else None,
             file_references=file_references if file_references else None,
             agent_state=self.todo_state if self.todo_state.get('todos') else None,
+            plan_mode_state=self.plan_mode_state,
         )
 
         # Execute with tool calling loop
@@ -1722,11 +1711,9 @@ class CodingAgent(AgentInterface):
         language: str = "python",
         use_rag: bool = True,
         stream: bool = False,
-        force_workflow: bool = False,
-        force_direct: bool = False,
     ) -> AgentResponse:
         """
-        Execute a coding task using workflow or direct execution.
+        Execute a coding task using direct LLM execution.
 
         Args:
             task_description: Description of the task
@@ -1734,8 +1721,6 @@ class CodingAgent(AgentInterface):
             language: Programming language
             use_rag: Whether to use RAG retrieval
             stream: Whether to stream response
-            force_workflow: Force workflow mode (for testing)
-            force_direct: Force direct mode (for testing)
 
         Returns:
             Agent response
@@ -1824,32 +1809,15 @@ class CodingAgent(AgentInterface):
         # Add user message to memory
         self.memory.add_user_message(task_description)
 
-        # Decide execution mode
-        # Note: Routing logic removed in favor of LLM-first decision making.
-        # For backward compatibility, this method still supports force flags.
-        use_workflow = force_workflow and not force_direct
-
-        # Execute based on decision
-        if use_workflow:
-            # Explicit workflow mode (for testing/validation framework)
-            response_content = self._execute_with_workflow(
-                task_description=task_description,
-                task_type=task_type,
-                language=language,
-                stream=stream,
-            )
-            execution_mode = "workflow"
-        else:
-            # Default: LLM-first execution (LLM decides tools vs conversation)
-            print("\n[DIRECT EXECUTION MODE]\n")
-            response_content = self._execute_direct(
-                task_description=task_description,
-                task_type=task_type,
-                language=language,
-                use_rag=use_rag,
-                stream=stream,
-            )
-            execution_mode = "direct"
+        # Execute using direct LLM-first approach (LLM decides tools vs conversation)
+        print("\n[DIRECT EXECUTION MODE]\n")
+        response_content = self._execute_direct(
+            task_description=task_description,
+            task_type=task_type,
+            language=language,
+            use_rag=use_rag,
+            stream=stream,
+        )
 
         # Add assistant response to memory
         self.memory.add_assistant_message(response_content)
@@ -1860,7 +1828,7 @@ class CodingAgent(AgentInterface):
                 "task_type": task_type,
                 "language": language,
                 "used_rag": use_rag and len(self.indexed_chunks) > 0,
-                "execution_mode": execution_mode,
+                "execution_mode": "direct",
             }
         )
 
@@ -1961,6 +1929,7 @@ class CodingAgent(AgentInterface):
             available_chunks=self.indexed_chunks if use_rag else None,
             file_references=file_references if file_references else None,
             agent_state=self.todo_state if self.todo_state.get('todos') else None,
+            plan_mode_state=self.plan_mode_state,
         )
 
         # Execute with tool calling loop (LLM decides what to do)
@@ -2004,61 +1973,6 @@ class CodingAgent(AgentInterface):
                 "used_rag": use_rag and len(self.indexed_chunks) > 0,
             }
         )
-
-    def _build_multimodal_content(
-        self,
-        user_input: str,
-        attachments: 'Optional[List]' = None
-    ) -> 'str | list':
-        """
-        Convert user text + attachments to OpenAI-compatible multimodal format.
-
-        Uses OpenAI's vision API format which is compatible with:
-        - OpenAI GPT-4V / GPT-4o
-        - Claude via OpenAI-compatible proxy
-        - Other vision-capable models
-
-        Args:
-            user_input: User's text message
-            attachments: Optional list of Attachment objects
-
-        Returns:
-            str: If no attachments, returns plain text
-            list: If attachments present, returns content array:
-                  [{"type": "text", "text": "..."}, {"type": "image_url", ...}]
-        """
-        if not attachments:
-            return user_input
-
-        # Build multimodal content array
-        content = []
-
-        # Add user text first (if any)
-        if user_input.strip():
-            content.append({
-                "type": "text",
-                "text": user_input
-            })
-
-        # Add each attachment
-        for att in attachments:
-            if att.kind == "image":
-                # Image attachment - use OpenAI vision format with data URL
-                content.append({
-                    "type": "image_url",
-                    "image_url": {
-                        "url": att.data_url  # data:image/png;base64,...
-                    }
-                })
-            else:
-                # Text file attachment - include as text block with filename context
-                text_content = att.truncated_text() if hasattr(att, 'truncated_text') else (att.text or "")
-                content.append({
-                    "type": "text",
-                    "text": f"--- BEGIN FILE: {att.filename} ({att.mime}) ---\n{text_content}\n--- END FILE: {att.filename} ---"
-                })
-
-        return content
 
     async def stream_response(
         self,
@@ -2136,9 +2050,10 @@ class CodingAgent(AgentInterface):
             if mode == PermissionMode.AUTO:
                 return False
 
-            # In PLAN mode, always ask for approval
+            # In PLAN mode, don't ask for approval - use gating instead
+            # Read-only tools execute freely, write tools are blocked by plan_mode_state.gate_tool()
             if mode == PermissionMode.PLAN:
-                return True
+                return False
 
             # In NORMAL mode (default), ask only for risky tools
             risky_tools = {'write_file', 'edit_file', 'append_to_file', 'run_command', 'git_commit'}
@@ -2154,9 +2069,9 @@ class CodingAgent(AgentInterface):
             )
             self.memory.set_task_context(task_context)
 
-            # Build multimodal message content if attachments present
-            user_message_content = self._build_multimodal_content(user_input, attachments)
-            self.memory.add_user_message(user_input)  # Store text in memory (not attachments)
+            # Add user message to memory with attachments
+            # MemoryManager will build multimodal content and store it in MessageStore
+            self.memory.add_user_message(user_input, attachments=attachments)
 
             # Parse and load file references
             file_references = self.file_reference_parser.parse_and_load(user_input)
@@ -2171,19 +2086,15 @@ class CodingAgent(AgentInterface):
                 available_chunks=self.indexed_chunks if self.indexed_chunks else None,
                 file_references=file_references if file_references else None,
                 agent_state=self.todo_state if self.todo_state.get('todos') else None,
+                plan_mode_state=self.plan_mode_state,
             )
 
             # NOTE: Context usage is emitted after each LLM response with real token count
             # (see chunk.done handling below). We don't emit here to avoid overwriting
             # accurate LLM usage with tiktoken estimates on subsequent messages.
 
-            # If we have multimodal content (attachments), update the last user message
-            if user_message_content != user_input:
-                # Find and update the last user message with multimodal content
-                for i in range(len(context) - 1, -1, -1):
-                    if context[i].get("role") == "user":
-                        context[i]["content"] = user_message_content
-                        break
+            # Multimodal content (attachments) is now properly stored in MessageStore
+            # and will be included in context automatically via build_context()
 
             # Tool execution loop with realistic budgets
             # These limits are for real coding workflows (reading files, searching, etc.)
@@ -2556,6 +2467,42 @@ class CodingAgent(AgentInterface):
                         })
                         continue  # Move to next tool call
 
+                    # Check plan mode gating BEFORE approval and execution
+                    tool_args = tc.function.get_parsed_arguments()
+                    plan_gate_result = self._check_plan_mode_gate(tc.function.name, tool_args)
+                    if plan_gate_result is not None:
+                        # Tool is gated in plan mode - show as blocked, not pending approval
+                        yield ToolCallStart(
+                            call_id=call_id,
+                            name=tc.function.name,
+                            arguments=tool_args,
+                            requires_approval=False,
+                        )
+                        yield ToolCallStatus(
+                            call_id=call_id,
+                            status=ToolStatus.FAILED,
+                            message=plan_gate_result["message"]
+                        )
+
+                        # Add gated response to tool messages for LLM feedback
+                        import json
+                        gated_output = json.dumps(plan_gate_result, indent=2)
+                        tool_messages.append({
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "name": tc.function.name,
+                            "content": gated_output
+                        })
+
+                        # Persist tool result to MessageStore for session replay
+                        self.memory.add_tool_result(
+                            tool_call_id=call_id,
+                            content=gated_output,
+                            tool_name=tc.function.name,
+                            status="gated",
+                        )
+                        continue  # Skip to next tool call
+
                     requires_approval = needs_approval(tc.function.name)
 
                     # Freeze approval policy in render meta registry (store-driven UI)
@@ -2817,6 +2764,49 @@ class CodingAgent(AgentInterface):
                     # Increment tool call counter for budget tracking
                     tool_call_count += 1
 
+                    # Special handling for clarify tool (requires UI interaction)
+                    if tc.function.name == "clarify":
+                        clarify_result = await self._handle_clarify_tool(
+                            call_id,
+                            tc.function.get_parsed_arguments(),
+                            ui
+                        )
+
+                        duration_ms = int((time.monotonic() - start_time) * 1000)
+
+                        # Update tool state in message store
+                        if self.memory.message_store:
+                            self.memory.message_store.update_tool_state(
+                                call_id,
+                                CoreToolStatus.SUCCESS,
+                                result=clarify_result,
+                                duration_ms=duration_ms
+                            )
+
+                        yield ToolCallResult(
+                            call_id=call_id,
+                            status=ToolStatus.SUCCESS,
+                            result=json.dumps(clarify_result),
+                            duration_ms=duration_ms,
+                        )
+
+                        # Persist tool result to MessageStore for session replay
+                        self.memory.add_tool_result(
+                            tool_call_id=call_id,
+                            content=json.dumps(clarify_result),
+                            tool_name=tc.function.name,
+                            status="success",
+                            duration_ms=duration_ms,
+                        )
+
+                        tool_messages.append({
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "name": tc.function.name,
+                            "content": json.dumps(clarify_result)
+                        })
+                        continue  # Skip to next tool call
+
                     try:
                         result = await self.tool_executor.execute_tool_async(
                             tc.function.name,
@@ -2830,49 +2820,30 @@ class CodingAgent(AgentInterface):
 
                             # Claude Code style: return ERROR with guidance for oversized output
                             if isinstance(output, str) and len(output) > self._max_tool_output_chars:
-                                error_msg = (
-                                    f"Error: Output too large ({len(output):,} characters, limit is {self._max_tool_output_chars:,}). "
-                                    f"For read_file: use offset and limit parameters to read specific portions of the file. "
-                                    f"For grep/search: use head_limit parameter to limit results. "
-                                    f"For command output: consider piping through head/tail."
+                                error_msg, tool_msg, history = self._format_oversized_output_error(
+                                    len(output), tc.function.name,
+                                    tc.function.get_parsed_arguments(), call_id
                                 )
 
                                 # Update tool state in message store
                                 if self.memory.message_store:
                                     self.memory.message_store.update_tool_state(
-                                        call_id,
-                                        CoreToolStatus.ERROR,
-                                        error=error_msg,
-                                        duration_ms=duration_ms
+                                        call_id, CoreToolStatus.ERROR,
+                                        error=error_msg, duration_ms=duration_ms
                                     )
 
                                 yield ToolCallResult(
-                                    call_id=call_id,
-                                    status=ToolStatus.FAILED,
-                                    error=error_msg,
-                                    duration_ms=duration_ms,
+                                    call_id=call_id, status=ToolStatus.FAILED,
+                                    error=error_msg, duration_ms=duration_ms,
                                 )
                                 # Persist tool result to MessageStore for session replay
                                 self.memory.add_tool_result(
-                                    tool_call_id=call_id,
-                                    content=error_msg,
-                                    tool_name=tc.function.name,
-                                    status="error",
+                                    tool_call_id=call_id, content=error_msg,
+                                    tool_name=tc.function.name, status="error",
                                     duration_ms=duration_ms,
                                 )
-                                tool_messages.append({
-                                    "role": "tool",
-                                    "tool_call_id": call_id,
-                                    "name": tc.function.name,
-                                    "content": error_msg
-                                })
-                                # Track in execution history for debugging/testing
-                                self.tool_execution_history.append({
-                                    "tool": tc.function.name,
-                                    "arguments": tc.function.get_parsed_arguments(),
-                                    "success": False,
-                                    "error": error_msg
-                                })
+                                tool_messages.append(tool_msg)
+                                self.tool_execution_history.append(history)
                                 continue  # Skip to next tool call
 
                             # Update tool state in message store
@@ -3436,6 +3407,7 @@ REQUIRED: Choose a DIFFERENT approach:
             available_chunks=self.indexed_chunks if use_rag else None,
             file_references=file_references if file_references else None,
             agent_state=self.todo_state if self.todo_state.get('todos') else None,
+            plan_mode_state=self.plan_mode_state,
         )
 
         # Execute with async tool calling loop
@@ -3657,7 +3629,7 @@ REQUIRED: Choose a DIFFERENT approach:
             HydrationResult with store, base_llm_messages, agent_state, report
 
         Usage:
-            result = agent.resume_session_from_jsonl(Path(".sessions/abc/session.jsonl"))
+            result = agent.resume_session_from_jsonl(Path(".clarity/sessions/abc/session.jsonl"))
             # MemoryManager now uses MessageStore for conversation history
             # agent.todo_state is restored
         """
@@ -3724,8 +3696,20 @@ REQUIRED: Choose a DIFFERENT approach:
         Raises:
             ValueError: If mode is invalid
         """
+        current_mode = self.permission_manager.get_mode()
         permission_mode = PermissionManager.from_string(mode)
         self.permission_manager.set_mode(permission_mode)
+
+        # Handle plan mode state transitions
+        if permission_mode == PermissionMode.PLAN and current_mode != PermissionMode.PLAN:
+            # Entering plan mode - activate plan mode state
+            session_id = self._session_id or "default-session"
+            if not self.plan_mode_state.is_active:
+                self.plan_mode_state.enter(session_id)
+        elif permission_mode != PermissionMode.PLAN and current_mode == PermissionMode.PLAN:
+            # Leaving plan mode - deactivate plan mode state
+            if self.plan_mode_state.is_active:
+                self.plan_mode_state.reset()
 
     def get_permission_mode(self) -> str:
         """Get current permission mode.
@@ -3777,6 +3761,53 @@ REQUIRED: Choose a DIFFERENT approach:
     # -------------------------------------------------------------------------
     # Error Recovery Helpers
     # -------------------------------------------------------------------------
+
+    def _format_oversized_output_error(
+        self,
+        output_size: int,
+        tool_name: str,
+        tool_args: Dict[str, Any],
+        tool_call_id: str
+    ) -> tuple:
+        """
+        Format error response for oversized tool output.
+
+        This is the unified helper for handling outputs that exceed
+        _max_tool_output_chars, providing consistent error messages
+        and data structures across sync/async/streaming code paths.
+
+        Args:
+            output_size: Size of the output in characters
+            tool_name: Name of the tool that generated the output
+            tool_args: Arguments passed to the tool
+            tool_call_id: ID of the tool call
+
+        Returns:
+            Tuple of (error_msg, tool_message_dict, history_entry_dict)
+        """
+        error_msg = (
+            f"Error: Output too large ({output_size:,} characters, "
+            f"limit is {self._max_tool_output_chars:,}). "
+            f"For read_file: use offset and limit parameters to read specific portions of the file. "
+            f"For grep/search: use head_limit parameter to limit results. "
+            f"For command output: consider piping through head/tail."
+        )
+
+        tool_message = {
+            "role": "tool",
+            "tool_call_id": tool_call_id,
+            "name": tool_name,
+            "content": error_msg
+        }
+
+        history_entry = {
+            "tool": tool_name,
+            "arguments": tool_args,
+            "success": False,
+            "error": error_msg
+        }
+
+        return error_msg, tool_message, history_entry
 
     def _classify_tool_error(self, error_message: str) -> str:
         """

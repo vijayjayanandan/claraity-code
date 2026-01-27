@@ -648,7 +648,7 @@ class ToolApprovalOptions(Static, can_focus=True):
         Do you want to allow this action?
           1. Yes
           2. Yes, allow all [tool] during this session
-        > 3. [Type here to tell Claude what to do differently]
+        > 3. [Provide alternative instructions]
 
         Esc to cancel
 
@@ -676,7 +676,7 @@ class ToolApprovalOptions(Static, can_focus=True):
         ("yes_all", "Yes, allow all {tool} during this session"),
     ]
 
-    FEEDBACK_PLACEHOLDER = "Type here to tell Claude what to do differently"
+    FEEDBACK_PLACEHOLDER = "Provide alternative instructions"
 
     selected_index = reactive(0)
     feedback_text = reactive("")
@@ -714,7 +714,6 @@ class ToolApprovalOptions(Static, can_focus=True):
     def on_mount(self) -> None:
         """Focus on mount to capture key events."""
         self.call_after_refresh(self._ensure_focus)
-        self.set_timer(0.1, self._ensure_focus)
 
     def _ensure_focus(self) -> None:
         """Ensure this widget has focus for key events."""

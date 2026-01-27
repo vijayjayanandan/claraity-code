@@ -455,9 +455,92 @@ class StoreEvent(Enum):
     MESSAGE_ADDED = "message_added"           # New message added
     MESSAGE_UPDATED = "message_updated"       # Streaming update (frequent, in-memory only)
     MESSAGE_FINALIZED = "message_finalized"   # Message complete (triggers persistence)
+    SNAPSHOT_ADDED = "snapshot_added"         # File snapshot added
+    STORE_CLEARED = "store_cleared"           # Store reset
     BULK_LOAD_COMPLETE = "bulk_load_complete" # Replay finished
     TOOL_STATE_UPDATED = "tool_state_updated" # Tool execution state changed
 ```
+
+**Internal Index Structure:**
+
+```mermaid
+graph TB
+    subgraph "Primary Storage"
+        Messages["_messages<br/>Dict[uuid → Message]"]
+    end
+
+    subgraph "Ordering Indexes"
+        BySeq["_by_seq<br/>Dict[seq → uuid]"]
+        RootIds["_root_ids<br/>List[uuid]"]
+    end
+
+    subgraph "Relationship Indexes"
+        Children["_children<br/>Dict[parent_uuid → [child_uuids]]"]
+        Sidechains["_sidechains<br/>Dict[parent_uuid → [sidechain_uuids]]"]
+    end
+
+    subgraph "Streaming Indexes"
+        ByStreamId["_by_stream_id<br/>Dict[stream_id → uuid]"]
+    end
+
+    subgraph "Tool Linkage Indexes"
+        ToolResults["_tool_results<br/>Dict[tool_call_id → result_uuid]"]
+        AssistantTools["_assistant_tools<br/>Dict[assistant_uuid → [tool_call_ids]]"]
+        ToolApprovals["_tool_approvals<br/>Dict[tool_call_id → approval_uuid]"]
+    end
+
+    subgraph "Ephemeral State"
+        ToolState["_tool_state<br/>Dict[tool_call_id → ToolExecutionState]"]
+    end
+
+    Messages -.->|Indexed by| BySeq
+    Messages -.->|Indexed by| ByStreamId
+    Messages -.->|Indexed by| ToolResults
+    Messages -.->|Indexed by| AssistantTools
+
+    style Messages fill:#e1f5ff
+    style ToolState fill:#ffe1e1
+```
+
+**Index Lookup Examples:**
+
+```mermaid
+graph LR
+    subgraph "Lookup by UUID (O(1))"
+        A1[uuid: abc-123] -->|_messages| B1[Message Object]
+    end
+
+    subgraph "Lookup by Seq (O(1))"
+        A2[seq: 42] -->|_by_seq| B2[uuid: abc-123]
+        B2 -->|_messages| C2[Message Object]
+    end
+
+    subgraph "Lookup by stream_id (O(1))"
+        A3[stream_id: xyz-789] -->|_by_stream_id| B3[uuid: abc-123]
+        B3 -->|_messages| C3[Message Object]
+    end
+
+    subgraph "Lookup Tool Result (O(1))"
+        A4[tool_call_id: call_xyz] -->|_tool_results| B4[uuid: def-456]
+        B4 -->|_messages| C4[Tool Result Message]
+    end
+
+    style B1 fill:#e1f5ff
+    style C2 fill:#e1f5ff
+    style C3 fill:#e1f5ff
+    style C4 fill:#e1f5ff
+```
+
+**Performance Characteristics:**
+
+| Operation | Complexity | Notes |
+|-----------|-----------|-------|
+| `add_message()` | O(1) | Hash table insert + index updates |
+| `get_message(uuid)` | O(1) | Direct hash lookup |
+| `get_by_seq(seq)` | O(1) | Index lookup |
+| `get_tool_result(id)` | O(1) | Index lookup |
+| `get_ordered_messages()` | O(n log n) | Sort by seq |
+| `get_llm_context()` | O(n) | Filter + transform |
 
 ---
 
@@ -885,7 +968,7 @@ async def _restore_conversation(self) -> None:
 
 ### JSONL Format
 
-The session file (`.sessions/<session-id>/session.jsonl`) uses append-only JSONL format where each line is a complete message object:
+The session file (`.clarity/sessions/<session-id>/session.jsonl`) uses append-only JSONL format where each line is a complete message object:
 
 ```jsonl
 {"role": "user", "meta": {"schema_version": 1, "uuid": "e9464dec-...", "seq": 1, "timestamp": "2026-01-24T00:05:50Z", "session_id": "session-20260123-190537-cbfb5eb8", "parent_uuid": null, "is_sidechain": false}, "content": "Hello"}
@@ -1454,6 +1537,92 @@ async def add_text(self, content: str) -> None:  # Make async
 
 ---
 
+### Thread Safety Model
+
+The persistence layer uses a multi-threaded architecture with careful coordination:
+
+```mermaid
+sequenceDiagram
+    participant MainThread as Main Thread<br/>(Textual Event Loop)
+    participant WorkerThread as Worker Thread<br/>(Agent Execution)
+    participant Store as MessageStore<br/>(RLock)
+    participant Writer as SessionWriter<br/>(Event Loop Capture)
+    participant EventLoop as Async Event Loop
+
+    Note over WorkerThread: Agent adds message
+    WorkerThread->>Store: add_message(message)
+    Store->>Store: Acquire RLock
+    Store->>Store: Update indexes
+    Store->>Store: Notify subscribers
+    Store->>Writer: sync_handler(notification)
+
+    Note over Writer: Cross-thread scheduling
+    Writer->>Writer: Increment pending_count (atomic)
+    Writer->>EventLoop: run_coroutine_threadsafe(write_task)
+    Store->>Store: Release RLock
+
+    Note over EventLoop: Async write on event loop
+    EventLoop->>Writer: _handle_event_tracked()
+    Writer->>Writer: async write_message()
+    Writer->>Writer: async flush()
+    Writer->>Writer: Decrement pending_count (atomic)
+
+    Note over MainThread: TUI receives notification
+    Store-->>MainThread: Notification(MESSAGE_ADDED)
+    MainThread->>MainThread: Update UI widgets
+```
+
+**Thread Safety Zones:**
+
+```mermaid
+graph TB
+    subgraph "Main Thread (Textual Event Loop)"
+        MT1[UI Rendering]
+        MT2[User Input]
+        MT3[Widget Updates]
+    end
+
+    subgraph "Worker Thread (Agent Execution)"
+        WT1[LLM API Calls]
+        WT2[Tool Execution]
+        WT3[Message Creation]
+    end
+
+    subgraph "Thread-Safe Zone (RLock Protected)"
+        TS1[MessageStore Operations]
+        TS2[Index Updates]
+        TS3[Subscriber Notifications]
+    end
+
+    subgraph "Async Event Loop (Writer Thread)"
+        AE1[JSONL Writes]
+        AE2[File Flush]
+        AE3[Drain on Close]
+    end
+
+    MT1 -.->|Read| TS1
+    MT2 -.->|Trigger| WT1
+    MT3 -.->|Subscribe| TS3
+
+    WT1 -.->|Create| WT3
+    WT2 -.->|Result| WT3
+    WT3 -.->|Add| TS1
+
+    TS1 -.->|Update| TS2
+    TS2 -.->|Notify| TS3
+    TS3 -.->|run_coroutine_threadsafe| AE1
+
+    AE1 --> AE2
+    AE2 --> AE3
+
+    style TS1 fill:#e1f5ff
+    style TS2 fill:#e1f5ff
+    style TS3 fill:#e1f5ff
+    style AE1 fill:#fff4e1
+```
+
+---
+
 ### Focus Management
 
 #### Approval Widget Focus
@@ -1560,6 +1729,44 @@ elif error_type == "incomplete_tool_call":
     # Add to message for visibility
     if self._current_message:
         await self._current_message.add_text(f"\n\n[!] {message}")
+```
+
+---
+
+#### Error Handling Decision Tree
+
+```mermaid
+flowchart TD
+    Error([Error Occurred]) --> Type{Error Type?}
+
+    Type -->|Parse Error| Parse{Last Line?}
+    Parse -->|Yes| Tolerate[Skip & Log Warning]
+    Parse -->|No| Raise1[Raise ParseError]
+
+    Type -->|Write Error| Write{Transient?}
+    Write -->|Yes| Retry[Retry up to 3x]
+    Write -->|No| Callback[Call on_error callback]
+
+    Type -->|Seq Collision| Collision[Raise SeqCollisionError]
+
+    Type -->|Thread Error| Thread{Event Loop Running?}
+    Thread -->|Yes| Schedule[Schedule on event loop]
+    Thread -->|No| Drop[Drop event & log]
+
+    Tolerate --> Continue1[Continue Processing]
+    Raise1 --> Stop1[Stop Processing]
+    Retry --> Success{Succeeded?}
+    Success -->|Yes| Continue2[Continue]
+    Success -->|No| Callback
+    Callback --> Continue3[Continue with Warning]
+    Collision --> Stop2[Fail Fast]
+    Schedule --> Continue4[Continue]
+    Drop --> Continue5[Continue with Warning]
+
+    style Tolerate fill:#e1ffe1
+    style Raise1 fill:#ffe1e1
+    style Collision fill:#ffe1e1
+    style Callback fill:#fff4e1
 ```
 
 ---
@@ -2353,8 +2560,17 @@ tests/ui/
 
 ---
 
-**Document Version:** 1.1
-**Last Updated:** 2026-01-24
+**Document Version:** 1.2
+**Last Updated:** 2026-01-25
 **Authors:** AI Coding Agent Team
 **Status:** Living Document (will be updated as implementation progresses)
+
+**Changelog:**
+- v1.2 (2026-01-25): Merged enhanced diagrams from PERSISTENCE_ARCHITECTURE_DEEP_DIVE.md
+  - Added MessageStore index structure diagrams
+  - Added index lookup examples with O(1) complexity
+  - Added performance characteristics table
+  - Added thread safety model sequence diagram
+  - Added error handling decision tree
+  - Added missing StoreEvents (SNAPSHOT_ADDED, STORE_CLEARED)
 

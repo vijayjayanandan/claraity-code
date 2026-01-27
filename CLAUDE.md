@@ -130,7 +130,7 @@ Store updates → _handle_store_notification() → UI refresh
 
 **Data flow:**
 ```
-User → CodingAgent → MemoryManager → MessageStore → .sessions/*.jsonl
+User → CodingAgent → MemoryManager → MessageStore → .clarity/sessions/*.jsonl
                                            ↓
                                     StoreAdapter (read) → TUI
 ```
@@ -185,7 +185,7 @@ Never add write methods to StoreAdapter. MemoryManager is the single writer.
 
 ## SESSION PERSISTENCE
 
-- **Location:** `.sessions/<session_id>.jsonl`
+- **Location:** `.clarity/sessions/<session_id>.jsonl`
 - **Format:** One JSON object per line: `{"role": "...", "meta": {...}, "content": "..."}`
 - **Resume:** JSONL replayed into MessageStore on session load
 

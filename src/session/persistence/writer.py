@@ -85,6 +85,8 @@ class SessionWriter:
         Open the file for writing.
 
         MUST be called from the async context where events will be processed.
+        
+        Note: File is not created until first write to avoid empty session files.
         """
         self._loop = asyncio.get_running_loop()
         self._write_lock = asyncio.Lock()
@@ -94,9 +96,9 @@ class SessionWriter:
         # Ensure parent directory exists
         self._file_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Use regular file I/O (aiofiles optional, sync is fine for appends)
-        self._file = open(self._file_path, 'a', encoding='utf-8')
-        logger.info(f"SessionWriter opened: {self._file_path}")
+        # DO NOT open file yet - will be opened on first write
+        # This prevents empty session files from appearing in /resume
+        logger.info(f"SessionWriter ready (file will be created on first write): {self._file_path}")
 
     async def close(self) -> None:
         """
@@ -285,12 +287,18 @@ class SessionWriter:
         return result
 
     async def _write_line(self, data: dict) -> WriteResult:
-        """Write a single JSON line."""
-        if not self._file:
-            return WriteResult(success=False, error="File not open")
-
+        """Write a single JSON line.
+        
+        Opens the file on first write if not already open.
+        This prevents empty session files from being created.
+        """
         try:
             async with self._write_lock:
+                # Open file on first write (lazy creation)
+                if not self._file:
+                    self._file = open(self._file_path, 'a', encoding='utf-8')
+                    logger.info(f"SessionWriter file created on first write: {self._file_path}")
+                
                 line = json.dumps(data, ensure_ascii=False)
                 self._file.write(line + '\n')
 

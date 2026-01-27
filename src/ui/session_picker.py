@@ -4,7 +4,7 @@ A modal screen that displays available JSONL sessions for the user to resume.
 Inspired by Claude Code's /resume UX.
 
 Features:
-- Lists sessions from .sessions/ directory
+- Lists sessions from .clarity/sessions/ directory
 - Shows first user message as session title (truncated)
 - Displays relative time, message count, git branch
 - Keyboard navigation with arrow keys
@@ -79,7 +79,7 @@ def scan_sessions(sessions_dir: Path, limit: int = 50) -> List[SessionDisplay]:
     Scan sessions directory for available sessions.
 
     Args:
-        sessions_dir: Path to .sessions directory
+        sessions_dir: Path to .clarity/sessions directory
         limit: Maximum number of sessions to return
 
     Returns:

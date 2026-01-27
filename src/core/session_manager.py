@@ -7,7 +7,7 @@ This module provides comprehensive session persistence allowing users to:
 - Share sessions with team members
 
 Session Storage Structure:
-    .opencodeagent/
+    .clarity/
       sessions/
         manifest.json                 # Index of all sessions
         <session-id>/
@@ -109,7 +109,7 @@ class SessionManager:
                          (default: .opencodeagent/sessions)
         """
         if sessions_dir is None:
-            sessions_dir = Path.cwd() / ".opencodeagent" / "sessions"
+            sessions_dir = Path.cwd() / ".clarity" / "sessions"
 
         self.sessions_dir = Path(sessions_dir)
         self.sessions_dir.mkdir(parents=True, exist_ok=True)

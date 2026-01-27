@@ -263,11 +263,14 @@ You are an expert in [YOUR DOMAIN].
 
 
 class SubAgentConfigLoader:
-    """Loads subagent configurations from hierarchical locations.
+    """Loads subagent configurations from prompts directory.
 
     Search order (highest to lowest priority):
-    1. Project: ./.claude/agents/*.md
-    2. User: ~/.claude/agents/*.md
+    1. Built-in: src/prompts/subagents/*.py (Python constants)
+    2. Legacy: ./.claude/agents/*.md (Markdown files, deprecated)
+    3. User: ~/.claude/agents/*.md (Markdown files, deprecated)
+    
+    Note: Markdown format is deprecated. Use Python constants in src/prompts/subagents/
     """
 
     def __init__(self, working_directory: Optional[Path] = None):
@@ -293,25 +296,40 @@ class SubAgentConfigLoader:
         """
         configs: Dict[str, SubAgentConfig] = {}
 
-        # Load from user directory first (lower priority)
+        # Load from built-in prompts (highest priority)
+        builtin_configs = self._load_from_python_prompts()
+        builtin_names = set(builtin_configs.keys())  # Track built-in names
+        configs.update(builtin_configs)
+        if builtin_configs:
+            logger.info(f"Loaded {len(builtin_configs)} built-in subagent(s) from src/prompts/subagents/")
+
+        # Load from user directory (legacy, lower priority)
         user_dir = Path.home() / ".claude" / "agents"
         if user_dir.exists():
             user_configs = self._load_from_directory(user_dir)
-            configs.update(user_configs)
-            logger.info(f"Loaded {len(user_configs)} subagent(s) from user directory")
+            added_count = 0
+            for name, config in user_configs.items():
+                if name not in builtin_names:  # Don't override built-in
+                    configs[name] = config
+                    added_count += 1
+                else:
+                    logger.debug(f"Skipping user subagent '{name}' (overridden by built-in)")
+            if added_count > 0:
+                logger.warning(f"Loaded {added_count} subagent(s) from legacy user directory (consider migrating to src/prompts/subagents/)")
 
-        # Load from project directory (higher priority, can override)
+        # Load from project directory (legacy, can override user but not built-in)
         project_dir = self.working_directory / ".claude" / "agents"
         if project_dir.exists():
             project_configs = self._load_from_directory(project_dir)
-            # Project configs override user configs
+            added_count = 0
             for name, config in project_configs.items():
-                if name in configs:
-                    logger.info(
-                        f"Project subagent '{name}' overrides user subagent"
-                    )
-                configs[name] = config
-            logger.info(f"Loaded {len(project_configs)} subagent(s) from project directory")
+                if name not in builtin_names:  # Don't override built-in
+                    configs[name] = config
+                    added_count += 1
+                else:
+                    logger.debug(f"Skipping project subagent '{name}' (overridden by built-in)")
+            if added_count > 0:
+                logger.warning(f"Loaded {added_count} subagent(s) from legacy project directory (consider migrating to src/prompts/subagents/)")
 
         # Cache loaded configs
         self.loaded_configs = configs
@@ -319,8 +337,65 @@ class SubAgentConfigLoader:
         logger.info(f"Total subagents discovered: {len(configs)}")
         return configs
 
+    def _load_from_python_prompts(self) -> Dict[str, SubAgentConfig]:
+        """Load subagent prompts from Python constants in src/prompts/subagents/.
+
+        Returns:
+            Dict mapping subagent names to configs
+        """
+        configs = {}
+
+        try:
+            # Import the subagent prompts module
+            from src.prompts.subagents import (
+                CODE_REVIEWER_PROMPT,
+                TEST_WRITER_PROMPT,
+                DOC_WRITER_PROMPT,
+            )
+
+            # Define subagent configurations
+            subagents = [
+                {
+                    'name': 'code-reviewer',
+                    'description': 'Expert code reviewer analyzing code quality, security vulnerabilities, performance issues, and best practices with verification-first methodology',
+                    'prompt': CODE_REVIEWER_PROMPT,
+                },
+                {
+                    'name': 'test-writer',
+                    'description': 'Expert test engineer creating comprehensive test suites with unit tests, integration tests, and edge case coverage',
+                    'prompt': TEST_WRITER_PROMPT,
+                },
+                {
+                    'name': 'doc-writer',
+                    'description': 'Expert technical writer creating clear, comprehensive documentation',
+                    'prompt': DOC_WRITER_PROMPT,
+                },
+            ]
+
+            # Create SubAgentConfig objects
+            for subagent in subagents:
+                config = SubAgentConfig(
+                    name=subagent['name'],
+                    description=subagent['description'],
+                    system_prompt=subagent['prompt'],
+                    tools=None,  # Inherit all tools
+                    model=None,  # Inherit model
+                    context_window=None,  # Inherit context window
+                    config_path=None,  # No file path for Python constants
+                    metadata={'source': 'builtin'}
+                )
+                configs[config.name] = config
+                logger.debug(f"Loaded built-in subagent: {config.name}")
+
+        except ImportError as e:
+            logger.warning(f"Failed to import subagent prompts: {e}")
+        except Exception as e:
+            logger.error(f"Error loading Python subagent prompts: {e}")
+
+        return configs
+
     def _load_from_directory(self, directory: Path) -> Dict[str, SubAgentConfig]:
-        """Load all .md files from a directory.
+        """Load all .md files from a directory (legacy format).
 
         Args:
             directory: Directory to scan

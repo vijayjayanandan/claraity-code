@@ -131,6 +131,10 @@ class MessageStore:
         self._assistant_tools: Dict[str, List[str]] = {}  # assistant_uuid -> [tool_call_ids]
         self._tool_approvals: Dict[str, str] = {}  # tool_call_id -> approval_message_uuid
 
+        # Clarify indexes (for interactive clarification flow)
+        self._clarify_requests: Dict[str, str] = {}   # call_id -> message_uuid
+        self._clarify_responses: Dict[str, str] = {}  # call_id -> message_uuid
+
         # Sidechain tracking
         self._sidechains: Dict[str, List[str]] = {}  # parent_uuid -> [sidechain_uuids]
 
@@ -245,6 +249,20 @@ class MessageStore:
                 tool_call_id = extra.get("tool_call_id")
                 if tool_call_id:
                     self._tool_approvals[tool_call_id] = uuid
+
+            # Handle clarify_request indexing
+            if message.is_system and message.meta.event_type == "clarify_request":
+                extra = message.meta.extra or {}
+                call_id = extra.get("call_id")
+                if call_id:
+                    self._clarify_requests[call_id] = uuid
+
+            # Handle clarify_response indexing
+            if message.is_system and message.meta.event_type == "clarify_response":
+                extra = message.meta.extra or {}
+                call_id = extra.get("call_id")
+                if call_id:
+                    self._clarify_responses[call_id] = uuid
 
             # Handle compaction boundary
             if message.is_system and message.meta.event_type == "compact_boundary":
@@ -405,6 +423,58 @@ class MessageStore:
         with self._lock:
             uuid = self._tool_approvals.get(tool_call_id)
             return self._messages.get(uuid) if uuid else None
+
+    # =========================================================================
+    # Clarify Linkage (O(1) lookups)
+    # =========================================================================
+
+    def get_clarify_request(self, call_id: str) -> Optional["Message"]:
+        """Get clarify request by call_id. O(1).
+
+        Returns the system message with event_type="clarify_request" containing
+        the questions that were asked.
+
+        The questions are in meta.extra:
+        - call_id: Tool call ID
+        - questions: List of question dicts
+        - context: Optional context string
+        """
+        with self._lock:
+            uuid = self._clarify_requests.get(call_id)
+            return self._messages.get(uuid) if uuid else None
+
+    def get_clarify_response(self, call_id: str) -> Optional["Message"]:
+        """Get clarify response by call_id. O(1).
+
+        Returns the system message with event_type="clarify_response" containing
+        the user's answers.
+
+        The response is in meta.extra:
+        - call_id: Tool call ID
+        - submitted: bool
+        - responses: Dict of question_id -> selected_option_id(s)
+        - chat_instead: bool
+        - chat_message: str | None
+        """
+        with self._lock:
+            uuid = self._clarify_responses.get(call_id)
+            return self._messages.get(uuid) if uuid else None
+
+    def get_pending_clarify_call_ids(self) -> List[str]:
+        """Get call_ids with requests but no responses.
+
+        Used during session resume to detect pending clarifications
+        that need to be re-displayed to the user.
+
+        Returns:
+            List of call_ids that have clarify_request but no clarify_response
+        """
+        with self._lock:
+            pending = []
+            for call_id in self._clarify_requests:
+                if call_id not in self._clarify_responses:
+                    pending.append(call_id)
+            return pending
 
     # =========================================================================
     # Tool Execution State (Ephemeral, NOT persisted)
@@ -680,6 +750,9 @@ class MessageStore:
             self._by_stream_id.clear()
             self._tool_results.clear()
             self._assistant_tools.clear()
+            self._tool_approvals.clear()
+            self._clarify_requests.clear()
+            self._clarify_responses.clear()
             self._sidechains.clear()
             self._snapshots.clear()
             self._tool_state.clear()  # Clear ephemeral tool state

@@ -12,6 +12,8 @@ This package contains the visual components:
 - AttachmentBar: Horizontal bar for managing attachments with navigation
 - TodoBar: Collapsible todo list display for tracking agent tasks
 - PausePromptWidget: Interactive pause/continue UI for budget limits
+- ClarifyWidget: Multi-question clarification interview UI
+- PlanApprovalWidget: Inline plan approval UI for plan mode
 """
 
 from .code_block import CodeBlock
@@ -24,6 +26,8 @@ from .autocomplete_dropdown import AutocompleteDropdown
 from .attachment_bar import AttachmentBar
 from .todo_bar import TodoBar
 from .pause_widget import PausePromptWidget
+from .clarify_widget import ClarifyWidget
+from .plan_approval_widget import PlanApprovalWidget
 
 __all__ = [
     'CodeBlock',
@@ -38,4 +42,6 @@ __all__ = [
     'AttachmentBar',
     'TodoBar',
     'PausePromptWidget',
+    'ClarifyWidget',
+    'PlanApprovalWidget',
 ]

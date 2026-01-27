@@ -1,6 +1,8 @@
 {
   "permissions": {
     "allow": [
+      "Edit",
+      "Write",
       "WebSearch",
       "Bash(git remote set-url:*)",
       "Bash(python -m pytest:*)",
@@ -24,12 +26,10 @@
       "WebFetch(domain:textual.textualize.io)",
       "Bash(find:*)",
       "WebFetch(domain:www.anthropic.com)",
-      "WebFetch(domain:claude.com)"
+      "WebFetch(domain:claude.com)",
+      "Bash(findstr:*)",
+      "Bash(powershell -Command \"Get-Content ''C:\\\\Vijay\\\\Learning\\\\AI\\\\ai-coding-agent\\\\.clarity\\\\logs\\\\app.jsonl'' | Select-String -Pattern ''21:57'' | Select-Object -Last 10\")"
     ],
-    "deny": [],
-    "ask": [
-      "Edit",
-      "Write"
-    ]
+    "deny": []
   }
 }

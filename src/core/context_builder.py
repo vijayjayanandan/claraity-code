@@ -10,7 +10,7 @@ from xml.sax.saxutils import escape as xml_escape
 from src.memory import MemoryManager
 from src.rag import HybridRetriever, CodeChunk
 from src.prompts import PromptOptimizer
-from src.prompts.system_prompts import get_system_prompt
+from src.prompts.system_prompts import get_system_prompt, get_plan_mode_injection
 from src.core.file_reference_parser import FileReference
 
 logger = logging.getLogger(__name__)
@@ -178,6 +178,7 @@ class ContextBuilder:
         available_chunks: Optional[List[CodeChunk]] = None,
         file_references: Optional[List[FileReference]] = None,
         agent_state: Optional[Dict[str, Any]] = None,
+        plan_mode_state: Optional[Any] = None,
         log_report: bool = True,
     ) -> List[Dict[str, str]]:
         """
@@ -196,6 +197,7 @@ class ContextBuilder:
             file_references: Optional list of file references to inject
             agent_state: Optional agent state (todos, current_todo_id, last_stop_reason)
                         for task continuation support
+            plan_mode_state: Optional PlanModeState instance for plan mode injection
             log_report: Whether to log the context assembly report (default True)
 
         Returns:
@@ -221,6 +223,15 @@ class ContextBuilder:
             task_type=task_type,
             context_size=self.max_context_tokens
         )
+
+        # Inject plan mode context if active
+        if plan_mode_state and plan_mode_state.is_active:
+            plan_injection = get_plan_mode_injection(
+                plan_path=str(plan_mode_state.plan_file_path),
+                plan_hash=plan_mode_state.plan_hash,
+                is_awaiting_approval=plan_mode_state.is_awaiting_approval()
+            )
+            system_prompt = system_prompt + "\n\n" + plan_injection
 
         # Compress if needed
         if self.optimizer.count_tokens(system_prompt) > system_prompt_budget:

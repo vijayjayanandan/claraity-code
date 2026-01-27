@@ -517,6 +517,9 @@ class StatusBar(Static):
         """Clean up timers when widget is removed from DOM."""
         self._stop_refresh_timer()
         self._stop_countdown()
+        if self._info_timer:
+            self._info_timer.stop()
+            self._info_timer = None
 
 
 class StreamingIndicator(Static):
