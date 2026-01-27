@@ -1997,7 +1997,7 @@ class CodingAgent(AgentInterface):
         from typing import AsyncIterator, Optional, List
         from src.ui.events import (
             UIEvent, StreamStart, StreamEnd, TextDelta,
-            ToolCallStart, ToolCallStatus, ToolCallResult, ToolStatus,
+            ToolCallStart, ToolCallStatus, ToolStatus,
             PausePromptStart, PausePromptEnd, ContextUpdated, ContextCompacted,
         )
         from src.core.tool_status import ToolStatus as CoreToolStatus
@@ -2241,10 +2241,9 @@ class CodingAgent(AgentInterface):
                         # Feed delta to MemoryManager (uses StreamingPipeline internally)
                         finalized_message = self.memory.process_provider_delta(delta)
 
-                        # Emit UIEvents for backward compatibility with TUI
                         if delta.text_delta:
                             response_content += delta.text_delta
-                            yield TextDelta(content=delta.text_delta)
+                            # Store gets text via process_provider_delta -> MESSAGE_UPDATED
 
                         # Track usage for context update
                         if delta.usage:
@@ -2737,13 +2736,6 @@ class CodingAgent(AgentInterface):
                                     duration_ms=duration_ms
                                 )
 
-                            yield ToolCallResult(
-                                call_id=call_id,
-                                status=ToolStatus.FAILED,
-                                error=error_content,
-                                duration_ms=duration_ms,
-                            )
-
                             # Persist tool result to MessageStore for session replay
                             self.memory.add_tool_result(
                                 tool_call_id=call_id,
@@ -2782,13 +2774,6 @@ class CodingAgent(AgentInterface):
                                 result=clarify_result,
                                 duration_ms=duration_ms
                             )
-
-                        yield ToolCallResult(
-                            call_id=call_id,
-                            status=ToolStatus.SUCCESS,
-                            result=json.dumps(clarify_result),
-                            duration_ms=duration_ms,
-                        )
 
                         # Persist tool result to MessageStore for session replay
                         self.memory.add_tool_result(
@@ -2832,10 +2817,6 @@ class CodingAgent(AgentInterface):
                                         error=error_msg, duration_ms=duration_ms
                                     )
 
-                                yield ToolCallResult(
-                                    call_id=call_id, status=ToolStatus.FAILED,
-                                    error=error_msg, duration_ms=duration_ms,
-                                )
                                 # Persist tool result to MessageStore for session replay
                                 self.memory.add_tool_result(
                                     tool_call_id=call_id, content=error_msg,
@@ -2854,13 +2835,6 @@ class CodingAgent(AgentInterface):
                                     result=output,
                                     duration_ms=duration_ms
                                 )
-
-                            yield ToolCallResult(
-                                call_id=call_id,
-                                status=ToolStatus.SUCCESS,
-                                result=output,
-                                duration_ms=duration_ms,
-                            )
 
                             # Persist tool result to MessageStore for session replay
                             self.memory.add_tool_result(
@@ -2910,13 +2884,6 @@ class CodingAgent(AgentInterface):
                                     error=result.error,
                                     duration_ms=duration_ms
                                 )
-
-                            yield ToolCallResult(
-                                call_id=call_id,
-                                status=ToolStatus.FAILED,
-                                error=result.error,
-                                duration_ms=duration_ms,
-                            )
 
                             # Record failure for intelligent retry
                             error_type = self._classify_tool_error(result.error or "Unknown error")
@@ -3064,13 +3031,6 @@ class CodingAgent(AgentInterface):
                                 error=str(e),
                                 duration_ms=duration_ms
                             )
-
-                        yield ToolCallResult(
-                            call_id=call_id,
-                            status=ToolStatus.FAILED,
-                            error=str(e),
-                            duration_ms=duration_ms,
-                        )
 
                         # Record exception as failure for intelligent retry
                         error_type = self._classify_tool_error(str(e))
