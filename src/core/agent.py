@@ -10,7 +10,7 @@ from pathlib import Path
 
 if TYPE_CHECKING:
     from src.hooks import HookManager, HookDecision
-    from src.ui.protocol import UIProtocol
+    from src.core.protocol import UIProtocol
 
 from src.memory import MemoryManager, TaskContext
 from src.rag import CodeIndexer, Embedder, HybridRetriever, CodeChunk
@@ -1449,7 +1449,7 @@ class CodingAgent(AgentInterface):
         if ui_protocol:
             # TUI mode - use UIProtocol
             try:
-                from src.ui.protocol import ClarifyResult
+                from src.core.protocol import ClarifyResult
                 result = await ui_protocol.wait_for_clarify_response(call_id)
 
                 # 3. Persist clarify_response via MemoryManager (SINGLE WRITER)
