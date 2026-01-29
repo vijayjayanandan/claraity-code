@@ -31,7 +31,7 @@ from enum import Enum
 import threading
 
 from src.observability import get_logger
-from src.core.tool_status import ToolStatus
+from src.core.events import ToolStatus
 
 if TYPE_CHECKING:
     from ..models.message import Message, FileHistorySnapshot
@@ -150,6 +150,9 @@ class MessageStore:
         # Keyed by tool_call_id, updated by Agent, read by TUI
         self._tool_state: Dict[str, ToolExecutionState] = {}
 
+        # Tool metadata (tool_name, args_summary) for hydration after mount
+        self._tool_metadata: Dict[str, Dict[str, Any]] = {}
+
         # Sequence tracking (Store owns seq authority per v3.1 Patch 1)
         self._max_seq: int = 0
 
@@ -160,6 +163,11 @@ class MessageStore:
         # Metadata
         self._session_id: Optional[str] = None
         self._is_bulk_loading: bool = False
+
+        # Permission mode tracking (extracted from permission_mode_changed events)
+        self._current_mode: str = "normal"  # Current permission mode
+        self._plan_hash: Optional[str] = None  # Plan hash if in plan mode
+        self._plan_path: Optional[str] = None  # Plan file path if in plan mode
 
     # =========================================================================
     # Core Operations
@@ -263,6 +271,18 @@ class MessageStore:
                 call_id = extra.get("call_id")
                 if call_id:
                     self._clarify_responses[call_id] = uuid
+
+            # Handle permission mode changes
+            if message.is_system and message.meta.event_type == "permission_mode_changed":
+                extra = message.meta.extra or {}
+                new_mode = extra.get("new_mode", "normal")
+                self._current_mode = new_mode
+
+            # Handle plan_submitted events (track plan hash and path)
+            if message.is_system and message.meta.event_type == "plan_submitted":
+                extra = message.meta.extra or {}
+                self._plan_hash = extra.get("plan_hash")
+                self._plan_path = extra.get("plan_path")
 
             # Handle compaction boundary
             if message.is_system and message.meta.event_type == "compact_boundary":
@@ -486,7 +506,9 @@ class MessageStore:
         status: ToolStatus,
         result: Optional[Any] = None,
         error: Optional[str] = None,
-        duration_ms: Optional[int] = None
+        duration_ms: Optional[int] = None,
+        tool_name: Optional[str] = None,
+        extra_metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Update ephemeral tool execution state.
 
@@ -510,11 +532,24 @@ class MessageStore:
                 duration_ms=duration_ms
             )
 
+            # Store metadata for hydration (merge, don't overwrite)
+            if tool_name or extra_metadata:
+                meta = self._tool_metadata.get(tool_call_id, {})
+                if extra_metadata:
+                    meta.update(extra_metadata)
+                if tool_name:
+                    meta["tool_name"] = tool_name
+                self._tool_metadata[tool_call_id] = meta
+
             if not self._is_bulk_loading:
+                metadata = dict(extra_metadata) if extra_metadata else {}
+                if tool_name:
+                    metadata["tool_name"] = tool_name
                 self._notify(StoreNotification(
                     event=StoreEvent.TOOL_STATE_UPDATED,
                     tool_call_id=tool_call_id,
-                    tool_state=self._tool_state[tool_call_id]
+                    tool_state=self._tool_state[tool_call_id],
+                    metadata=metadata,
                 ))
 
     def get_tool_state(self, tool_call_id: str) -> Optional[ToolExecutionState]:
@@ -526,10 +561,26 @@ class MessageStore:
         with self._lock:
             return self._tool_state.get(tool_call_id)
 
+    def get_tool_states(self) -> Dict[str, ToolExecutionState]:
+        """Snapshot of all tool execution states (thread-safe copy)."""
+        with self._lock:
+            return dict(self._tool_state)
+
+    def get_tool_metadata(self, tool_call_id: str) -> Dict[str, Any]:
+        """Get metadata for a tool call (tool_name, args_summary, etc.)."""
+        with self._lock:
+            return dict(self._tool_metadata.get(tool_call_id, {}))
+
+    def get_all_tool_metadata(self) -> Dict[str, Dict[str, Any]]:
+        """Snapshot of all tool metadata (thread-safe copy)."""
+        with self._lock:
+            return {k: dict(v) for k, v in self._tool_metadata.items()}
+
     def clear_tool_state(self) -> None:
         """Clear ephemeral tool state (session reset)."""
         with self._lock:
             self._tool_state.clear()
+            self._tool_metadata.clear()
 
     # =========================================================================
     # Sidechain Operations
@@ -756,11 +807,15 @@ class MessageStore:
             self._sidechains.clear()
             self._snapshots.clear()
             self._tool_state.clear()  # Clear ephemeral tool state
+            self._tool_metadata.clear()  # Clear tool metadata
             self._last_compact_boundary_seq = None
             self._compact_boundary_uuid = None
             self._compact_summary_uuid = None
             self._max_seq = 0
             self._session_id = None
+            self._current_mode = "normal"
+            self._plan_hash = None
+            self._plan_path = None
 
             self._notify(StoreNotification(event=StoreEvent.STORE_CLEARED))
 
@@ -853,3 +908,21 @@ class MessageStore:
     def max_seq(self) -> int:
         with self._lock:
             return self._max_seq
+
+    @property
+    def current_mode(self) -> str:
+        """Get the current permission mode (normal, plan, awaiting_approval, auto)."""
+        with self._lock:
+            return self._current_mode
+
+    @property
+    def plan_hash(self) -> Optional[str]:
+        """Get the current plan hash (if in plan mode or awaiting approval)."""
+        with self._lock:
+            return self._plan_hash
+
+    @property
+    def plan_path(self) -> Optional[str]:
+        """Get the current plan file path (if in plan mode or awaiting approval)."""
+        with self._lock:
+            return self._plan_path

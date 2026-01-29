@@ -398,15 +398,20 @@ delegate_to_subagent(
 # Task Management
 # ---------------------------------------------------------------------------
 
-TASK_MANAGEMENT = """# Task Management (todo_write)
+TASK_MANAGEMENT = """# Task Management (CRUD tools)
 
-Use `todo_write` to track progress through multi-step work.
+Use `task_create`, `task_update`, `task_list`, and `task_get` to track progress.
+
+## Tools
+- **task_create** - Add a new task (subject, description, activeForm). Returns an ID.
+- **task_update** - Update one task by ID (status, subject, description, activeForm).
+- **task_list** - List all tasks with IDs and statuses (read-only).
+- **task_get** - Get full details of one task by ID (read-only).
 
 ## When to Use
 - Task needs 3+ distinct steps
 - User provided multiple requirements (numbered list, comma-separated)
 - Debugging/refactoring across multiple files
-- Running builds/tests that may reveal multiple issues
 
 ## When NOT to Use
 - Single, trivial operations (fix a typo, add one line)
@@ -419,11 +424,11 @@ Use `todo_write` to track progress through multi-step work.
 - **completed**: Finished and verified
 
 ## Discipline Rules
-1. Keep EXACTLY ONE todo as in_progress at any time
-2. Mark todos completed IMMEDIATELY when done (not in batches)
-3. Only mark completed when FULLY accomplished (tests passing, no errors)
-4. If blocked, keep as in_progress and create new todo for the blocker
-5. Add new todos when you discover necessary work
+1. Use task_create for each step, then task_update to change status
+2. Keep EXACTLY ONE task as in_progress at any time
+3. Mark tasks completed IMMEDIATELY when done (not in batches)
+4. Only mark completed when FULLY accomplished (tests passing, no errors)
+5. If blocked, keep as in_progress and create new task for the blocker
 """
 
 # ---------------------------------------------------------------------------
@@ -461,7 +466,7 @@ For complex tasks, design an approach before implementing.
 
 ## Tools
 - `enter_plan_mode` - Start plan mode, creates plan file at `.clarity/plans/<session_id>.md`
-- `exit_plan_mode` - Submit plan for user approval
+- `request_plan_approval` - Submit plan for user approval
 
 ## When to Enter Plan Mode
 - New feature implementation with multiple components
@@ -478,10 +483,20 @@ For complex tasks, design an approach before implementing.
 ## Plan Mode Workflow
 1. Call `enter_plan_mode` to start
 2. Use read-only tools to explore codebase
-3. Write your plan to the plan file (only file writes allowed)
-4. Call `exit_plan_mode` when ready
-5. Wait for user approval
-6. After approval, implement the plan with full tool access
+3. Use `clarify` tool to ask questions if needed
+4. Write your plan to the plan file
+5. Call `request_plan_approval` to submit for review
+6. If rejected with feedback: revise plan and call `request_plan_approval` again
+7. After approval: implement with full tool access
+
+## When to Call request_plan_approval
+- After writing or updating your plan
+- When user asks to review the plan
+
+## Handling Task Changes
+If user requests a DIFFERENT task while in plan mode, respond:
+"You're in plan mode for [original task]. To switch tasks, exit plan mode first (F2 > Mode > Normal)."
+Do NOT submit the current plan.
 
 ## Plan File Format
 ```markdown
@@ -543,11 +558,11 @@ Your plan is awaiting user approval.
 Plan file: {plan_path}
 Plan hash: {plan_hash}
 
-Wait for the user to approve or request changes before making code changes.
+Wait for the user to approve or provide feedback before making code changes.
 The user will see an approval widget with options:
 - Approve (manual edits): Review each file change before applying
 - Approve (auto-accept): Apply changes automatically
-- Request changes: Stay in plan mode for revisions
+- Provide feedback: Give you specific feedback to revise the plan
 
 Do NOT attempt to implement the plan until you receive approval.
 </plan-mode>
@@ -568,7 +583,7 @@ You are in PLAN MODE. Follow this workflow:
 3. WRITE PLAN: Write your implementation plan to the plan file:
    {plan_path}
 
-4. EXIT: Call exit_plan_mode when ready for user approval
+4. EXIT: Call request_plan_approval when ready for user approval
 
 CONSTRAINTS:
 - Only read-only tools are allowed
@@ -616,25 +631,19 @@ Always cite sources: "According to [source](url)..."
 
 SESSION_CONTINUATION = """# Session Continuation
 
-When continuing a session with existing todos:
+When continuing a session with existing tasks:
 
-## 1) RESET (explicit only)
-- Trigger: "reset todos", "clear tasks", "discard previous"
-- Action: Allow destructive todo replacement
-- If "start over" without reset phrasing: confirm first
-
-## 2) CONTINUATION (auto-resume)
+## 1) CONTINUATION (auto-resume)
 - Trigger: "continue", "resume", "go on", "next", short acknowledgements
-- Action: Resume current in_progress todo, else first pending
-- Do not create new todos or ask clarifying questions
+- Action: Use `task_list` to see current tasks, then `task_update` to resume the in_progress task (or first pending)
+- Do not create new tasks or ask clarifying questions
 
-## 3) NEW REQUEST
+## 2) NEW REQUEST
 - Trigger: Clearly different task/domain
 - Action: Ask user: continue current work or pause for new request?
 
-## 4) AMBIGUOUS
+## 3) AMBIGUOUS
 - Default to continuation
-- Controller safeguards prevent destructive overwrites
 """
 
 # ---------------------------------------------------------------------------

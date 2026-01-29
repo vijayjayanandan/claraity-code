@@ -1,4 +1,4 @@
-# AI Coding Agent - Claude Instructions
+# ClarAIty AI Coding Agent - Claude Instructions
 
 ## QUICK START
 
@@ -191,6 +191,15 @@ Never add write methods to StoreAdapter. MemoryManager is the single writer.
 
 ---
 
+## LOGS & DIAGNOSTICS
+
+- **Application logs:** `.clarity/logs/app.jsonl` (structured JSONL, all log levels)
+- **Metrics DB:** `.clarity/metrics.db` (SQLite, performance metrics and error tracking)
+- **Query logs:** `python -m src.observability.log_query --tail 50`
+- **Subagent transcripts:** `.clarity/sessions/subagents/<name>-<session_id>.jsonl`
+
+---
+
 ## TESTING
 
 ```bash
@@ -214,6 +223,23 @@ python test_agent_interface_live.py
 1. Split `stream_response()` (1280 lines → ~300)
 2. Extract segment rendering (4 copies → 1 helper)
 3. Split `_handle_event()` (325 lines → dispatcher + 14 handlers)
+
+---
+
+## ONGOING DOCUMENTATION TASKS
+
+### System Reminders Documentation
+**File**: `SYSTEM_REMINDERS.md`
+
+Whenever you observe a new type of system reminder (XML tags like `<system-reminder>`) injected by Claude Code CLI into your context, document it in SYSTEM_REMINDERS.md:
+
+1. Add the reminder type with full text example
+2. Document when it's injected (trigger conditions)
+3. Note any variables/substitutions
+4. Explain its purpose
+5. Add entry to Session Log with date
+
+This helps us understand Claude Code's contextual guidance system so we can replicate similar patterns in our custom agent.
 
 ---
 

@@ -14,7 +14,8 @@ from .search_tools import GrepTool, GlobTool
 from .lsp_tools import GetFileOutlineTool, GetSymbolContextTool
 from .git_operations import GitStatusTool, GitDiffTool, GitCommitTool
 from .delegation import DelegateToSubagentTool
-from .planning_tool import TodoWriteTool
+from .task_state import TaskState
+from .planning_tool import TaskCreateTool, TaskUpdateTool, TaskListTool, TaskGetTool
 from .checkpoint_tool import CreateCheckpointTool
 from .clarity_tools import (
     QueryComponentTool,
@@ -35,7 +36,7 @@ from .clarity_tools import (
 )
 from .clarity_setup_tool import ClaritySetupTool
 from .clarify_tool import ClarifyTool
-from .plan_mode_tools import EnterPlanModeTool, ExitPlanModeTool
+from .plan_mode_tools import EnterPlanModeTool, RequestPlanApprovalTool
 from .web_tools import (
     WebSearchTool,
     WebFetchTool,
@@ -83,7 +84,11 @@ __all__ = [
     "GitDiffTool",
     "GitCommitTool",
     "DelegateToSubagentTool",
-    "TodoWriteTool",
+    "TaskState",
+    "TaskCreateTool",
+    "TaskUpdateTool",
+    "TaskListTool",
+    "TaskGetTool",
     "CreateCheckpointTool",
     "QueryComponentTool",
     "QueryDependenciesTool",
@@ -104,7 +109,7 @@ __all__ = [
     "ClarifyTool",
     # Plan mode tools
     "EnterPlanModeTool",
-    "ExitPlanModeTool",
+    "RequestPlanApprovalTool",
     # Web tools
     "WebSearchTool",
     "WebFetchTool",

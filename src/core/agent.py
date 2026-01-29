@@ -39,7 +39,11 @@ from src.tools import (
     GitDiffTool,
     GitCommitTool,
     DelegateToSubagentTool,
-    TodoWriteTool,
+    TaskState,
+    TaskCreateTool,
+    TaskUpdateTool,
+    TaskListTool,
+    TaskGetTool,
     CreateCheckpointTool,
     QueryComponentTool,
     QueryDependenciesTool,
@@ -58,7 +62,7 @@ from src.tools import (
     UpdateAcceptanceCriterionTool,
     UpdateImplementationPatternTool,
     EnterPlanModeTool,
-    ExitPlanModeTool,
+    RequestPlanApprovalTool,
 )
 from src.tools.tool_parser import ToolCallParser, ParsedResponse
 from src.tools.tool_schemas import ALL_TOOLS
@@ -198,6 +202,15 @@ class CodingAgent(AgentInterface):
     Implements AgentInterface to enable loose coupling with subsystems.
     """
 
+    @property
+    def todo_state(self) -> Dict[str, Any]:
+        """Backward-compat dict view for context_builder, pause logic, UI."""
+        return {
+            'todos': self.task_state.get_todos_list(),
+            'current_todo_id': self.task_state.current_task_id,
+            'last_stop_reason': self.task_state.last_stop_reason,
+        }
+
     def __init__(
         self,
         model_name: str,
@@ -301,18 +314,8 @@ class CodingAgent(AgentInterface):
         self.retriever: Optional[HybridRetriever] = None
         self.indexed_chunks: List[CodeChunk] = []
 
-        # Initialize todo state for task tracking (before tools registration)
-        # Extended structure for task continuation support
-        self.todo_state: Dict[str, Any] = {
-            'todos': [],
-            'current_todo_id': None,
-            'last_stop_reason': None,
-            '_next_id': 1,  # Internal counter for stable ID generation
-        }
-
-        # Per-turn flags (reset each user message)
-        self._user_confirmed_reset = False
-        self._pending_reset_confirmation = False
+        # Initialize task state for CRUD task tracking (before tools registration)
+        self.task_state = TaskState()
 
         # Initialize error recovery tracker (for intelligent retry behavior)
         # Uses defaults: max_same_tool_error_failures=4, max_total_failures=10
@@ -337,6 +340,10 @@ class CodingAgent(AgentInterface):
         self.tool_executor = ToolExecutor(hook_manager=hook_manager)
         self._register_tools()
 
+        # Set workspace root on file operation tools so path validation works
+        from src.tools.file_operations import FileOperationTool
+        FileOperationTool._workspace_root = self.working_directory
+
         # Initialize tool parser
         self.tool_parser = ToolCallParser()
 
@@ -348,6 +355,7 @@ class CodingAgent(AgentInterface):
             memory_manager=self.memory,
             retriever=self.retriever,
             max_context_tokens=context_window,
+            project_root=Path(self.working_directory),
         )
 
         # Initialize file reference parser
@@ -542,11 +550,88 @@ class CodingAgent(AgentInterface):
                 "allowed_actions": [
                     "Use read-only tools (read_file, grep, glob, etc.)",
                     f"Write to plan file: {self.plan_mode_state.plan_file_path}",
-                    "Call exit_plan_mode when ready for approval"
+                    "Call request_plan_approval when ready for approval"
+                ]
+            }
+
+        if decision == PlanGateDecision.REQUIRE_APPROVAL:
+            return {
+                "status": "denied",
+                "error_code": "PLAN_APPROVAL_REQUIRED",
+                "message": f"Tool '{tool_name}' cannot run until the plan is approved. The plan is awaiting user approval.",
+                "plan_path": str(self.plan_mode_state.plan_file_path) if self.plan_mode_state.plan_file_path else None,
+                "allowed_actions": [
+                    "Wait for user to approve or reject the plan",
+                    "Use read-only tools while waiting"
                 ]
             }
 
         return None  # Allowed
+
+    def _sync_plan_mode_from_store(self) -> None:
+        """
+        Synchronize plan_mode_state from MessageStore.
+
+        MessageStore maintains current mode as a property (updated when
+        permission_mode_changed events are added). This method simply
+        queries that property and syncs the agent's in-memory state.
+
+        Called at the start of each turn before building context.
+        """
+        if not self.memory.has_message_store:
+            return
+
+        # Query mode state directly from MessageStore (O(1) property access)
+        store = self.memory.message_store
+        current_mode = store.current_mode
+        plan_hash = store.plan_hash
+        plan_path = store.plan_path
+
+        # Synchronize both plan_mode_state AND permission_manager based on current mode
+        from src.core.permission_mode import PermissionMode
+
+        if current_mode == "plan":
+            # In plan mode - ensure state is active
+            if not self.plan_mode_state.is_active:
+                # Reconstruct plan mode state
+                if plan_path:
+                    from pathlib import Path
+                    self.plan_mode_state.plan_file_path = Path(plan_path)
+                    self.plan_mode_state.session_id = self._session_id
+                self.plan_mode_state.is_active = True
+                self.plan_mode_state._awaiting_approval = False
+            # Sync permission_manager to PLAN mode
+            if self.permission_manager.get_mode() != PermissionMode.PLAN:
+                self.permission_manager.set_mode(PermissionMode.PLAN)
+
+        elif current_mode == "awaiting_approval":
+            # Awaiting approval - set awaiting state
+            if plan_path:
+                from pathlib import Path
+                self.plan_mode_state.plan_file_path = Path(plan_path)
+            self.plan_mode_state.is_active = False
+            self.plan_mode_state._awaiting_approval = True
+            if plan_hash:
+                self.plan_mode_state.plan_hash = plan_hash
+            # Keep permission_manager in PLAN mode during approval
+            if self.permission_manager.get_mode() != PermissionMode.PLAN:
+                self.permission_manager.set_mode(PermissionMode.PLAN)
+
+        elif current_mode == "normal":
+            # Normal mode - clear plan mode, set permission_manager to NORMAL
+            if self.plan_mode_state.is_active or self.plan_mode_state._awaiting_approval:
+                self.plan_mode_state.is_active = False
+                self.plan_mode_state._awaiting_approval = False
+            if self.permission_manager.get_mode() != PermissionMode.NORMAL:
+                self.permission_manager.set_mode(PermissionMode.NORMAL)
+
+        elif current_mode == "auto":
+            # Auto mode - clear plan mode, set permission_manager to AUTO
+            if self.plan_mode_state.is_active or self.plan_mode_state._awaiting_approval:
+                self.plan_mode_state.is_active = False
+                self.plan_mode_state._awaiting_approval = False
+            if self.permission_manager.get_mode() != PermissionMode.AUTO:
+                self.permission_manager.set_mode(PermissionMode.AUTO)
 
     def _register_tools(self) -> None:
         """Register available tools."""
@@ -572,8 +657,11 @@ class CodingAgent(AgentInterface):
         # System operations
         self.tool_executor.register_tool(RunCommandTool())
 
-        # Task management
-        self.tool_executor.register_tool(TodoWriteTool(agent_state=self.todo_state))
+        # Task management (CRUD tools share TaskState)
+        self.tool_executor.register_tool(TaskCreateTool(task_state=self.task_state))
+        self.tool_executor.register_tool(TaskUpdateTool(task_state=self.task_state))
+        self.tool_executor.register_tool(TaskListTool(task_state=self.task_state))
+        self.tool_executor.register_tool(TaskGetTool(task_state=self.task_state))
 
         # Checkpoint tool (controller will be set later by CLI)
         self.tool_executor.register_tool(CreateCheckpointTool(controller=None))
@@ -627,11 +715,11 @@ class CodingAgent(AgentInterface):
             plan_mode_state=self.plan_mode_state,
             session_id=None  # Will be set when session starts
         )
-        self._exit_plan_mode_tool = ExitPlanModeTool(
+        self._request_plan_approval_tool = RequestPlanApprovalTool(
             plan_mode_state=self.plan_mode_state
         )
         self.tool_executor.register_tool(self._enter_plan_mode_tool)
-        self.tool_executor.register_tool(self._exit_plan_mode_tool)
+        self.tool_executor.register_tool(self._request_plan_approval_tool)
 
         # Subagent delegation (requires subagent_manager to be initialized)
         # This is registered after subagent_manager is initialized in __init__
@@ -828,6 +916,10 @@ class CodingAgent(AgentInterface):
                             return ToolExecutionResult(content="", turn_messages=turn_messages)
 
                 try:
+                    # Pass tool_call_id for delegation tool (registry linking)
+                    if tool_name == 'delegate_to_subagent':
+                        tool_args['_tool_call_id'] = tool_call.id
+
                     # Execute the tool
                     result = self.tool_executor.execute_tool(
                         tool_name,
@@ -1081,9 +1173,10 @@ class CodingAgent(AgentInterface):
 
                 # Check if approval is required (NORMAL mode)
                 if self.permission_manager and self.permission_manager.mode == PermissionMode.NORMAL:
+                    from src.core.plan_mode import is_agent_internal_write
                     risky_tools = ['write_file', 'edit_file', 'append_to_file', 'run_command', 'git_commit']
 
-                    if tool_name in risky_tools:
+                    if tool_name in risky_tools and not is_agent_internal_write(tool_name, tool_args):
                         if request_approval:
                             # Use TUI-native approval (non-blocking, UI stays responsive)
                             approved = await request_approval(tool_name, tool_args)
@@ -1096,6 +1189,10 @@ class CodingAgent(AgentInterface):
                             return ToolExecutionResult(content="", turn_messages=turn_messages)
 
                 try:
+                    # Pass tool_call_id for delegation tool (registry linking)
+                    if tool_name == 'delegate_to_subagent':
+                        tool_args['_tool_call_id'] = tool_call.id
+
                     # Execute tool asynchronously (doesn't block event loop)
                     result = await self.tool_executor.execute_tool_async(
                         tool_name,
@@ -1498,6 +1595,159 @@ class CodingAgent(AgentInterface):
 
             return result
 
+    async def _handle_request_plan_approval_tool(
+        self,
+        call_id: str,
+        ui_protocol: Optional['UIProtocol'] = None,
+    ) -> tuple[str, bool]:
+        """
+        Handle request_plan_approval tool - execute the tool, persist events, and wait for approval.
+
+        Returns a tuple (result_text, rejected_without_feedback):
+        - result_text: Human-readable string for LLM (includes plan content on approval)
+        - rejected_without_feedback: True if user rejected without feedback (Escape key)
+          - When True, caller should stop tool loop and wait for user input
+          - When False, caller should continue tool loop (LLM sees the result)
+
+        Flow:
+        1. Execute request_plan_approval tool (computes hash, sets awaiting_approval)
+        2. Read full plan content (before approval may clear state)
+        3. Persist plan_submitted system event (triggers TUI to mount approval widget)
+        4. Wait for user approval via UIProtocol
+        5. Apply approval/rejection to plan_mode_state
+        6. Return tuple with result and rejection flag
+        """
+        # 1. Execute the request_plan_approval tool
+        result = await self.tool_executor.execute_tool_async("request_plan_approval")
+
+        if not result.is_success():
+            return (f"Error: {result.error or 'Failed to request plan approval'}", False)
+
+        # Parse metadata from tool result
+        metadata = result.metadata or {}
+        plan_hash = metadata.get("plan_hash")
+        excerpt = metadata.get("excerpt", "")
+        truncated = metadata.get("truncated", False)
+        plan_path = metadata.get("plan_path")
+
+        if not plan_hash:
+            return ("Error: No plan hash returned from request_plan_approval", False)
+
+        # 2. Read full plan content before approval (state may reset after)
+        plan_content = self.plan_mode_state.get_plan_content() or excerpt
+
+        # 3. Persist plan_submitted system event (TUI will mount approval widget)
+        if self.memory.has_message_store:
+            self.memory.persist_system_event(
+                event_type="plan_submitted",
+                content="[Plan submitted for approval]",
+                extra={
+                    "call_id": call_id,
+                    "plan_hash": plan_hash,
+                    "excerpt": excerpt,
+                    "truncated": truncated,
+                    "plan_path": plan_path,
+                },
+                include_in_llm_context=False,
+            )
+
+        # Persist mode change event
+        if self.memory.has_message_store:
+            self.memory.persist_system_event(
+                event_type="permission_mode_changed",
+                content="Mode: plan -> awaiting_approval",
+                extra={"old_mode": "plan", "new_mode": "awaiting_approval"},
+                include_in_llm_context=False,
+            )
+
+        # 4. Wait for user approval via UIProtocol
+        if ui_protocol:
+            try:
+                from src.core.protocol import PlanApprovalResult
+                approval = await ui_protocol.wait_for_plan_approval(plan_hash)
+
+                if approval.approved:
+                    self.plan_mode_state.approve(plan_hash)
+
+                    if self.memory.has_message_store:
+                        self.memory.persist_system_event(
+                            event_type="plan_approved",
+                            content="[Plan approved]",
+                            extra={
+                                "plan_hash": plan_hash,
+                                "auto_accept_edits": approval.auto_accept_edits,
+                            },
+                            include_in_llm_context=False,
+                        )
+                        new_mode = "auto" if approval.auto_accept_edits else "normal"
+                        self.memory.persist_system_event(
+                            event_type="permission_mode_changed",
+                            content=f"Mode: plan -> {new_mode}",
+                            extra={"old_mode": "plan", "new_mode": new_mode},
+                            include_in_llm_context=False,
+                        )
+                        self.permission_manager.set_mode(
+                            PermissionManager.from_string(new_mode)
+                        )
+
+                    result_text = (
+                        "User has approved your plan. You can now start coding. "
+                        "Start with updating your todo list if applicable.\n\n"
+                        f"Your plan has been saved to: {plan_path}\n"
+                        "You can refer back to it if needed during implementation.\n\n"
+                        "## Approved Plan:\n"
+                        f"{plan_content}"
+                    )
+                    return (result_text, False)
+                else:
+                    self.plan_mode_state.reject()
+
+                    if self.memory.has_message_store:
+                        self.memory.persist_system_event(
+                            event_type="plan_rejected",
+                            content="[Plan rejected]",
+                            extra={
+                                "plan_hash": plan_hash,
+                                "feedback": approval.feedback,
+                            },
+                            include_in_llm_context=False,
+                        )
+                        # CRITICAL: Persist mode change back to plan mode
+                        self.memory.persist_system_event(
+                            event_type="permission_mode_changed",
+                            content="Mode: awaiting_approval -> plan",
+                            extra={"old_mode": "awaiting_approval", "new_mode": "plan"},
+                            include_in_llm_context=False,
+                        )
+
+                    # Check if user rejected without feedback (Escape key)
+                    if approval.feedback is None:
+                        # Pure rejection - stop tool loop, wait for user input
+                        return ("Plan approval cancelled.", True)
+                    else:
+                        # Rejection with feedback - continue tool loop so LLM can revise
+                        result_text = (
+                            "Plan rejected. You are back in plan mode. "
+                            f"Revise the plan and call request_plan_approval again.\n\n"
+                            f"User feedback: {approval.feedback}"
+                        )
+                        return (result_text, False)
+
+            except asyncio.CancelledError:
+                return ("Plan approval was cancelled.", True)
+
+        # No UI protocol (CLI mode) - auto-approve
+        self.plan_mode_state.approve(plan_hash)
+        result_text = (
+            "User has approved your plan. You can now start coding. "
+            "Start with updating your todo list if applicable.\n\n"
+            f"Your plan has been saved to: {plan_path}\n"
+            "You can refer back to it if needed during implementation.\n\n"
+            "## Approved Plan:\n"
+            f"{plan_content}"
+        )
+        return (result_text, False)
+
     def _print_tool_announcement(self, tool_name: str, tool_args: Dict[str, Any]) -> None:
         """
         Print a clean tool announcement for CLI output.
@@ -1555,9 +1805,14 @@ class CodingAgent(AgentInterface):
                 message = message[:50] + '...'
             safe_print(f"\n[GIT] commit: {message}")
 
-        elif tool_name == 'todo_write':
-            todos = tool_args.get('todos', [])
-            safe_print(f"\n[TODO] Updating {len(todos)} items")
+        elif tool_name == 'task_create':
+            subject = tool_args.get('subject', '')
+            safe_print(f"\n[TASK] Creating: {subject}")
+
+        elif tool_name == 'task_update':
+            task_id = tool_args.get('taskId', '?')
+            status = tool_args.get('status', '')
+            safe_print(f"\n[TASK] Updating {task_id}: {status}")
 
         elif tool_name == 'delegate_to_subagent':
             subagent = tool_args.get('subagent', 'unknown')
@@ -1908,6 +2163,10 @@ class CodingAgent(AgentInterface):
             summary = self.file_reference_parser.format_summary(file_references)
             print(f"\n{summary}\n")
 
+        # CRITICAL: Sync plan mode state from MessageStore before building context
+        # This ensures agent's in-memory state matches persisted state (single source of truth)
+        self._sync_plan_mode_from_store()
+
         # Build context with enhanced system prompt for decision-making
         # Include agent state for task continuation support
         # MemoryManager uses MessageStore when configured (Option A: Single Source of Truth)
@@ -1988,6 +2247,7 @@ class CodingAgent(AgentInterface):
         from src.core.events import (
             UIEvent, StreamStart, StreamEnd, TextDelta,
             PausePromptStart, PausePromptEnd, ContextUpdated, ContextCompacted,
+            FileReadEvent,
         )
         from src.core.tool_status import ToolStatus as CoreToolStatus
         from src.core.render_meta import ToolApprovalMeta
@@ -2005,33 +2265,22 @@ class CodingAgent(AgentInterface):
             op='stream_response',
         )
 
-        # Yield StreamStart to signal beginning of response
-        yield StreamStart()
-
         # Reset error tracker at start of each user request
         # (NOT in tool loop - that would reset mid-request)
         self._error_tracker.reset()
-
-        # Check for reset intent at start of each user request
-        is_reset, needs_confirm = self._check_reset_intent(user_input)
-        if is_reset and needs_confirm and self._has_incomplete_todos():
-            # Loose reset language - needs confirmation
-            self._pending_reset_confirmation = True
-            self._user_confirmed_reset = False
-        else:
-            self._user_confirmed_reset = is_reset
-            self._pending_reset_confirmation = False
 
         # Track blocked calls for controller constraint injection
         blocked_calls: List[str] = []
 
         # Safety limit for iterations (emergency brake only)
-        # Primary limits are: MAX_TOOL_CALLS (60) and MAX_WALL_TIME_SECONDS (90)
+        # Primary limits are: MAX_TOOL_CALLS (200) and MAX_WALL_TIME_SECONDS (90)
         # Definition: 1 iteration = 1 LLM call cycle (can produce 0-5+ tool calls)
         ABSOLUTE_MAX_ITERATIONS = 50
 
         # Helper to check if tool needs approval based on permission mode
-        def needs_approval(tool_name: str) -> bool:
+        def needs_approval(tool_name: str, tool_args: Dict[str, Any] = None) -> bool:
+            from src.core.plan_mode import is_agent_internal_write
+
             # Get current permission mode
             mode = self.permission_manager.get_mode() if self.permission_manager else PermissionMode.NORMAL
 
@@ -2042,6 +2291,11 @@ class CodingAgent(AgentInterface):
             # In PLAN mode, don't ask for approval - use gating instead
             # Read-only tools execute freely, write tools are blocked by plan_mode_state.gate_tool()
             if mode == PermissionMode.PLAN:
+                return False
+
+            # Agent-internal writes (plan files, sessions, logs) bypass approval
+            # — same as MemoryManager writing session JSONL without approval
+            if tool_args and is_agent_internal_write(tool_name, tool_args):
                 return False
 
             # In NORMAL mode (default), ask only for risky tools
@@ -2065,6 +2319,24 @@ class CodingAgent(AgentInterface):
             # Parse and load file references
             file_references = self.file_reference_parser.parse_and_load(user_input)
 
+            # Emit FileReadEvent for each loaded file (TUI shows subtle confirmation)
+            for ref in (file_references or []):
+                if ref.is_loaded:
+                    yield FileReadEvent(
+                        path=ref.display_path,
+                        lines_read=ref.lines_read,
+                        truncated=ref.truncated,
+                    )
+
+            # StreamStart AFTER FileReadEvents so TUI can flush buffered
+            # file-read notes (which need UserMessage widget to be mounted).
+            # Sequence: add_user_message → FileReadEvent(s) → StreamStart → LLM call
+            yield StreamStart()
+
+            # CRITICAL: Sync plan mode state from MessageStore before building context
+            # This ensures agent's in-memory state matches persisted state (single source of truth)
+            self._sync_plan_mode_from_store()
+
             # Build initial context (with agent state for task continuation)
             # MemoryManager uses MessageStore when configured (Option A: Single Source of Truth)
             context = self.context_builder.build_context(
@@ -2087,7 +2359,7 @@ class CodingAgent(AgentInterface):
 
             # Tool execution loop with realistic budgets
             # These limits are for real coding workflows (reading files, searching, etc.)
-            MAX_TOOL_CALLS = 60  # Primary budget - generous for multi-file work
+            MAX_TOOL_CALLS = 200  # Primary budget - generous for multi-step workflows
             MAX_WALL_TIME_SECONDS = None  # Disabled - tool_call limit is primary constraint
             MAX_PAUSE_CONTINUES = 3  # Safety cap - prevent infinite continuation
             MAX_ERROR_BUDGET_RESUMES = 2  # Cap on error budget "Continue" to prevent infinite loops
@@ -2129,12 +2401,12 @@ class CodingAgent(AgentInterface):
                         break
 
                     # Set state for potential resumption
-                    self.todo_state['last_stop_reason'] = pause_reason_code
+                    self.task_state.last_stop_reason = pause_reason_code
 
                     # Check if UI supports interactive pause
                     if hasattr(ui, 'has_pause_capability') and ui.has_pause_capability():
                         # TUI mode - use interactive widget
-                        pending_todos = self._get_pending_todos_summary()
+                        pending_todos = self.task_state.get_pending_summary()
                         stats = {
                             'tool_calls': tool_call_count,
                             'elapsed_s': elapsed_seconds,
@@ -2342,11 +2614,7 @@ class CodingAgent(AgentInterface):
                     # Transition to pause state (same as other limits)
                     if hasattr(ui, 'has_pause_capability') and ui.has_pause_capability():
                         # TUI mode - emit PausePromptStart and wait
-                        pending_todos = [
-                            t.get('content', 'Unknown task')[:50]
-                            for t in self.todo_state.get('todos', [])
-                            if t.get('status') in ('in_progress', 'pending')
-                        ]
+                        pending_todos = self.task_state.get_pending_summary()
 
                         yield PausePromptStart(
                             reason=pause_reason,
@@ -2479,7 +2747,7 @@ class CodingAgent(AgentInterface):
                         )
                         continue  # Skip to next tool call
 
-                    requires_approval = needs_approval(tc.function.name)
+                    requires_approval = needs_approval(tc.function.name, tc.function.get_parsed_arguments())
 
                     # Freeze approval policy in render meta registry (store-driven UI)
                     # This captures the policy at tool-call creation time (freeze semantics)
@@ -2644,48 +2912,6 @@ class CodingAgent(AgentInterface):
 
                     start_time = time.monotonic()
 
-                    # OVERWRITE GUARD: Block destructive todo_write BEFORE execution.
-                    # Rationale: TodoWriteTool mutates agent_state['todos'] during execution.
-                    # If we validate after execution, the state may already be overwritten.
-                    if tc.function.name == 'todo_write':
-                        new_todos = tc.function.get_parsed_arguments().get('todos', [])
-                        if self._is_destructive_todo_update(new_todos) and not self._user_confirmed_reset:
-                            # Block the destructive update
-                            incomplete = [t for t in self.todo_state.get('todos', [])
-                                          if t.get('status') in ('in_progress', 'pending')]
-                            task_ids = ", ".join(t.get('id', '?') for t in incomplete[:3])
-                            if len(incomplete) > 3:
-                                task_ids += f"... and {len(incomplete) - 3} more"
-
-                            duration_ms = int((time.monotonic() - start_time) * 1000)
-                            error_content = f"Cannot overwrite incomplete todos ({task_ids}). Complete them first, or say 'reset todos' to discard."
-
-                            # Update tool state in message store
-                            if self.memory.message_store:
-                                self.memory.message_store.update_tool_state(
-                                    call_id,
-                                    CoreToolStatus.ERROR,
-                                    error=error_content,
-                                    duration_ms=duration_ms
-                                )
-
-                            # Persist tool result to MessageStore for session replay
-                            self.memory.add_tool_result(
-                                tool_call_id=call_id,
-                                content=f"Error: {error_content}",
-                                tool_name=tc.function.name,
-                                status="error",
-                                duration_ms=duration_ms,
-                            )
-
-                            tool_messages.append({
-                                "role": "tool",
-                                "tool_call_id": call_id,
-                                "name": tc.function.name,
-                                "content": f"Error: {error_content}"
-                            })
-                            continue  # Skip to next tool call
-
                     # Increment tool call counter for budget tracking
                     tool_call_count += 1
 
@@ -2725,10 +2951,57 @@ class CodingAgent(AgentInterface):
                         })
                         continue  # Skip to next tool call
 
+                    # Special handling for request_plan_approval (requires UI approval)
+                    if tc.function.name == "request_plan_approval":
+                        approval_result, plan_rejected = await self._handle_request_plan_approval_tool(
+                            call_id, ui
+                        )
+
+                        duration_ms = int((time.monotonic() - start_time) * 1000)
+
+                        # Determine tool status based on rejection flag
+                        tool_status = CoreToolStatus.REJECTED if plan_rejected else CoreToolStatus.SUCCESS
+                        result_status = "rejected" if plan_rejected else "success"
+
+                        if self.memory.message_store:
+                            self.memory.message_store.update_tool_state(
+                                call_id,
+                                tool_status,
+                                result=approval_result,
+                                duration_ms=duration_ms
+                            )
+
+                        self.memory.add_tool_result(
+                            tool_call_id=call_id,
+                            content=approval_result,
+                            tool_name=tc.function.name,
+                            status=result_status,
+                            duration_ms=duration_ms,
+                        )
+
+                        tool_messages.append({
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "name": tc.function.name,
+                            "content": approval_result
+                        })
+
+                        # If user rejected without feedback (Escape), stop tool loop
+                        if plan_rejected:
+                            user_rejected = True
+                            break  # Exit tool loop, wait for user input (no LLM call)
+
+                        continue  # Skip to next tool call
+
                     try:
+                        tool_kwargs = tc.function.get_parsed_arguments()
+                        # Pass tool_call_id for delegation tool (registry linking)
+                        if tc.function.name == 'delegate_to_subagent':
+                            tool_kwargs['_tool_call_id'] = call_id
+
                         result = await self.tool_executor.execute_tool_async(
                             tc.function.name,
-                            **tc.function.get_parsed_arguments()
+                            **tool_kwargs
                         )
 
                         duration_ms = int((time.monotonic() - start_time) * 1000)
@@ -2779,28 +3052,22 @@ class CodingAgent(AgentInterface):
                             )
 
                             # Track successful tool since error budget resume (for progress detection)
-                            if self.todo_state.get('error_budget_resume_count', 0) > 0:
-                                self.todo_state['successful_tools_since_resume'] = \
-                                    self.todo_state.get('successful_tools_since_resume', 0) + 1
+                            if self.task_state.error_budget_resume_count > 0:
+                                self.task_state.successful_tools_since_resume += 1
 
-                            # Handle todo_write success: apply stable IDs and notify UI
-                            # NOTE: Always run merge, even on first write (empty existing list is handled)
-                            if tc.function.name == 'todo_write':
-                                # Apply stable ID merge (preserves IDs across updates)
-                                raw_todos = tc.function.get_parsed_arguments().get('todos', [])
-                                merged_todos = self._merge_todos_with_stable_ids(raw_todos)
-                                self.todo_state['todos'] = merged_todos
+                            # Notify UI when tasks change
+                            if tc.function.name in ('task_create', 'task_update'):
+                                ui.notify_todos_updated(self.task_state.get_todos_list())
 
-                                # Enforce single active invariant
-                                in_progress_todo = next(
-                                    (t for t in merged_todos if t.get('status') == 'in_progress'),
-                                    None
+                            # Persist mode change event for enter_plan_mode
+                            # (request_plan_approval is handled specially above with approval flow)
+                            if tc.function.name == 'enter_plan_mode':
+                                self.memory.persist_system_event(
+                                    event_type="permission_mode_changed",
+                                    content="Mode: -> plan",
+                                    extra={"old_mode": "normal", "new_mode": "plan"},
+                                    include_in_llm_context=False,
                                 )
-                                if in_progress_todo and in_progress_todo.get('id'):
-                                    self._set_todo_in_progress(in_progress_todo['id'])
-
-                                # Notify UI
-                                ui.notify_todos_updated(self.todo_state['todos'])
 
                             tool_messages.append({
                                 "role": "tool",
@@ -2864,11 +3131,11 @@ class CodingAgent(AgentInterface):
                                     continue  # Let approval resolve first
 
                                 # Set state for potential resumption
-                                self.todo_state['last_stop_reason'] = 'error_budget'
+                                self.task_state.last_stop_reason = 'error_budget'
 
                                 # Check resume cap (prevent infinite Continue loops)
-                                resume_count = self.todo_state.get('error_budget_resume_count', 0)
-                                progress_since_resume = self.todo_state.get('successful_tools_since_resume', 0)
+                                resume_count = self.task_state.error_budget_resume_count
+                                progress_since_resume = self.task_state.successful_tools_since_resume
 
                                 if resume_count >= MAX_ERROR_BUDGET_RESUMES:
                                     # Force stop - too many resumes
@@ -2890,7 +3157,7 @@ class CodingAgent(AgentInterface):
                                 # Check if UI supports interactive pause
                                 if hasattr(ui, 'has_pause_capability') and ui.has_pause_capability():
                                     # TUI mode - use interactive widget
-                                    pending_todos = self._get_pending_todos_summary()
+                                    pending_todos = self.task_state.get_pending_summary()
                                     error_stats = self._error_tracker.get_stats()
                                     stats = {
                                         'tool_calls': tool_call_count,
@@ -2918,9 +3185,8 @@ class CodingAgent(AgentInterface):
                                             break  # User chose to stop
 
                                         # User chose to continue - partial reset
-                                        self.todo_state['error_budget_resume_count'] = \
-                                            self.todo_state.get('error_budget_resume_count', 0) + 1
-                                        self.todo_state['successful_tools_since_resume'] = 0
+                                        self.task_state.error_budget_resume_count += 1
+                                        self.task_state.successful_tools_since_resume = 0
 
                                         # Reset tool error counts (allow retries)
                                         self._error_tracker.reset_tool_error_counts(tool_name=tc.function.name)
@@ -3008,11 +3274,11 @@ class CodingAgent(AgentInterface):
                                 continue  # Let approval resolve first
 
                             # Set state for potential resumption
-                            self.todo_state['last_stop_reason'] = 'error_budget'
+                            self.task_state.last_stop_reason = 'error_budget'
 
                             # Check resume cap (prevent infinite Continue loops)
-                            resume_count = self.todo_state.get('error_budget_resume_count', 0)
-                            progress_since_resume = self.todo_state.get('successful_tools_since_resume', 0)
+                            resume_count = self.task_state.error_budget_resume_count
+                            progress_since_resume = self.task_state.successful_tools_since_resume
 
                             if resume_count >= MAX_ERROR_BUDGET_RESUMES:
                                 # Force stop - too many resumes
@@ -3034,7 +3300,7 @@ class CodingAgent(AgentInterface):
                             # Check if UI supports interactive pause
                             if hasattr(ui, 'has_pause_capability') and ui.has_pause_capability():
                                 # TUI mode - use interactive widget
-                                pending_todos = self._get_pending_todos_summary()
+                                pending_todos = self.task_state.get_pending_summary()
                                 error_stats = self._error_tracker.get_stats()
                                 stats = {
                                     'tool_calls': tool_call_count,
@@ -3062,9 +3328,8 @@ class CodingAgent(AgentInterface):
                                         break  # User chose to stop
 
                                     # User chose to continue - partial reset
-                                    self.todo_state['error_budget_resume_count'] = \
-                                        self.todo_state.get('error_budget_resume_count', 0) + 1
-                                    self.todo_state['successful_tools_since_resume'] = 0
+                                    self.task_state.error_budget_resume_count += 1
+                                    self.task_state.successful_tools_since_resume = 0
 
                                     # Reset tool error counts (allow retries)
                                     self._error_tracker.reset_tool_error_counts(tool_name=tc.function.name)
@@ -3541,21 +3806,15 @@ REQUIRED: Choose a DIFFERENT approach:
         # Now MemoryManager.get_context_for_llm() uses MessageStore directly
         self.memory.set_message_store(result.store, session_id)
 
-        # Restore agent state
+        # Restore agent state into TaskState
         if result.agent_state.todos:
-            self.todo_state['todos'] = result.agent_state.todos
-        if result.agent_state.current_todo_id:
-            self.todo_state['current_todo_id'] = result.agent_state.current_todo_id
-        if result.agent_state.last_stop_reason:
-            self.todo_state['last_stop_reason'] = result.agent_state.last_stop_reason
-
-        # Update _next_id based on restored todos
-        if result.agent_state.todos:
-            max_id = max(
-                (int(t.get('id', '0').split('-')[-1]) for t in result.agent_state.todos if t.get('id')),
-                default=0
+            self.task_state.restore(
+                todos=result.agent_state.todos,
+                current_id=result.agent_state.current_todo_id,
+                stop_reason=result.agent_state.last_stop_reason,
             )
-            self.todo_state['_next_id'] = max_id + 1
+        elif result.agent_state.last_stop_reason:
+            self.task_state.last_stop_reason = result.agent_state.last_stop_reason
 
         from src.observability import get_logger
         logger = get_logger(__name__)
@@ -3599,9 +3858,22 @@ REQUIRED: Choose a DIFFERENT approach:
             if not self.plan_mode_state.is_active:
                 self.plan_mode_state.enter(session_id)
         elif permission_mode != PermissionMode.PLAN and current_mode == PermissionMode.PLAN:
-            # Leaving plan mode - deactivate plan mode state
+            # Leaving plan mode - reject if awaiting approval, then reset
+            if self.plan_mode_state.is_awaiting_approval():
+                self.plan_mode_state.reject()
             if self.plan_mode_state.is_active:
                 self.plan_mode_state.reset()
+
+        # Persist mode change event to store for UI rendering
+        old_mode_str = current_mode.value
+        new_mode_str = permission_mode.value
+        if old_mode_str != new_mode_str:
+            self.memory.persist_system_event(
+                event_type="permission_mode_changed",
+                content=f"Mode: {old_mode_str} -> {new_mode_str}",
+                extra={"old_mode": old_mode_str, "new_mode": new_mode_str},
+                include_in_llm_context=False,
+            )
 
     def get_permission_mode(self) -> str:
         """Get current permission mode.
@@ -3839,235 +4111,30 @@ REQUIRED: Choose a DIFFERENT approach:
 
         return "\n".join(suggestions)
 
-    # =========================================================================
-    # Task Continuation Support Methods
-    # NOTE: todo_state mutations assume single-threaded execution (CLI).
-    # If concurrency is added, protect with an asyncio.Lock or equivalent.
-    # =========================================================================
-
-    def _normalize_text(self, text: str) -> str:
-        """
-        Normalize text for content matching across todo operations.
-
-        Used by:
-        - _merge_todos_with_stable_ids() for content matching
-        - _is_destructive_todo_update() for ID recovery via content
-        - Index fallback similarity check
-
-        Normalization: strip, lowercase, collapse whitespace.
-        """
-        if not text:
-            return ""
-        return " ".join(text.strip().lower().split())
-
-    def _merge_todos_with_stable_ids(
-        self,
-        new_todos: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
-        """
-        Merge new todos with existing ones, preserving stable IDs.
-
-        This is critical for task continuation - if todo_write returns todos
-        without preserving IDs, we need to match them to existing todos to
-        maintain continuity.
-
-        Matching priority:
-        1. Explicit ID match (if new todo has ID that exists)
-        2. Exact content match (normalized)
-        3. Same index position (last resort for updates)
-        4. Truly new item -> assign new ID
-
-        Args:
-            new_todos: List of todos from todo_write tool
-
-        Returns:
-            List of todos with stable IDs assigned
-        """
-        existing = self.todo_state.get('todos', [])
-        existing_by_id = {t['id']: t for t in existing if 'id' in t}
-        existing_by_content = {
-            self._normalize_text(t.get('content', '')): t
-            for t in existing if t.get('content')
-        }
-
-        used_ids = set()
-        result = []
-
-        for idx, new_todo in enumerate(new_todos):
-            matched_id = None
-
-            # Priority 1: Explicit ID match
-            if 'id' in new_todo and new_todo['id'] in existing_by_id:
-                matched_id = new_todo['id']
-
-            # Priority 2: Exact content match (use 'if matched_id is None' to allow fallthrough)
-            if matched_id is None and new_todo.get('content'):
-                content_key = self._normalize_text(new_todo['content'])
-                if content_key in existing_by_content:
-                    matched_id = existing_by_content[content_key].get('id')
-
-            # Priority 3: Same index position (fallback when content doesn't match)
-            if matched_id is None and idx < len(existing) and 'id' in existing[idx]:
-                # Only use index match if content is similar enough
-                existing_content = existing[idx].get('content', '')
-                new_content = new_todo.get('content', '')
-                if existing_content and new_content:
-                    # Simple similarity: same first 20 chars (normalized)
-                    if self._normalize_text(existing_content)[:20] == self._normalize_text(new_content)[:20]:
-                        matched_id = existing[idx]['id']
-
-            # Assign ID
-            if matched_id and matched_id not in used_ids:
-                new_todo['id'] = matched_id
-                used_ids.add(matched_id)
-            elif 'id' not in new_todo or new_todo['id'] in used_ids:
-                # Assign new ID
-                new_todo['id'] = f"T{self.todo_state['_next_id']}"
-                self.todo_state['_next_id'] += 1
-                used_ids.add(new_todo['id'])
-
-            result.append(new_todo)
-
-        return result
-
-    def _has_incomplete_todos(self) -> bool:
-        """Check if there are any in_progress or pending todos."""
-        todos = self.todo_state.get('todos', [])
-        return any(
-            t.get('status') in ('in_progress', 'pending')
-            for t in todos
-        )
-
-    def _is_destructive_todo_update(self, new_todos: List[Dict]) -> bool:
-        """
-        Detect if todo_write would destructively overwrite incomplete work.
-
-        Destructive = incomplete todo IDs are missing from new list.
-        This is deterministic and hard to circumvent.
-
-        Args:
-            new_todos: The new todo list from todo_write
-
-        Returns:
-            True if this would drop incomplete todos (destructive)
-        """
-        existing = self.todo_state.get('todos', [])
-        if not existing:
-            return False  # No existing todos, can't be destructive
-
-        # Get IDs of incomplete todos
-        incomplete_ids = {
-            t.get('id') for t in existing
-            if t.get('status') in ('in_progress', 'pending') and t.get('id')
-        }
-        if not incomplete_ids:
-            return False  # All complete, safe to replace
-
-        # Get IDs in new list (check both explicit IDs and content-matched)
-        new_ids = {t.get('id') for t in new_todos if t.get('id')}
-
-        # Also try content matching for items without IDs (using shared normalization)
-        existing_by_content = {
-            self._normalize_text(t.get('content', '')): t.get('id')
-            for t in existing if t.get('id')
-        }
-        for new_todo in new_todos:
-            if 'id' not in new_todo and new_todo.get('content'):
-                content_key = self._normalize_text(new_todo['content'])
-                if content_key in existing_by_content:
-                    new_ids.add(existing_by_content[content_key])
-
-        # RULE: All incomplete IDs must be preserved
-        missing_incomplete = incomplete_ids - new_ids
-        if missing_incomplete:
-            return True  # Would drop incomplete todos
-
-        return False
-
-    def _check_reset_intent(self, user_message: str) -> tuple:
-        """
-        Check if user explicitly wants to reset todos.
-
-        Returns:
-            Tuple of (is_reset, needs_confirmation)
-            - (True, False) = explicit reset, allow immediately
-            - (True, True) = loose reset language, needs confirmation
-            - (False, False) = not a reset request
-        """
-        msg_lower = user_message.lower()
-
-        # Explicit reset phrases - allow immediately
-        explicit_reset = [
-            "reset todos", "reset tasks", "reset the todos", "reset my todos",
-            "clear todos", "clear tasks", "clear the todos",
-            "discard previous", "discard todos", "discard tasks",
-            "forget previous tasks", "forget todos"
-        ]
-        if any(phrase in msg_lower for phrase in explicit_reset):
-            return (True, False)
-
-        # Loose reset phrases - require confirmation
-        loose_reset = ["start fresh", "start over"]
-        if any(phrase in msg_lower for phrase in loose_reset):
-            # Only if they don't also have explicit language
-            has_explicit = any(w in msg_lower for w in ["reset", "clear", "discard"])
-            if not has_explicit:
-                return (True, True)  # Needs confirmation
-            return (True, False)  # Has explicit, allow
-
-        return (False, False)
-
-    def _set_todo_in_progress(self, todo_id: str) -> None:
-        """
-        Set a todo to in_progress, auto-demoting others to pending.
-
-        Enforces invariant: Only one in_progress at a time.
-
-        Args:
-            todo_id: ID of the todo to set as in_progress
-        """
-        for todo in self.todo_state.get('todos', []):
-            if todo.get('id') == todo_id:
-                todo['status'] = 'in_progress'
-                self.todo_state['current_todo_id'] = todo_id
-            elif todo.get('status') == 'in_progress':
-                # Demote to pending (was interrupted)
-                todo['status'] = 'pending'
-
     def _build_pause_message(self, reason: str) -> str:
         """
         Build pause message and set agent state for resumption.
 
-        Sets state (last_stop_reason, current_todo_id) and returns a
-        user-visible message. Caller is responsible for yielding as TextDelta.
-
         Args:
-            reason: Stop reason code (max_iterations, max_tool_calls,
-                    max_wall_time, error_budget, user_interrupt, provider_error)
+            reason: Stop reason code
 
         Returns:
             Formatted pause message string for user display
         """
-        # Set stop reason for next turn
-        self.todo_state['last_stop_reason'] = reason
+        self.task_state.last_stop_reason = reason
 
-        # Preserve current_todo_id if we have an in_progress todo
+        # Preserve current_task_id if we have an in_progress task
         in_progress = next(
-            (t for t in self.todo_state.get('todos', [])
+            (t for t in self.task_state.list_all()
              if t.get('status') == 'in_progress'),
             None
         )
         if in_progress:
-            self.todo_state['current_todo_id'] = in_progress.get('id')
-
-        # When Phase C lands, save checkpoint here:
-        # self._save_checkpoint()
+            self.task_state.current_task_id = in_progress.get('id')
 
         # Build user-visible message
-        incomplete = [t for t in self.todo_state.get('todos', [])
-                      if t.get('status') in ('in_progress', 'pending')]
+        pending = self.task_state.get_pending_summary()
 
-        # Map reason codes to human-readable text
         reason_text = {
             'max_iterations': 'iteration limit',
             'max_tool_calls': 'tool call limit',
@@ -4077,30 +4144,13 @@ REQUIRED: Choose a DIFFERENT approach:
             'provider_error': 'provider error - retry available',
         }.get(reason, reason)
 
-        if incomplete:
-            pending_summary = ", ".join(
-                f"{t.get('id', '?')}: {t.get('content', '?')[:30]}..."
-                for t in incomplete[:3]
-            )
-            message = f"\n\n---\n**Paused** ({reason_text}). Pending: {pending_summary}\nSend `?` to continue.\n"
+        if pending:
+            pending_str = ", ".join(pending[:3])
+            message = f"\n\n---\n**Paused** ({reason_text}). Pending: {pending_str}\nSend `?` to continue.\n"
         else:
             message = f"\n\n---\n**Paused** ({reason_text}). Send `?` to continue.\n"
 
         return message
-
-    def _get_pending_todos_summary(self) -> list[str]:
-        """
-        Get summary of pending/in_progress todos for pause widget.
-
-        Returns:
-            List of truncated task descriptions
-        """
-        incomplete = [t for t in self.todo_state.get('todos', [])
-                      if t.get('status') in ('in_progress', 'pending')]
-        return [
-            t.get('content', 'Unknown task')[:50]
-            for t in incomplete[:5]
-        ]
 
     def shutdown(self) -> None:
         """

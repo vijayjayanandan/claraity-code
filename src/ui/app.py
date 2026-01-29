@@ -36,6 +36,7 @@ from .events import (
     ThinkingStart, ThinkingDelta, ThinkingEnd,
     PausePromptStart, PausePromptEnd,
     ContextUpdated, ContextCompacted,
+    FileReadEvent,
     ErrorEvent, ToolStatus,
 )
 from .messages import (
@@ -56,6 +57,7 @@ from .widgets.todo_bar import TodoBar
 from .widgets.pause_widget import PausePromptWidget
 from .widgets.clarify_widget import ClarifyWidget
 from .widgets.plan_approval_widget import PlanApprovalWidget
+from .widgets.subagent_card import SubAgentCard
 from .autocomplete import FileAutocomplete
 
 if TYPE_CHECKING:
@@ -63,7 +65,11 @@ if TYPE_CHECKING:
     from ..session.store.memory_store import MessageStore, StoreNotification
     from ..session.models.message import Message
     from .store_adapter import StoreAdapter
+    from .subagent_registry import SubagentRegistry
 
+
+# Tools that should NOT display a ToolCard in the UI (silent/internal tools)
+SILENT_TOOLS = {'task_create', 'task_update', 'task_list', 'task_get', 'enter_plan_mode'}
 
 # =============================================================================
 # FOCUSABLE CONVERSATION CONTAINER
@@ -423,8 +429,12 @@ class ChatInput(TextArea):
 
     def _show_autocomplete_suggestions(self, query: str) -> None:
         """Show autocomplete dropdown with suggestions."""
-        # Skip if still indexing (background task not complete yet)
         if not self._autocomplete._indexed:
+            try:
+                dropdown = self.app.query_one("#autocomplete", AutocompleteDropdown)
+                dropdown.show_message("Indexing files...")
+            except Exception:
+                pass
             return
 
         suggestions = self._autocomplete.suggest(query)
@@ -668,6 +678,7 @@ class CodingAgentApp(App):
         stream_handler: Callable[[str, UIProtocol], AsyncIterator[UIEvent]] | None = None,
         model_name: str = "claude-3-opus",
         show_header: bool = False,
+        subagent_registry: Optional["SubagentRegistry"] = None,
         **kwargs
     ):
         """
@@ -681,6 +692,8 @@ class CodingAgentApp(App):
             model_name: Name of the LLM model for status bar. If agent is provided,
                        this is extracted from the agent.
             show_header: Whether to show the header bar
+            subagent_registry: Optional registry for subagent visibility.
+                              When provided, subagent progress is displayed in TUI.
             **kwargs: Additional arguments for App
 
         Note:
@@ -717,7 +730,10 @@ class CodingAgentApp(App):
         self._current_thinking: ThinkingBlock | None = None
         self._tool_cards: dict[str, ToolCard] = {}
 
-        # Scroll state
+        # Scroll state: _auto_scroll is True when user hasn't explicitly scrolled away.
+        # Reset to True on new message submission and action_scroll_end.
+        # Set to False by keyboard scroll-up actions.
+        # Mouse wheel scrolls are handled by checking is_vertical_scroll_end at scroll time.
         self._auto_scroll = True
 
         # Retry state
@@ -761,6 +777,11 @@ class CodingAgentApp(App):
 
         # PR4: Store update coalescing (prevents UI flicker during streaming)
         self._store_pending_updates: dict[str, "Message"] = {}  # stream_id -> latest message
+
+        # Buffered file-read notes: FileReadEvents arrive before UserMessage widget
+        # is mounted (store notification chain is async). We buffer them and flush
+        # when StreamStart arrives, by which point UserMessage is guaranteed mounted.
+        self._pending_file_read_events: list = []
         self._store_update_timer: Optional[asyncio.TimerHandle] = None
         self._store_update_interval_sec: float = 0.15  # Coalesce updates within 150ms
 
@@ -774,6 +795,14 @@ class CodingAgentApp(App):
         self._segment_flush_handle: asyncio.TimerHandle | None = None  # Timer for delayed flush
         self._segment_flush_interval_sec: float = 0.5  # Flush after 0.5s (Fix #4: faster feedback)
         self._segment_flush_running: bool = False  # Prevent overlapping flushes (Fix #4)
+
+        # Subagent visibility: registry for live subagent stores
+        self._subagent_registry: Optional["SubagentRegistry"] = subagent_registry
+        self._subagent_subscriptions: dict[str, dict] = {}  # subagent_id -> subscription info
+        self._pending_subagent_mounts: dict[str, dict] = {}  # parent_tool_call_id -> pending data
+        self._buffered_subagent_notifications: dict[str, list] = {}  # subagent_id -> buffered notifications
+        self._unsubscribe_registry_reg: Optional[Callable[[], None]] = None
+        self._unsubscribe_registry_unreg: Optional[Callable[[], None]] = None
 
     def _create_agent_stream_handler(
         self,
@@ -845,6 +874,9 @@ class CodingAgentApp(App):
         # Register todos callback for TodoBar and StatusBar updates
         self.ui_protocol.set_todos_callback(self._on_todos_updated)
 
+        # Create and wire subagent registry for live visibility
+        self._setup_subagent_registry()
+
         # Note: Signal handlers for SIGINT on Windows with asyncio are problematic.
         # We rely on Textual's Ctrl+C binding (action_interrupt) and the outer
         # try/except KeyboardInterrupt wrapper instead.
@@ -860,6 +892,58 @@ class CodingAgentApp(App):
             except RuntimeError:
                 pass  # No running loop
 
+        # Cleanup subagent registry subscriptions
+        if self._unsubscribe_registry_reg:
+            self._unsubscribe_registry_reg()
+        if self._unsubscribe_registry_unreg:
+            self._unsubscribe_registry_unreg()
+        if hasattr(self, '_unsubscribe_registry_notif') and self._unsubscribe_registry_notif:
+            self._unsubscribe_registry_notif()
+
+        # Cleanup subagent store subscriptions
+        for sub_id, sub_info in self._subagent_subscriptions.items():
+            if sub_info.get("unsubscribe"):
+                sub_info["unsubscribe"]()
+
+    def _setup_subagent_registry(self) -> None:
+        """Set up subagent registry for live visibility.
+
+        Creates the registry if not provided externally, then:
+        1. Subscribes to registration/unregistration events
+        2. Wires the registry to the delegation tool on the agent
+        """
+        # Create registry if not provided externally
+        if self._subagent_registry is None and self.agent:
+            from .subagent_registry import SubagentRegistry
+            self._subagent_registry = SubagentRegistry(app=self)
+            logger.info("Created SubagentRegistry for TUI visibility")
+
+        # Subscribe to registry events
+        if self._subagent_registry:
+            self._unsubscribe_registry_reg = self._subagent_registry.subscribe_on_registered(
+                self._on_subagent_registered
+            )
+            self._unsubscribe_registry_unreg = self._subagent_registry.subscribe_on_unregistered(
+                self._on_subagent_unregistered
+            )
+            # Subscribe to store notifications via registry (no lost notifications)
+            self._unsubscribe_registry_notif = self._subagent_registry.subscribe_on_notification(
+                self._handle_subagent_notification
+            )
+            logger.info("Subscribed to SubagentRegistry events")
+
+            # Wire registry to delegation tool on agent
+            if self.agent:
+                delegation_tool = self.agent.tool_executor.tools.get("delegate_to_subagent")
+                if delegation_tool and hasattr(delegation_tool, "set_registry"):
+                    delegation_tool.set_registry(self._subagent_registry)
+                    logger.info("Wired SubagentRegistry to delegation tool")
+                else:
+                    logger.warning(
+                        "delegate_to_subagent tool not found or missing set_registry - "
+                        f"tools: {list(self.agent.tool_executor.tools.keys())}"
+                    )
+
     def _focus_input(self) -> None:
         """Set focus to input widget."""
         try:
@@ -867,6 +951,157 @@ class CodingAgentApp(App):
             input_widget.focus()
         except Exception as e:
             self.log.error(f"Failed to focus input: {e}")
+
+    # -------------------------------------------------------------------------
+    # Subagent Visibility
+    # -------------------------------------------------------------------------
+
+    def _on_subagent_registered(
+        self,
+        subagent_id: str,
+        store: "MessageStore",
+        transcript_path: Path,
+        parent_tool_call_id: str
+    ) -> None:
+        """Called on UI loop when subagent is registered.
+
+        Subscribes to the subagent's store for live updates and tries to mount
+        a SubAgentCard inside the parent ToolCard.
+
+        Args:
+            subagent_id: Unique ID of the subagent session
+            store: The subagent's MessageStore instance
+            transcript_path: Path to the subagent's JSONL transcript
+            parent_tool_call_id: Tool call ID of the spawning delegation call
+        """
+        logger.info(
+            f"TUI: Subagent registered: {subagent_id}, "
+            f"parent_tool_call_id={parent_tool_call_id}"
+        )
+
+        # NOTE: Store subscription is handled by the registry (immediate, no lost
+        # notifications). Notifications arrive via subscribe_on_notification().
+        self._subagent_subscriptions[subagent_id] = {
+            "card": None,  # Will be set when mounted
+            "transcript_path": transcript_path,
+            "parent_tool_call_id": parent_tool_call_id,
+            "store": store,
+        }
+
+        # Try to mount card into parent ToolCard
+        self._try_mount_subagent_card(subagent_id, transcript_path, parent_tool_call_id)
+
+    def _on_subagent_unregistered(self, subagent_id: str) -> None:
+        """Called on UI loop when subagent completes.
+
+        Cleans up store subscription and marks the SubAgentCard as completed.
+
+        Args:
+            subagent_id: The subagent session ID that completed
+        """
+        logger.debug(f"TUI: Subagent unregistered: {subagent_id}")
+
+        sub = self._subagent_subscriptions.pop(subagent_id, None)
+        if sub:
+            # NOTE: Store unsubscription is handled by the registry in unregister().
+            # Mark card as completed (don't remove - user may want to see final state)
+            if sub.get("card"):
+                sub["card"].mark_completed()
+
+    def _try_mount_subagent_card(
+        self,
+        subagent_id: str,
+        transcript_path: Path,
+        parent_tool_call_id: str
+    ) -> None:
+        """Mount SubAgentCard, or queue for retry if parent ToolCard doesn't exist yet.
+
+        Args:
+            subagent_id: Unique ID of the subagent session
+            transcript_path: Path to the subagent's JSONL transcript
+            parent_tool_call_id: Tool call ID of the spawning delegation call
+        """
+        parent_tool_card = self._tool_cards.get(parent_tool_call_id)
+
+        if parent_tool_card:
+            # Parent card exists - mount immediately
+            card = SubAgentCard(
+                subagent_id=subagent_id,
+                transcript_path=transcript_path,
+                id=f"subagent-{subagent_id}"
+            )
+
+            # Hydrate from store snapshot BEFORE setting card reference
+            # (so live notifications don't bypass hydration)
+            store = self._subagent_subscriptions.get(subagent_id, {}).get("store")
+            if store:
+                card.hydrate_from_store(store)
+
+            # Flush buffered notifications BEFORE setting card reference
+            buffered = self._buffered_subagent_notifications.pop(subagent_id, [])
+            for notif in buffered:
+                card.update_from_notification(notif)
+
+            # NOW set card reference so live notifications go directly to it
+            if subagent_id in self._subagent_subscriptions:
+                self._subagent_subscriptions[subagent_id]["card"] = card
+
+            # Mount the card inside the parent ToolCard
+            self.call_later(parent_tool_card.mount, card)
+
+            logger.info(
+                f"TUI: Mounted SubAgentCard {subagent_id} "
+                f"inside ToolCard {parent_tool_call_id}"
+            )
+        else:
+            # Parent card not created yet - queue for retry
+            self._pending_subagent_mounts[parent_tool_call_id] = {
+                "subagent_id": subagent_id,
+                "transcript_path": transcript_path,
+            }
+            logger.info(
+                f"TUI: Queued SubAgentCard {subagent_id} "
+                f"for pending mount (parent {parent_tool_call_id} not found). "
+                f"Available tool_cards: {list(self._tool_cards.keys())}"
+            )
+
+    def _on_tool_card_created(self, tool_call_id: str, tool_card: ToolCard) -> None:
+        """Called when a ToolCard is created. Check for pending subagent mounts.
+
+        Args:
+            tool_call_id: The tool call ID of the created ToolCard
+            tool_card: The created ToolCard instance
+        """
+        pending = self._pending_subagent_mounts.pop(tool_call_id, None)
+        if pending:
+            self._try_mount_subagent_card(
+                pending["subagent_id"],
+                pending["transcript_path"],
+                tool_call_id
+            )
+
+    def _handle_subagent_notification(
+        self,
+        subagent_id: str,
+        notification: "StoreNotification"
+    ) -> None:
+        """Update SubAgentCard from store notification.
+
+        Args:
+            subagent_id: The subagent session ID
+            notification: StoreNotification from the subagent's MessageStore
+        """
+        sub = self._subagent_subscriptions.get(subagent_id)
+        if sub and sub.get("card"):
+            sub["card"].update_from_notification(notification)
+        else:
+            # Buffer notification — cap at 500 to prevent unbounded growth
+            buf = self._buffered_subagent_notifications.setdefault(subagent_id, [])
+            if len(buf) < 500:
+                buf.append(notification)
+            logger.debug(
+                f"TUI: Buffered notification for {subagent_id} (total={len(buf)})"
+            )
 
     # -------------------------------------------------------------------------
     # Input Handling
@@ -896,6 +1131,9 @@ class CodingAgentApp(App):
         # Store for potential retry
         self._last_user_input = user_input
         self._last_attachments = attachments  # Store attachments for retry
+
+        # Re-enable auto-scroll on new message (user expects to follow the response)
+        self._auto_scroll = True
 
         # Add user message to conversation (with attachment indicator)
         attachment_summary = ""
@@ -1316,6 +1554,41 @@ class CodingAgentApp(App):
                 event.error_id, event.recoverable, event.retry_after
             )
 
+        # FileReadEvent — buffer now, flush on StreamStart (when UserMessage is mounted).
+        elif isinstance(event, FileReadEvent):
+            self._pending_file_read_events.append(event)
+
+        # StreamStart — flush buffered file-read notes after UserMessage is mounted.
+        elif isinstance(event, StreamStart):
+            await self._flush_file_read_notes(conversation)
+
+        # PausePromptStart — mount the pause widget
+        elif isinstance(event, PausePromptStart):
+            await self._flush_segment()
+            widget = PausePromptWidget(
+                reason=event.reason,
+                reason_code=event.reason_code,
+                pending_todos=event.pending_todos or [],
+                stats=event.stats or {},
+            )
+            self._pause_widget = widget
+            await conversation.mount(widget)
+            widget.scroll_visible()
+
+        # PausePromptEnd — remove widget if agent resolved it
+        elif isinstance(event, PausePromptEnd):
+            if self._pause_widget:
+                self._pause_widget.remove()
+                self._pause_widget = None
+
+        # ContextUpdated — update status bar context pressure indicator
+        elif isinstance(event, ContextUpdated):
+            try:
+                status_bar = self.query_one("#status", StatusBar)
+                status_bar.update_context(event.used, event.limit, event.pressure_level)
+            except NoMatches:
+                pass
+
     def _finalize_current_message(self, msg: Optional[MessageWidget] = None) -> None:
         """Finalize current message and reset state.
 
@@ -1370,6 +1643,33 @@ class CodingAgentApp(App):
             pass  # Widget may have been removed
 
     # -------------------------------------------------------------------------
+    # File-read notes (buffered flush)
+    # -------------------------------------------------------------------------
+
+    async def _flush_file_read_notes(self, conversation: ScrollableContainer) -> None:
+        """Mount buffered file-read notes as children of the last UserMessage.
+
+        Called on StreamStart, when UserMessage is guaranteed to be mounted.
+        """
+        if not self._pending_file_read_events:
+            return
+
+        events = self._pending_file_read_events
+        self._pending_file_read_events = []
+
+        # Find last UserMessage in conversation
+        user_msgs = list(conversation.query("UserMessage"))
+        if not user_msgs:
+            return
+        user_msg = user_msgs[-1]
+
+        for evt in events:
+            label = f" \u2514 Read {evt.path} ({evt.lines_read} lines)"
+            if evt.truncated:
+                label += " (truncated)"
+            await user_msg.add_annotation(label)
+
+    # -------------------------------------------------------------------------
     # Segmented Streaming (Default Mode)
     # -------------------------------------------------------------------------
 
@@ -1387,10 +1687,7 @@ class CodingAgentApp(App):
             return
 
         # Snapshot scroll position BEFORE rendering
-        was_at_bottom = (
-            self._conversation.is_vertical_scroll_end
-            if self._conversation else True
-        )
+        was_at_bottom = self._is_at_bottom()
 
         # Join and render as Markdown (one-time parse at boundary)
         text = "".join(self._segment_chunks)
@@ -1405,9 +1702,8 @@ class CodingAgentApp(App):
         if msg.parent is not None:
             await msg.add_text(text)
 
-        # Auto-scroll if was at bottom
-        if self._auto_scroll and was_at_bottom and self._conversation:
-            self._conversation.scroll_end(animate=False)
+        # Auto-scroll if was at bottom before append
+        self._scroll_to_bottom(was_at_bottom=was_at_bottom)
 
     def _schedule_segment_flush(self) -> None:
         """
@@ -1610,10 +1906,14 @@ class CodingAgentApp(App):
         message: "Message",
         conversation: ScrollableContainer
     ) -> None:
-        """Handle clarify_request system message - mount ClarifyWidget.
+        """Handle clarify_request system message - mount ClarifyWidget if needed.
 
         Called when a clarify_request message is added to the store.
-        Mounts ClarifyWidget to capture user's answers.
+        Mounts ClarifyWidget only if the tool is still pending (not yet answered).
+
+        Widget visibility is driven by tool_state:
+        - PENDING/AWAITING_APPROVAL: Mount widget (needs user input)
+        - SUCCESS/ERROR/CANCELLED: Don't mount (already completed)
         """
         extra = message.meta.extra if message.meta else {}
         call_id = extra.get("call_id")
@@ -1626,6 +1926,16 @@ class CodingAgentApp(App):
         # Don't mount if we already have a clarify widget for this call_id
         if self._clarify_widget and self._clarify_widget.call_id == call_id:
             return
+
+        # Check if tool already has a result: Only mount if tool is still pending
+        # Use get_tool_result() which reads from persisted tool messages (role="tool")
+        # This works for both live and replay sessions (tool_state is ephemeral)
+        if self._message_store:
+            tool_result = self._message_store.get_tool_result(call_id)
+            if tool_result:
+                # Tool result exists - tool was already executed, don't mount widget
+                logger.info(f"[CLARIFY] Skipping mount - tool result exists for call_id={call_id}")
+                return
 
         # Create and mount clarify widget
         self._clarify_widget = ClarifyWidget(
@@ -1646,7 +1956,7 @@ class CodingAgentApp(App):
 
         # Scroll to make widget visible (only if user is at bottom)
         if self._auto_scroll:
-            conversation.scroll_end(animate=False)
+            self._scroll_to_bottom(conversation)
 
     def on_clarify_response_message(self, message: ClarifyResponseMessage) -> None:
         """Handle ClarifyResponseMessage from ClarifyWidget.
@@ -1687,9 +1997,9 @@ class CodingAgentApp(App):
         plan_path: str | None = None
     ) -> None:
         """
-        Mount PlanApprovalWidget when agent exits plan mode.
+        Mount PlanApprovalWidget when agent requests plan approval.
 
-        Called when exit_plan_mode tool returns with plan for approval.
+        Called when request_plan_approval tool returns with plan for approval.
         """
         # Avoid duplicates
         if self._plan_approval_widget and self._plan_approval_widget.plan_hash == plan_hash:
@@ -1715,7 +2025,7 @@ class CodingAgentApp(App):
 
         # Scroll to make widget visible (only if user is at bottom)
         if self._auto_scroll:
-            conversation.scroll_end(animate=False)
+            self._scroll_to_bottom(conversation)
 
     def on_plan_approval_response_message(self, message: PlanApprovalResponseMessage) -> None:
         """Handle PlanApprovalResponseMessage from PlanApprovalWidget.
@@ -1751,15 +2061,37 @@ class CodingAgentApp(App):
     # Scroll Handling
     # -------------------------------------------------------------------------
 
-    def on_scroll(self) -> None:
-        """Detect user scrolling to manage auto-scroll."""
-        try:
-            conversation = self.query_one("#conversation", ScrollableContainer)
-            # Disable auto-scroll if user scrolled up
-            at_bottom = conversation.scroll_offset.y >= conversation.max_scroll_y - 10
-            self._auto_scroll = at_bottom
-        except NoMatches:
-            pass
+    def _is_at_bottom(self, conversation: ScrollableContainer | None = None) -> bool:
+        """Check if conversation is scrolled to the bottom.
+
+        Call BEFORE appending content to snapshot the scroll position.
+        """
+        target = conversation or self._conversation
+        if not target:
+            return True
+        return target.is_vertical_scroll_end
+
+    def _scroll_to_bottom(
+        self,
+        conversation: ScrollableContainer | None = None,
+        was_at_bottom: bool | None = None,
+    ) -> None:
+        """Scroll to bottom only if user hasn't scrolled away.
+
+        Args:
+            conversation: Target container (defaults to self._conversation)
+            was_at_bottom: Pre-append scroll position snapshot from _is_at_bottom().
+                          If None, checks _auto_scroll flag only (for cases where
+                          snapshot wasn't taken, e.g. widget mounts).
+        """
+        target = conversation or self._conversation
+        if not target:
+            return
+        if not self._auto_scroll:
+            return
+        if was_at_bottom is not None and not was_at_bottom:
+            return
+        target.scroll_end(animate=False)
 
     # -------------------------------------------------------------------------
     # Actions (keyboard bindings)
@@ -1827,6 +2159,13 @@ class CodingAgentApp(App):
                 # Cancel the worker (primary cancellation mechanism)
                 if self._stream_worker is not None:
                     self._stream_worker.cancel()
+
+                # Cancel any running subagents
+                if self._subagent_registry:
+                    for sid in list(self._subagent_subscriptions.keys()):
+                        inst = self._subagent_registry.get_instance(sid)
+                        if inst and hasattr(inst, 'cancel'):
+                            inst.cancel()
 
                 # Also cancel the task (belt and suspenders)
                 if self._streaming_task and not self._streaming_task.done():
@@ -2136,11 +2475,51 @@ class CodingAgentApp(App):
             await self._apply_tool_result_to_card(message)
             return  # No new widget needed, ToolCard updated in place
         elif message.is_system:
-            # Check for clarify_request system event
             event_type = message.meta.event_type if message.meta else None
             if event_type == "clarify_request":
                 await self._on_clarify_request(message, conversation)
-            # Other system messages - skip
+            elif event_type == "plan_submitted":
+                # Mount plan approval widget only if not already resolved.
+                # Same pattern as clarify: check if tool result exists in store.
+                # During replay, the tool result is already persisted so we skip.
+                extra = message.meta.extra if message.meta else {}
+                plan_hash = extra.get("plan_hash") if extra else None
+                call_id = extra.get("call_id") if extra else None
+                if plan_hash:
+                    # Check if tool already has a result (already approved/rejected)
+                    if call_id and self._message_store:
+                        tool_result = self._message_store.get_tool_result(call_id)
+                        if tool_result:
+                            logger.info(f"[PLAN] Skipping approval mount - tool result exists for call_id={call_id}")
+                        else:
+                            await self.mount_plan_approval(
+                                plan_hash=plan_hash,
+                                excerpt=extra.get("excerpt", ""),
+                                truncated=extra.get("truncated", False),
+                                plan_path=extra.get("plan_path"),
+                            )
+                    else:
+                        await self.mount_plan_approval(
+                            plan_hash=plan_hash,
+                            excerpt=extra.get("excerpt", ""),
+                            truncated=extra.get("truncated", False),
+                            plan_path=extra.get("plan_path"),
+                        )
+            elif event_type == "permission_mode_changed":
+                # Update status bar mode from MessageStore's current_mode property
+                # This ensures UI and agent always see the same mode (single source of truth)
+                if self._message_store:
+                    new_mode = self._message_store.current_mode
+                else:
+                    # Fallback: extract from event if no store (shouldn't happen)
+                    extra = message.meta.extra if message.meta else {}
+                    new_mode = extra.get("new_mode", "normal") if extra else "normal"
+                try:
+                    status_bar = self.query_one("#status", StatusBar)
+                    status_bar.set_mode(new_mode)
+                except NoMatches:
+                    pass
+            # System messages - skip rendering
             return
         else:
             # Unknown message type - skip
@@ -2156,11 +2535,18 @@ class CodingAgentApp(App):
             segments = message.meta.segments if message.meta and message.meta.segments else []
 
             if segments:
-                rendered = await self._render_segments(
-                    widget, message, segments,
-                    defer_tool_mount=bulk_load,
-                    use_store_hydration=bulk_load
-                )
+                try:
+                    rendered = await self._render_segments(
+                        widget, message, segments,
+                        defer_tool_mount=bulk_load,
+                        use_store_hydration=bulk_load
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"_render_segments failed: {type(e).__name__}: {e}",
+                        exc_info=True
+                    )
+                    rendered = 0
                 # Track segment index for future updates (live path only)
                 if not bulk_load and stream_id:
                     self._store_rendered_segment_idx[stream_id] = rendered
@@ -2172,19 +2558,22 @@ class CodingAgentApp(App):
                 if bulk_load and message.tool_calls:
                     import json
                     for tc in message.tool_calls:
+                        if tc.function.name in SILENT_TOOLS:
+                            continue
                         args = json.loads(tc.function.arguments) if tc.function.arguments else {}
                         card = widget.add_tool_card(tc.id, tc.function.name, args, requires_approval=False)
                         card.set_defer_diff_mount(True)
                         self._tool_cards[tc.id] = card
+                        self._on_tool_card_created(tc.id, card)
                         self._hydrate_tool_card_from_store(card, tc.id)
 
             # Bulk load: finalize widget immediately (replay shows final state)
             if bulk_load:
                 widget.finalize()
 
-        # Auto-scroll only during live rendering (not replay) and if user is at bottom
-        if not bulk_load and not self._is_replaying and self._auto_scroll:
-            conversation.scroll_end(animate=False)
+        # Auto-scroll only during live rendering (not replay)
+        if not bulk_load and not self._is_replaying:
+            self._scroll_to_bottom(conversation)
 
     async def _on_store_message_added(
         self,
@@ -2244,6 +2633,9 @@ class CodingAgentApp(App):
         if not self._store_pending_updates:
             return
 
+        # Snapshot scroll position BEFORE rendering batch
+        was_at_bottom = self._is_at_bottom(conversation)
+
         # Process all pending updates
         for stream_id, message in self._store_pending_updates.items():
             if stream_id not in self._store_message_widgets:
@@ -2266,9 +2658,9 @@ class CodingAgentApp(App):
         # Clear pending updates
         self._store_pending_updates.clear()
 
-        # Auto-scroll during streaming (once after batch), only if user is at bottom
-        if not self._is_replaying and self._auto_scroll:
-            conversation.scroll_end(animate=False)
+        # Auto-scroll if was at bottom before batch render
+        if not self._is_replaying:
+            self._scroll_to_bottom(conversation, was_at_bottom=was_at_bottom)
 
     async def _on_store_message_finalized(self, message: "Message") -> None:
         """Handle MESSAGE_FINALIZED: flush pending updates and finalize widget."""
@@ -2356,6 +2748,9 @@ class CodingAgentApp(App):
                 # Reference by ID (stable)
                 tc = self._get_tool_call_by_id(message, segment.tool_call_id)
                 if tc:
+                    if tc.function.name in SILENT_TOOLS:
+                        rendered += 1
+                        continue
                     if skip_existing_cards and tc.id in self._tool_cards:
                         rendered += 1
                         continue
@@ -2364,6 +2759,7 @@ class CodingAgentApp(App):
                     if defer_tool_mount:
                         card.set_defer_diff_mount(True)
                     self._tool_cards[tc.id] = card
+                    self._on_tool_card_created(tc.id, card)
                     if use_store_hydration:
                         self._hydrate_tool_card_from_store(card, tc.id)
                     elif not self._is_replaying and self._message_store:
@@ -2375,6 +2771,9 @@ class CodingAgentApp(App):
                 # Legacy: reference by index (deprecated)
                 tc = self._get_tool_call_safe(message, segment.tool_call_index, "render_segments")
                 if tc:
+                    if tc.function.name in SILENT_TOOLS:
+                        rendered += 1
+                        continue
                     if skip_existing_cards and tc.id in self._tool_cards:
                         rendered += 1
                         continue
@@ -2383,6 +2782,7 @@ class CodingAgentApp(App):
                     if defer_tool_mount:
                         card.set_defer_diff_mount(True)
                     self._tool_cards[tc.id] = card
+                    self._on_tool_card_created(tc.id, card)
                     if use_store_hydration:
                         self._hydrate_tool_card_from_store(card, tc.id)
                     elif not self._is_replaying and self._message_store:
@@ -2543,7 +2943,7 @@ class CodingAgentApp(App):
         self._is_replaying = False
 
         # Scroll to bottom after replay
-        conversation.scroll_end(animate=False)
+        self._scroll_to_bottom(conversation)
 
         # Re-enable input
         try:
@@ -2559,16 +2959,28 @@ class CodingAgentApp(App):
         self,
         notification: "StoreNotification"
     ) -> None:
-        """Handle TOOL_STATE_UPDATED: update tool card status.
+        """Handle TOOL_STATE_UPDATED: update tool card status and clarify widget.
 
         Called when Agent updates tool execution state in MessageStore.
         Updates card.status which triggers watch_status() for approval widget.
+        Also removes clarify widget when clarify tool completes (status-driven).
         """
         tool_call_id = notification.tool_call_id
         tool_state = notification.tool_state
 
         if not tool_call_id or not tool_state:
             return
+
+        # Remove clarify widget when clarify tool completes (status-driven)
+        # This handles both live and replay sessions uniformly
+        if self._clarify_widget and self._clarify_widget.call_id == tool_call_id:
+            if tool_state.status in (
+                CoreToolStatus.SUCCESS,
+                CoreToolStatus.ERROR,
+                CoreToolStatus.CANCELLED
+            ):
+                self._clarify_widget.remove()
+                self._clarify_widget = None
 
         # Card may not exist yet (race condition) - that's OK, card creation queries store
         if tool_call_id not in self._tool_cards:
