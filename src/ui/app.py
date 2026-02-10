@@ -1024,25 +1024,22 @@ class CodingAgentApp(App):
         parent_tool_card = self._tool_cards.get(parent_tool_call_id)
 
         if parent_tool_card:
-            # Parent card exists - mount immediately
+            # Parent card exists - create card with deferred hydration.
+            # Store and buffered notifications are passed to the constructor
+            # so the card can hydrate in on_mount() AFTER compose() builds
+            # the DOM tree (section bodies must exist before tools can mount).
+            store = self._subagent_subscriptions.get(subagent_id, {}).get("store")
+            buffered = self._buffered_subagent_notifications.pop(subagent_id, [])
+
             card = SubAgentCard(
                 subagent_id=subagent_id,
                 transcript_path=transcript_path,
+                store=store,
+                buffered_notifications=buffered,
                 id=f"subagent-{subagent_id}"
             )
 
-            # Hydrate from store snapshot BEFORE setting card reference
-            # (so live notifications don't bypass hydration)
-            store = self._subagent_subscriptions.get(subagent_id, {}).get("store")
-            if store:
-                card.hydrate_from_store(store)
-
-            # Flush buffered notifications BEFORE setting card reference
-            buffered = self._buffered_subagent_notifications.pop(subagent_id, [])
-            for notif in buffered:
-                card.update_from_notification(notif)
-
-            # NOW set card reference so live notifications go directly to it
+            # Set card reference so live notifications go directly to it
             if subagent_id in self._subagent_subscriptions:
                 self._subagent_subscriptions[subagent_id]["card"] = card
 

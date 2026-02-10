@@ -51,6 +51,18 @@ class FileReference:
         return self.content is not None and self.error is None
 
     @property
+    def lines_read(self) -> int:
+        """Number of lines loaded from the file."""
+        if self.content:
+            return len(self.content.splitlines())
+        return 0
+
+    @property
+    def truncated(self) -> bool:
+        """Whether the content was truncated during loading."""
+        return False
+
+    @property
     def display_path(self) -> str:
         """Get display path (relative if possible)."""
         try:

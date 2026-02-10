@@ -16,6 +16,7 @@ from src.core.events import (  # noqa: F401
     ThinkingStart, ThinkingDelta, ThinkingEnd,
     PausePromptStart, PausePromptEnd,
     ContextUpdated, ContextCompacted,
+    FileReadEvent,
     ErrorEvent,
     UIEvent,
 )
@@ -29,6 +30,7 @@ __all__ = [
     'ThinkingStart', 'ThinkingDelta', 'ThinkingEnd',
     'PausePromptStart', 'PausePromptEnd',
     'ContextUpdated', 'ContextCompacted',
+    'FileReadEvent',
     'ErrorEvent',
     'UIEvent',
 ]

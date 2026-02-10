@@ -4,6 +4,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from xml.sax.saxutils import escape as xml_escape
 
@@ -138,6 +139,7 @@ class ContextBuilder:
         reserved_output_tokens: Optional[int] = None,
         safety_buffer_tokens: Optional[int] = None,
         tools_schema_tokens: Optional[int] = None,
+        project_root: Optional[Path] = None,
     ):
         """
         Initialize context builder.
@@ -149,10 +151,12 @@ class ContextBuilder:
             reserved_output_tokens: Tokens reserved for LLM output (default from env or 12000)
             safety_buffer_tokens: Safety buffer tokens (default from env or 2000)
             tools_schema_tokens: Estimated tokens for tool schemas (default from env or 3000)
+            project_root: Project root directory (for file reference resolution)
         """
         self.memory = memory_manager
         self.retriever = retriever
         self.max_context_tokens = max_context_tokens
+        self.project_root = project_root
         self.optimizer = PromptOptimizer()
 
         # Load from environment with sensible defaults

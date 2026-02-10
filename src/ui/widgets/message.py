@@ -837,6 +837,7 @@ class UserMessage(MessageWidget):
             isinstance(item, dict) and item.get("type") in ("image_url", "text")
             for item in content
         )
+        self._pending_annotations: list[str] = []
 
     def compose(self) -> ComposeResult:
         """Compose the header and content with clickable attachment placeholders."""
@@ -977,6 +978,37 @@ class UserMessage(MessageWidget):
                     parts.append(text)
         
         return " ".join(parts) if parts else ""
+
+    async def add_annotation(self, label: str) -> None:
+        """Add a dim annotation line below the message content.
+
+        Used for file-read confirmations (e.g., "Read demo.py (98 lines)")
+        and interruption notices.
+
+        Args:
+            label: Annotation text (e.g., " L  Read file.py (42 lines)")
+        """
+        # Buffer annotations and defer mounting to after the next refresh
+        # cycle.  This avoids a race where add_annotation runs before
+        # compose() has finished yielding children (MessageHeader,
+        # Markdown).  call_after_refresh guarantees compose is complete,
+        # so mount() appends after all content widgets.
+        self._pending_annotations.append(label)
+        self.call_after_refresh(self._mount_pending_annotations)
+
+    def _mount_pending_annotations(self) -> None:
+        """Mount buffered annotations at the end of children."""
+        if not self._pending_annotations:
+            return
+        labels = self._pending_annotations[:]
+        self._pending_annotations.clear()
+        for label in labels:
+            annotation = Static(label, classes="user-annotation")
+            annotation.styles.color = "#6e7681"
+            annotation.styles.height = "auto"
+            annotation.styles.margin = (0, 0, 0, 1)
+            self.mount(annotation)
+        self._blocks.append(annotation)
 
 
 class AssistantMessage(MessageWidget):

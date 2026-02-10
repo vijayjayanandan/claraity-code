@@ -1,0 +1,141 @@
+"""In-memory task state for CRUD-based task tracking."""
+
+import uuid
+from typing import List, Dict, Any, Optional
+
+
+class TaskState:
+    """
+    Manages an in-memory list of tasks (todos) with CRUD operations.
+
+    Used by TaskCreateTool, TaskUpdateTool, TaskListTool, TaskGetTool
+    and by CodingAgent for pause/resume state tracking.
+    """
+
+    def __init__(self):
+        self._tasks: Dict[str, Dict[str, Any]] = {}  # id -> task dict
+        self._next_id: int = 1
+        self.current_task_id: Optional[str] = None
+        self.last_stop_reason: Optional[str] = None
+        self.error_budget_resume_count: int = 0
+        self.successful_tools_since_resume: int = 0
+
+    # -- CRUD operations --
+
+    def create(self, subject: str, description: str = "",
+               active_form: str = "", metadata: Optional[Dict] = None) -> Dict[str, Any]:
+        """Create a new task and return it."""
+        task_id = str(self._next_id)
+        self._next_id += 1
+        task = {
+            "id": task_id,
+            "subject": subject,
+            "description": description,
+            "activeForm": active_form or subject,
+            "status": "pending",
+            "blocks": [],
+            "blockedBy": [],
+            "metadata": metadata or {},
+        }
+        self._tasks[task_id] = task
+        return dict(task)
+
+    def get(self, task_id: str) -> Optional[Dict[str, Any]]:
+        """Get a task by ID, or None if not found."""
+        task = self._tasks.get(task_id)
+        return dict(task) if task else None
+
+    def update(self, task_id: str, **fields) -> Optional[Dict[str, Any]]:
+        """
+        Update fields on an existing task. Returns updated task or None.
+
+        Supported fields: subject, description, activeForm, status, metadata,
+                          addBlocks, addBlockedBy, owner.
+        """
+        task = self._tasks.get(task_id)
+        if not task:
+            return None
+
+        for key in ("subject", "description", "activeForm", "status", "owner"):
+            if key in fields and fields[key] is not None:
+                task[key] = fields[key]
+
+        if "metadata" in fields and fields["metadata"]:
+            for k, v in fields["metadata"].items():
+                if v is None:
+                    task.setdefault("metadata", {}).pop(k, None)
+                else:
+                    task.setdefault("metadata", {})[k] = v
+
+        if "addBlocks" in fields:
+            for bid in fields["addBlocks"]:
+                if bid not in task.get("blocks", []):
+                    task.setdefault("blocks", []).append(bid)
+
+        if "addBlockedBy" in fields:
+            for bid in fields["addBlockedBy"]:
+                if bid not in task.get("blockedBy", []):
+                    task.setdefault("blockedBy", []).append(bid)
+
+        # Handle deletion
+        if task.get("status") == "deleted":
+            del self._tasks[task_id]
+            return {"id": task_id, "status": "deleted"}
+
+        # When a task completes, remove it from other tasks' blockedBy lists
+        if task.get("status") == "completed":
+            for other in self._tasks.values():
+                if task_id in other.get("blockedBy", []):
+                    other["blockedBy"].remove(task_id)
+
+        return dict(task)
+
+    def list_all(self) -> List[Dict[str, Any]]:
+        """Return all non-deleted tasks."""
+        return [dict(t) for t in self._tasks.values()]
+
+    # -- Convenience methods used by CodingAgent --
+
+    def get_todos_list(self) -> List[Dict[str, Any]]:
+        """Return tasks formatted for serialization (session persistence)."""
+        return self.list_all()
+
+    def get_pending_summary(self) -> str:
+        """Return a human-readable summary of pending/in-progress tasks."""
+        tasks = self.list_all()
+        if not tasks:
+            return ""
+
+        lines = []
+        for t in tasks:
+            status = t.get("status", "pending")
+            subject = t.get("subject", "")
+            if status == "in_progress":
+                lines.append(f"  [IN PROGRESS] {t.get('activeForm', subject)}")
+            elif status == "pending":
+                lines.append(f"  [TODO] {subject}")
+            elif status == "completed":
+                lines.append(f"  [DONE] {subject}")
+
+        if not lines:
+            return ""
+        return "\n".join(lines)
+
+    def restore(self, todos: List[Dict[str, Any]],
+                current_id: Optional[str] = None,
+                stop_reason: Optional[str] = None):
+        """Restore state from a previous session (deserialized from JSONL)."""
+        self._tasks.clear()
+        max_id = 0
+        for t in todos:
+            tid = t.get("id", str(self._next_id))
+            self._tasks[tid] = dict(t)
+            try:
+                num = int(tid)
+                if num > max_id:
+                    max_id = num
+            except (ValueError, TypeError):
+                pass
+        self._next_id = max_id + 1
+        self.current_task_id = current_id
+        self.last_stop_reason = stop_reason

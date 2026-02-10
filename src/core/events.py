@@ -253,6 +253,24 @@ class ErrorEvent:
 
 
 # =============================================================================
+# File Operations Events
+# =============================================================================
+
+@dataclass(frozen=True)
+class FileReadEvent:
+    """Emitted when the agent reads a file (for TUI annotations).
+
+    Attributes:
+        path: File path that was read
+        lines_read: Number of lines read
+        truncated: Whether the content was truncated
+    """
+    path: str
+    lines_read: int = 0
+    truncated: bool = False
+
+
+# =============================================================================
 # Type Union for Pattern Matching
 # =============================================================================
 
@@ -264,6 +282,7 @@ UIEvent = Union[
     ThinkingStart, ThinkingDelta, ThinkingEnd,
     PausePromptStart, PausePromptEnd,
     ContextUpdated, ContextCompacted,
+    FileReadEvent,
     ErrorEvent
 ]
 
@@ -277,6 +296,7 @@ __all__ = [
     'ThinkingStart', 'ThinkingDelta', 'ThinkingEnd',
     'PausePromptStart', 'PausePromptEnd',
     'ContextUpdated', 'ContextCompacted',
+    'FileReadEvent',
     'ErrorEvent',
     'UIEvent',
 ]
