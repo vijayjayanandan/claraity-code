@@ -173,7 +173,7 @@ class SubAgent:
         self,
         task_description: str,
         context: Optional[Dict[str, Any]] = None,
-        max_iterations: int = 5
+        max_iterations: int = 50
     ) -> SubAgentResult:
         """Execute a task with this subagent.
 
@@ -183,7 +183,7 @@ class SubAgent:
         Args:
             task_description: Description of task to execute
             context: Optional additional context (currently unused, for future extension)
-            max_iterations: Maximum tool-calling iterations (default: 5)
+            max_iterations: Maximum tool-calling iterations (default: 50)
 
         Returns:
             SubAgentResult with execution details

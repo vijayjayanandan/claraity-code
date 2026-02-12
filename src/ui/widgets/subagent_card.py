@@ -1,30 +1,29 @@
-"""SubAgentCard - displays subagent execution in the TUI.
+"""SubAgentCard - displays subagent execution as a collapsible mini-session.
 
-Three vertically stacked collapsible sections, each with a scrollable body:
+Renders subagent output identically to the main session using the same
+AssistantMessage and ToolCard widgets.  The card takes full width (same as
+main agent) and is collapsible via a clickable header.
 
-1. Input:  Task sent to the subagent (collapsed by default) + Copy
-2. Tools:  Tool calls with live status badges (expanded by default)
-3. Output: Final subagent response (collapsed until done) + Copy
-
-Uses a custom _CollapsibleSection widget (not Textual's Collapsible) for
-reliable expand/collapse behavior with explicit display toggle.
-
-Tools are rendered as Rich Text inside a SINGLE Static widget — no dynamic
-widget mounting.  When any tool changes, the entire tools display is
-re-rendered.  This avoids Textual mount-timing issues that caused only
-1-of-N tools to appear.
+Widget tree:
+    SubAgentCard (Container)
+    +-- _SubagentHeader (Static, clickable)   -- status badge + collapse toggle
+    +-- _SubagentBody (Vertical)              -- display:none when collapsed
+        +-- Static (dim task input)           -- first user message
+        +-- AssistantMessage                  -- reused from main session
+        |   +-- text blocks, code blocks
+        |   +-- ToolCard (per tool call)      -- with diffs, results
+        +-- AssistantMessage                  -- next assistant turn
+        ...
 
 Mounted inside the parent ToolCard (delegation tool call).
 """
 
-import sys
-from dataclasses import dataclass, field
+import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from textual.containers import Container, ScrollableContainer, Vertical
 from textual.widgets import Static
-from textual.reactive import reactive
 from rich.text import Text
 from rich.console import RenderableType
 
@@ -35,25 +34,16 @@ if TYPE_CHECKING:
     from src.session.store.memory_store import (
         MessageStore, StoreNotification, StoreEvent, ToolExecutionState,
     )
+    from src.session.models.message import Message
+    from src.ui.widgets.tool_card import ToolCard
 
 logger = get_logger("ui.widgets.subagent_card")
 
 
-# Status badge config -- matches ToolCard for visual consistency
-STATUS_ICONS: Dict[ToolStatus, tuple[str, str, str]] = {
-    ToolStatus.PENDING:           ("~", "#888888", "#2a2a2a"),
-    ToolStatus.AWAITING_APPROVAL: ("?", "#1e1e1e", "#cca700"),
-    ToolStatus.APPROVED:          ("+", "#1e1e1e", "#73c991"),
-    ToolStatus.REJECTED:          ("x", "#ffffff", "#f14c4c"),
-    ToolStatus.RUNNING:           ("*", "#1e1e1e", "#cca700"),
-    ToolStatus.SUCCESS:           ("+", "#1e1e1e", "#73c991"),
-    ToolStatus.FAILED:            ("!", "#ffffff", "#f14c4c"),
-    ToolStatus.ERROR:             ("!", "#ffffff", "#f14c4c"),
-    ToolStatus.CANCELLED:         ("-", "#666666", "#2a2a2a"),
-    ToolStatus.TIMEOUT:           ("!", "#ffffff", "#f14c4c"),
-    ToolStatus.SKIPPED:           ("-", "#666666", "#2a2a2a"),
-}
+# Tools that should not be rendered (same as app.py SILENT_TOOLS)
+SILENT_TOOLS = {'task_create', 'task_update', 'task_list', 'task_get', 'enter_plan_mode'}
 
+# Status badge config for the header
 HEADER_ICONS: Dict[str, tuple[str, str, str]] = {
     "running": ("*", "#1e1e1e", "#cca700"),
     "done":    ("+", "#1e1e1e", "#73c991"),
@@ -61,247 +51,27 @@ HEADER_ICONS: Dict[str, tuple[str, str, str]] = {
 }
 
 
-@dataclass
-class _ToolEntry:
-    """Plain data for a single tool call (NOT a widget)."""
-    tool_call_id: str
-    name: str
-    args_summary: str = ""
-    status: ToolStatus = ToolStatus.PENDING
-    duration_ms: Optional[int] = None
-    error: Optional[str] = None
-
-
-def _copy_to_clipboard(text: str) -> bool:
-    """Copy text to system clipboard. Returns True on success."""
-    try:
-        import pyperclip
-        pyperclip.copy(text)
-        return True
-    except Exception:
-        pass
-    # Windows ctypes fallback
-    if sys.platform != "win32":
-        return False
-    try:
-        import ctypes
-        kernel32 = ctypes.windll.kernel32
-        user32 = ctypes.windll.user32
-        user32.OpenClipboard(0)
-        try:
-            user32.EmptyClipboard()
-            data = text.encode("utf-16le") + b"\x00\x00"
-            h = kernel32.GlobalAlloc(0x0042, len(data))
-            ptr = kernel32.GlobalLock(h)
-            ctypes.memmove(ptr, data, len(data))
-            kernel32.GlobalUnlock(h)
-            user32.SetClipboardData(13, h)  # CF_UNICODETEXT
-        finally:
-            user32.CloseClipboard()
-        return True
-    except Exception:
-        return False
-
-
 # =============================================================================
-# Custom collapsible section (replaces Textual Collapsible)
+# Helper widgets
 # =============================================================================
 
-class _SectionTitle(Static):
-    """Clickable title bar for a collapsible section."""
+class _SubagentHeader(Static):
+    """Clickable header: status badge + subagent name + tool count + duration.
+
+    Click to toggle collapse/expand of the body.
+    """
 
     DEFAULT_CSS = """
-    _SectionTitle {
+    _SubagentHeader {
         width: 100%;
         height: 1;
         color: #9cdcfe;
         background: #1a1a2e;
         padding: 0 1;
     }
-    _SectionTitle:hover {
+    _SubagentHeader:hover {
         background: #252545;
         text-style: bold;
-    }
-    """
-
-    def __init__(self, label: str, expanded: bool = False, **kwargs):
-        super().__init__(**kwargs)
-        self._label = label
-        self._expanded = expanded
-
-    def set_expanded(self, expanded: bool) -> None:
-        self._expanded = expanded
-        self.refresh()
-
-    def set_label(self, label: str) -> None:
-        self._label = label
-        self.refresh()
-
-    def render(self) -> RenderableType:
-        indicator = "[-]" if self._expanded else "[+]"
-        t = Text()
-        t.append(indicator, style="bold #73c991" if self._expanded else "bold #cca700")
-        t.append(f" {self._label}", style="#9cdcfe")
-        return t
-
-    def on_click(self, event) -> None:
-        event.stop()
-        section = self.parent
-        if isinstance(section, _CollapsibleSection):
-            section.toggle()
-
-
-class _SectionBody(ScrollableContainer):
-    """Scrollable body of a collapsible section."""
-
-    DEFAULT_CSS = """
-    _SectionBody {
-        height: auto;
-        max-height: 15;
-        margin: 0 0 0 1;
-        background: #0d1117;
-        border-left: tall #333333;
-    }
-    _SectionBody.-hidden {
-        display: none;
-    }
-    """
-
-
-class _CollapsibleSection(Vertical):
-    """A single collapsible section: clickable title + scrollable body.
-
-    Click the title bar to toggle expand/collapse.  The body uses
-    display:none when collapsed so Textual skips layout entirely.
-    """
-
-    DEFAULT_CSS = """
-    _CollapsibleSection {
-        height: auto;
-        margin: 0;
-        padding: 0;
-    }
-    """
-
-    expanded = reactive(False)
-
-    def __init__(
-        self,
-        label: str,
-        expanded: bool = False,
-        body_max_height: int = 15,
-        section_id: str = "",
-        **kwargs,
-    ):
-        super().__init__(**kwargs)
-        self._label = label
-        self._initial_expanded = expanded
-        self._body_max_height = body_max_height
-        self._section_id = section_id
-
-    def compose(self):
-        yield _SectionTitle(
-            self._label,
-            expanded=self._initial_expanded,
-            id=f"{self._section_id}-title" if self._section_id else None,
-        )
-        body = _SectionBody(id=f"{self._section_id}-body" if self._section_id else None)
-        body.styles.max_height = self._body_max_height
-        if not self._initial_expanded:
-            body.add_class("-hidden")
-        yield body
-
-    def on_mount(self) -> None:
-        self.expanded = self._initial_expanded
-
-    def toggle(self) -> None:
-        self.expanded = not self.expanded
-
-    def watch_expanded(self, value: bool) -> None:
-        try:
-            title = self.query_one(_SectionTitle)
-            title.set_expanded(value)
-        except Exception:
-            pass
-        try:
-            body = self.query_one(_SectionBody)
-            if value:
-                body.remove_class("-hidden")
-            else:
-                body.add_class("-hidden")
-        except Exception:
-            pass
-
-    def set_label(self, label: str) -> None:
-        self._label = label
-        try:
-            title = self.query_one(_SectionTitle)
-            title.set_label(label)
-        except Exception:
-            pass
-
-    @property
-    def body(self) -> _SectionBody:
-        """Direct access to the scrollable body container."""
-        return self.query_one(_SectionBody)
-
-
-# =============================================================================
-# Small helper widgets
-# =============================================================================
-
-class _CopyButton(Static):
-    """Small clickable copy button placed inside a section body."""
-
-    DEFAULT_CSS = """
-    _CopyButton {
-        height: 1;
-        width: auto;
-        min-width: 8;
-        margin: 0 0 0 1;
-        color: #555555;
-    }
-    _CopyButton:hover {
-        color: #4a9eff;
-        text-style: underline;
-    }
-    """
-
-    def __init__(self, label: str = "Copy", **kwargs):
-        super().__init__(**kwargs)
-        self._base_label = label
-        self._label = label
-        self._text_to_copy: str = ""
-
-    def set_text(self, text: str) -> None:
-        self._text_to_copy = text
-
-    def render(self) -> RenderableType:
-        return Text(f"[{self._label}]", style="")
-
-    def on_click(self, event) -> None:
-        event.stop()
-        if not self._text_to_copy:
-            self._label = "Empty"
-        elif _copy_to_clipboard(self._text_to_copy):
-            self._label = "Copied!"
-        else:
-            self._label = "Failed"
-        self.refresh()
-        self.set_timer(1.5, self._reset_label)
-
-    def _reset_label(self) -> None:
-        self._label = self._base_label
-        self.refresh()
-
-
-class _StatusHeader(Static):
-    """Top status line: badge + subagent name + tool count + duration."""
-
-    DEFAULT_CSS = """
-    _StatusHeader {
-        height: 1;
-        margin: 0 0 0 1;
     }
     """
 
@@ -311,6 +81,7 @@ class _StatusHeader(Static):
         self._status = "running"
         self._tool_count = 0
         self._duration_ms: Optional[int] = None
+        self._collapsed = False
 
     def update_status(
         self,
@@ -323,12 +94,20 @@ class _StatusHeader(Static):
         self._duration_ms = duration_ms
         self.refresh()
 
+    def set_collapsed(self, collapsed: bool) -> None:
+        self._collapsed = collapsed
+        self.refresh()
+
     def render(self) -> RenderableType:
         icon, fg, bg = HEADER_ICONS.get(
             self._status, ("*", "#1e1e1e", "#cca700")
         )
 
+        collapse_indicator = "[+]" if self._collapsed else "[-]"
+
         t = Text()
+        t.append(collapse_indicator, style="bold #73c991" if not self._collapsed else "bold #cca700")
+        t.append(" ", style="")
         t.append(f" {icon} ", style=f"bold {fg} on {bg}")
         t.append(" ", style="")
         t.append("Subagent ", style="#9cdcfe")
@@ -343,42 +122,67 @@ class _StatusHeader(Static):
 
         return t
 
+    def on_click(self, event) -> None:
+        event.stop()
+        card = self.parent
+        if isinstance(card, SubAgentCard):
+            card.toggle_collapsed()
+
+
+class _SubagentBody(ScrollableContainer):
+    """Scrollable container for the mini-session content.
+
+    Toggled via -collapsed class. Max height prevents subagent output
+    from taking over the entire screen.
+    """
+
+    DEFAULT_CSS = """
+    _SubagentBody {
+        height: auto;
+        max-height: 40;
+        padding: 0;
+        margin: 0;
+        border-left: tall #333355;
+    }
+    _SubagentBody.-collapsed {
+        display: none;
+    }
+    """
+
 
 # =============================================================================
 # Main SubAgentCard
 # =============================================================================
 
 class SubAgentCard(Container):
-    """Displays subagent execution status inside a parent ToolCard.
+    """Displays subagent execution as a collapsible mini-session.
 
     Architecture:
         SubAgentCard (Container)
-        +-- _StatusHeader
-        +-- _CollapsibleSection "Input"  (collapsed by default)
-        |   +-- _SectionTitle  "[+] Input"
-        |   +-- _SectionBody   (max-height: 10)
-        |       +-- Static#sa-input-text       (mounted in on_mount)
-        |       +-- _CopyButton#sa-copy-input  (mounted in on_mount)
-        +-- _CollapsibleSection "Tools"  (expanded by default)
-        |   +-- _SectionTitle  "[-] Tools (N)"
-        |   +-- _SectionBody   (max-height: 15)
-        |       +-- Static#sa-tools-display    (mounted in on_mount)
-        +-- _CollapsibleSection "Output" (collapsed until done)
-            +-- _SectionTitle  "[+] Output"
-            +-- _SectionBody   (max-height: 20)
-                +-- Static#sa-output-text       (mounted in on_mount)
-                +-- _CopyButton#sa-copy-output  (mounted in on_mount)
+        +-- _SubagentHeader (clickable collapse toggle + status badge)
+        +-- _SubagentBody (Vertical, toggles display:none)
+            +-- Static (dim task input text)
+            +-- AssistantMessage (with ToolCards, code blocks, etc.)
+            +-- AssistantMessage (next turn, if any)
+            ...
 
-    IMPORTANT: Tools are rendered as Rich Text in a SINGLE Static widget.
-    No dynamic widget mounting.  _tool_data is a plain dict, not widgets.
-    Every tool add/update re-renders the entire tools Static via .update().
+    Reuses the same AssistantMessage and ToolCard widgets as the main session
+    for identical rendering of text, code, tool results, and file diffs.
     """
 
     DEFAULT_CSS = """
     SubAgentCard {
         height: auto;
         padding: 0;
-        margin: 0 0 0 2;
+        margin: 0;
+    }
+    /* Subagent user messages: orange (distinct from main agent blue) */
+    SubAgentCard MessageWidget.subagent-user {
+        border-left: thick #cc7832;
+    }
+    /* Subagent assistant messages: purple (distinct from main agent green) */
+    SubAgentCard MessageWidget.subagent-message {
+        border-left: thick #6a5acd;
     }
     """
 
@@ -394,361 +198,414 @@ class SubAgentCard(Container):
         self.subagent_id = subagent_id
         self.transcript_path = transcript_path
         self._status = "running"
-        self._input_text = ""
-        self._output_text = ""
+        self._collapsed = False
         self._duration_ms: Optional[int] = None
 
-        # Tool data (plain dicts, NOT widgets): tool_call_id -> _ToolEntry
-        self._tool_data: Dict[str, _ToolEntry] = {}
-        # Insertion-ordered list for stable display order
-        self._tool_order: List[str] = []
+        # Own tool card tracking (separate from app._tool_cards)
+        self._tool_cards: Dict[str, "ToolCard"] = {}
+        self._tool_count = 0
 
-        # Deferred hydration: store and buffered notifications are processed
-        # in on_mount() AFTER compose() has built the DOM tree.
+        # Buffer for tool state updates that arrive before the card is mounted.
+        # call_later creates concurrent async tasks, so TOOL_STATE_UPDATED can
+        # race ahead of the MESSAGE_ADDED handler that creates the ToolCard.
+        self._pending_tool_states: Dict[str, "StoreNotification"] = {}
+
+        # Current assistant message widget (for appending tool cards)
+        self._current_assistant: Optional[Any] = None
+
+        # Track which stream_ids we've already rendered
+        self._rendered_stream_ids: set = set()
+
+        # Deferred hydration: processed in on_mount after compose builds DOM
         self._pending_store = store
         self._pending_notifications = buffered_notifications or []
 
-        # Direct widget references (set in on_mount, avoids query_one)
-        self._header_widget: Optional[_StatusHeader] = None
-        self._input_text_widget: Optional[Static] = None
-        self._input_copy_widget: Optional[_CopyButton] = None
-        self._tools_display_widget: Optional[Static] = None
-        self._output_text_widget: Optional[Static] = None
-        self._output_copy_widget: Optional[_CopyButton] = None
+        # Direct widget references (set after compose)
+        self._header: Optional[_SubagentHeader] = None
+        self._body: Optional[_SubagentBody] = None
 
     def compose(self):
-        yield _StatusHeader(self.subagent_id, id="sa-header")
+        yield _SubagentHeader(self.subagent_id, id="sa-header")
+        yield _SubagentBody(id="sa-body")
 
-        # --- Input section (collapsed by default) ---
-        yield _CollapsibleSection(
-            label="Input",
-            expanded=False,
-            body_max_height=10,
-            section_id="sa-input",
-            id="sa-input-section",
-        )
-
-        # --- Tools section (expanded by default) ---
-        yield _CollapsibleSection(
-            label="Tools (0)",
-            expanded=True,
-            body_max_height=15,
-            section_id="sa-tools",
-            id="sa-tools-section",
-        )
-
-        # --- Output section (collapsed until done) ---
-        yield _CollapsibleSection(
-            label="Output",
-            expanded=False,
-            body_max_height=20,
-            section_id="sa-output",
-            id="sa-output-section",
-        )
-
-    def on_mount(self) -> None:
-        """Populate section bodies, then hydrate from store.
-
-        Compose has already created the _CollapsibleSection widgets and
-        their _SectionBody children.  We mount content widgets into the
-        bodies, then hydrate (pure data operations + .update() calls).
-        """
-        # Grab header reference
+    async def on_mount(self) -> None:
+        """Hydrate from store after compose builds the DOM."""
         try:
-            self._header_widget = self.query_one("#sa-header", _StatusHeader)
+            self._header = self.query_one("#sa-header", _SubagentHeader)
+        except Exception:
+            pass
+        try:
+            self._body = self.query_one("#sa-body", _SubagentBody)
         except Exception:
             pass
 
-        # Input body: text + copy button
-        try:
-            input_body = self.query_one("#sa-input-section", _CollapsibleSection).body
-            self._input_text_widget = Static("(waiting for input...)", id="sa-input-text")
-            self._input_copy_widget = _CopyButton("Copy Input", id="sa-copy-input")
-            input_body.mount(self._input_text_widget, self._input_copy_widget)
-        except Exception as e:
-            logger.error(f"Failed to mount input body: {e}")
-
-        # Tools body: single Static for ALL tools (no dynamic mounting)
-        try:
-            tools_body = self.query_one("#sa-tools-section", _CollapsibleSection).body
-            self._tools_display_widget = Static("(no tools yet)", id="sa-tools-display")
-            tools_body.mount(self._tools_display_widget)
-        except Exception as e:
-            logger.error(f"Failed to mount tools body: {e}")
-
-        # Output body: text + copy button
-        try:
-            output_body = self.query_one("#sa-output-section", _CollapsibleSection).body
-            self._output_text_widget = Static("(waiting for output...)", id="sa-output-text")
-            self._output_copy_widget = _CopyButton("Copy Output", id="sa-copy-output")
-            output_body.mount(self._output_text_widget, self._output_copy_widget)
-        except Exception as e:
-            logger.error(f"Failed to mount output body: {e}")
-
-        # --- Deferred hydration: populate data, then update displays ---
+        # Deferred hydration
         if self._pending_store is not None:
-            self._hydrate_from_store(self._pending_store)
+            await self._hydrate_from_store(self._pending_store)
             self._pending_store = None
 
-        # Flush any buffered notifications that arrived before mount
+        # Flush buffered notifications
         if self._pending_notifications:
             for notif in self._pending_notifications:
-                self.update_from_notification(notif)
+                await self._apply_notification(notif)
             self._pending_notifications.clear()
 
     # -------------------------------------------------------------------------
     # Public API (called by app.py)
     # -------------------------------------------------------------------------
 
-    def hydrate_from_store(self, store: "MessageStore") -> None:
-        """Public entry point for hydration (delegates to internal)."""
-        self._hydrate_from_store(store)
+    def toggle_collapsed(self) -> None:
+        """Toggle collapse state of the body."""
+        self._collapsed = not self._collapsed
+        if self._header:
+            self._header.set_collapsed(self._collapsed)
+        if self._body:
+            if self._collapsed:
+                self._body.add_class("-collapsed")
+            else:
+                self._body.remove_class("-collapsed")
 
-    def update_from_notification(self, notification: "StoreNotification") -> None:
+    async def update_from_notification(self, notification: "StoreNotification") -> None:
         """Update display from a live store notification."""
-        try:
-            from src.session.store.memory_store import StoreEvent
+        await self._apply_notification(notification)
 
-            if notification.event == StoreEvent.TOOL_STATE_UPDATED:
-                if notification.tool_call_id and notification.tool_state:
-                    meta = notification.metadata or {}
-                    tool_name = meta.get("tool_name") or "unknown"
-                    args_summary = meta.get("args_summary") or ""
-                    self._register_tool(
-                        notification.tool_call_id,
-                        tool_name,
-                        args_summary,
-                        notification.tool_state.status,
-                        notification.tool_state.duration_ms,
-                        notification.tool_state.error,
-                    )
+    def hydrate_from_store(self, store: "MessageStore") -> None:
+        """Sync entry point for hydration (for backward compat).
 
-            elif notification.message:
-                msg = notification.message
-                if msg.role == "user" and msg.content and not self._input_text:
-                    content = msg.content if isinstance(msg.content, str) else str(msg.content)
-                    self._input_text = content
-                    self._refresh_input()
-
-                elif msg.role == "assistant" and msg.content:
-                    content = msg.content if isinstance(msg.content, str) else str(msg.content)
-                    self._output_text = content
-                    self._refresh_output()
-
-                elif msg.role == "assistant" and msg.tool_calls:
-                    for tc in msg.tool_calls:
-                        name = tc.function.name if tc.function else "unknown"
-                        args = tc.function.get_parsed_arguments() if tc.function else {}
-                        args_summary = _summarize_args(name, args)
-                        self._register_tool(tc.id, name, args_summary, ToolStatus.PENDING)
-
-        except Exception as e:
-            logger.error(f"SubAgentCard update error: {e}")
+        Prefer the async path via on_mount deferred hydration.
+        """
+        # Schedule async hydration
+        self.call_later(self._hydrate_from_store, store)
 
     def mark_completed(self, success: bool = True) -> None:
         """Mark the subagent as completed."""
         self._status = "done" if success else "failed"
         self._refresh_header()
 
-        # Expand output section on completion (success or failure)
-        try:
-            output_section = self.query_one("#sa-output-section", _CollapsibleSection)
-            output_section.expanded = True
-        except Exception as e:
-            logger.warning(f"Failed to expand output section: {e}")
+        # Auto-collapse on completion
+        if not self._collapsed:
+            self.toggle_collapsed()
 
     def remove(self) -> None:
         """Clean up references before removal."""
-        self._tool_data.clear()
-        self._tool_order.clear()
+        self._tool_cards.clear()
+        self._pending_tool_states.clear()
+        self._current_assistant = None
         super().remove()
 
     # -------------------------------------------------------------------------
-    # Internal: hydration
+    # Internal: hydration from store (session resume)
     # -------------------------------------------------------------------------
 
-    def _hydrate_from_store(self, store: "MessageStore") -> None:
-        """Load initial state from a MessageStore snapshot.
-
-        Pure data operation: populates _tool_data, _input_text, _output_text,
-        then refreshes display widgets via .update() calls.
-        No dynamic widget mounting.
-        """
+    async def _hydrate_from_store(self, store: "MessageStore") -> None:
+        """Load and render all messages from the store."""
         try:
             messages = store.get_ordered_messages()
 
             for msg in messages:
-                if msg.role == "user" and msg.content and not self._input_text:
-                    content = msg.content if isinstance(msg.content, str) else str(msg.content)
-                    self._input_text = content
+                await self._render_message(msg, store=store)
 
-                elif msg.role == "assistant":
-                    if msg.content:
-                        content = msg.content if isinstance(msg.content, str) else str(msg.content)
-                        self._output_text = content
-
-                    if msg.tool_calls:
-                        for tc in msg.tool_calls:
-                            name = tc.function.name if tc.function else "unknown"
-                            args = tc.function.get_parsed_arguments() if tc.function else {}
-                            args_summary = _summarize_args(name, args)
-                            state = store.get_tool_state(tc.id)
-                            status = state.status if state else ToolStatus.PENDING
-                            duration = state.duration_ms if state else None
-                            error = state.error if state else None
-                            self._register_tool(
-                                tc.id, name, args_summary, status, duration, error,
-                                skip_refresh=True,  # batch: refresh once at end
-                            )
-
-            # Single refresh for all data
-            self._refresh_all()
+            self._refresh_header()
 
         except Exception as e:
             logger.error(f"SubAgentCard hydrate error: {e}")
 
     # -------------------------------------------------------------------------
-    # Internal: tool data management
+    # Internal: notification handling
     # -------------------------------------------------------------------------
 
-    def _register_tool(
-        self,
-        tool_call_id: str,
-        name: str,
-        args_summary: str = "",
-        status: ToolStatus = ToolStatus.PENDING,
-        duration_ms: Optional[int] = None,
-        error: Optional[str] = None,
-        skip_refresh: bool = False,
-    ) -> None:
-        """Add or update a tool entry (pure data, no widget mounting)."""
-        existing = self._tool_data.get(tool_call_id)
-        if existing:
-            existing.status = status
-            if duration_ms is not None:
-                existing.duration_ms = duration_ms
-            if error is not None:
-                existing.error = error
-        else:
-            entry = _ToolEntry(
-                tool_call_id=tool_call_id,
-                name=name or "unknown",
-                args_summary=args_summary,
-                status=status,
-                duration_ms=duration_ms,
-                error=error,
-            )
-            self._tool_data[tool_call_id] = entry
-            self._tool_order.append(tool_call_id)
+    async def _apply_notification(self, notification: "StoreNotification") -> None:
+        """Process a single store notification."""
+        try:
+            from src.session.store.memory_store import StoreEvent
 
-        if not skip_refresh:
-            self._refresh_tools_display()
-            self._refresh_header()
+            if notification.event == StoreEvent.TOOL_STATE_UPDATED:
+                self._apply_tool_state_update(notification)
 
-    # -------------------------------------------------------------------------
-    # Internal: display refresh (all use .update(), no mounting)
-    # -------------------------------------------------------------------------
+            elif notification.event == StoreEvent.MESSAGE_ADDED:
+                if notification.message:
+                    await self._render_message(notification.message)
+                    self._refresh_header()
 
-    def _refresh_all(self) -> None:
-        """Refresh all display widgets after hydration."""
+            elif notification.event == StoreEvent.MESSAGE_UPDATED:
+                if notification.message and notification.message.role == "assistant":
+                    await self._update_assistant_message(notification.message)
+
+            elif notification.event == StoreEvent.MESSAGE_FINALIZED:
+                if notification.message and notification.message.role == "assistant":
+                    # Finalize the current assistant widget
+                    if self._current_assistant:
+                        self._current_assistant.finalize()
+
+        except Exception as e:
+            logger.error(f"SubAgentCard notification error: {e}")
+
+    def _apply_tool_state_update(self, notification: "StoreNotification") -> None:
+        """Update an existing ToolCard from a tool state notification.
+
+        call_later processes notifications sequentially, so the MESSAGE_ADDED
+        that creates the ToolCard always completes before TOOL_STATE_UPDATED
+        is processed. No buffering needed.
+        """
+        if not notification.tool_call_id or not notification.tool_state:
+            return
+
+        card = self._tool_cards.get(notification.tool_call_id)
+        if not card:
+            # Card not created yet (async race). Buffer for flush on card creation.
+            self._pending_tool_states[notification.tool_call_id] = notification
+            return
+
+        state = notification.tool_state
+        status = state.status
+
+        if status == ToolStatus.RUNNING:
+            card.start_running()
+        elif status == ToolStatus.SUCCESS:
+            # Result content comes from tool MESSAGE_ADDED, not state update.
+            # Use state.result if available, otherwise just update duration/status.
+            result_content = str(state.result) if state.result else ""
+            if result_content:
+                card.set_result(result_content, duration_ms=state.duration_ms)
+            elif card.status != ToolStatus.SUCCESS:
+                # Only upgrade status if card hasn't already been set by tool message
+                card.set_result("", duration_ms=state.duration_ms)
+        elif status in (ToolStatus.FAILED, ToolStatus.ERROR):
+            card.set_error(state.error or "Unknown error")
+        elif status == ToolStatus.CANCELLED:
+            card.cancel()
+
         self._refresh_header()
-        self._refresh_input()
-        self._refresh_output()
-        self._refresh_tools_display()
+
+    # -------------------------------------------------------------------------
+    # Internal: message rendering
+    # -------------------------------------------------------------------------
+
+    async def _render_message(
+        self,
+        msg: "Message",
+        store: Optional["MessageStore"] = None,
+    ) -> None:
+        """Render a single store message into the body."""
+        if not self._body:
+            return
+
+        if msg.role == "user":
+            await self._render_user_message(msg)
+        elif msg.role == "assistant":
+            await self._render_assistant_message(msg, store=store)
+        elif msg.role == "tool":
+            self._apply_tool_result_message(msg)
+
+    async def _render_user_message(self, msg: "Message") -> None:
+        """Show user message as a proper MessageWidget with subagent-specific color."""
+        from src.ui.widgets.message import MessageWidget
+
+        if not self._body or not msg.content:
+            return
+        content = msg.content if isinstance(msg.content, str) else str(msg.content)
+
+        widget = MessageWidget(role="user")
+        widget.add_class("subagent-user")
+        await self._body.mount(widget)
+        await widget.add_text(content)
+        widget.finalize()
+
+    async def _render_assistant_message(
+        self,
+        msg: "Message",
+        store: Optional["MessageStore"] = None,
+    ) -> None:
+        """Render an assistant message using AssistantMessage widget."""
+        from src.ui.widgets.message import AssistantMessage
+
+        if not self._body:
+            return
+
+        # Avoid rendering the same message twice
+        stream_id = msg.meta.stream_id if msg.meta else None
+        if stream_id and stream_id in self._rendered_stream_ids:
+            return
+        if stream_id:
+            self._rendered_stream_ids.add(stream_id)
+
+        widget = AssistantMessage()
+        widget.add_class("subagent-message")
+        self._current_assistant = widget
+        await self._body.mount(widget)
+
+        # Render segments if available
+        segments = msg.meta.segments if msg.meta and msg.meta.segments else []
+        if segments:
+            await self._render_segments(widget, msg, segments, store=store)
+        else:
+            # Fallback: render plain content + tool calls
+            if msg.content:
+                await widget.add_text(msg.content)
+            if msg.tool_calls:
+                for tc in msg.tool_calls:
+                    if tc.function.name in SILENT_TOOLS:
+                        continue
+                    args = json.loads(tc.function.arguments) if tc.function.arguments else {}
+                    card = widget.add_tool_card(tc.id, tc.function.name, args, requires_approval=False)
+                    self._register_tool_card(tc.id, card)
+                    if store:
+                        self._hydrate_tool_card(card, tc.id, store)
+
+        # Finalize immediately (messages arrive complete, no streaming)
+        widget.finalize()
+
+    async def _update_assistant_message(self, msg: "Message") -> None:
+        """Handle incremental updates to the current assistant message.
+
+        For live notifications where the assistant message gets updated
+        with new segments (e.g., new tool calls added to an existing message).
+        """
+        if not self._current_assistant:
+            return
+
+        segments = msg.meta.segments if msg.meta and msg.meta.segments else []
+        if segments:
+            # Re-render only new segments we haven't seen
+            await self._render_segments(self._current_assistant, msg, segments)
+
+    async def _render_segments(
+        self,
+        widget: "Any",  # AssistantMessage
+        message: "Message",
+        segments: list,
+        store: Optional["MessageStore"] = None,
+    ) -> None:
+        """Render message segments into an AssistantMessage widget.
+
+        Simplified version of app.py's _render_segments(). Handles:
+        - TextSegment: markdown text
+        - CodeBlockSegment: syntax-highlighted code
+        - ThinkingSegment: collapsible thinking block
+        - ToolCallRefSegment: ToolCard with diffs and results
+        """
+        from src.session.models.message import (
+            TextSegment, CodeBlockSegment,
+            ToolCallRefSegment, ThinkingSegment
+        )
+
+        for segment in segments:
+            if isinstance(segment, TextSegment):
+                if segment.content and segment.content.strip():
+                    await widget.add_text(segment.content)
+
+            elif isinstance(segment, CodeBlockSegment):
+                widget.start_code_block(segment.language)
+                widget.append_code(segment.content)
+                widget.end_code_block()
+
+            elif isinstance(segment, ThinkingSegment):
+                if segment.content and segment.content.strip():
+                    widget.start_thinking()
+                    widget.append_thinking(segment.content)
+                    widget.end_thinking()
+
+            elif isinstance(segment, ToolCallRefSegment):
+                tc = self._find_tool_call(message, segment.tool_call_id)
+                if tc:
+                    if tc.function.name in SILENT_TOOLS:
+                        continue
+                    # Skip if we already created this card
+                    if tc.id in self._tool_cards:
+                        continue
+                    args = json.loads(tc.function.arguments) if tc.function.arguments else {}
+                    card = widget.add_tool_card(tc.id, tc.function.name, args, requires_approval=False)
+                    self._register_tool_card(tc.id, card)
+                    # Hydrate from store if available (session resume)
+                    if store:
+                        self._hydrate_tool_card(card, tc.id, store)
+
+    # -------------------------------------------------------------------------
+    # Internal: tool card hydration
+    # -------------------------------------------------------------------------
+
+    def _hydrate_tool_card(
+        self,
+        card: "ToolCard",
+        tool_call_id: str,
+        store: "MessageStore",
+    ) -> None:
+        """Load tool result from store into a ToolCard (session resume)."""
+        result_msg = store.get_tool_result(tool_call_id)
+
+        if result_msg:
+            result_content = (
+                result_msg.get_text_content()
+                if hasattr(result_msg, 'get_text_content')
+                else (result_msg.content or "")
+            )
+            status = result_msg.meta.status if result_msg.meta else None
+            duration = result_msg.meta.duration_ms if result_msg.meta else None
+
+            if status in ("success", None):
+                card.set_result(result_content, duration_ms=duration)
+            elif status in ("error", "timeout", "cancelled"):
+                card.set_error(result_content or f"Tool {status}")
+            else:
+                card.set_result(result_content, duration_ms=duration)
+        else:
+            # No result found -- interrupted
+            card.status = ToolStatus.CANCELLED
+            card.result_preview = "(Interrupted - no recorded result)"
+
+    def _apply_tool_result_message(self, msg: "Message") -> None:
+        """Apply a tool result message to the corresponding ToolCard."""
+        if not msg.meta:
+            return
+        tool_call_id = msg.meta.tool_call_id if hasattr(msg.meta, 'tool_call_id') else None
+        if not tool_call_id:
+            return
+
+        card = self._tool_cards.get(tool_call_id)
+        if not card:
+            return
+
+        content = msg.content if isinstance(msg.content, str) else str(msg.content or "")
+        status = msg.meta.status if msg.meta else None
+        duration = msg.meta.duration_ms if msg.meta else None
+
+        if status in ("error", "timeout", "cancelled"):
+            card.set_error(content or f"Tool {status}")
+        else:
+            card.set_result(content, duration_ms=duration)
+
+    # -------------------------------------------------------------------------
+    # Internal: helpers
+    # -------------------------------------------------------------------------
+
+    def _register_tool_card(self, tool_call_id: str, card: "ToolCard") -> None:
+        """Register a tool card and flush any pending state updates.
+
+        call_later creates concurrent async tasks, so TOOL_STATE_UPDATED
+        notifications can arrive before MESSAGE_ADDED finishes creating
+        the ToolCard. This method applies any buffered states.
+        """
+        self._tool_cards[tool_call_id] = card
+        self._tool_count += 1
+
+        # Flush pending tool state update (if TOOL_STATE_UPDATED raced ahead)
+        pending = self._pending_tool_states.pop(tool_call_id, None)
+        if pending:
+            self._apply_tool_state_update(pending)
+
+    @staticmethod
+    def _find_tool_call(message: "Message", tool_call_id: str):
+        """Find a tool call by ID in a message."""
+        if not message.tool_calls:
+            return None
+        for tc in message.tool_calls:
+            if tc.id == tool_call_id:
+                return tc
+        return None
 
     def _refresh_header(self) -> None:
-        if self._header_widget:
-            self._header_widget.update_status(
-                self._status, len(self._tool_data), self._duration_ms
+        """Update the header with current status and tool count."""
+        if self._header:
+            self._header.update_status(
+                self._status, self._tool_count, self._duration_ms
             )
-
-    def _refresh_input(self) -> None:
-        if self._input_text_widget:
-            self._input_text_widget.update(self._input_text or "(empty)")
-        if self._input_copy_widget:
-            self._input_copy_widget.set_text(self._input_text)
-
-    def _refresh_output(self) -> None:
-        if self._output_text_widget:
-            self._output_text_widget.update(self._output_text or "(empty)")
-        if self._output_copy_widget:
-            self._output_copy_widget.set_text(self._output_text)
-
-    def _refresh_tools_display(self) -> None:
-        """Re-render ALL tools as Rich Text into a single Static widget."""
-        if not self._tools_display_widget:
-            return
-
-        if not self._tool_data:
-            self._tools_display_widget.update("(no tools yet)")
-            self._update_tools_title(0)
-            return
-
-        # Build Rich Text with all tool lines
-        text = Text()
-        for i, tool_call_id in enumerate(self._tool_order):
-            entry = self._tool_data.get(tool_call_id)
-            if not entry:
-                continue
-
-            if i > 0:
-                text.append("\n")
-
-            # Status badge
-            icon, fg, bg = STATUS_ICONS.get(
-                entry.status, ("?", "#888888", "#2a2a2a")
-            )
-            text.append(f" {icon} ", style=f"bold {fg} on {bg}")
-            text.append(" ", style="")
-
-            # Tool name
-            text.append(entry.name, style="bold #e0e0e0")
-
-            # Args summary
-            if entry.args_summary:
-                text.append("(", style="#6e7681")
-                text.append(entry.args_summary, style="#9cdcfe")
-                text.append(")", style="#6e7681")
-
-            # Duration
-            if entry.duration_ms:
-                text.append(f"  {entry.duration_ms}ms", style="#6e7681")
-
-            # Error
-            if entry.error:
-                err = entry.error[:57] + "..." if len(entry.error) > 60 else entry.error
-                text.append(f"  {err}", style="#f14c4c")
-
-        self._tools_display_widget.update(text)
-        self._update_tools_title(len(self._tool_data))
-
-    def _update_tools_title(self, count: int) -> None:
-        try:
-            tools_section = self.query_one("#sa-tools-section", _CollapsibleSection)
-            tools_section.set_label(f"Tools ({count})")
-        except Exception:
-            pass
-
-
-def _summarize_args(tool_name: str, args: Dict[str, Any]) -> str:
-    """Create a short summary of tool arguments."""
-    if not args:
-        return ""
-
-    main_keys = [
-        "file_path", "path", "filename", "command", "query",
-        "pattern", "url", "name",
-    ]
-    for key in main_keys:
-        if key in args:
-            val = str(args[key])
-            if len(val) > 60:
-                val = val[:57] + "..."
-            return val
-
-    for val in args.values():
-        if isinstance(val, str) and val:
-            if len(val) > 60:
-                return val[:57] + "..."
-            return val
-    return ""

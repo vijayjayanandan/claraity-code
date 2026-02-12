@@ -39,6 +39,9 @@ TOOL_TIMEOUT_OVERRIDES = {
     # Commands can run long (builds, tests, etc.)
     "run_command": 600,  # 10 minutes
 
+    # Subagent delegation needs time for full subagent execution
+    "delegate_to_subagent": 600,  # 10 minutes (subagents run multiple tools)
+
     # LSP tools need extra time for server startup (jedi-language-server ~25s)
     "get_file_outline": 90,
     "get_symbol_context": 90,
@@ -160,6 +163,10 @@ class ToolExecutor:
             tool: Tool to register
         """
         self.tools[tool.name] = tool
+
+    def unregister_tool(self, tool_name: str) -> None:
+        """Remove a tool by name. No-op if not registered."""
+        self.tools.pop(tool_name, None)
 
     def execute_tool(self, tool_name: str, **kwargs: Any) -> ToolResult:
         """

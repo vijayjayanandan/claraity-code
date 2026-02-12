@@ -905,6 +905,10 @@ class CodingAgentApp(App):
             if sub_info.get("unsubscribe"):
                 sub_info["unsubscribe"]()
 
+        # Synchronously kill MCP subprocesses (event loop may be closed)
+        if self.agent and self.agent._mcp_manager.has_connections:
+            self.agent._mcp_manager.shutdown_sync()
+
     def _setup_subagent_registry(self) -> None:
         """Set up subagent registry for live visibility.
 
@@ -1084,15 +1088,31 @@ class CodingAgentApp(App):
     ) -> None:
         """Update SubAgentCard from store notification.
 
+        Bridges sync callback (from call_from_thread) to async handler,
+        since SubAgentCard.update_from_notification is now async (it mounts
+        AssistantMessage and ToolCard widgets).
+
         Args:
             subagent_id: The subagent session ID
             notification: StoreNotification from the subagent's MessageStore
         """
+        self.call_later(
+            self._async_handle_subagent_notification,
+            subagent_id,
+            notification,
+        )
+
+    async def _async_handle_subagent_notification(
+        self,
+        subagent_id: str,
+        notification: "StoreNotification"
+    ) -> None:
+        """Async handler for subagent store notifications."""
         sub = self._subagent_subscriptions.get(subagent_id)
         if sub and sub.get("card"):
-            sub["card"].update_from_notification(notification)
+            await sub["card"].update_from_notification(notification)
         else:
-            # Buffer notification — cap at 500 to prevent unbounded growth
+            # Buffer notification -- cap at 500 to prevent unbounded growth
             buf = self._buffered_subagent_notifications.setdefault(subagent_id, [])
             if len(buf) < 500:
                 buf.append(notification)
@@ -1208,8 +1228,63 @@ class CodingAgentApp(App):
             await self._show_session_picker()
             return True
 
+        if cmd == "/connect-jira":
+            self.run_worker(self._connect_jira(), exclusive=False, group="jira")
+            return True
+
+        if cmd == "/disconnect-jira":
+            self.run_worker(self._disconnect_jira(), exclusive=False, group="jira")
+            return True
+
         # Unknown command - let it pass through to agent
         return False
+
+    async def _connect_jira(self) -> None:
+        """Connect to Jira via Atlassian Remote MCP Server."""
+        if not self.agent:
+            self.notify("No agent available", severity="error")
+            return
+
+        self.notify("Connecting to Jira via Atlassian MCP...")
+
+        try:
+            from src.integrations.jira.connection import JiraConnection
+            from src.integrations.jira.tools import create_jira_policy_gate
+            from src.integrations.mcp.client import McpClient, StdioTransport
+            from src.integrations.mcp.registry import McpToolRegistry
+
+            conn = JiraConnection()
+            if not conn.enabled:
+                # First-time setup: configure with default (user can change later)
+                conn.configure("https://atlassian.net")
+
+            config = conn.get_mcp_config()
+            transport = StdioTransport()
+            client = McpClient(config, transport)
+            policy_gate = create_jira_policy_gate()
+            registry = McpToolRegistry(config, policy_gate)
+
+            count = await self.agent.enable_mcp_integration("jira", registry, client)
+            self.notify(
+                f"Jira connected: {count} tools available",
+                severity="information",
+            )
+        except Exception as e:
+            self.notify(f"Jira connection failed: {e}", severity="error")
+
+    async def _disconnect_jira(self) -> None:
+        """Disconnect from Jira MCP server."""
+        if not self.agent:
+            self.notify("Jira is not connected", severity="warning")
+            return
+
+        try:
+            await self.agent.disable_mcp_integration("jira")
+            self.notify("Jira disconnected", severity="information")
+        except KeyError:
+            self.notify("Jira is not connected", severity="warning")
+        except Exception as e:
+            self.notify(f"Disconnect failed: {e}", severity="error")
 
     async def _show_session_picker(self) -> None:
         """Show the session picker modal and load selected session."""

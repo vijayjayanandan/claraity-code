@@ -228,7 +228,7 @@ class SubAgentManager:
         subagent_name: str,
         task_description: str,
         context: Optional[Dict[str, Any]] = None,
-        max_iterations: int = 5
+        max_iterations: int = 50
     ) -> Optional['SubAgentResult']:
         """Delegate task to a specific subagent.
 
@@ -278,7 +278,7 @@ class SubAgentManager:
         self,
         task_description: str,
         context: Optional[Dict[str, Any]] = None,
-        max_iterations: int = 5
+        max_iterations: int = 50
     ) -> Optional['SubAgentResult']:
         """Automatically select and delegate to best subagent.
 
@@ -321,7 +321,7 @@ class SubAgentManager:
     def execute_parallel(
         self,
         tasks: List[Tuple[str, str, Optional[Dict[str, Any]]]],
-        max_iterations: int = 5
+        max_iterations: int = 50
     ) -> DelegationResult:
         """Execute multiple subagent tasks in parallel.
 

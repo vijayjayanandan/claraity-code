@@ -65,7 +65,7 @@ from src.tools import (
     RequestPlanApprovalTool,
 )
 from src.tools.tool_parser import ToolCallParser, ParsedResponse
-from src.tools.tool_schemas import ALL_TOOLS
+from src.tools.tool_schemas import ALL_TOOLS, get_all_tools
 from src.prompts import PromptLibrary, TaskType
 from .context_builder import ContextBuilder
 from .file_reference_parser import FileReferenceParser
@@ -339,6 +339,11 @@ class CodingAgent(AgentInterface):
         # Initialize tools
         self.tool_executor = ToolExecutor(hook_manager=hook_manager)
         self._register_tools()
+
+        # MCP connection manager (lazy - no connections at init time)
+        # Connections added via enable_mcp_integration()
+        from src.integrations.mcp.manager import McpConnectionManager
+        self._mcp_manager = McpConnectionManager()
 
         # Set workspace root on file operation tools so path validation works
         from src.tools.file_operations import FileOperationTool
@@ -725,6 +730,40 @@ class CodingAgent(AgentInterface):
         # This is registered after subagent_manager is initialized in __init__
         # Will be registered separately via _register_delegation_tool()
 
+    def _get_tools(self):
+        """Build the tool list for LLM requests (native + MCP)."""
+        mcp_defs = self._mcp_manager.get_all_tool_definitions() or None
+        return get_all_tools(mcp_definitions=mcp_defs)
+
+    async def enable_mcp_integration(self, name, mcp_registry, client, secret_store=None):
+        """Enable a named MCP integration by connecting and discovering tools.
+
+        Args:
+            name: Connection identifier (e.g. "jira", "github").
+            mcp_registry: McpToolRegistry instance (with policy gate).
+            client: McpClient instance (transport configured, not connected).
+            secret_store: Optional SecretStore for auth token resolution.
+
+        Returns:
+            Number of MCP tools registered.
+        """
+        return await self._mcp_manager.connect(
+            name=name,
+            config=client._config,
+            client=client,
+            registry=mcp_registry,
+            tool_executor=self.tool_executor,
+            secret_store=secret_store,
+        )
+
+    async def disable_mcp_integration(self, name):
+        """Disconnect a named MCP integration.
+
+        Args:
+            name: Connection identifier.
+        """
+        await self._mcp_manager.disconnect(name, self.tool_executor)
+
     @observe_agent_method("execute_with_tools", capture_input=False, capture_output=True)
     def _execute_with_tools(
         self,
@@ -768,7 +807,7 @@ class CodingAgent(AgentInterface):
 
                 for chunk, tc in self.llm.generate_with_tools_stream(
                     messages=current_context,
-                    tools=ALL_TOOLS,
+                    tools=self._get_tools(),
                     tool_choice="auto"
                 ):
                     # Display content chunks as they arrive
@@ -799,7 +838,7 @@ class CodingAgent(AgentInterface):
                 # Non-streaming mode - original behavior
                 llm_response = self.llm.generate_with_tools(
                     messages=current_context,
-                    tools=ALL_TOOLS,
+                    tools=self._get_tools(),
                     tool_choice="auto"  # Let LLM decide whether to use tools
                 )
 
@@ -827,7 +866,7 @@ class CodingAgent(AgentInterface):
                         # Generate continuation
                         continuation_response = self.llm.generate_with_tools(
                             messages=continuation_context,
-                            tools=ALL_TOOLS,
+                            tools=self._get_tools(),
                             tool_choice="auto"
                         )
                         response_content = response_content + "\n\n" + (continuation_response.content or "")
@@ -898,6 +937,19 @@ class CodingAgent(AgentInterface):
                     continue  # Skip to next tool call
 
                 # Check if approval is required (NORMAL mode only)
+                # NOTE: MCP tools are TUI-only (enabled via async enable_mcp_integration).
+                # They should never appear in this sync path. If they do, block them.
+                if self._mcp_manager.is_mcp_tool(tool_name):
+                    tool_result = f"[BLOCKED] MCP tool '{tool_name}' is only available in TUI mode"
+                    tool_results.append({"status": "error", "message": tool_result, "tool_name": tool_name})
+                    tool_messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "name": tool_name,
+                        "content": tool_result
+                    })
+                    continue
+
                 if self.permission_manager and self.permission_manager.mode == PermissionMode.NORMAL:
                     # Only ask for risky operations
                     risky_tools = ['write_file', 'edit_file', 'append_to_file', 'run_command', 'git_commit']
@@ -1046,7 +1098,7 @@ class CodingAgent(AgentInterface):
         # Generate final summary (no tools this time, just text)
         final_response = self.llm.generate_with_tools(
             messages=current_context,
-            tools=ALL_TOOLS,
+            tools=self._get_tools(),
             tool_choice="none"  # Force text response only
         )
         final_content = final_response.content or "Task completed based on tool results."
@@ -1095,7 +1147,7 @@ class CodingAgent(AgentInterface):
 
             async for chunk, tc in self.llm.generate_with_tools_stream_async(
                 messages=current_context,
-                tools=ALL_TOOLS,
+                tools=self._get_tools(),
                 tool_choice="auto"
             ):
                 # Handle content chunks
@@ -1172,6 +1224,25 @@ class CodingAgent(AgentInterface):
                     continue  # Skip to next tool call
 
                 # Check if approval is required (NORMAL mode)
+                # NOTE: MCP tools are TUI-only (enabled via async enable_mcp_integration).
+                # They should never appear in this legacy async path. If they do, block them.
+                if self._mcp_manager.is_mcp_tool(tool_name):
+                    tool_result_str = f"[BLOCKED] MCP tool '{tool_name}' is only available in TUI mode"
+                    tool_results.append({"status": "error", "message": tool_result_str, "tool_name": tool_name})
+                    tool_messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "name": tool_name,
+                        "content": tool_result_str
+                    })
+                    self.tool_execution_history.append({
+                        "tool": tool_name,
+                        "arguments": tool_args,
+                        "success": False,
+                        "error": tool_result_str
+                    })
+                    continue
+
                 if self.permission_manager and self.permission_manager.mode == PermissionMode.NORMAL:
                     from src.core.plan_mode import is_agent_internal_write
                     risky_tools = ['write_file', 'edit_file', 'append_to_file', 'run_command', 'git_commit']
@@ -1287,7 +1358,7 @@ class CodingAgent(AgentInterface):
 
         final_response = self.llm.generate_with_tools(
             messages=current_context,
-            tools=ALL_TOOLS,
+            tools=self._get_tools(),
             tool_choice="none"
         )
         final_content = final_response.content or "Task completed based on tool results."
@@ -2251,7 +2322,6 @@ class CodingAgent(AgentInterface):
         )
         from src.core.tool_status import ToolStatus as CoreToolStatus
         from src.core.render_meta import ToolApprovalMeta
-        from src.tools.tool_schemas import ALL_TOOLS
         import json
         import time
 
@@ -2290,13 +2360,20 @@ class CodingAgent(AgentInterface):
 
             # In PLAN mode, don't ask for approval - use gating instead
             # Read-only tools execute freely, write tools are blocked by plan_mode_state.gate_tool()
+            # Exception: MCP write tools are external side effects that gate_tool() can't catch
             if mode == PermissionMode.PLAN:
+                if self._mcp_manager.is_mcp_tool(tool_name):
+                    return self._mcp_manager.requires_approval(tool_name)
                 return False
 
             # Agent-internal writes (plan files, sessions, logs) bypass approval
             # — same as MemoryManager writing session JSONL without approval
             if tool_args and is_agent_internal_write(tool_name, tool_args):
                 return False
+
+            # MCP tools: delegate to policy gate for read/write classification
+            if self._mcp_manager.is_mcp_tool(tool_name):
+                return self._mcp_manager.requires_approval(tool_name)
 
             # In NORMAL mode (default), ask only for risky tools
             risky_tools = {'write_file', 'edit_file', 'append_to_file', 'run_command', 'git_commit'}
@@ -2490,7 +2567,7 @@ class CodingAgent(AgentInterface):
                     # 2. Get LLM stream - yields ProviderDelta objects
                     llm_stream = self.llm.generate_provider_deltas_async(
                         messages=current_context,
-                        tools=ALL_TOOLS,
+                        tools=self._get_tools(),
                         tool_choice="auto"
                     )
 

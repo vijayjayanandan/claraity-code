@@ -5,7 +5,7 @@ This module defines all available tools in OpenAI's function calling format.
 These schemas are used by the LLM to understand what tools are available and how to call them.
 """
 
-from typing import List
+from typing import List, Optional
 from src.llm.base import ToolDefinition
 
 
@@ -1126,6 +1126,26 @@ def get_tools_for_task(task_type: str) -> List[ToolDefinition]:
     return ALL_TOOLS
 
 
+def get_all_tools(
+    mcp_definitions: Optional[List[ToolDefinition]] = None,
+) -> List[ToolDefinition]:
+    """Return native tools merged with any active MCP tool definitions.
+
+    This is the single function that builds the tool list for LLM requests.
+    Native tools come first (stable ordering), MCP tools are appended.
+
+    Args:
+        mcp_definitions: Optional list of MCP-provided ToolDefinitions
+                        (from McpToolRegistry.get_tool_definitions()).
+
+    Returns:
+        Combined list of ToolDefinitions.
+    """
+    if not mcp_definitions:
+        return list(ALL_TOOLS)
+    return list(ALL_TOOLS) + list(mcp_definitions)
+
+
 __all__ = [
     "READ_FILE_TOOL",
     "WRITE_FILE_TOOL",
@@ -1159,4 +1179,5 @@ __all__ = [
     "EXIT_PLAN_MODE_TOOL",
     "PLAN_MODE_TOOLS",
     "get_tools_for_task",
+    "get_all_tools",
 ]
