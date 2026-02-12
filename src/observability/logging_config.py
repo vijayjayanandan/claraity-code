@@ -79,6 +79,7 @@ operation: ContextVar[str] = ContextVar('operation', default='')
 _queue_listener: Optional[logging.handlers.QueueListener] = None
 _log_queue: Optional[queue.Queue] = None
 _sqlite_handler: Optional["SQLiteErrorHandler"] = None  # Forward reference
+_sqlite_log_handler: Optional["SQLiteLogHandler"] = None  # Forward reference
 _configured: bool = False
 _shutting_down: bool = False
 _original_sigint_handler = None
@@ -536,8 +537,8 @@ def _asyncio_exception_handler(loop, context):
 
 
 def _flush_logs():
-    """Flush all pending logs (QueueListener + SQLite handler)."""
-    global _queue_listener, _sqlite_handler, _shutting_down
+    """Flush all pending logs (QueueListener + SQLite handlers)."""
+    global _queue_listener, _sqlite_handler, _sqlite_log_handler, _shutting_down
 
     if _shutting_down:
         return  # Prevent recursive shutdown
@@ -554,6 +555,13 @@ def _flush_logs():
     if _sqlite_handler:
         try:
             _sqlite_handler.close()
+        except Exception:
+            pass
+
+    # 3. Flush SQLite log handler queue
+    if _sqlite_log_handler:
+        try:
+            _sqlite_log_handler.close()
         except Exception:
             pass
 
@@ -634,14 +642,17 @@ def configure_logging(
     All logs go to JSONL file only - NO console output in any mode.
     Console is reserved for user-facing messages via Rich console.print().
 
+    Configuration is loaded from `.clarity/config.yaml` with layered overrides:
+        Environment variables > CLI flags > config.yaml > code defaults
+
     Args:
         mode: "cli" or "tui" (both behave the same - file-only logging)
-        log_level: Override log level (default: from LOG_LEVEL env or INFO)
+        log_level: Override log level from CLI (default: from config.yaml or INFO)
         log_dir: Directory for log files
         max_bytes: Max size per log file before rotation
         backup_count: Number of rotated files to keep
     """
-    global _queue_listener, _log_queue, _sqlite_handler, _configured
+    global _queue_listener, _log_queue, _sqlite_handler, _sqlite_log_handler, _configured
 
     if _configured:
         return
@@ -650,11 +661,32 @@ def configure_logging(
     process_run_id = str(uuid.uuid4())[:12]
     run_id.set(process_run_id)
 
-    # Get log level
-    if log_level is None:
-        log_level = os.environ.get('LOG_LEVEL', 'INFO').upper()
+    # ---- Load centralized config from .clarity/config.yaml ----
+    from .log_config_loader import (
+        load_logging_config,
+        resolve_logging_config,
+        apply_component_levels,
+        generate_default_config,
+    )
 
-    level = getattr(logging, log_level.upper(), logging.INFO)
+    # Generate default config on first run
+    generate_default_config()
+
+    # Load and resolve with priority layering
+    config = load_logging_config()
+    env_level = os.environ.get('LOG_LEVEL')
+    config = resolve_logging_config(
+        env_level=env_level,
+        cli_level=log_level,
+        config=config,
+    )
+
+    # Resolved global level
+    level = getattr(logging, config.level.upper(), logging.INFO)
+
+    # Use retention settings from config for JSONL handler
+    max_bytes = config.retention.jsonl_max_bytes
+    backup_count = config.retention.jsonl_backup_count
 
     # Ensure log directory exists
     log_path = Path(log_dir)
@@ -672,9 +704,10 @@ def configure_logging(
         encoding='utf-8',
     )
     file_handler.setFormatter(create_json_formatter())
-    # INFO level for development - DEBUG is too verbose and can flood the queue
-    # Set LOG_LEVEL=DEBUG env var if you need debug logs for troubleshooting
-    file_handler.setLevel(logging.INFO)
+    # Handler level from config (default: INFO)
+    file_handler.setLevel(
+        getattr(logging, config.handlers.jsonl_level, logging.INFO)
+    )
     handlers.append(file_handler)
 
     # 2. Console handler - DISABLED for both modes
@@ -689,11 +722,27 @@ def configure_logging(
     try:
         from .sqlite_error_handler import SQLiteErrorHandler
         sqlite_handler = SQLiteErrorHandler()
-        sqlite_handler.setLevel(logging.ERROR)
+        # Handler level from config (default: ERROR)
+        sqlite_handler.setLevel(
+            getattr(logging, config.handlers.errors_db_level, logging.ERROR)
+        )
         handlers.append(sqlite_handler)
         _sqlite_handler = sqlite_handler  # Save reference for shutdown
     except ImportError:
         pass  # SQLite handler not available yet
+
+    # 4. SQLite log handler - ALL log levels to logs.db for queryable access
+    try:
+        from .sqlite_log_handler import SQLiteLogHandler
+        log_handler = SQLiteLogHandler()
+        # Handler level from config (default: DEBUG)
+        log_handler.setLevel(
+            getattr(logging, config.handlers.logs_db_level, logging.DEBUG)
+        )
+        handlers.append(log_handler)
+        _sqlite_log_handler = log_handler  # Save reference for shutdown
+    except ImportError:
+        pass  # SQLite log handler not available yet
 
     # Create bounded queue for non-blocking logging (drops when full)
     _log_queue = queue.Queue(maxsize=LOG_QUEUE_SIZE)
@@ -794,10 +843,21 @@ def configure_logging(
     for logger_name in noisy_loggers:
         logging.getLogger(logger_name).setLevel(logging.WARNING)
 
+    # Apply per-component log levels from config.yaml
+    if config.components:
+        apply_component_levels(config.components)
+
     # Install crash hooks
     _install_crash_hooks()
 
     _configured = True
+
+    # Startup cleanup using retention config
+    try:
+        from .log_store import get_log_store
+        get_log_store().clear_old(days=config.retention.logs_db_days)
+    except Exception:
+        pass  # Non-critical, logs.db may not exist yet
 
     # Log startup (this now goes through the full pipeline)
     logger = structlog.get_logger('logging')
@@ -805,10 +865,11 @@ def configure_logging(
         'logging_configured',
         run_id=process_run_id,
         mode=mode,
-        level=log_level,
+        level=config.level,
         log_file=str(jsonl_file),
         max_bytes=max_bytes,
         backup_count=backup_count,
+        config_components=config.components or None,
     )
 
 

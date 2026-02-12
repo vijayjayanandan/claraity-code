@@ -42,17 +42,16 @@ from src.core import CodingAgent
 from src.execution.controller import LongRunningController
 from src.ui.app import CodingAgentApp
 
-# Configure production-grade logging (structlog + QueueHandler)
-# Logging will be configured based on mode (cli vs tui) in the main function
-# For now, set up minimal logging until mode is determined
-log_level = os.environ.get("LOG_LEVEL", "WARNING").upper()
+# Logging is configured lazily in chat_mode() / simple_chat_mode()
+# via configure_logging() which loads .clarity/config.yaml + env overrides.
+# The --log-level CLI flag is passed through as an override.
 _logging_configured = False
 
 
 console = Console()
 
 
-def chat_mode(agent: CodingAgent, controller: Optional[LongRunningController] = None) -> None:
+def chat_mode(agent: CodingAgent, controller: Optional[LongRunningController] = None, log_level: Optional[str] = None) -> None:
     """Interactive chat mode with professional Textual TUI and async streaming.
 
     Uses Textual framework for rich UI with code blocks, tool cards, and streaming.
@@ -64,6 +63,7 @@ def chat_mode(agent: CodingAgent, controller: Optional[LongRunningController] = 
     Args:
         agent: CodingAgent instance
         controller: Optional LongRunningController for checkpoint functionality
+        log_level: Optional CLI log level override
     """
     try:
         # Configure logging - all logs go to JSONL file only, no console output
@@ -122,15 +122,16 @@ def chat_mode(agent: CodingAgent, controller: Optional[LongRunningController] = 
         # Fallback to simple mode
         console.print(f"[dim]TUI unavailable: {type(e).__name__}: {e}[/dim]")
         console.print(f"[dim]Falling back to simple chat mode...[/dim]")
-        simple_chat_mode(agent, controller)
+        simple_chat_mode(agent, controller, log_level=log_level)
 
 
-def simple_chat_mode(agent: CodingAgent, controller: Optional[LongRunningController] = None) -> None:
+def simple_chat_mode(agent: CodingAgent, controller: Optional[LongRunningController] = None, log_level: Optional[str] = None) -> None:
     """Simple interactive chat mode (fallback).
 
     Args:
         agent: CodingAgent instance
         controller: Optional LongRunningController for checkpoint functionality
+        log_level: Optional CLI log level override
     """
     # Configure logging - all logs go to JSONL file only, no console output
     from src.observability.logging_config import configure_logging
@@ -1581,6 +1582,13 @@ def main() -> None:
         help="Permission mode (from .env: PERMISSION_MODE, or normal by default)"
     )
 
+    parser.add_argument(
+        "--log-level",
+        default=None,
+        choices=["debug", "info", "warning", "error", "critical"],
+        help="Override log level (overrides .clarity/config.yaml, overridden by LOG_LEVEL env var)"
+    )
+
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     # Chat command
@@ -1671,16 +1679,23 @@ def main() -> None:
         # Note: Auto-indexing removed - use 'memory-init' command in chat or 'index' command explicitly
         # Indexing should be on-demand when LLM decides it's needed, or user requests it
 
+        # Configure logging early so all modes get config.yaml + --log-level
+        # chat_mode/simple_chat_mode also call configure_logging, but the
+        # _configured guard makes double-calling safe.
+        cli_log_level = args.log_level
+        from src.observability.logging_config import configure_logging
+        configure_logging(mode="cli", log_level=cli_log_level)
+
         # Execute command
         if args.command == "chat":
-            chat_mode(agent, controller)
+            chat_mode(agent, controller, log_level=cli_log_level)
         elif args.command == "task":
             task_mode(agent, args.description, args.type)
         elif args.command == "index":
             index_mode(agent, args.directory)
         else:
             # Default to chat mode
-            chat_mode(agent, controller)
+            chat_mode(agent, controller, log_level=cli_log_level)
 
     except Exception as e:
         console.print(f"[red]Failed to initialize agent: {e}[/red]")

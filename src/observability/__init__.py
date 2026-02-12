@@ -34,6 +34,11 @@ Usage:
     # Query errors
     from src.observability import get_error_store
     errors = get_error_store().query(session_id="abc123")
+
+    # Query all logs for a session
+    from src.observability import query_session_logs, query_session_errors
+    logs = query_session_logs("session-id", level="error", limit=50)
+    errors = query_session_errors("session-id")
 """
 
 from .langfuse_config import (
@@ -84,6 +89,25 @@ from .error_store import (
     error_store,
 )
 
+from .log_store import (
+    LogStore,
+    LogRecord,
+    get_log_store,
+    log_store,
+)
+
+from .log_config_loader import (
+    LoggingConfig,
+    HandlerConfig,
+    RetentionConfig,
+    load_logging_config,
+)
+
+from .log_query import (
+    query_session_logs,
+    query_session_errors,
+)
+
 from .transcript_logger import (
     TranscriptLogger,
     TranscriptEvent,
@@ -132,6 +156,22 @@ __all__ = [
     'ErrorCategory',
     'get_error_store',
     'error_store',
+
+    # Log Store (SQLite-based, all log levels)
+    'LogStore',
+    'LogRecord',
+    'get_log_store',
+    'log_store',
+
+    # Programmatic Query API
+    'query_session_logs',
+    'query_session_errors',
+
+    # Logging Configuration
+    'LoggingConfig',
+    'HandlerConfig',
+    'RetentionConfig',
+    'load_logging_config',
 
     # Transcript Logger (JSONL-based)
     'TranscriptLogger',
