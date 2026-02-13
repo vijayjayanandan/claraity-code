@@ -75,9 +75,10 @@ class _SubagentHeader(Static):
     }
     """
 
-    def __init__(self, subagent_id: str, **kwargs):
+    def __init__(self, subagent_id: str, model_name: str = "", **kwargs):
         super().__init__(**kwargs)
         self._subagent_id = subagent_id
+        self._model_name = model_name
         self._status = "running"
         self._tool_count = 0
         self._duration_ms: Optional[int] = None
@@ -112,6 +113,10 @@ class _SubagentHeader(Static):
         t.append(" ", style="")
         t.append("Subagent ", style="#9cdcfe")
         t.append(self._subagent_id[:12], style="bold #e0e0e0")
+
+        if self._model_name:
+            t.append(f" ({self._model_name})", style="#b5cea8")
+
         t.append(f" | {self._tool_count} tools", style="#6e7681")
 
         if self._duration_ms:
@@ -192,11 +197,13 @@ class SubAgentCard(Container):
         transcript_path: Optional[Path] = None,
         store: Optional["MessageStore"] = None,
         buffered_notifications: Optional[list] = None,
+        model_name: str = "",
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.subagent_id = subagent_id
         self.transcript_path = transcript_path
+        self.model_name = model_name
         self._status = "running"
         self._collapsed = False
         self._duration_ms: Optional[int] = None
@@ -225,7 +232,7 @@ class SubAgentCard(Container):
         self._body: Optional[_SubagentBody] = None
 
     def compose(self):
-        yield _SubagentHeader(self.subagent_id, id="sa-header")
+        yield _SubagentHeader(self.subagent_id, model_name=self.model_name, id="sa-header")
         yield _SubagentBody(id="sa-body")
 
     async def on_mount(self) -> None:

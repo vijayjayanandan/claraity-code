@@ -78,16 +78,16 @@ class OpenAIBackend(LLMBackend):
         self.api_key = api_key or os.getenv(api_key_env)
         if not self.api_key:
             raise ValueError(
-                f"API key not provided. Set {api_key_env} environment variable "
-                f"or pass api_key parameter."
+                "API key not provided. Set an API key in the LLM config wizard "
+                "(Ctrl+P > Configure LLM) or pass it via --api-key flag."
             )
 
-        # DEBUG: Log initialization details
-        import logging
         import httpx
 
-        logger = logging.getLogger(__name__)
-        logger.info(f"OpenAI Backend Init - base_url: {config.base_url}, api_key_env: {api_key_env}, key_found: {bool(self.api_key)}, key_prefix: {self.api_key[:10]}..." if self.api_key else "no key")
+        logger.info(
+            f"OpenAI Backend Init - base_url: {config.base_url}, "
+            f"key_provided: {bool(self.api_key)}"
+        )
 
         # Initialize OpenAI client with base URL from config
         # Use httpx.Timeout for granular timeout control:

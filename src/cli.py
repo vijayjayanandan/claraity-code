@@ -51,19 +51,28 @@ _logging_configured = False
 console = Console()
 
 
-def chat_mode(agent: CodingAgent, controller: Optional[LongRunningController] = None, log_level: Optional[str] = None) -> None:
+def chat_mode(
+    agent: Optional[CodingAgent] = None,
+    controller: Optional[LongRunningController] = None,
+    log_level: Optional[str] = None,
+    llm_config: Optional["LLMConfigData"] = None,
+) -> None:
     """Interactive chat mode with professional Textual TUI and async streaming.
 
     Uses Textual framework for rich UI with code blocks, tool cards, and streaming.
     The agent's stream_response() method yields typed UIEvents that the TUI renders.
     Falls back to simple mode if TUI fails.
 
+    When agent is None (LLM not yet configured), launches TUI in setup mode
+    and auto-presents the configuration wizard.
+
     Phase 6: Integrates MessageStore for session persistence to JSONL.
 
     Args:
-        agent: CodingAgent instance
+        agent: CodingAgent instance, or None for setup-only mode
         controller: Optional LongRunningController for checkpoint functionality
         log_level: Optional CLI log level override
+        llm_config: Optional LLMConfigData for post-wizard agent initialization
     """
     try:
         # Configure logging - all logs go to JSONL file only, no console output
@@ -83,46 +92,48 @@ def chat_mode(agent: CodingAgent, controller: Optional[LongRunningController] = 
         # DO NOT create directory yet - SessionWriter will create it on first write
         jsonl_path = session_dir / "session.jsonl"
 
-        # Set session ID on agent for plan mode and other session-scoped features
-        agent.set_session_id(session_id, is_new_session=True)
-
         # Initialize store (writer will be opened by app in its event loop)
         store = MessageStore()
         writer = SessionWriter(file_path=jsonl_path)
 
-        # Link MemoryManager to MessageStore for unified data flow
-        # This makes fresh sessions behave identically to resumed sessions:
-        # - Agent adds messages to store via MemoryManager
-        # - Store notifications trigger TUI rendering
-        # - Single source of truth for conversation history
-        agent.memory.set_message_store(store, session_id)
+        if agent:
+            # Full mode: agent is ready
+            # Set session ID on agent for plan mode and other session-scoped features
+            agent.set_session_id(session_id, is_new_session=True)
 
-        # Create and run Textual app with agent directly
-        # The app will internally call agent.stream_response() which yields UIEvents
+            # Link MemoryManager to MessageStore for unified data flow
+            agent.memory.set_message_store(store, session_id)
+
+        # Create and run Textual app (agent=None triggers setup mode)
         app = CodingAgentApp(
             agent=agent,
-            show_header=False
+            show_header=False,
         )
 
+        # Pass llm_config so the app can init agent after wizard completes
+        app._pending_llm_config = llm_config
+
         # Phase 6: Bind store and writer to app
-        # The app will open/close the writer in its own event loop
         app.bind_store(store, session_id=session_id)
         app.set_session_writer(writer)
 
-        # Wire up render meta registry for approval policy hints
-        # Agent freezes approval policy when tool call name becomes known during streaming
-        # TUI queries registry when creating tool cards from store notifications
-        app.set_render_meta_registry(agent.memory.render_meta)
+        if agent:
+            # Wire up render meta registry for approval policy hints
+            app.set_render_meta_registry(agent.memory.render_meta)
 
         app.run()
-        
+
         # Session is auto-saved - no need to show path to users (implementation detail)
 
     except Exception as e:
-        # Fallback to simple mode
-        console.print(f"[dim]TUI unavailable: {type(e).__name__}: {e}[/dim]")
-        console.print(f"[dim]Falling back to simple chat mode...[/dim]")
-        simple_chat_mode(agent, controller, log_level=log_level)
+        if agent:
+            # Fallback to simple mode only when agent exists
+            console.print(f"[dim]TUI unavailable: {type(e).__name__}: {e}[/dim]")
+            console.print(f"[dim]Falling back to simple chat mode...[/dim]")
+            simple_chat_mode(agent, controller, log_level=log_level)
+        else:
+            console.print(f"[red]Failed to launch setup wizard: {type(e).__name__}: {e}[/red]")
+            sys.exit(1)
 
 
 def simple_chat_mode(agent: CodingAgent, controller: Optional[LongRunningController] = None, log_level: Optional[str] = None) -> None:
@@ -1492,28 +1503,28 @@ def main() -> None:
 
     parser.add_argument(
         "--model",
-        default=os.environ.get("LLM_MODEL"),
-        help="Model name (from .env: LLM_MODEL)"
+        default=None,
+        help="Model name (from .env: LLM_MODEL, or .clarity/config.yaml)"
     )
 
     parser.add_argument(
         "--backend",
-        default=os.environ.get("LLM_BACKEND"),
+        default=None,
         choices=["ollama", "openai"],
-        help="LLM backend (from .env: LLM_BACKEND)"
+        help="LLM backend (from .env: LLM_BACKEND, or .clarity/config.yaml)"
     )
 
     parser.add_argument(
         "--url",
-        default=os.environ.get("LLM_HOST"),
-        help="Backend API URL (from .env: LLM_HOST)"
+        default=None,
+        help="Backend API URL (from .env: LLM_HOST, or .clarity/config.yaml)"
     )
 
     parser.add_argument(
         "--context",
         type=int,
-        default=int(os.environ.get("MAX_CONTEXT_TOKENS", 131072)),
-        help="Context window size (from .env: MAX_CONTEXT_TOKENS)"
+        default=None,
+        help="Context window size (from .env: MAX_CONTEXT_TOKENS, or .clarity/config.yaml)"
     )
 
     parser.add_argument(
@@ -1524,8 +1535,8 @@ def main() -> None:
 
     parser.add_argument(
         "--api-key-env",
-        default=os.environ.get("API_KEY_ENV", "OPENAI_API_KEY"),
-        help="Environment variable name for API key (OPENAI_API_KEY by default for OpenAI-compatible APIs)"
+        default=None,
+        help="Environment variable name for API key (default: OPENAI_API_KEY)"
     )
 
     # Embedding configuration
@@ -1557,22 +1568,22 @@ def main() -> None:
     parser.add_argument(
         "--temperature",
         type=float,
-        default=float(os.environ.get("LLM_TEMPERATURE", "0.2")),
-        help="LLM temperature (from .env: LLM_TEMPERATURE)"
+        default=None,
+        help="LLM temperature (from .env: LLM_TEMPERATURE, or .clarity/config.yaml)"
     )
 
     parser.add_argument(
         "--max-tokens",
         type=int,
-        default=int(os.environ.get("LLM_MAX_TOKENS", "16384")),
-        help="Max output tokens (from .env: LLM_MAX_TOKENS)"
+        default=None,
+        help="Max output tokens (from .env: LLM_MAX_TOKENS, or .clarity/config.yaml)"
     )
 
     parser.add_argument(
         "--top-p",
         type=float,
-        default=float(os.environ.get("LLM_TOP_P", "0.95")),
-        help="Top-p sampling (from .env: LLM_TOP_P)"
+        default=None,
+        help="Top-p sampling (from .env: LLM_TOP_P, or .clarity/config.yaml)"
     )
 
     parser.add_argument(
@@ -1615,39 +1626,87 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    # Validate required configuration from .env
-    if not args.model:
-        console.print("[red]Error: LLM_MODEL not set in .env file[/red]")
-        console.print("[yellow]Please add LLM_MODEL to your .env file (e.g., LLM_MODEL=qwen3-coder-plus)[/yellow]")
+    # ---------------------------------------------------------------
+    # Unified config: YAML file + env vars + CLI args (layered)
+    # ---------------------------------------------------------------
+    from src.llm.config_loader import load_llm_config, resolve_llm_config
+
+    llm_config = load_llm_config()
+
+    # Env vars layer (reads from .env / environment)
+    env_vars = {
+        "model": os.environ.get("LLM_MODEL"),
+        "backend": os.environ.get("LLM_BACKEND"),
+        "url": os.environ.get("LLM_HOST"),
+        "context_window": os.environ.get("MAX_CONTEXT_TOKENS"),
+        "temperature": os.environ.get("LLM_TEMPERATURE"),
+        "max_tokens": os.environ.get("LLM_MAX_TOKENS"),
+        "top_p": os.environ.get("LLM_TOP_P"),
+        "api_key_env": os.environ.get("API_KEY_ENV"),
+    }
+
+    # CLI args layer (None means "not passed")
+    cli_args = {
+        "model": args.model,
+        "backend": args.backend,
+        "url": args.url,
+        "context_window": str(args.context) if args.context is not None else None,
+        "temperature": str(args.temperature) if args.temperature is not None else None,
+        "max_tokens": str(args.max_tokens) if args.max_tokens is not None else None,
+        "top_p": str(args.top_p) if args.top_p is not None else None,
+        "api_key_env": args.api_key_env,
+    }
+
+    llm_config = resolve_llm_config(env_vars, cli_args, llm_config)
+
+    # Check if LLM configuration is complete
+    llm_configured = bool(llm_config.model and llm_config.backend_type and llm_config.base_url)
+
+    # In TUI mode (default "chat"), launch without agent if config is missing
+    # The TUI will auto-present the config wizard
+    is_tui_mode = (not hasattr(args, 'command') or args.command is None or args.command == "chat")
+
+    if not llm_configured and not is_tui_mode:
+        # Non-TUI modes (task, index) require a fully configured LLM
+        if not llm_config.model:
+            console.print("[red]Error: No LLM model configured.[/red]")
+        if not llm_config.backend_type:
+            console.print("[red]Error: No LLM backend configured.[/red]")
+        if not llm_config.base_url:
+            console.print("[red]Error: No LLM API URL configured.[/red]")
+        console.print("[yellow]Configure via: Ctrl+P > 'Configure LLM' in TUI, or set LLM_MODEL env var, or add llm.model to .clarity/config.yaml[/yellow]")
         sys.exit(1)
 
-    if not args.backend:
-        console.print("[red]Error: LLM_BACKEND not set in .env file[/red]")
-        console.print("[yellow]Please add LLM_BACKEND to your .env file (e.g., LLM_BACKEND=openai)[/yellow]")
-        sys.exit(1)
-
-    if not args.url:
-        console.print("[red]Error: LLM_HOST not set in .env file[/red]")
-        console.print("[yellow]Please add LLM_HOST to your .env file[/yellow]")
-        sys.exit(1)
+    if not llm_configured and is_tui_mode:
+        # Launch TUI without agent -- it will auto-show the config wizard
+        console.print("[yellow]No LLM configured. Launching setup wizard...[/yellow]")
+        cli_log_level = args.log_level
+        from src.observability.logging_config import configure_logging
+        configure_logging(mode="cli", log_level=cli_log_level)
+        chat_mode(agent=None, controller=None, log_level=cli_log_level, llm_config=llm_config)
+        return
 
     # Initialize agent
     console.print(f"\n[cyan]Initializing AI Coding Agent...[/cyan]")
-    console.print(f"Model: {args.model}")
-    console.print(f"Backend: {args.backend}")
-    console.print(f"URL: {args.url}")
+    console.print(f"Model: {llm_config.model}")
+    console.print(f"Backend: {llm_config.backend_type}")
+    console.print(f"URL: {llm_config.base_url}")
+
+    # Resolve API key: CLI flag > keyring > env var
+    # (llm_config.api_key is already populated from keyring/env by load_llm_config)
+    resolved_api_key = args.api_key or llm_config.api_key
 
     try:
         agent = CodingAgent(
-            model_name=args.model,
-            backend=args.backend,
-            base_url=args.url,
-            context_window=args.context,
-            temperature=args.temperature,
-            max_tokens=args.max_tokens,
-            top_p=args.top_p,
-            api_key=args.api_key,
-            api_key_env=args.api_key_env,
+            model_name=llm_config.model,
+            backend=llm_config.backend_type,
+            base_url=llm_config.base_url,
+            context_window=llm_config.context_window,
+            temperature=llm_config.temperature,
+            max_tokens=llm_config.max_tokens,
+            top_p=llm_config.top_p,
+            api_key=resolved_api_key,
+            api_key_env=llm_config.api_key_env,
             embedding_model=args.embedding_model,
             embedding_api_key=args.embedding_api_key,
             embedding_api_key_env=args.embedding_api_key_env,
@@ -1655,10 +1714,14 @@ def main() -> None:
             permission_mode=args.permission,
         )
 
+        # Apply subagent LLM overrides from config.yaml
+        if llm_config.subagents and hasattr(agent, 'subagent_manager'):
+            agent.subagent_manager.config_loader.apply_llm_overrides(llm_config)
+
         # Check if backend is available
         if not agent.llm.is_available():
-            console.print(f"[red]Error: {args.backend} backend not available at {args.url}[/red]")
-            console.print(f"[yellow]Make sure {args.backend} is running and accessible[/yellow]")
+            console.print(f"[red]Error: {llm_config.backend_type} backend not available at {llm_config.base_url}[/red]")
+            console.print(f"[yellow]Make sure {llm_config.backend_type} is running and accessible[/yellow]")
             sys.exit(1)
 
         console.print(f"[green]Agent initialized successfully![/green]\n")
@@ -1688,14 +1751,14 @@ def main() -> None:
 
         # Execute command
         if args.command == "chat":
-            chat_mode(agent, controller, log_level=cli_log_level)
+            chat_mode(agent, controller, log_level=cli_log_level, llm_config=llm_config)
         elif args.command == "task":
             task_mode(agent, args.description, args.type)
         elif args.command == "index":
             index_mode(agent, args.directory)
         else:
             # Default to chat mode
-            chat_mode(agent, controller, log_level=cli_log_level)
+            chat_mode(agent, controller, log_level=cli_log_level, llm_config=llm_config)
 
     except Exception as e:
         console.print(f"[red]Failed to initialize agent: {e}[/red]")

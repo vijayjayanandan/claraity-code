@@ -626,7 +626,17 @@ ADD_METHOD_TOOL = ToolDefinition(
             },
             "parameters": {
                 "type": "array",
-                "description": "Optional list of parameter objects with name, type, description, required, default"
+                "description": "Optional list of parameter objects with name, type, description, required, default",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "type": {"type": "string"},
+                        "description": {"type": "string"},
+                        "required": {"type": "boolean"},
+                        "default": {"type": "string"}
+                    }
+                }
             },
             "return_type": {
                 "type": "string",
@@ -634,7 +644,10 @@ ADD_METHOD_TOOL = ToolDefinition(
             },
             "raises": {
                 "type": "array",
-                "description": "Optional list of exception names this method can raise"
+                "description": "Optional list of exception names this method can raise",
+                "items": {
+                    "type": "string"
+                }
             },
             "example_usage": {
                 "type": "string",
@@ -705,7 +718,17 @@ UPDATE_METHOD_TOOL = ToolDefinition(
             },
             "parameters": {
                 "type": "array",
-                "description": "Optional: New parameter list"
+                "description": "Optional: New parameter list",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "type": {"type": "string"},
+                        "description": {"type": "string"},
+                        "required": {"type": "boolean"},
+                        "default": {"type": "string"}
+                    }
+                }
             },
             "return_type": {
                 "type": "string",
@@ -713,7 +736,10 @@ UPDATE_METHOD_TOOL = ToolDefinition(
             },
             "raises": {
                 "type": "array",
-                "description": "Optional: New exception list"
+                "description": "Optional: New exception list",
+                "items": {
+                    "type": "string"
+                }
             },
             "example_usage": {
                 "type": "string",

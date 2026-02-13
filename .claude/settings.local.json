@@ -1,8 +1,6 @@
 {
   "permissions": {
     "allow": [
-      "Edit",
-      "Write",
       "WebSearch",
       "Bash(git remote set-url:*)",
       "Bash(python -m pytest:*)",
@@ -28,7 +26,10 @@
       "WebFetch(domain:www.anthropic.com)",
       "WebFetch(domain:claude.com)",
       "Bash(findstr:*)",
-      "Bash(powershell -Command \"Get-Content ''C:\\\\Vijay\\\\Learning\\\\AI\\\\ai-coding-agent\\\\.clarity\\\\logs\\\\app.jsonl'' | Select-String -Pattern ''21:57'' | Select-Object -Last 10\")"
+      "Bash(powershell -Command \"Get-Content ''C:\\\\Vijay\\\\Learning\\\\AI\\\\ai-coding-agent\\\\.clarity\\\\logs\\\\app.jsonl'' | Select-String -Pattern ''21:57'' | Select-Object -Last 10\")",
+      "Bash(for module in \"src.core.cancel_token\" \"src.memory.manager\" \"src.session.subagent_registry\" \"src.tools.file_ops\" \"src.workflow\" \"src.core.auth\")",
+      "Bash(do echo \"=== $module ===\")",
+      "Bash(done)"
     ],
     "deny": []
   }

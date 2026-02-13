@@ -26,7 +26,8 @@ if TYPE_CHECKING:
 logger = get_logger("ui.subagent_registry")
 
 # Type aliases for callback signatures
-RegisteredCallback = Callable[[str, "MessageStore", Path, str], None]
+# (subagent_id, store, transcript_path, parent_tool_call_id, model_name)
+RegisteredCallback = Callable[[str, "MessageStore", Path, str, str], None]
 UnregisteredCallback = Callable[[str], None]
 NotificationCallback = Callable[[str, "StoreNotification"], None]
 
@@ -113,6 +114,7 @@ class SubagentRegistry:
         transcript_path: Path,
         parent_tool_call_id: str,
         instance: Any = None,
+        model_name: str = "",
     ) -> None:
         """Register a running subagent for TUI visibility.
 
@@ -125,6 +127,7 @@ class SubagentRegistry:
             transcript_path: Path to the subagent's JSONL transcript
             parent_tool_call_id: Tool call ID of the delegation call
             instance: The SubAgent instance (for cancellation via .cancel())
+            model_name: LLM model name used by this subagent
         """
         with self._lock:
             self._instances[subagent_id] = instance
@@ -138,11 +141,11 @@ class SubagentRegistry:
 
         logger.info(
             f"Registered subagent {subagent_id} "
-            f"(parent_tool_call_id={parent_tool_call_id})"
+            f"(parent_tool_call_id={parent_tool_call_id}, model={model_name})"
         )
 
         # Dispatch to subscribers (on TUI event loop if app available)
-        self._dispatch_registered(subagent_id, store, transcript_path, parent_tool_call_id)
+        self._dispatch_registered(subagent_id, store, transcript_path, parent_tool_call_id, model_name)
 
     def unregister(self, subagent_id: str) -> None:
         """Unregister a completed subagent.
@@ -207,16 +210,17 @@ class SubagentRegistry:
         store: "MessageStore",
         transcript_path: Path,
         parent_tool_call_id: str,
+        model_name: str = "",
     ) -> None:
         """Dispatch registration event to subscribers."""
         for callback in list(self._on_registered):
             try:
                 if self._app and hasattr(self._app, 'call_from_thread'):
                     self._app.call_from_thread(
-                        callback, subagent_id, store, transcript_path, parent_tool_call_id
+                        callback, subagent_id, store, transcript_path, parent_tool_call_id, model_name
                     )
                 else:
-                    callback(subagent_id, store, transcript_path, parent_tool_call_id)
+                    callback(subagent_id, store, transcript_path, parent_tool_call_id, model_name)
             except Exception as e:
                 logger.error(f"Error in registered callback: {e}")
 

@@ -1,8 +1,18 @@
 """SubAgent configuration parser for Markdown + YAML format.
 
 Subagent configurations are stored as Markdown files with YAML frontmatter:
-- Frontmatter: name, description, tools, model, context_window
+- Frontmatter: name, description, tools, llm (nested backend/model config)
 - Body: Specialized system prompt for the subagent
+
+LLM configuration is nested under an ``llm:`` key::
+
+    llm:
+      backend_type: openai        # "openai", "ollama" (omit to inherit)
+      model: gpt-4o              # model name (omit or "inherit" to inherit)
+      base_url: https://...      # API endpoint (omit to inherit)
+      context_window: 128000     # context size (omit to inherit)
+
+All ``llm`` fields are optional. Omitted fields inherit from the main agent.
 
 Configuration files are loaded hierarchically:
 1. Project: .claude/agents/*.md (highest priority)
@@ -19,6 +29,45 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+VALID_BACKEND_TYPES = {"openai", "ollama", "vllm", "localai", "llamacpp"}
+
+
+@dataclass
+class SubAgentLLMConfig:
+    """LLM overrides for a subagent. None fields inherit from main agent.
+
+    Attributes:
+        backend_type: LLM backend type, e.g. "openai", "ollama" (None = inherit)
+        model: Model name, e.g. "gpt-4o", "claude-sonnet-4-20250514" (None = inherit)
+        base_url: API endpoint URL (None = inherit from main agent)
+        api_key: API credentials (None = inherit from main agent)
+        context_window: Context window size in tokens (None = inherit)
+    """
+
+    backend_type: Optional[str] = None
+    model: Optional[str] = None
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    context_window: Optional[int] = None
+
+    @property
+    def has_overrides(self) -> bool:
+        """True if any field is set (i.e., not all inherited)."""
+        return any(v is not None for v in [
+            self.backend_type, self.model, self.base_url,
+            self.api_key, self.context_window,
+        ])
+
+    def __post_init__(self):
+        if self.backend_type is not None:
+            self.backend_type = self.backend_type.lower()
+            if self.backend_type not in VALID_BACKEND_TYPES:
+                raise ValueError(
+                    f"Invalid backend_type '{self.backend_type}'. "
+                    f"Valid: {', '.join(sorted(VALID_BACKEND_TYPES))}"
+                )
+
+
 @dataclass
 class SubAgentConfig:
     """Configuration for a subagent.
@@ -28,8 +77,7 @@ class SubAgentConfig:
         description: Natural language description for automatic delegation
         system_prompt: Specialized system prompt (from Markdown body)
         tools: List of allowed tools (None = inherit all)
-        model: Model to use (None = inherit from main agent)
-        context_window: Context window size (None = inherit from main agent)
+        llm: LLM overrides (None = inherit everything from main agent)
         config_path: Path to the configuration file
         metadata: Additional metadata from YAML frontmatter
     """
@@ -38,8 +86,7 @@ class SubAgentConfig:
     description: str
     system_prompt: str
     tools: Optional[List[str]] = None
-    model: Optional[str] = None
-    context_window: Optional[int] = None
+    llm: Optional[SubAgentLLMConfig] = None
     config_path: Optional[Path] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
@@ -115,23 +162,41 @@ class SubAgentConfig:
                     f"'tools' field must be a comma-separated string or list, got {type(tools)}"
                 )
 
-        model = frontmatter.get('model')
-        if model == 'inherit':
-            model = None  # None means inherit from main agent
+        # Parse LLM config (nested section)
+        llm_config = None
+        llm_data = frontmatter.get('llm')
+        if isinstance(llm_data, dict):
+            # Parse model: "inherit" means None (inherit from main agent)
+            model = llm_data.get('model')
+            if model == 'inherit':
+                model = None
 
-        context_window = frontmatter.get('context_window')
-        if context_window is not None:
-            try:
-                context_window = int(context_window)
-            except (ValueError, TypeError):
-                raise ValueError(
-                    f"'context_window' must be an integer, got {context_window}"
-                )
+            # Parse context_window
+            context_window = llm_data.get('context_window')
+            if context_window is not None:
+                try:
+                    context_window = int(context_window)
+                except (ValueError, TypeError):
+                    raise ValueError(
+                        f"'llm.context_window' must be an integer, "
+                        f"got {context_window}"
+                    )
+
+            llm_config = SubAgentLLMConfig(
+                backend_type=llm_data.get('backend_type'),
+                model=model,
+                base_url=llm_data.get('base_url'),
+                api_key=llm_data.get('api_key'),
+                context_window=context_window,
+            )
+            # Treat all-None as no override
+            if not llm_config.has_overrides:
+                llm_config = None
 
         # Remove standard fields from metadata
         metadata = {
             k: v for k, v in frontmatter.items()
-            if k not in {'name', 'description', 'tools', 'model', 'context_window'}
+            if k not in {'name', 'description', 'tools', 'llm'}
         }
 
         # Create config
@@ -140,8 +205,7 @@ class SubAgentConfig:
             description=description,
             system_prompt=body.strip(),
             tools=tools,
-            model=model,
-            context_window=context_window,
+            llm=llm_config,
             config_path=file_path,
             metadata=metadata
         )
@@ -222,8 +286,11 @@ class SubAgentConfig:
 name: {name}
 description: {description}
 tools: Read, Write, Edit  # Comma-separated list of allowed tools (optional)
-model: inherit  # Model to use: 'inherit', 'opus', 'sonnet', 'haiku', or specific model name
-context_window: null  # Context window size (null = inherit from main agent)
+llm:
+  # backend_type: openai  # "openai", "ollama", etc. (omit to inherit from main agent)
+  model: inherit           # Model name or 'inherit' (inherit from main agent)
+  # base_url: null         # API endpoint (omit to inherit from main agent)
+  # context_window: null   # Context window size (omit to inherit from main agent)
 ---
 
 # {name.replace('-', ' ').title()} Subagent
@@ -379,8 +446,7 @@ class SubAgentConfigLoader:
                     description=subagent['description'],
                     system_prompt=subagent['prompt'],
                     tools=None,  # Inherit all tools
-                    model=None,  # Inherit model
-                    context_window=None,  # Inherit context window
+                    llm=None,  # Inherit LLM config from main agent
                     config_path=None,  # No file path for Python constants
                     metadata={'source': 'builtin'}
                 )
@@ -450,6 +516,38 @@ class SubAgentConfigLoader:
         """
         self.loaded_configs.clear()
         return self.discover_all()
+
+    def apply_llm_overrides(self, llm_config: "LLMConfigData") -> None:
+        """Apply config.yaml subagent LLM overrides to loaded SubAgentConfigs.
+
+        Only applies if the SubAgentConfig doesn't already have llm set
+        (i.e., .md file overrides beat config.yaml).
+
+        Priority: .md file ``llm:`` > config.yaml ``subagents:`` > inherit from main agent
+
+        Args:
+            llm_config: Resolved LLM configuration (with subagents dict)
+        """
+        import os as _os
+
+        for name, override in llm_config.subagents.items():
+            if name in self.loaded_configs and self.loaded_configs[name].llm is None:
+                # Build SubAgentLLMConfig from the config.yaml override
+                self.loaded_configs[name].llm = SubAgentLLMConfig(
+                    backend_type=override.backend_type,
+                    model=override.model,
+                    base_url=override.base_url,
+                    api_key=(
+                        _os.environ.get(override.api_key_env)
+                        if override.api_key_env
+                        else None
+                    ),
+                    context_window=override.context_window,
+                )
+                logger.debug(
+                    f"Applied config.yaml LLM override for subagent '{name}': "
+                    f"model={override.model}"
+                )
 
     def get_all_names(self) -> List[str]:
         """Get names of all discovered subagents.

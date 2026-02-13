@@ -252,3 +252,18 @@ Launch code-reviewer subagent for:
 - Persistence layer changes
 
 Quality gates: 4.5+ APPROVE | 3.5-4.4 REQUEST CHANGES | <3.5 REJECT
+
+---
+
+## JIRA & CONFLUENCE
+
+**See:** `JIRA_CONFLUENCE.md` for complete guide on:
+- Creating user stories with dev/test subtasks
+- Uploading documentation to Confluence
+- Linking Jira issues to Confluence pages
+- Search, query, and workflow patterns
+
+**Quick reference:**
+- Cloud ID: `fcd96f11-1610-4860-b036-6fb42ce58d98`
+- Confluence Space: ClarAIty Code (CC) - Space ID: `557060`
+- Jira Project: ClarAIty Code (CC) - Project Key: `CC`

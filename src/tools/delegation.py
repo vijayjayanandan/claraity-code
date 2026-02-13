@@ -146,12 +146,14 @@ Use this tool proactively when appropriate!"""
         if self._registry and parent_tool_call_id:
             try:
                 info = subagent_instance.get_session_info()
+                model_name = subagent_instance.llm.config.model_name
                 self._registry.register(
                     subagent_id=info.subagent_id,
                     store=info.store,
                     transcript_path=info.transcript_path,
                     parent_tool_call_id=parent_tool_call_id,
                     instance=subagent_instance,
+                    model_name=model_name,
                 )
                 registered = True
                 logger.info(

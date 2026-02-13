@@ -1,17 +1,18 @@
-"""SubAgent implementation with independent context and shared capabilities.
+"""SubAgent implementation with independent context and configurable capabilities.
 
 A SubAgent is a lightweight wrapper that:
 - Operates with its own conversation context (no pollution of main agent)
 - Has specialized system prompts for domain expertise
-- Uses the main agent's LLM and tools (no duplication)
-- Has its own MessageStore and MemoryManager for persistence
+- Can use its own LLM model or inherit the main agent's
+- Can be scoped to specific tools via config.tools or inherit all
+- Has its own MessageStore for persistence
 - Returns structured results
 
 Architecture:
 - Own MessageStore instance (isolated from main session)
-- Own MemoryManager instance (single writer to own store)
 - SyncJSONLWriter for thread-safe transcript persistence
-- Shares main agent's LLM and tools
+- Configurable LLM backend/model (config.llm) -- creates own backend instance
+- Configurable tool allowlist (config.tools) -- filters available tools
 """
 
 from dataclasses import dataclass, field
@@ -82,17 +83,19 @@ class SubAgentResult:
 
 
 class SubAgent:
-    """Lightweight subagent with specialized capabilities and own persistence.
+    """Lightweight subagent with configurable LLM model and tool access.
 
-    A SubAgent operates with isolated context and has its own persistence stack:
+    A SubAgent operates with isolated context and its own persistence stack:
     - Own MessageStore instance (isolated from main session)
     - SyncJSONLWriter for transcript persistence
-    - Shares main agent's LLM and tools (no duplication)
+    - Configurable LLM backend/model via config.llm (or inherits main agent's)
+    - Configurable tool allowlist via config.tools (or inherits all tools)
 
     This ensures:
     - No context pollution between main agent and subagent
     - Specialized system prompts for domain expertise
-    - Consistent tool behavior (same tools as main agent)
+    - Per-subagent model selection (e.g., cheaper model for doc-writing)
+    - Scoped tool access (e.g., read-only tools for code review)
     - Full transcript visibility for TUI
 
     Example:
@@ -108,11 +111,12 @@ class SubAgent:
         main_agent: 'AgentInterface',
         transcript_dir: Optional[Path] = None,
     ):
-        """Initialize subagent with own persistence stack.
+        """Initialize subagent with own persistence and configurable LLM/tools.
 
         Args:
-            config: SubAgentConfig with name, description, system_prompt
-            main_agent: Main agent (provides LLM and tools)
+            config: SubAgentConfig with name, description, system_prompt,
+                    and optional model/tools/context_window overrides
+            main_agent: Main agent (provides default LLM, tools, and working directory)
             transcript_dir: Directory for JSONL transcripts (default: .clarity/sessions/subagents/)
         """
         self.config = config
@@ -142,11 +146,100 @@ class SubAgent:
         # Track execution history
         self.execution_history: List[SubAgentResult] = []
 
+        # Per-subagent LLM: create separate backend if llm overrides are set
+        self._override_llm = None
+        if self.config.llm and self.config.llm.has_overrides:
+            self._override_llm = self._create_override_llm()
+
+        # Log initialization with actual LLM and tool info
+        model_name = self.llm.config.model_name
+        model_source = "override" if self._override_llm else "main agent"
+        tool_info = (
+            f"{len(self.config.tools)} configured"
+            if self.config.tools
+            else f"{len(self.main_agent.tool_executor.tools)} inherited"
+        )
         logger.info(
             f"SubAgent [{self.config.name}] initialized "
-            f"(session={self.session_id}, using main agent's LLM and "
-            f"{len(self.main_agent.tool_executor.tools)} tools)"
+            f"(session={self.session_id}, model={model_name} [{model_source}], "
+            f"tools={tool_info})"
         )
+
+    @property
+    def llm(self):
+        """Return the LLM backend for this subagent.
+
+        Uses the override LLM if config.llm has overrides, otherwise
+        falls back to the main agent's LLM. In both cases, the subagent
+        maintains its own separate conversation context.
+        """
+        return self._override_llm or self.main_agent.llm
+
+    def _create_override_llm(self):
+        """Create a separate LLM backend from config.llm overrides.
+
+        Each field in SubAgentLLMConfig is optional. Omitted fields
+        inherit from the main agent's LLM configuration.
+
+        Supported backend types:
+        - "openai" (and OpenAI-compatible: "vllm", "localai", "llamacpp")
+        - "ollama"
+
+        Returns:
+            LLMBackend instance with overrides applied, or None on failure.
+        """
+        try:
+            from src.llm import OpenAIBackend, OllamaBackend, LLMConfig
+
+            llm_overrides = self.config.llm
+            main_llm = self.main_agent.llm
+            main_config = main_llm.config
+
+            # Resolve each field: override if set, else inherit from main
+            backend_type = llm_overrides.backend_type or main_config.backend_type
+            model_name = llm_overrides.model or main_config.model_name
+            base_url = llm_overrides.base_url or main_config.base_url
+            context_window = llm_overrides.context_window or main_config.context_window
+            api_key = llm_overrides.api_key or getattr(main_llm, 'api_key', None)
+
+            override_config = LLMConfig(
+                backend_type=backend_type,
+                model_name=model_name,
+                base_url=base_url,
+                context_window=context_window,
+                temperature=main_config.temperature,
+                max_tokens=main_config.max_tokens,
+                top_p=main_config.top_p,
+            )
+
+            # Create the right backend class based on type
+            OPENAI_COMPATIBLE = {"openai", "vllm", "localai", "llamacpp"}
+            if backend_type in OPENAI_COMPATIBLE:
+                override_llm = OpenAIBackend(
+                    config=override_config, api_key=api_key,
+                )
+            elif backend_type == "ollama":
+                override_llm = OllamaBackend(config=override_config)
+            else:
+                logger.warning(
+                    f"SubAgent [{self.config.name}]: Unsupported backend_type "
+                    f"'{backend_type}', falling back to main agent's LLM."
+                )
+                return None
+
+            logger.info(
+                f"SubAgent [{self.config.name}]: LLM override active "
+                f"(backend={backend_type}, model={model_name}, "
+                f"base_url={base_url})"
+            )
+            return override_llm
+
+        except Exception as e:
+            logger.warning(
+                f"SubAgent [{self.config.name}]: Failed to create override LLM: "
+                f"{e}. Falling back to main agent's LLM."
+            )
+            return None
 
     def cancel(self) -> None:
         """Signal cancellation to stop execution."""
@@ -224,8 +317,11 @@ class SubAgent:
                 output=output,
                 metadata={
                     "task_description": task_description,
-                    "model": self.main_agent.llm.config.model_name,
+                    "backend_type": self.llm.config.backend_type,
+                    "model": self.llm.config.model_name,
+                    "llm_override": self._override_llm is not None,
                     "tools_available": list(self.main_agent.tool_executor.tools.keys()),
+                    "tools_filtered": self.config.tools is not None,
                     "iterations": len(tool_calls),
                     "subagent_id": self.session_id,
                     "transcript_path": str(self._transcript_path),
@@ -305,6 +401,34 @@ class SubAgent:
         if self._transcript_writer:
             self._transcript_writer.write_notification(notification)
 
+    def _resolve_tools(self, all_tools: List) -> List:
+        """Build the filtered tool list for this subagent.
+
+        1. Exclude tools that subagents must never use (delegation, plan mode)
+        2. If config.tools is set, further filter to only those tools
+
+        Args:
+            all_tools: Full list of ToolDefinition objects from tool_schemas
+
+        Returns:
+            Filtered list of ToolDefinition objects
+        """
+        SUBAGENT_EXCLUDED_TOOLS = {
+            "delegate_to_subagent", "enter_plan_mode", "request_plan_approval"
+        }
+        tools = [t for t in all_tools if t.name not in SUBAGENT_EXCLUDED_TOOLS]
+
+        # Apply config.tools allowlist if specified
+        if self.config.tools is not None:
+            allowed = set(self.config.tools)
+            tools = [t for t in tools if t.name in allowed]
+            logger.debug(
+                f"SubAgent [{self.config.name}]: Tool allowlist active - "
+                f"{len(tools)} tools available: {[t.name for t in tools]}"
+            )
+
+        return tools
+
     def _build_context(self, task_description: str) -> tuple[List[Dict[str, str]], str]:
         """Build fresh LLM context with specialized system prompt.
 
@@ -378,9 +502,8 @@ class SubAgent:
         from src.tools.tool_schemas import ALL_TOOLS
         from src.session.models.message import Message
 
-        # Exclude delegation and plan mode tools from subagent
-        SUBAGENT_EXCLUDED_TOOLS = {"delegate_to_subagent", "enter_plan_mode", "request_plan_approval"}
-        subagent_tools = [t for t in ALL_TOOLS if t.name not in SUBAGENT_EXCLUDED_TOOLS]
+        # Build tool list for this subagent
+        subagent_tools = self._resolve_tools(ALL_TOOLS)
 
         current_context = context.copy()
         all_tool_calls = []
@@ -392,8 +515,8 @@ class SubAgent:
 
             logger.debug(f"SubAgent [{self.config.name}]: Iteration {iteration + 1}/{max_iterations}")
 
-            # Native function calling - same as main agent
-            llm_response = self.main_agent.llm.generate_with_tools(
+            # Native function calling with this subagent's LLM
+            llm_response = self.llm.generate_with_tools(
                 messages=current_context,
                 tools=subagent_tools,
                 tool_choice="auto"
@@ -474,6 +597,14 @@ class SubAgent:
                 )
 
                 try:
+                    # Defense-in-depth: block tools not in the allowlist
+                    allowed_tool_names = {t.name for t in subagent_tools}
+                    if tool_name not in allowed_tool_names:
+                        raise PermissionError(
+                            f"Tool '{tool_name}' is not allowed for "
+                            f"subagent '{self.config.name}'"
+                        )
+
                     result = self.main_agent.tool_executor.execute_tool(
                         tool_name, **tool_args
                     )
@@ -570,7 +701,7 @@ class SubAgent:
         parent_uuid = summary_msg.uuid
 
         self._cancel_token.check_cancelled()
-        final_response = self.main_agent.llm.generate_with_tools(
+        final_response = self.llm.generate_with_tools(
             messages=current_context, tools=subagent_tools, tool_choice="none"
         )
 
@@ -611,6 +742,9 @@ class SubAgent:
             "average_execution_time": avg_time,
             "total_tool_calls": total_tools,
             "average_tool_calls": avg_tools,
-            "model": self.main_agent.llm.config.model_name,
-            "tools_available": len(self.main_agent.tool_executor.tools)
+            "backend_type": self.llm.config.backend_type,
+            "model": self.llm.config.model_name,
+            "llm_override": self._override_llm is not None,
+            "tools_available": len(self.main_agent.tool_executor.tools),
+            "tools_filtered": self.config.tools is not None,
         }

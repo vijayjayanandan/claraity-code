@@ -475,8 +475,12 @@ class SubAgentManager:
             "name": config.name,
             "description": config.description,
             "tools": config.tools or "All tools inherited",
-            "model": config.model or "Inherited from main agent",
-            "context_window": config.context_window or "Inherited from main agent",
+            "llm": {
+                "backend_type": config.llm.backend_type if config.llm else "Inherited",
+                "model": config.llm.model if config.llm else "Inherited",
+                "base_url": config.llm.base_url if config.llm else "Inherited",
+                "context_window": config.llm.context_window if config.llm else "Inherited",
+            } if config.llm else "Inherited from main agent",
             "config_path": str(config.config_path) if config.config_path else None,
             "delegation_count": self.delegation_count.get(name, 0)
         }

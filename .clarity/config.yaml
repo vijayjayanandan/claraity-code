@@ -1,0 +1,26 @@
+logging:
+  level: INFO
+  handlers:
+    jsonl: INFO
+    logs_db: DEBUG
+    errors_db: ERROR
+  retention:
+    logs_db_days: 7
+    errors_db_days: 30
+    jsonl_max_bytes: 52428800
+    jsonl_backup_count: 5
+llm:
+  backend_type: openai
+  base_url: https://proxy.fuelix.ai/v1
+  model: claude-sonnet-4-5-20250929
+  context_window: 200000
+  temperature: 0.2
+  max_tokens: 16384
+  top_p: 0.95
+  subagents:
+    code-reviewer:
+      model: gpt-5.2-2025-12-11
+    test-writer:
+      model: gpt-5.2-2025-12-11
+    doc-writer:
+      model: gpt-5
