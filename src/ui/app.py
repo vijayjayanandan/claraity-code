@@ -8,7 +8,7 @@ This is the top-level application that:
 - Coordinates with UIProtocol for approvals
 """
 
-from textual.app import App, ComposeResult
+from textual.app import App, ComposeResult, SystemCommand
 from textual.containers import ScrollableContainer, Vertical
 from textual.widgets import Footer, Header, TextArea, Static
 from textual.widgets.text_area import Selection
@@ -59,6 +59,7 @@ from .widgets.clarify_widget import ClarifyWidget
 from .widgets.plan_approval_widget import PlanApprovalWidget
 from .widgets.subagent_card import SubAgentCard
 from .autocomplete import FileAutocomplete
+from .clipboard_handler import ClipboardHandler
 
 if TYPE_CHECKING:
     from ..core.agent import CodingAgent  # For type hints
@@ -278,7 +279,6 @@ class ChatInput(TextArea):
     }
     """
 
-    # Note: Ctrl+V handled in on_key() to prevent race condition with TextArea's native paste
     BINDINGS = []
 
     def __init__(self, **kwargs):
@@ -295,6 +295,8 @@ class ChatInput(TextArea):
         self._autocomplete_active = False
         self._autocomplete_start = 0  # Position of @ in text
         self._index_task: asyncio.Task | None = None  # Track for cleanup
+        # Guard to prevent on_paste() from double-inserting text
+        self._suppress_paste_text_until = 0.0
 
     def action_undo(self) -> None:
         """Override to handle cursor position errors during undo.
@@ -330,7 +332,6 @@ class ChatInput(TextArea):
 
     def on_mount(self) -> None:
         """Start autocomplete indexing in background (non-blocking)."""
-        # Track task for cleanup on unmount
         self._index_task = asyncio.create_task(self._autocomplete.index())
 
     def on_unmount(self) -> None:
@@ -338,11 +339,44 @@ class ChatInput(TextArea):
         if self._index_task and not self._index_task.done():
             self._index_task.cancel()
 
+    def action_paste_image(self) -> None:
+        """Handle Alt+V - paste image/files from system clipboard via PIL."""
+        logger.info("ALT_V: Checking system clipboard for image/files")
+        self._suppress_paste_text_until = time.time() + 0.3
+
+        try:
+            from PIL import ImageGrab
+            result = ImageGrab.grabclipboard()
+
+            if result is not None and not isinstance(result, list):
+                logger.info("ALT_V: Clipboard has image, attaching")
+                self.call_next(lambda r=result: asyncio.create_task(
+                    self._attach_clipboard_image(r)
+                ))
+                return
+
+            if isinstance(result, list):
+                logger.info(f"ALT_V: Clipboard has {len(result)} file(s), attaching")
+                self.call_next(lambda r=result: asyncio.create_task(
+                    self._attach_clipboard_files(r)
+                ))
+                return
+        except Exception as e:
+            logger.debug(f"ALT_V: PIL ImageGrab failed: {e}")
+
+        # No image/file found
+        self.app.notify("No image in clipboard", severity="warning", timeout=2)
+
     def on_key(self, event) -> None:
-        """Handle Enter to submit, Ctrl+Enter for newline, @ autocomplete.
-        
-        Note: Ctrl+V paste is handled by on_paste() event handler, not here.
-        """
+        """Handle Enter to submit, Ctrl+Enter for newline, Alt+V paste, @ autocomplete."""
+        logger.debug(f"ON_KEY: key={event.key!r}")
+
+        # Alt+V: paste image/files from system clipboard
+        if event.key == "alt+v":
+            event.prevent_default()
+            event.stop()
+            self.action_paste_image()
+            return
 
         # If autocomplete is active, handle navigation first
         if self._autocomplete_active:
@@ -526,46 +560,21 @@ class ChatInput(TextArea):
             self.attachments.clear()
             self._update_attachment_indicator()
 
-    async def on_paste(self, event: Paste) -> None:
-        """Handle paste events - intercept before TextArea's default handler.
-
-        Check for images/files first, then fall back to text.
-        This handles both Ctrl+V and right-click paste, supporting:
-        - Screenshots (image data in clipboard)
-        - Files copied from Explorer (file paths in clipboard)
-        - Plain text
-        """
-        event.prevent_default()
-        event.stop()
-
-        # Check for image/file in clipboard first (same logic as on_key)
+    async def _attach_image_bytes(self, image_bytes: bytes) -> None:
+        """Attach image from clipboard bytes."""
         try:
-            from PIL import ImageGrab
-            result = ImageGrab.grabclipboard()
-
-            if result is not None and not isinstance(result, list):
-                # It's an image (screenshot) - handle it as image attachment
-                await self._attach_clipboard_image(result)
-                return
-
-            if isinstance(result, list):
-                # It's files (copied from Explorer) - handle them as file attachments
-                # These can be images OR text files, determined by MIME type
-                await self._attach_clipboard_files(result)
-                return
+            att = self.attachments.add_screenshot(image_bytes, "png")
+            self.app.notify(f"Attached image ({att.size_kb:.1f} KB)")
+            self._update_attachment_indicator()
         except Exception as e:
-            logger.debug(f"PIL ImageGrab failed (falling back to text): {e}")
-
-        # No image/file - paste as plain text into the input
-        if event.text:
-            self.insert(event.text)
+            logger.error(f"Failed to attach image: {e}", exc_info=True)
+            self.app.notify(f"Failed to attach image: {e}", severity="error")
 
     async def _attach_clipboard_image(self, image) -> None:
-        """Attach image from clipboard (called from on_key with PIL image)."""
+        """Attach PIL Image from clipboard (called from on_key with PIL result)."""
         try:
             from io import BytesIO
             output = BytesIO()
-            # Convert to RGB if necessary (handles RGBA, P mode images)
             if hasattr(image, 'mode') and image.mode in ('RGBA', 'P'):
                 image = image.convert('RGB')
             image.save(output, format='PNG')
@@ -573,13 +582,71 @@ class ChatInput(TextArea):
             self.app.notify(f"Attached image ({att.size_kb:.1f} KB)")
             self._update_attachment_indicator()
         except Exception as e:
+            logger.error(f"Failed to attach clipboard image: {e}", exc_info=True)
             self.app.notify(f"Failed to attach image: {e}", severity="error")
 
+    async def on_paste(self, event: Paste) -> None:
+        """Handle paste events from terminal emulator.
+
+        On Windows Terminal, Ctrl+V is intercepted by the terminal and sent
+        as a Paste event (text only). We must prevent TextArea's default
+        _on_paste from also inserting text, and check PIL for images/files.
+        """
+        # CRITICAL: stop TextArea's _on_paste from also inserting the text
+        event.prevent_default()
+        event.stop()
+
+        logger.info(f"ON_PASTE: Terminal paste event - text_len={len(event.text) if event.text else 0}")
+
+        # Guard: prevent double-insert when a previous handler already inserted.
+        if time.time() < self._suppress_paste_text_until:
+            logger.info("ON_PASTE: Suppressed - paste already handled")
+            return
+
+        # In many terminals Ctrl+V maps to a Paste event; attempt image/file attach first.
+        image_bytes, file_list, _text = ClipboardHandler.get_clipboard_content()
+        logger.info(
+            "ON_PASTE: ClipboardHandler returned - "
+            f"image={bool(image_bytes)}, files={bool(file_list)}"
+        )
+
+        if image_bytes:
+            # Suppress any immediately-following Paste event that contains text.
+            self._suppress_paste_text_until = time.time() + 0.2
+            self.call_next(lambda: asyncio.create_task(self._attach_image_bytes(image_bytes)))
+            return
+
+        if file_list:
+            self._suppress_paste_text_until = time.time() + 0.2
+            self.call_next(lambda: asyncio.create_task(self._attach_clipboard_files(file_list)))
+            return
+
+        # For terminal-initiated pastes, check if it looks like file paths
+        if event.text:
+            lines = event.text.strip().split('\n')
+            # If all lines look like Windows file paths, try to attach them
+            if all(line.strip() and (':' in line or line.startswith('\\\\')) for line in lines if line.strip()):
+                logger.info("ON_PASTE: Text looks like file paths, attempting to attach")
+                from pathlib import Path
+                file_paths = [line.strip() for line in lines if line.strip()]
+                valid_files = [f for f in file_paths if Path(f).exists() and Path(f).is_file()]
+
+                if valid_files:
+                    self._suppress_paste_text_until = time.time() + 0.2
+                    self.call_next(lambda: asyncio.create_task(self._attach_clipboard_files(valid_files)))
+                    return
+
+            # Regular text - insert it
+            logger.info(f"ON_PASTE: Inserting text ({len(event.text)} chars)")
+            self._suppress_paste_text_until = time.time() + 0.2
+            self.insert(event.text)
+
     async def _attach_clipboard_files(self, files: list) -> None:
-        """Attach files from clipboard (called from on_key with file list)."""
+        """Attach files from clipboard file list."""
         from pathlib import Path
         valid_count = 0
-        for file_path in files[:5]:
+        
+        for file_path in files[:5]:  # Limit to 5 files
             if isinstance(file_path, str) and Path(file_path).exists() and Path(file_path).is_file():
                 try:
                     att = await self.attachments.add_file(file_path)
@@ -589,12 +656,12 @@ class ChatInput(TextArea):
                         self.app.notify(f"Attached: {att.filename}")
                     valid_count += 1
                 except (ValueError, FileNotFoundError, IOError) as e:
+                    logger.error(f"Failed to attach {file_path}: {e}", exc_info=True)
                     self.app.notify(f"Failed: {e}", severity="error")
-
-        # Fix #7: Notify if no valid files found in clipboard
+        
         if valid_count == 0 and files:
             self.app.notify("No valid files found in clipboard", severity="warning")
-
+        
         self._update_attachment_indicator()
 
     def _update_attachment_indicator(self) -> None:
@@ -717,7 +784,8 @@ class CodingAgentApp(App):
         elif stream_handler:
             self.stream_handler = stream_handler
         else:
-            raise ValueError("Either 'agent' or 'stream_handler' must be provided")
+            # Setup mode: no agent yet, wizard will be shown on mount
+            self.stream_handler = None
 
         # Streaming state
         self._is_streaming = False
@@ -804,6 +872,9 @@ class CodingAgentApp(App):
         self._unsubscribe_registry_reg: Optional[Callable[[], None]] = None
         self._unsubscribe_registry_unreg: Optional[Callable[[], None]] = None
 
+        # Setup mode: when agent=None, TUI shows config wizard on mount
+        self._pending_llm_config = None  # Set by cli.py before app.run()
+
     def _create_agent_stream_handler(
         self,
         agent: "CodingAgent"
@@ -843,6 +914,131 @@ class CodingAgentApp(App):
         yield ChatInput(id="input")
         yield Footer()
 
+    def get_system_commands(self, screen):
+        """Add custom commands to the command palette (Ctrl+P)."""
+        yield from super().get_system_commands(screen)
+        yield SystemCommand(
+            "Configure LLM",
+            "Set up LLM backend, model, and subagent models",
+            self.action_configure_llm,
+        )
+
+    def action_configure_llm(self) -> None:
+        """Open the LLM configuration wizard."""
+        from .llm_config_screen import ConfigLLMScreen
+
+        # Get subagent names from the already-loaded agent config
+        subagent_names = []
+        if self.agent and hasattr(self.agent, 'subagent_manager'):
+            try:
+                subagent_names = list(
+                    self.agent.subagent_manager.config_loader.loaded_configs.keys()
+                )
+            except Exception:
+                pass
+
+        self.push_screen(
+            ConfigLLMScreen(subagent_names=subagent_names),
+            callback=self._on_llm_configured,
+        )
+
+    def _show_setup_wizard(self) -> None:
+        """Auto-present the LLM config wizard in setup mode."""
+        from .llm_config_screen import ConfigLLMScreen
+
+        self.push_screen(
+            ConfigLLMScreen(),
+            callback=self._on_llm_configured,
+        )
+
+    def _on_llm_configured(self, result) -> None:
+        """Handle result from the LLM config wizard.
+
+        When in setup mode (agent was None), initializes a real agent
+        from the saved config and wires it into the app.
+        """
+        if result is None:
+            if self.agent is None:
+                # User cancelled the wizard in setup mode -- exit the app
+                self.notify("LLM configuration required. Exiting.", severity="warning")
+                self.set_timer(1.0, lambda: self.exit())
+            return
+
+        self.notify("LLM configuration saved to .clarity/config.yaml")
+
+        # If agent already exists, config was just updated (not setup mode)
+        if self.agent is not None:
+            return
+
+        # Setup mode: create agent from saved config
+        self._initialize_agent_from_config(result)
+
+    def _initialize_agent_from_config(self, config) -> None:
+        """Create a CodingAgent from saved LLMConfigData and wire it into the app.
+
+        Args:
+            config: LLMConfigData from the wizard
+        """
+        import os
+        from src.core.agent import CodingAgent
+
+        try:
+            # Resolve API key
+            api_key = (
+                config.api_key
+                or os.environ.get(config.api_key_env, "")
+            )
+
+            agent = CodingAgent(
+                model_name=config.model,
+                backend=config.backend_type,
+                base_url=config.base_url,
+                context_window=config.context_window,
+                temperature=config.temperature,
+                max_tokens=config.max_tokens,
+                top_p=config.top_p,
+                api_key=api_key,
+                api_key_env=config.api_key_env,
+            )
+
+            # Apply subagent LLM overrides
+            if config.subagents and hasattr(agent, 'subagent_manager'):
+                agent.subagent_manager.config_loader.apply_llm_overrides(config)
+
+            # Wire agent into the app
+            self.agent = agent
+            self.model_name = agent.model_name
+            self.stream_handler = self._create_agent_stream_handler(agent)
+
+            # Connect agent to existing store and session
+            if self._message_store and self._session_id:
+                agent.set_session_id(self._session_id, is_new_session=True)
+                agent.memory.set_message_store(self._message_store, self._session_id)
+
+            # Wire render meta registry
+            self.set_render_meta_registry(agent.memory.render_meta)
+
+            # Update status bar
+            if self._status_bar:
+                self._status_bar.set_mode(agent.get_permission_mode())
+                self._status_bar.set_model(self.model_name)
+
+            # Set up subagent registry
+            self._setup_subagent_registry()
+
+            self.notify(
+                f"Agent ready: {config.model} via {config.backend_type}",
+                severity="information",
+            )
+            logger.info(f"Agent initialized from wizard: model={config.model}")
+
+        except Exception as e:
+            logger.error(f"Failed to initialize agent from config: {e}")
+            self.notify(
+                f"Failed to initialize agent: {e}",
+                severity="error",
+            )
+
     def on_mount(self) -> None:
         """Focus input on start and initialize mode display."""
         # Install asyncio exception handler to capture unhandled task exceptions
@@ -876,6 +1072,10 @@ class CodingAgentApp(App):
 
         # Create and wire subagent registry for live visibility
         self._setup_subagent_registry()
+
+        # Setup mode: auto-present config wizard when no agent is configured
+        if self.agent is None:
+            self.call_after_refresh(self._show_setup_wizard)
 
         # Note: Signal handlers for SIGINT on Windows with asyncio are problematic.
         # We rely on Textual's Ctrl+C binding (action_interrupt) and the outer
@@ -965,7 +1165,8 @@ class CodingAgentApp(App):
         subagent_id: str,
         store: "MessageStore",
         transcript_path: Path,
-        parent_tool_call_id: str
+        parent_tool_call_id: str,
+        model_name: str = "",
     ) -> None:
         """Called on UI loop when subagent is registered.
 
@@ -977,10 +1178,11 @@ class CodingAgentApp(App):
             store: The subagent's MessageStore instance
             transcript_path: Path to the subagent's JSONL transcript
             parent_tool_call_id: Tool call ID of the spawning delegation call
+            model_name: LLM model name used by this subagent
         """
         logger.info(
             f"TUI: Subagent registered: {subagent_id}, "
-            f"parent_tool_call_id={parent_tool_call_id}"
+            f"parent_tool_call_id={parent_tool_call_id}, model={model_name}"
         )
 
         # NOTE: Store subscription is handled by the registry (immediate, no lost
@@ -990,10 +1192,11 @@ class CodingAgentApp(App):
             "transcript_path": transcript_path,
             "parent_tool_call_id": parent_tool_call_id,
             "store": store,
+            "model_name": model_name,
         }
 
         # Try to mount card into parent ToolCard
-        self._try_mount_subagent_card(subagent_id, transcript_path, parent_tool_call_id)
+        self._try_mount_subagent_card(subagent_id, transcript_path, parent_tool_call_id, model_name)
 
     def _on_subagent_unregistered(self, subagent_id: str) -> None:
         """Called on UI loop when subagent completes.
@@ -1016,7 +1219,8 @@ class CodingAgentApp(App):
         self,
         subagent_id: str,
         transcript_path: Path,
-        parent_tool_call_id: str
+        parent_tool_call_id: str,
+        model_name: str = "",
     ) -> None:
         """Mount SubAgentCard, or queue for retry if parent ToolCard doesn't exist yet.
 
@@ -1024,6 +1228,7 @@ class CodingAgentApp(App):
             subagent_id: Unique ID of the subagent session
             transcript_path: Path to the subagent's JSONL transcript
             parent_tool_call_id: Tool call ID of the spawning delegation call
+            model_name: LLM model name used by this subagent
         """
         parent_tool_card = self._tool_cards.get(parent_tool_call_id)
 
@@ -1040,6 +1245,7 @@ class CodingAgentApp(App):
                 transcript_path=transcript_path,
                 store=store,
                 buffered_notifications=buffered,
+                model_name=model_name,
                 id=f"subagent-{subagent_id}"
             )
 
@@ -1059,6 +1265,7 @@ class CodingAgentApp(App):
             self._pending_subagent_mounts[parent_tool_call_id] = {
                 "subagent_id": subagent_id,
                 "transcript_path": transcript_path,
+                "model_name": model_name,
             }
             logger.info(
                 f"TUI: Queued SubAgentCard {subagent_id} "
@@ -1078,7 +1285,8 @@ class CodingAgentApp(App):
             self._try_mount_subagent_card(
                 pending["subagent_id"],
                 pending["transcript_path"],
-                tool_call_id
+                tool_call_id,
+                pending.get("model_name", ""),
             )
 
     def _handle_subagent_notification(
@@ -1137,6 +1345,14 @@ class CodingAgentApp(App):
         if self._is_streaming:
             # Ignore input while streaming - input should be disabled anyway
             self.log.warning("Input submitted while streaming - ignoring")
+            return
+
+        # Guard: no agent configured yet
+        if self.stream_handler is None:
+            self.notify(
+                "No LLM configured. Use Ctrl+P > 'Configure LLM' to set up.",
+                severity="warning",
+            )
             return
 
         # Handle slash commands
@@ -1226,6 +1442,10 @@ class CodingAgentApp(App):
 
         if cmd == "/resume":
             await self._show_session_picker()
+            return True
+
+        if cmd == "/config-llm":
+            self.action_configure_llm()
             return True
 
         if cmd == "/connect-jira":

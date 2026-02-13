@@ -11,6 +11,10 @@ from typing import Optional, List, Tuple
 from io import BytesIO
 from pathlib import Path
 
+from src.observability import get_logger
+
+logger = get_logger(__name__)
+
 
 class ClipboardHandler:
     """
@@ -64,17 +68,23 @@ class ClipboardHandler:
                 if hasattr(result, 'mode') and result.mode in ('RGBA', 'P'):
                     result = result.convert('RGB')
                 result.save(output, format='PNG')
-                return output.getvalue(), None, None
-            except Exception:
-                # Image conversion failed, fall back to text
+                image_bytes = output.getvalue()
+                # SUCCESS - return image bytes
+                return image_bytes, None, None
+            except Exception as e:
+                # Image conversion failed - log the error
+                logger.error(f"ClipboardHandler: Image conversion failed: {e}", exc_info=True)
+                # Fall back to text
                 return None, None, text
 
-        except ImportError:
+        except ImportError as e:
             # PIL not available - use text only
+            logger.error(f"ClipboardHandler: PIL not available: {e}")
             return None, None, text
 
-        except Exception:
+        except Exception as e:
             # Any other error - return text if available
+            logger.error(f"ClipboardHandler: Unexpected error: {e}", exc_info=True)
             return None, None, text
 
     @classmethod
