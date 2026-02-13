@@ -13,6 +13,21 @@ from src.llm import LLMBackendType, LLMResponse
 # FIXTURES
 # =============================================================================
 
+def _make_mock_tool(name):
+    """Create a mock tool with get_schema() for SubAgent compatibility.
+
+    SubAgent._execute_with_tools builds ToolDefinitions from tool_executor.tools,
+    so each mock tool must return a valid schema dict from get_schema().
+    """
+    tool = Mock()
+    tool.get_schema.return_value = {
+        "name": name,
+        "description": f"Mock {name} tool",
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    }
+    return tool
+
+
 @pytest.fixture
 def mock_main_agent():
     """Create a mock main agent with LLM and tool executor."""
@@ -31,15 +46,15 @@ def mock_main_agent():
     agent.llm.config.top_p = 0.95
     agent.llm.api_key = "test-api-key-123"
 
-    # Mock tool executor with several tools
+    # Mock tool executor with several tools (each has get_schema())
     agent.tool_executor = Mock()
     agent.tool_executor.tools = {
-        "read_file": Mock(),
-        "write_file": Mock(),
-        "edit_file": Mock(),
-        "search_code": Mock(),
-        "run_command": Mock(),
-        "glob_files": Mock(),
+        "read_file": _make_mock_tool("read_file"),
+        "write_file": _make_mock_tool("write_file"),
+        "edit_file": _make_mock_tool("edit_file"),
+        "search_code": _make_mock_tool("search_code"),
+        "run_command": _make_mock_tool("run_command"),
+        "glob_files": _make_mock_tool("glob_files"),
     }
 
     return agent

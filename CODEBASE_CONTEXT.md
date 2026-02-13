@@ -362,8 +362,8 @@ You are an expert code reviewer...
 ```
 
 **Hierarchical Loading:**
-1. User directory: `~/.claude/agents/*.md` (lower priority)
-2. Project directory: `.claude/agents/*.md` (higher priority, overrides)
+1. User directory: `~/.clarity/agents/*.md` (lower priority)
+2. Project directory: `.clarity/agents/*.md` (higher priority, overrides)
 
 #### **`src/subagents/manager.py`** (503 lines)
 **Purpose:** Coordinates multiple subagents (delegation, parallel execution)
@@ -483,7 +483,7 @@ arguments:
 
 ### Built-In Subagents
 
-#### **code-reviewer** (`.claude/agents/code-reviewer.md`)
+#### **code-reviewer** (`.clarity/agents/code-reviewer.md`)
 **Purpose:** Expert code review for quality, security, and performance
 **Tools:** Read, Grep, SearchCode, AnalyzeCode, GitDiff
 **Model:** Inherit
@@ -494,7 +494,7 @@ arguments:
 - Best practices and patterns
 - Test coverage analysis
 
-#### **test-writer** (`.claude/agents/test-writer.md`)
+#### **test-writer** (`.clarity/agents/test-writer.md`)
 **Purpose:** Comprehensive test generation (unit, integration, E2E)
 **Tools:** Read, Write, Edit, RunCommand
 **Model:** Inherit
@@ -505,7 +505,7 @@ arguments:
 - Edge case identification
 - Mock and fixture creation
 
-#### **doc-writer** (`.claude/agents/doc-writer.md`)
+#### **doc-writer** (`.clarity/agents/doc-writer.md`)
 **Purpose:** Technical documentation creation
 **Tools:** Read, Write, Edit, Grep, SearchCode, AnalyzeCode
 **Model:** Inherit
@@ -2094,7 +2094,7 @@ semantic_memory: 40%   # Long-term knowledge (RAG chunks)
 - `src/subagents/__init__.py` (37 lines) - Module exports
 - `src/core/agent.py` (~100 lines added) - Integration methods (delegate_to_subagent, get_available_subagents)
 - `tests/core/test_agent_subagent_integration.py` (300 lines, 12 tests) - Integration tests
-- `.claude/agents/` directory - Configuration storage location with 3 built-in subagents
+- `.clarity/agents/` directory - Configuration storage location with 3 built-in subagents
 
 **Day 2:**
 - `src/tools/delegation.py` (180 lines) - DelegateToSubagentTool for LLM tool calling interface
@@ -2105,10 +2105,10 @@ semantic_memory: 40%   # Long-term knowledge (RAG chunks)
 **Features (Claude Code Integration - Phase 2, Feature 2):**
 - **Independent Context Windows:** Each subagent has separate memory to prevent main agent pollution
 - **Specialized System Prompts:** Domain-specific prompts from Markdown body
-- **Configuration-Based:** Markdown + YAML frontmatter (e.g., `.claude/agents/code-reviewer.md`)
+- **Configuration-Based:** Markdown + YAML frontmatter (e.g., `.clarity/agents/code-reviewer.md`)
 - **Tool Inheritance & Restriction:** Whitelist approach for security
 - **Flexible Model Selection:** Can override main agent's model
-- **Hierarchical Configuration Loading:** Project (.claude/agents/) overrides user (~/.claude/agents/)
+- **Hierarchical Configuration Loading:** Project (.clarity/agents/) overrides user (~/.clarity/agents/)
 - **Template Creation:** `SubAgentConfig.create_template()` for easy setup
 - **Pattern Matching:** Exact match, wildcard support for tool names
 - **Execution Loop:** Max 5 iterations for subagent tasks (focused, not infinite)
@@ -2175,7 +2175,7 @@ You are an expert code reviewer...
 - **3 Decision Types:** PERMIT/DENY/BLOCK for PreToolUse, CONTINUE/BLOCK for prompts, APPROVE/DENY for notifications
 - **Pattern Matching:** Exact match (`PreToolUse:write_file`), wildcard (`PreToolUse:*`), event-only (`SessionStart`)
 - **Type-Safe:** Pydantic validation for all contexts and results
-- **Configuration:** Python file (`.claude/hooks.py`) for full language power
+- **Configuration:** Python file (`.clarity/hooks.py`) for full language power
 - **ToolExecutor Integration:** Automatic PreToolUse/PostToolUse hook execution with decision enforcement
 - **CodingAgent Integration:** SessionStart on init, UserPromptSubmit on execute_task, SessionEnd on shutdown()
 - **Argument Modification:** Hooks can modify tool arguments before execution

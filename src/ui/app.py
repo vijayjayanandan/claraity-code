@@ -871,6 +871,7 @@ class CodingAgentApp(App):
         self._buffered_subagent_notifications: dict[str, list] = {}  # subagent_id -> buffered notifications
         self._unsubscribe_registry_reg: Optional[Callable[[], None]] = None
         self._unsubscribe_registry_unreg: Optional[Callable[[], None]] = None
+        self._unsubscribe_registry_notif: Optional[Callable[[], None]] = None
 
         # Setup mode: when agent=None, TUI shows config wizard on mount
         self._pending_llm_config = None  # Set by cli.py before app.run()
@@ -1041,6 +1042,9 @@ class CodingAgentApp(App):
 
     def on_mount(self) -> None:
         """Focus input on start and initialize mode display."""
+        # Set terminal tab title safely through Textual's rendering pipeline
+        self.console.set_window_title("ClarAIty")
+
         # Install asyncio exception handler to capture unhandled task exceptions
         try:
             from src.observability.logging_config import install_asyncio_handler
@@ -1097,7 +1101,7 @@ class CodingAgentApp(App):
             self._unsubscribe_registry_reg()
         if self._unsubscribe_registry_unreg:
             self._unsubscribe_registry_unreg()
-        if hasattr(self, '_unsubscribe_registry_notif') and self._unsubscribe_registry_notif:
+        if self._unsubscribe_registry_notif:
             self._unsubscribe_registry_notif()
 
         # Cleanup subagent store subscriptions
@@ -1175,23 +1179,25 @@ class CodingAgentApp(App):
 
         Args:
             subagent_id: Unique ID of the subagent session
-            store: The subagent's MessageStore instance
+            store: The subagent's MessageStore instance (may be None for subprocess mode)
             transcript_path: Path to the subagent's JSONL transcript
             parent_tool_call_id: Tool call ID of the spawning delegation call
             model_name: LLM model name used by this subagent
         """
         logger.info(
             f"TUI: Subagent registered: {subagent_id}, "
-            f"parent_tool_call_id={parent_tool_call_id}, model={model_name}"
+            f"parent_tool_call_id={parent_tool_call_id}, model={model_name}, "
+            f"mode={'subprocess' if store is None else 'in-process'}"
         )
 
         # NOTE: Store subscription is handled by the registry (immediate, no lost
-        # notifications). Notifications arrive via subscribe_on_notification().
+        # notifications). For subprocess mode, store is None and notifications
+        # arrive via push_notification() instead of store subscription.
         self._subagent_subscriptions[subagent_id] = {
             "card": None,  # Will be set when mounted
             "transcript_path": transcript_path,
             "parent_tool_call_id": parent_tool_call_id,
-            "store": store,
+            "store": store,  # May be None for subprocess mode
             "model_name": model_name,
         }
 
@@ -2452,12 +2458,10 @@ class CodingAgentApp(App):
                 if self._stream_worker is not None:
                     self._stream_worker.cancel()
 
-                # Cancel any running subagents
+                # Cancel any running subagents (handles both in-process and subprocess)
                 if self._subagent_registry:
                     for sid in list(self._subagent_subscriptions.keys()):
-                        inst = self._subagent_registry.get_instance(sid)
-                        if inst and hasattr(inst, 'cancel'):
-                            inst.cancel()
+                        self._subagent_registry.cancel(sid)
 
                 # Also cancel the task (belt and suspenders)
                 if self._streaming_task and not self._streaming_task.done():

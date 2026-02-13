@@ -9,7 +9,7 @@ Performance:
     - Synchronous execution (no async/await needed)
 
 Example:
-    Create a hooks.py file in .claude/:
+    Create a hooks.py file in .clarity/:
 
     ```python
     from src.hooks import PreToolUseContext, HookResult, HookDecision

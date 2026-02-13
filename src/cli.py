@@ -1070,16 +1070,16 @@ def show_hooks_status(agent: CodingAgent) -> None:
     # Check if hook manager exists
     if not agent.hook_manager:
         console.print("[yellow]No hooks loaded.[/yellow]")
-        console.print("[dim]Hooks are loaded from .claude/hooks.py if it exists.[/dim]")
+        console.print("[dim]Hooks are loaded from .clarity/hooks.py if it exists.[/dim]")
         console.print("[dim]Use 'hooks-examples' to see available examples.[/dim]")
         return
 
     # Check hooks file location
-    hooks_path = Path(".claude/hooks.py")
+    hooks_path = Path(".clarity/hooks.py")
     hooks_file_status = "✓ Found" if hooks_path.exists() else "✗ Not found"
 
     console.print(f"\n[bold cyan]Hooks Status:[/bold cyan]")
-    console.print(f"[dim]Hooks file (.claude/hooks.py): {hooks_file_status}[/dim]")
+    console.print(f"[dim]Hooks file (.clarity/hooks.py): {hooks_file_status}[/dim]")
 
     # Count registered hooks
     from src.hooks import HookEvent
@@ -1095,7 +1095,7 @@ def show_hooks_status(agent: CodingAgent) -> None:
 
     if total_hooks == 0:
         console.print("\n[yellow]No hooks registered.[/yellow]")
-        console.print("[dim]Add hooks to .claude/hooks.py to extend agent behavior.[/dim]")
+        console.print("[dim]Add hooks to .clarity/hooks.py to extend agent behavior.[/dim]")
         return
 
     console.print(f"\n[green]✓ {total_hooks} hook(s) registered across {len(hooks_by_event)} event(s)[/green]\n")
@@ -1113,14 +1113,14 @@ def show_hooks_status(agent: CodingAgent) -> None:
 
 
 def reload_hooks(agent: CodingAgent) -> None:
-    """Reload hooks from .claude/hooks.py."""
+    """Reload hooks from .clarity/hooks.py."""
     from pathlib import Path
     from src.hooks import HookManager
 
-    hooks_path = Path(".claude/hooks.py")
+    hooks_path = Path(".clarity/hooks.py")
 
     if not hooks_path.exists():
-        console.print("[yellow]No hooks file found at .claude/hooks.py[/yellow]")
+        console.print("[yellow]No hooks file found at .clarity/hooks.py[/yellow]")
         console.print("[dim]Use 'hooks-examples' to see available examples to get started.[/dim]")
         return
 
@@ -1150,7 +1150,7 @@ def reload_hooks(agent: CodingAgent) -> None:
 
     except Exception as e:
         console.print(f"[red]Error loading hooks: {e}[/red]")
-        console.print("[dim]Check .claude/hooks.py for syntax errors[/dim]")
+        console.print("[dim]Check .clarity/hooks.py for syntax errors[/dim]")
 
 
 def list_hook_examples() -> None:
@@ -1158,17 +1158,17 @@ def list_hook_examples() -> None:
     from pathlib import Path
     from rich.table import Table
 
-    examples_dir = Path(".claude/examples")
+    examples_dir = Path(".clarity/examples")
 
     if not examples_dir.exists():
-        console.print("[yellow]Examples directory not found at .claude/examples[/yellow]")
+        console.print("[yellow]Examples directory not found at .clarity/examples[/yellow]")
         return
 
     # Get example files
     example_files = sorted(examples_dir.glob("*.py"))
 
     if not example_files:
-        console.print("[yellow]No example files found in .claude/examples[/yellow]")
+        console.print("[yellow]No example files found in .clarity/examples[/yellow]")
         return
 
     console.print(f"\n[bold cyan]Available Hook Examples:[/bold cyan]\n")
@@ -1198,14 +1198,14 @@ def list_hook_examples() -> None:
 
     # Show usage instructions
     console.print(f"\n[dim]To use an example:[/dim]")
-    console.print(f"[dim]  cp .claude/examples/validation.py .claude/hooks.py[/dim]")
-    console.print(f"[dim]  # Edit .claude/hooks.py to customize[/dim]")
+    console.print(f"[dim]  cp .clarity/examples/validation.py .clarity/hooks.py[/dim]")
+    console.print(f"[dim]  # Edit .clarity/hooks.py to customize[/dim]")
     console.print(f"[dim]  # Run 'hooks-reload' to activate[/dim]")
 
     # Show README location
     readme_path = examples_dir / "README.md"
     if readme_path.exists():
-        console.print(f"\n[dim]For detailed documentation, see: .claude/examples/README.md[/dim]")
+        console.print(f"\n[dim]For detailed documentation, see: .clarity/examples/README.md[/dim]")
 
 
 def show_help() -> None:
@@ -1249,7 +1249,7 @@ def show_help() -> None:
 
 **Hooks Commands:**
 - `hooks` or `hooks-status` - Show current hooks status
-- `hooks-reload` - Reload hooks from .claude/hooks.py
+- `hooks-reload` - Reload hooks from .clarity/hooks.py
 - `hooks-examples` - List available hook examples
 
 **ClarAIty Commands:**
@@ -1274,8 +1274,8 @@ The agent automatically loads memories from:
 
 **Hooks System:**
 Extend agent behavior with custom Python hooks:
-- `.claude/hooks.py` - Your custom hooks
-- `.claude/examples/` - Example hooks to get started
+- `.clarity/hooks.py` - Your custom hooks
+- `.clarity/examples/` - Example hooks to get started
 """
     console.print(Markdown(help_text))
 

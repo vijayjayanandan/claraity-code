@@ -79,8 +79,9 @@ from src.core.permission_mode import PermissionManager, PermissionMode
 # Plan mode (Claude Code-style planning workflow)
 from src.core.plan_mode import PlanModeState, PlanGateDecision
 
-# Subagent components
-from src.subagents import SubAgentManager, SubAgentResult
+# Subagent components (lazy import to avoid circular dependency)
+if TYPE_CHECKING:
+    from src.subagents import SubAgentManager, SubAgentResult
 
 # ClarAIty integration
 try:
@@ -377,7 +378,8 @@ class CodingAgent(AgentInterface):
             mode = PermissionMode.NORMAL
         self.permission_manager = PermissionManager(mode=mode)
 
-        # Initialize subagent manager
+        # Initialize subagent manager (lazy import to avoid circular dependency)
+        from src.subagents import SubAgentManager
         self.subagent_manager = SubAgentManager(
             main_agent=self,
             working_directory=self.working_directory,
@@ -425,7 +427,7 @@ class CodingAgent(AgentInterface):
         task_description: str,
         context: Optional[Dict[str, Any]] = None,
         max_iterations: int = 5
-    ) -> SubAgentResult:
+    ) -> 'SubAgentResult':
         """Delegate a task to a specialized subagent.
 
         Subagents operate with independent context windows and specialized

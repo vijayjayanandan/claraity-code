@@ -1,6 +1,6 @@
 """Built-in system prompts for subagents.
 
-These prompts mirror the .claude/agents/*.md files used by Claude Code.
+These prompts mirror the .clarity/agents/*.md markdown config format.
 They are loaded as highest-priority built-in prompts by SubAgentConfigLoader.
 """
 

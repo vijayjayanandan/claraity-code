@@ -12,7 +12,7 @@ from src.subagents import SubAgentManager, SubAgentResult
 @pytest.fixture
 def temp_agent_dir(tmp_path):
     """Create temporary directory with subagent configs."""
-    agents_dir = tmp_path / ".claude" / "agents"
+    agents_dir = tmp_path / ".clarity" / "agents"
     agents_dir.mkdir(parents=True)
 
     # Create test subagent config

@@ -15,8 +15,8 @@ LLM configuration is nested under an ``llm:`` key::
 All ``llm`` fields are optional. Omitted fields inherit from the main agent.
 
 Configuration files are loaded hierarchically:
-1. Project: .claude/agents/*.md (highest priority)
-2. User: ~/.claude/agents/*.md (lower priority)
+1. Project: .clarity/agents/*.md (highest priority)
+2. User: ~/.clarity/agents/*.md (lower priority)
 """
 
 from dataclasses import dataclass, field
@@ -127,7 +127,7 @@ class SubAgentConfig:
             ValueError: If file format is invalid
 
         Example:
-            >>> config = SubAgentConfig.from_file(Path(".claude/agents/code-reviewer.md"))
+            >>> config = SubAgentConfig.from_file(Path(".clarity/agents/code-reviewer.md"))
             >>> print(config.name)
             'code-reviewer'
         """
@@ -273,7 +273,7 @@ class SubAgentConfig:
             >>> SubAgentConfig.create_template(
             ...     "my-agent",
             ...     "My custom subagent",
-            ...     Path(".claude/agents/my-agent.md")
+            ...     Path(".clarity/agents/my-agent.md")
             ... )
         """
         # Validate name format
@@ -334,8 +334,8 @@ class SubAgentConfigLoader:
 
     Search order (highest to lowest priority):
     1. Built-in: src/prompts/subagents/*.py (Python constants)
-    2. Legacy: ./.claude/agents/*.md (Markdown files, deprecated)
-    3. User: ~/.claude/agents/*.md (Markdown files, deprecated)
+    2. Legacy: ./.clarity/agents/*.md (Markdown files, deprecated)
+    3. User: ~/.clarity/agents/*.md (Markdown files, deprecated)
     
     Note: Markdown format is deprecated. Use Python constants in src/prompts/subagents/
     """
@@ -371,7 +371,7 @@ class SubAgentConfigLoader:
             logger.info(f"Loaded {len(builtin_configs)} built-in subagent(s) from src/prompts/subagents/")
 
         # Load from user directory (legacy, lower priority)
-        user_dir = Path.home() / ".claude" / "agents"
+        user_dir = Path.home() / ".clarity" / "agents"
         if user_dir.exists():
             user_configs = self._load_from_directory(user_dir)
             added_count = 0
@@ -385,7 +385,7 @@ class SubAgentConfigLoader:
                 logger.warning(f"Loaded {added_count} subagent(s) from legacy user directory (consider migrating to src/prompts/subagents/)")
 
         # Load from project directory (legacy, can override user but not built-in)
-        project_dir = self.working_directory / ".claude" / "agents"
+        project_dir = self.working_directory / ".clarity" / "agents"
         if project_dir.exists():
             project_configs = self._load_from_directory(project_dir)
             added_count = 0

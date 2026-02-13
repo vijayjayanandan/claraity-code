@@ -22,7 +22,7 @@ import time
 import uuid
 
 from src.observability import get_logger
-from src.core.tool_status import ToolStatus
+from src.core.events import ToolStatus
 from src.core.cancel_token import CancelToken, CancelledException
 from .sync_writer import SyncJSONLWriter
 
@@ -108,19 +108,45 @@ class SubAgent:
     def __init__(
         self,
         config: 'SubAgentConfig',
-        main_agent: 'AgentInterface',
+        main_agent: Optional['AgentInterface'] = None,
         transcript_dir: Optional[Path] = None,
+        *,
+        llm: Optional[Any] = None,
+        tool_executor: Optional[Any] = None,
+        working_directory: Optional[str] = None,
     ):
         """Initialize subagent with own persistence and configurable LLM/tools.
+
+        Supports two modes:
+        1. main_agent mode (existing): extract deps from main agent
+        2. Direct injection (subprocess): provide llm, tool_executor, working_directory
 
         Args:
             config: SubAgentConfig with name, description, system_prompt,
                     and optional model/tools/context_window overrides
-            main_agent: Main agent (provides default LLM, tools, and working directory)
+            main_agent: Main agent (provides default LLM, tools, and working directory).
+                       Optional if llm and tool_executor are provided directly.
             transcript_dir: Directory for JSONL transcripts (default: .clarity/sessions/subagents/)
+            llm: LLMBackend instance (direct injection for subprocess mode)
+            tool_executor: ToolExecutor instance (direct injection for subprocess mode)
+            working_directory: Working directory path (direct injection for subprocess mode)
         """
         self.config = config
-        self.main_agent = main_agent
+        self.main_agent = main_agent  # May be None in subprocess mode
+
+        # Resolve dependencies: direct injection or extract from main_agent
+        if main_agent is not None:
+            self._llm_source = main_agent.llm
+            self._tool_executor = main_agent.tool_executor
+            self._working_directory = getattr(main_agent, 'working_directory', None)
+        else:
+            if llm is None or tool_executor is None:
+                raise ValueError(
+                    "SubAgent requires either main_agent or both llm and tool_executor"
+                )
+            self._llm_source = llm
+            self._tool_executor = tool_executor
+            self._working_directory = working_directory
 
         # Generate unique session ID for this subagent
         self.session_id = str(uuid.uuid4())[:8]
@@ -153,11 +179,11 @@ class SubAgent:
 
         # Log initialization with actual LLM and tool info
         model_name = self.llm.config.model_name
-        model_source = "override" if self._override_llm else "main agent"
+        model_source = "override" if self._override_llm else ("injected" if main_agent is None else "main agent")
         tool_info = (
             f"{len(self.config.tools)} configured"
             if self.config.tools
-            else f"{len(self.main_agent.tool_executor.tools)} inherited"
+            else f"{len(self._tool_executor.tools)} inherited"
         )
         logger.info(
             f"SubAgent [{self.config.name}] initialized "
@@ -170,10 +196,10 @@ class SubAgent:
         """Return the LLM backend for this subagent.
 
         Uses the override LLM if config.llm has overrides, otherwise
-        falls back to the main agent's LLM. In both cases, the subagent
+        falls back to the injected LLM source. In both cases, the subagent
         maintains its own separate conversation context.
         """
-        return self._override_llm or self.main_agent.llm
+        return self._override_llm or self._llm_source
 
     def _create_override_llm(self):
         """Create a separate LLM backend from config.llm overrides.
@@ -192,7 +218,7 @@ class SubAgent:
             from src.llm import OpenAIBackend, OllamaBackend, LLMConfig
 
             llm_overrides = self.config.llm
-            main_llm = self.main_agent.llm
+            main_llm = self._llm_source
             main_config = main_llm.config
 
             # Resolve each field: override if set, else inherit from main
@@ -286,16 +312,15 @@ class SubAgent:
         logger.info(f"SubAgent [{self.config.name}]: Starting execution")
         logger.debug(f"Task: {task_description[:100]}...")
 
-        # Open transcript writer
-        self._transcript_writer = SyncJSONLWriter(self._transcript_path)
-        self._transcript_writer.open()
-
-        # Subscribe to store notifications for transcript persistence
-        self._store_unsubscribe = self._message_store.subscribe(
-            self._on_store_notification
-        )
-
         try:
+            # Open transcript writer (inside try so failures hit structured error handler)
+            self._transcript_writer = SyncJSONLWriter(self._transcript_path)
+            self._transcript_writer.open()
+
+            # Subscribe to store notifications for transcript persistence
+            self._store_unsubscribe = self._message_store.subscribe(
+                self._on_store_notification
+            )
             # Check cancellation before starting
             self._cancel_token.check_cancelled()
 
@@ -320,7 +345,7 @@ class SubAgent:
                     "backend_type": self.llm.config.backend_type,
                     "model": self.llm.config.model_name,
                     "llm_override": self._override_llm is not None,
-                    "tools_available": list(self.main_agent.tool_executor.tools.keys()),
+                    "tools_available": list(self._tool_executor.tools.keys()),
                     "tools_filtered": self.config.tools is not None,
                     "iterations": len(tool_calls),
                     "subagent_id": self.session_id,
@@ -383,14 +408,21 @@ class SubAgent:
             return result
 
         finally:
-            # Cleanup: unsubscribe and close writer
-            if self._store_unsubscribe:
-                self._store_unsubscribe()
-                self._store_unsubscribe = None
+            # Cleanup: each step wrapped independently so one failure
+            # doesn't skip subsequent cleanup (prevents resource leaks)
+            try:
+                if self._store_unsubscribe:
+                    self._store_unsubscribe()
+                    self._store_unsubscribe = None
+            except Exception as e:
+                logger.warning(f"SubAgent [{self.config.name}]: unsubscribe failed: {e}")
 
-            if self._transcript_writer:
-                self._transcript_writer.close()
-                self._transcript_writer = None
+            try:
+                if self._transcript_writer:
+                    self._transcript_writer.close()
+                    self._transcript_writer = None
+            except Exception as e:
+                logger.warning(f"SubAgent [{self.config.name}]: writer close failed: {e}")
 
     def _on_store_notification(self, notification) -> None:
         """Handle store notifications by writing to transcript.
@@ -446,15 +478,14 @@ class SubAgent:
         system_message = self.config.system_prompt
 
         # Defensive check: warn if tool_executor has no workspace_root
-        tool_exec = getattr(self.main_agent, 'tool_executor', None)
-        if tool_exec and getattr(tool_exec, '_workspace_root', None) is None:
+        if self._tool_executor and getattr(self._tool_executor, '_workspace_root', None) is None:
             logger.warning(
                 f"SubAgent [{self.config.name}]: tool_executor._workspace_root is None - "
                 f"file operations may use incorrect paths"
             )
 
         # Add working directory context so LLM uses correct paths
-        working_dir = getattr(self.main_agent, 'working_directory', None)
+        working_dir = self._working_directory
         if working_dir:
             system_message += f"\n\n## Working Directory:\nThe current working directory is: {working_dir}\nAll file paths should be relative to this directory.\n"
 
@@ -499,11 +530,16 @@ class SubAgent:
         Returns:
             Tuple of (final_output, tool_calls)
         """
-        from src.tools.tool_schemas import ALL_TOOLS
+        from src.llm.base import ToolDefinition
         from src.session.models.message import Message
 
-        # Build tool list for this subagent
-        subagent_tools = self._resolve_tools(ALL_TOOLS)
+        # Build tool definitions from the tool executor's registered tools
+        all_tool_defs = [
+            ToolDefinition(**t.get_schema())
+            for t in self._tool_executor.tools.values()
+        ]
+        # Filter using existing _resolve_tools logic
+        subagent_tools = self._resolve_tools(all_tool_defs)
 
         current_context = context.copy()
         all_tool_calls = []
@@ -605,7 +641,7 @@ class SubAgent:
                             f"subagent '{self.config.name}'"
                         )
 
-                    result = self.main_agent.tool_executor.execute_tool(
+                    result = self._tool_executor.execute_tool(
                         tool_name, **tool_args
                     )
 
@@ -745,6 +781,6 @@ class SubAgent:
             "backend_type": self.llm.config.backend_type,
             "model": self.llm.config.model_name,
             "llm_override": self._override_llm is not None,
-            "tools_available": len(self.main_agent.tool_executor.tools),
+            "tools_available": len(self._tool_executor.tools),
             "tools_filtered": self.config.tools is not None,
         }
