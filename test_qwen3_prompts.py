@@ -10,7 +10,7 @@ from typing import Dict, List, Any
 from datetime import datetime
 
 # API Configuration
-API_KEY = os.getenv("DASHSCOPE_API_KEY", "sk-6ca5ca68942447c7a4c18d0ea63f75e7")
+API_KEY = os.getenv("DASHSCOPE_API_KEY", "")
 API_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions"
 
 # Tool Definitions (OpenAI-compatible format)

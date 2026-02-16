@@ -1,11 +1,13 @@
-import os
-import traceback
+#!/usr/bin/env python
+"""Test circular import issue"""
+import sys
 
-os.environ['DASHSCOPE_API_KEY'] = 'sk-4e4a13fc4efb48408e22eb9feb40a03d'
-
+print("Testing import of SubAgentManager...")
 try:
-    from src.validation import runner
-    print("SUCCESS: Import worked!")
-except Exception as e:
-    print(f"ERROR: {e}")
+    from src.subagents import SubAgentManager
+    print("SUCCESS: SubAgentManager imported")
+except ImportError as e:
+    print(f"FAILED: {e}")
+    import traceback
     traceback.print_exc()
+    sys.exit(1)

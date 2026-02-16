@@ -374,7 +374,11 @@ class TestCriticalFixes:
             model_name=os.getenv("LLM_MODEL", "deepseek-coder"),
             backend=os.getenv("LLM_BACKEND", "openai"),
             base_url=os.getenv("LLM_HOST", "http://localhost:8000"),
-            context_window=int(os.getenv("MAX_CONTEXT_TOKENS", "4096"))
+            context_window=int(os.getenv("MAX_CONTEXT_TOKENS", "4096")),
+            api_key=os.getenv("DASHSCOPE_API_KEY", os.getenv("OPENAI_API_KEY", "sk-test-placeholder")),
+            embedding_api_key=os.getenv("EMBEDDING_API_KEY", "sk-test-placeholder"),
+            embedding_base_url=os.getenv("EMBEDDING_BASE_URL", "http://localhost:8000"),
+            load_file_memories=False,
         )
 
         # Empty messages should raise ValueError
@@ -390,7 +394,11 @@ class TestCriticalFixes:
             model_name=os.getenv("LLM_MODEL", "deepseek-coder"),
             backend=os.getenv("LLM_BACKEND", "openai"),
             base_url=os.getenv("LLM_HOST", "http://localhost:8000"),
-            context_window=int(os.getenv("MAX_CONTEXT_TOKENS", "4096"))
+            context_window=int(os.getenv("MAX_CONTEXT_TOKENS", "4096")),
+            api_key=os.getenv("DASHSCOPE_API_KEY", os.getenv("OPENAI_API_KEY", "sk-test-placeholder")),
+            embedding_api_key=os.getenv("EMBEDDING_API_KEY", "sk-test-placeholder"),
+            embedding_base_url=os.getenv("EMBEDDING_BASE_URL", "http://localhost:8000"),
+            load_file_memories=False,
         )
 
         # Message without role should raise ValueError
@@ -426,7 +434,11 @@ class TestCriticalFixes:
             model_name=os.getenv("LLM_MODEL", "deepseek-coder"),
             backend=os.getenv("LLM_BACKEND", "openai"),
             base_url=os.getenv("LLM_HOST", "http://localhost:8000"),
-            context_window=int(os.getenv("MAX_CONTEXT_TOKENS", "4096"))
+            context_window=int(os.getenv("MAX_CONTEXT_TOKENS", "4096")),
+            api_key=os.getenv("DASHSCOPE_API_KEY", os.getenv("OPENAI_API_KEY", "sk-test-placeholder")),
+            embedding_api_key=os.getenv("EMBEDDING_API_KEY", "sk-test-placeholder"),
+            embedding_base_url=os.getenv("EMBEDDING_BASE_URL", "http://localhost:8000"),
+            load_file_memories=False,
         )
 
         # Store structured data
@@ -448,7 +460,11 @@ class TestCriticalFixes:
             model_name=os.getenv("LLM_MODEL", "deepseek-coder"),
             backend=os.getenv("LLM_BACKEND", "openai"),
             base_url=os.getenv("LLM_HOST", "http://localhost:8000"),
-            context_window=int(os.getenv("MAX_CONTEXT_TOKENS", "4096"))
+            context_window=int(os.getenv("MAX_CONTEXT_TOKENS", "4096")),
+            api_key=os.getenv("DASHSCOPE_API_KEY", os.getenv("OPENAI_API_KEY", "sk-test-placeholder")),
+            embedding_api_key=os.getenv("EMBEDDING_API_KEY", "sk-test-placeholder"),
+            embedding_base_url=os.getenv("EMBEDDING_BASE_URL", "http://localhost:8000"),
+            load_file_memories=False,
         )
 
         # Get non-existent key with default

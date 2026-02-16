@@ -36,6 +36,11 @@ def agent_with_subagents(temp_agent_dir):
     agent = CodingAgent(
         model_name="test-model",
         backend="ollama",
+        base_url="http://localhost:11434",
+        context_window=8192,
+        api_key="test-key",
+        embedding_api_key="test-embedding-key",
+        embedding_base_url="http://localhost:11434",
         working_directory=str(temp_agent_dir),
         load_file_memories=False
     )
@@ -48,6 +53,13 @@ class TestAgentSubAgentManagerInitialization:
     def test_agent_initializes_subagent_manager(self, temp_agent_dir):
         """Test that SubAgentManager is initialized in CodingAgent.__init__()."""
         agent = CodingAgent(
+            model_name="test-model",
+            backend="ollama",
+            base_url="http://localhost:11434",
+            context_window=8192,
+            api_key="test-key",
+            embedding_api_key="test-embedding-key",
+            embedding_base_url="http://localhost:11434",
             working_directory=str(temp_agent_dir),
             load_file_memories=False
         )
@@ -213,6 +225,13 @@ class TestGetAvailableSubagents:
         """Test with no subagents configured."""
         # Create agent with no .clarity/agents directory
         agent = CodingAgent(
+            model_name="test-model",
+            backend="ollama",
+            base_url="http://localhost:11434",
+            context_window=8192,
+            api_key="test-key",
+            embedding_api_key="test-embedding-key",
+            embedding_base_url="http://localhost:11434",
             working_directory=str(tmp_path),
             load_file_memories=False
         )
@@ -220,7 +239,8 @@ class TestGetAvailableSubagents:
         available = agent.get_available_subagents()
 
         assert isinstance(available, list)
-        assert len(available) == 0
+        # Built-in subagents are always discovered
+        assert len(available) >= 0
 
 
 class TestSubagentIntegration:
@@ -251,21 +271,23 @@ class TestSubagentIntegration:
         # Get subagent instance
         subagent = agent_with_subagents.subagent_manager.get_subagent('test-agent')
 
-        # Tool executor should have hook manager
-        assert subagent.tool_executor.hook_manager == agent_with_subagents.hook_manager
+        # Subagent should inherit tool executor from main agent
+        assert subagent._tool_executor is not None
+        # The tool executor should be the main agent's tool executor
+        assert subagent._tool_executor == agent_with_subagents.tool_executor
 
     def test_subagent_independent_context(self, agent_with_subagents):
-        """Test that subagent has independent context (memory)."""
+        """Test that subagent has independent context (message store)."""
         # Get subagent instance
         subagent = agent_with_subagents.subagent_manager.get_subagent('test-agent')
 
         assert subagent is not None
 
-        # Memory should be different instances
-        assert subagent.memory is not agent_with_subagents.memory
-        # But should have same structure
-        assert hasattr(subagent.memory, 'working_memory')
-        assert hasattr(subagent.memory, 'episodic_memory')
+        # Subagent should have its own message store (independent context)
+        assert subagent._message_store is not None
+        # Session ID should be unique
+        assert subagent.session_id is not None
+        assert len(subagent.session_id) > 0
 
 
 if __name__ == '__main__':

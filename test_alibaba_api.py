@@ -16,7 +16,7 @@ def test_alibaba_connection():
         model_name="qwen3-coder-plus",
         base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
         context_window=32768,  # Reasonable context window
-        api_key="sk-6ca5ca68942447c7a4c18d0ea63f75e7",
+        api_key=os.getenv("DASHSCOPE_API_KEY", ""),
         api_key_env="DASHSCOPE_API_KEY"
     )
 

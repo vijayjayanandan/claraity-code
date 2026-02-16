@@ -16,7 +16,7 @@ def test_conversation_memory():
         model_name="qwen3-coder-plus",
         base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
         context_window=32768,
-        api_key="sk-6ca5ca68942447c7a4c18d0ea63f75e7"
+        api_key=os.getenv("DASHSCOPE_API_KEY", "")
     )
 
     print("\n✓ Agent initialized with Alibaba API")
@@ -68,7 +68,7 @@ def test_tool_calling():
         model_name="qwen3-coder-plus",
         base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
         context_window=32768,
-        api_key="sk-6ca5ca68942447c7a4c18d0ea63f75e7"
+        api_key=os.getenv("DASHSCOPE_API_KEY", "")
     )
 
     # Index the codebase first
@@ -111,7 +111,7 @@ def test_multi_turn_conversation():
         model_name="qwen3-coder-plus",
         base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
         context_window=32768,
-        api_key="sk-6ca5ca68942447c7a4c18d0ea63f75e7"
+        api_key=os.getenv("DASHSCOPE_API_KEY", "")
     )
 
     # Turn 1
@@ -158,7 +158,7 @@ def test_code_quality():
         model_name="qwen3-coder-plus",
         base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
         context_window=32768,
-        api_key="sk-6ca5ca68942447c7a4c18d0ea63f75e7"
+        api_key=os.getenv("DASHSCOPE_API_KEY", "")
     )
 
     print("\n📝 Asking agent to write a class with proper documentation")

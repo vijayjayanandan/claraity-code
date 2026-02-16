@@ -78,7 +78,7 @@ class TestDelegationResult:
 
         str_repr = str(delegation_result)
 
-        assert "✅ SUCCESS" in str_repr
+        assert "[OK] SUCCESS" in str_repr
         assert "Subagents Used: 2" in str_repr
         assert "5.50s" in str_repr
         assert "code-reviewer" in str_repr
@@ -110,7 +110,7 @@ class TestDelegationResult:
 
         str_repr = str(delegation_result)
 
-        assert "❌ FAILED" in str_repr
+        assert "[FAIL] FAILED" in str_repr
         assert "Subagents Used: 2" in str_repr
 
 
@@ -257,7 +257,7 @@ class TestSubAgentManagerDelegation:
             mock_subagent.execute.assert_called_once_with(
                 task_description="Review src/api.py",
                 context=None,
-                max_iterations=5
+                max_iterations=50
             )
 
     def test_delegate_with_context(self, mock_main_agent, sample_configs):

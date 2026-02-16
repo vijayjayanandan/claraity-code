@@ -4,7 +4,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from src.subagents.config import SubAgentConfig, SubAgentConfigLoader
+from src.subagents.config import SubAgentConfig, SubAgentConfigLoader, SubAgentLLMConfig
 
 
 @pytest.fixture
@@ -22,8 +22,9 @@ def valid_config_content():
 name: test-agent
 description: Test subagent for unit testing
 tools: Read, Write, Edit
-model: sonnet
-context_window: 8192
+llm:
+  model: sonnet
+  context_window: 200000
 ---
 
 # Test Agent
@@ -58,16 +59,15 @@ class TestSubAgentConfigValidation:
             description="Test subagent",
             system_prompt="You are a test agent.",
             tools=["Read", "Write"],
-            model="sonnet",
-            context_window=8192
+            llm=SubAgentLLMConfig(model="sonnet", context_window=200000)
         )
 
         assert config.name == "test-agent"
         assert config.description == "Test subagent"
         assert config.system_prompt == "You are a test agent."
         assert config.tools == ["Read", "Write"]
-        assert config.model == "sonnet"
-        assert config.context_window == 8192
+        assert config.llm.model == "sonnet"
+        assert config.llm.context_window == 200000
 
     def test_invalid_name_format(self):
         """Test that invalid name formats raise ValueError."""
@@ -156,8 +156,9 @@ class TestSubAgentConfigFileLoading:
         assert config.description == "Test subagent for unit testing"
         assert "You are a test subagent" in config.system_prompt
         assert config.tools == ["Read", "Write", "Edit"]
-        assert config.model == "sonnet"
-        assert config.context_window == 8192
+        assert config.llm is not None
+        assert config.llm.model == "sonnet"
+        assert config.llm.context_window == 200000
         assert config.config_path == config_file
 
     def test_load_minimal_config(self, temp_config_dir, minimal_config_content):
@@ -171,8 +172,7 @@ class TestSubAgentConfigFileLoading:
         assert config.description == "Minimal test agent"
         assert "You are a minimal test agent" in config.system_prompt
         assert config.tools is None
-        assert config.model is None
-        assert config.context_window is None
+        assert config.llm is None
 
     def test_load_file_not_found(self, temp_config_dir):
         """Test loading non-existent file raises FileNotFoundError."""
@@ -258,12 +258,13 @@ Prompt
         assert config.tools == ["Read", "Write", "Edit"]
 
     def test_load_model_inherit(self, temp_config_dir):
-        """Test that 'model: inherit' is converted to None."""
+        """Test that 'model: inherit' is converted to None (no LLM overrides)."""
         config_file = temp_config_dir / "model-inherit.md"
         config_file.write_text("""---
 name: inherit-test
 description: Test model inheritance
-model: inherit
+llm:
+  model: inherit
 ---
 
 Prompt
@@ -271,7 +272,8 @@ Prompt
 
         config = SubAgentConfig.from_file(config_file)
 
-        assert config.model is None
+        # "inherit" means None, and with no other overrides, llm is None
+        assert config.llm is None
 
     def test_load_invalid_context_window(self, temp_config_dir):
         """Test that invalid context_window raises ValueError."""
@@ -279,7 +281,8 @@ Prompt
         config_file.write_text("""---
 name: context-test
 description: Test context window
-context_window: not-a-number
+llm:
+  context_window: not-a-number
 ---
 
 Prompt
@@ -392,7 +395,7 @@ Prompt 2
         loader = SubAgentConfigLoader(working_directory=temp_config_dir.parent.parent)
         configs = loader.discover_all()
 
-        assert len(configs) == 2
+        # Should include our 2 custom agents plus built-in agents
         assert "agent1" in configs
         assert "agent2" in configs
         assert configs["agent1"].description == "First agent"
@@ -429,7 +432,7 @@ Project prompt
             loader = SubAgentConfigLoader(working_directory=tmp_path / "project")
             configs = loader.discover_all()
 
-        assert len(configs) == 2
+        # Should include both user and project agents (plus built-ins)
         assert "user-agent" in configs
         assert "project-agent" in configs
 
@@ -537,7 +540,7 @@ Prompt {i}
         loader = SubAgentConfigLoader(working_directory=temp_config_dir.parent.parent)
         names = loader.get_all_names()
 
-        assert len(names) == 3
+        # Should include our 3 custom agents (plus built-ins)
         assert "agent0" in names
         assert "agent1" in names
         assert "agent2" in names
@@ -564,8 +567,7 @@ Prompt
         loader = SubAgentConfigLoader(working_directory=temp_config_dir.parent.parent)
         configs = loader.discover_all()
 
-        # Should load valid config, skip invalid
-        assert len(configs) == 1
+        # Should load valid config, skip invalid (plus built-ins)
         assert "valid-agent" in configs
         assert "invalid-agent" not in configs
 

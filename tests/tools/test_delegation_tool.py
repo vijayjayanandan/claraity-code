@@ -94,15 +94,21 @@ class TestDelegationToolExecution:
                 {'tool': 'write_file', 'success': True}
             ]
         )
-        mock_subagent_manager.delegate.return_value = mock_result
+
+        # Mock get_subagent to return a mock subagent instance
+        mock_subagent_instance = Mock()
+        mock_subagent_instance.execute.return_value = mock_result
+        mock_subagent_manager.get_subagent.return_value = mock_subagent_instance
 
         # Execute tool
         result = tool.execute(subagent='test-agent', task='Test task')
 
-        # Verify delegation was called
-        mock_subagent_manager.delegate.assert_called_once_with(
-            subagent_name='test-agent',
-            task_description='Test task'
+        # Verify get_subagent was called
+        mock_subagent_manager.get_subagent.assert_called_with('test-agent')
+
+        # Verify subagent.execute was called
+        mock_subagent_instance.execute.assert_called_once_with(
+            task_description='Test task',
         )
 
         # Verify result
@@ -116,8 +122,8 @@ class TestDelegationToolExecution:
         """Test execution when subagent doesn't exist."""
         tool = DelegateToSubagentTool(mock_subagent_manager)
 
-        # Mock subagent not found
-        mock_subagent_manager.delegate.return_value = None
+        # Mock get_subagent returning None (not found)
+        mock_subagent_manager.get_subagent.return_value = None
 
         # Execute tool
         result = tool.execute(subagent='non-existent', task='Test task')
@@ -140,7 +146,11 @@ class TestDelegationToolExecution:
             error='Subagent execution failed',
             execution_time=0.5
         )
-        mock_subagent_manager.delegate.return_value = mock_result
+
+        # Mock get_subagent to return a mock subagent instance that fails
+        mock_subagent_instance = Mock()
+        mock_subagent_instance.execute.return_value = mock_result
+        mock_subagent_manager.get_subagent.return_value = mock_subagent_instance
 
         # Execute tool
         result = tool.execute(subagent='test-agent', task='Test task')
@@ -186,9 +196,14 @@ class TestDelegationToolExecution:
             success=True,
             subagent_name='test-agent',
             output='Output',
-            execution_time=1.0
+            execution_time=1.0,
+            tool_calls=[]
         )
-        mock_subagent_manager.delegate.return_value = mock_result
+
+        # Mock get_subagent to return a mock subagent instance
+        mock_subagent_instance = Mock()
+        mock_subagent_instance.execute.return_value = mock_result
+        mock_subagent_manager.get_subagent.return_value = mock_subagent_instance
 
         # Execute with whitespace
         result = tool.execute(
@@ -196,10 +211,12 @@ class TestDelegationToolExecution:
             task='  Test task with spaces  '
         )
 
-        # Verify trimmed values were used
-        mock_subagent_manager.delegate.assert_called_once_with(
-            subagent_name='test-agent',
-            task_description='Test task with spaces'
+        # Verify get_subagent was called with trimmed name
+        mock_subagent_manager.get_subagent.assert_called_with('test-agent')
+
+        # Verify subagent.execute was called with trimmed task
+        mock_subagent_instance.execute.assert_called_once_with(
+            task_description='Test task with spaces',
         )
 
         assert result.status == ToolStatus.SUCCESS

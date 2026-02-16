@@ -3,8 +3,17 @@
 import os
 import tempfile
 import pytest
+import chromadb.api.shared_system_client
 
 from src.memory import MemoryManager, Importance
+
+
+@pytest.fixture(autouse=True)
+def reset_chromadb():
+    """Reset ChromaDB singleton between tests to avoid settings conflicts."""
+    yield
+    # Clear the ChromaDB singleton cache after each test
+    chromadb.api.shared_system_client.SharedSystemClient._identifier_to_system.clear()
 
 
 class TestMemoryManagerObservationIntegration:
@@ -25,6 +34,8 @@ class TestMemoryManagerObservationIntegration:
             episodic_memory_tokens=20000,
             persist_directory=temp_dir,
             load_file_memories=False,
+            embedding_api_key=os.getenv("EMBEDDING_API_KEY", os.getenv("DASHSCOPE_API_KEY", "sk-test-placeholder")),
+            embedding_base_url=os.getenv("EMBEDDING_BASE_URL", "http://localhost:8000"),
         )
 
     def test_turn_id_increments_on_user_message(self, memory_manager):
@@ -75,12 +86,12 @@ class TestMemoryManagerObservationIntegration:
         """Test rehydrating a pointer back to content."""
         memory_manager.add_user_message("Read file")
 
-        original_content = "def important_function(): pass"
+        original_content = "def important_function(): pass\n" * 50  # Large enough to exceed threshold
         pointer, is_pointer = memory_manager.add_tool_observation(
             tool_name="read_file",
             args={"path": "/important.py"},
             content=original_content,
-            inline_threshold_tokens=10,  # Force pointer
+            inline_threshold_tokens=5,  # Force pointer with very low threshold
         )
 
         assert is_pointer
@@ -172,6 +183,8 @@ class TestObservationStoreFeatureFlag:
         mm = MemoryManager(
             persist_directory=temp_dir,
             load_file_memories=False,
+            embedding_api_key=os.getenv("EMBEDDING_API_KEY", os.getenv("DASHSCOPE_API_KEY", "sk-test-placeholder")),
+            embedding_base_url=os.getenv("EMBEDDING_BASE_URL", "http://localhost:8000"),
         )
 
         assert mm.observation_store is not None
@@ -192,6 +205,8 @@ class TestTurnIdPersistence:
         mm = MemoryManager(
             persist_directory=temp_dir,
             load_file_memories=False,
+            embedding_api_key=os.getenv("EMBEDDING_API_KEY", os.getenv("DASHSCOPE_API_KEY", "sk-test-placeholder")),
+            embedding_base_url=os.getenv("EMBEDDING_BASE_URL", "http://localhost:8000"),
         )
 
         # Turn 1

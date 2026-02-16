@@ -831,6 +831,9 @@ class CodingAgentApp(App):
         self._last_status_update_ts: float = 0.0
         self._status_update_interval_sec: float = 0.2  # Update at most every 200ms
 
+        # Director mode: pending activation (user typed /director with no task)
+        self._director_pending: bool = False
+
         # Phase 6: Store-driven rendering
         # TUI renders from MessageStore notifications. UIEvents are forwarded
         # to StoreAdapter for persistence; store notifications handle rendering.
@@ -923,6 +926,11 @@ class CodingAgentApp(App):
             "Set up LLM backend, model, and subagent models",
             self.action_configure_llm,
         )
+        yield SystemCommand(
+            "Configure Jira",
+            "Set up Jira connection profiles (URL, username, API token)",
+            self.action_configure_jira,
+        )
 
     def action_configure_llm(self) -> None:
         """Open the LLM configuration wizard."""
@@ -942,6 +950,43 @@ class CodingAgentApp(App):
             ConfigLLMScreen(subagent_names=subagent_names),
             callback=self._on_llm_configured,
         )
+
+    def action_configure_jira(self) -> None:
+        """Open the Jira configuration screen."""
+        from .jira_config_screen import ConfigJiraScreen
+
+        # Detect which Jira profile is currently connected (if any)
+        connected_profile = None
+        if self.agent:
+            conn = self.agent._mcp_manager.get_connection("jira")
+            if conn:
+                # Extract profile from server name "mcp-atlassian-<profile>"
+                connected_profile = conn.config.name.replace("mcp-atlassian-", "")
+
+        self.push_screen(
+            ConfigJiraScreen(connected_profile=connected_profile),
+            callback=self._on_jira_configured,
+        )
+
+    def _on_jira_configured(self, result) -> None:
+        """Handle result from the Jira config screen."""
+        if result is None:
+            return
+
+        if result.disconnect:
+            # "Disconnect" was pressed
+            self.run_worker(
+                self._disconnect_jira(),
+                exclusive=False,
+                group="jira",
+            )
+        else:
+            # "Save & Connect" was pressed -- trigger connection
+            self.run_worker(
+                self._connect_jira(profile=result.profile),
+                exclusive=False,
+                group="jira",
+            )
 
     def _show_setup_wizard(self) -> None:
         """Auto-present the LLM config wizard in setup mode."""
@@ -1361,6 +1406,42 @@ class CodingAgentApp(App):
             )
             return
 
+        # Handle /director command (activate director, strip prefix, send task as message)
+        if user_input.lower().startswith("/director") and not user_input.lower().startswith("/director-"):
+            task = user_input[len("/director"):].strip()
+            if not task:
+                # Bare /director -- activate pending mode, wait for next message as task
+                self._director_pending = True
+                self.notify("Director mode ready. Type your task to begin.")
+                try:
+                    status_bar = self.query_one("#status", StatusBar)
+                    status_bar.set_director_phase("READY")
+                except Exception:
+                    pass
+                return
+            if self.agent:
+                self.agent.director_adapter.start(task)
+                self._director_pending = False
+                self.notify("Director mode: UNDERSTAND phase")
+                try:
+                    status_bar = self.query_one("#status", StatusBar)
+                    status_bar.set_director_phase("UNDERSTAND")
+                except Exception:
+                    pass
+                user_input = task  # Strip prefix, fall through to send as message
+
+        # Handle pending director activation -- next message becomes the task
+        if self._director_pending and self.agent and not user_input.startswith("/"):
+            self.agent.director_adapter.start(user_input)
+            self._director_pending = False
+            self.notify("Director mode: UNDERSTAND phase")
+            try:
+                status_bar = self.query_one("#status", StatusBar)
+                status_bar.set_director_phase("UNDERSTAND")
+            except Exception:
+                pass
+            # Fall through to send as message
+
         # Handle slash commands
         if user_input.startswith("/"):
             handled = await self._handle_slash_command(user_input)
@@ -1454,24 +1535,47 @@ class CodingAgentApp(App):
             self.action_configure_llm()
             return True
 
-        if cmd == "/connect-jira":
-            self.run_worker(self._connect_jira(), exclusive=False, group="jira")
+        if cmd == "/config-jira":
+            self.action_configure_jira()
+            return True
+
+        if cmd == "/connect-jira" or cmd.startswith("/connect-jira "):
+            # Extract optional profile name: /connect-jira corporate
+            parts = command.strip().split(maxsplit=1)
+            profile = parts[1].strip() if len(parts) > 1 else None
+            self.run_worker(
+                self._connect_jira(profile=profile), exclusive=False, group="jira"
+            )
             return True
 
         if cmd == "/disconnect-jira":
             self.run_worker(self._disconnect_jira(), exclusive=False, group="jira")
             return True
 
+        if cmd == "/director-reset":
+            if self.agent:
+                self.agent.director_adapter.reset()
+            self.notify("Director mode reset")
+            try:
+                status_bar = self.query_one("#status", StatusBar)
+                status_bar.clear_director_phase()
+            except Exception:
+                pass
+            return True
+
         # Unknown command - let it pass through to agent
         return False
 
-    async def _connect_jira(self) -> None:
-        """Connect to Jira via Atlassian Remote MCP Server."""
+    async def _connect_jira(self, profile: str = None) -> None:
+        """Connect to Jira via mcp-atlassian MCP server.
+
+        Args:
+            profile: Named profile to connect (e.g. "personal", "corporate").
+                     If None, auto-selects when only one profile exists.
+        """
         if not self.agent:
             self.notify("No agent available", severity="error")
             return
-
-        self.notify("Connecting to Jira via Atlassian MCP...")
 
         try:
             from src.integrations.jira.connection import JiraConnection
@@ -1479,10 +1583,46 @@ class CodingAgentApp(App):
             from src.integrations.mcp.client import McpClient, StdioTransport
             from src.integrations.mcp.registry import McpToolRegistry
 
-            conn = JiraConnection()
-            if not conn.enabled:
-                # First-time setup: configure with default (user can change later)
-                conn.configure("https://atlassian.net")
+            # Resolve which profile to use
+            if profile is None:
+                profiles = JiraConnection.list_profiles()
+                if len(profiles) == 0:
+                    self.notify(
+                        "No Jira profiles found. Opening configuration...",
+                        severity="warning",
+                    )
+                    self.action_configure_jira()
+                    return
+                if len(profiles) == 1:
+                    profile = profiles[0]
+                else:
+                    profiles_str = ", ".join(profiles)
+                    self.notify(
+                        f"Multiple profiles found: {profiles_str}. "
+                        f"Use /connect-jira <profile> to specify one.",
+                        severity="warning",
+                    )
+                    return
+
+            conn = JiraConnection(profile=profile)
+            if not conn.is_configured():
+                self.notify(
+                    f"Jira profile '{profile}' incomplete. Opening configuration...",
+                    severity="warning",
+                )
+                from .jira_config_screen import ConfigJiraScreen
+                self.push_screen(
+                    ConfigJiraScreen(profile=profile),
+                    callback=self._on_jira_configured,
+                )
+                return
+
+            # Auto-disconnect existing Jira connection before connecting new profile
+            existing = self.agent._mcp_manager.get_connection("jira")
+            if existing:
+                await self.agent.disable_mcp_integration("jira")
+
+            self.notify(f"Connecting to Jira ({profile})...")
 
             config = conn.get_mcp_config()
             transport = StdioTransport()
@@ -1490,10 +1630,20 @@ class CodingAgentApp(App):
             policy_gate = create_jira_policy_gate()
             registry = McpToolRegistry(config, policy_gate)
 
-            count = await self.agent.enable_mcp_integration("jira", registry, client)
+            import asyncio as _asyncio
+            count = await _asyncio.wait_for(
+                self.agent.enable_mcp_integration("jira", registry, client),
+                timeout=120,
+            )
             self.notify(
-                f"Jira connected: {count} tools available",
+                f"Jira ({profile}) connected: {count} tools available",
                 severity="information",
+                timeout=10,
+            )
+        except TimeoutError:
+            self.notify(
+                f"Jira connection timed out (120s). Is mcp-atlassian installed?",
+                severity="error",
             )
         except Exception as e:
             self.notify(f"Jira connection failed: {e}", severity="error")
@@ -2801,6 +2951,28 @@ class CodingAgentApp(App):
                             truncated=extra.get("truncated", False),
                             plan_path=extra.get("plan_path"),
                         )
+            elif event_type == "director_plan_submitted":
+                # Director plan approval - reuse PlanApprovalWidget
+                extra = message.meta.extra if message.meta else {}
+                plan_hash = extra.get("plan_hash") if extra else None
+                if plan_hash:
+                    await self.mount_plan_approval(
+                        plan_hash=plan_hash,
+                        excerpt=extra.get("excerpt", ""),
+                        truncated=extra.get("truncated", False),
+                    )
+            elif event_type == "director_phase_changed":
+                # Update status bar director phase badge
+                extra = message.meta.extra if message.meta else {}
+                new_phase = extra.get("phase", "") if extra else ""
+                try:
+                    status_bar = self.query_one("#status", StatusBar)
+                    if new_phase:
+                        status_bar.set_director_phase(new_phase)
+                    else:
+                        status_bar.clear_director_phase()
+                except Exception:
+                    pass
             elif event_type == "permission_mode_changed":
                 # Update status bar mode from MessageStore's current_mode property
                 # This ensures UI and agent always see the same mode (single source of truth)

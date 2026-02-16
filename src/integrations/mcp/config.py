@@ -35,5 +35,8 @@ class McpServerConfig:
     # Extra headers (non-secret, e.g. content-type)
     extra_headers: Dict[str, str] = field(default_factory=dict)
 
+    # Extra environment variables for stdio subprocess (e.g. Okta config)
+    extra_env: Dict[str, str] = field(default_factory=dict)
+
     # Tool name prefix for namespacing (e.g. "jira" -> "jira_searchJiraIssuesUsingJql")
     tool_prefix: str = ""

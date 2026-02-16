@@ -623,7 +623,7 @@ def main():
         model_name="qwen3-coder-plus",
         base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
         context_window=131072,  # 128K - production setting
-        api_key="sk-6ca5ca68942447c7a4c18d0ea63f75e7",
+        api_key=os.getenv("DASHSCOPE_API_KEY", ""),
         api_key_env="DASHSCOPE_API_KEY"
     )
 

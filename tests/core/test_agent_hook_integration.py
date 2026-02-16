@@ -1,5 +1,6 @@
 """Integration tests for CodingAgent with HookManager."""
 
+import os
 import pytest
 import tempfile
 from pathlib import Path
@@ -8,11 +9,15 @@ from src.hooks import HookManager, HookDecision, HookResult
 
 
 # Common API configuration for all tests
+# API key is read from env var; tests that construct a real CodingAgent require it
 API_CONFIG = {
     "backend": "openai",
-    "model_name": "qwen3-coder-plus",
-    "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-    "api_key": "sk-6ca5ca68942447c7a4c18d0ea63f75e7",
+    "model_name": os.getenv("LLM_MODEL", "qwen3-coder-plus"),
+    "base_url": os.getenv("LLM_HOST", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
+    "api_key": os.getenv("DASHSCOPE_API_KEY", os.getenv("OPENAI_API_KEY", "sk-test-placeholder")),
+    "context_window": int(os.getenv("MAX_CONTEXT_TOKENS", "128000")),
+    "embedding_api_key": os.getenv("EMBEDDING_API_KEY", os.getenv("DASHSCOPE_API_KEY", "sk-test-placeholder")),
+    "embedding_base_url": os.getenv("EMBEDDING_BASE_URL", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
     "load_file_memories": False
 }
 
