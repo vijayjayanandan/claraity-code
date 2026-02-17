@@ -24,6 +24,13 @@ from .errors import DirectorError, InvalidTransitionError, PhaseError
 from .phases.base import PhaseHandler
 from .phases.understand import UnderstandPhaseHandler
 from .phases.plan import PlanPhaseHandler
+from .adapter import DirectorAdapter, DirectorGateDecision
+from .prompts import PHASE_PROMPTS, PHASE_ALLOWED_TOOLS, get_director_phase_prompt
+from .tools import (
+    DirectorCompleteUnderstandTool,
+    DirectorCompletePlanTool,
+    DirectorCompleteSliceTool,
+)
 
 __all__ = [
     # Core
@@ -45,4 +52,15 @@ __all__ = [
     "PhaseHandler",
     "UnderstandPhaseHandler",
     "PlanPhaseHandler",
+    # Adapter (Phase 2)
+    "DirectorAdapter",
+    "DirectorGateDecision",
+    # Prompts (Phase 2)
+    "PHASE_PROMPTS",
+    "PHASE_ALLOWED_TOOLS",
+    "get_director_phase_prompt",
+    # Tools (Phase 2)
+    "DirectorCompleteUnderstandTool",
+    "DirectorCompletePlanTool",
+    "DirectorCompleteSliceTool",
 ]

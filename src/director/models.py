@@ -103,6 +103,7 @@ class DirectorPlan:
     slices: List[VerticalSlice] = field(default_factory=list)
     context: Optional[ContextDocument] = None
     summary: str = ""
+    plan_document: str = ""  # Path to rich markdown plan file
     created_at: Optional[datetime] = None
 
     @property

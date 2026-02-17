@@ -79,6 +79,11 @@ from src.core.permission_mode import PermissionManager, PermissionMode
 # Plan mode (Claude Code-style planning workflow)
 from src.core.plan_mode import PlanModeState, PlanGateDecision
 
+# Director mode (lazy import to avoid circular dependency)
+# src.director.adapter -> prompts -> src.core.plan_mode -> src.core -> agent
+if TYPE_CHECKING:
+    from src.director.adapter import DirectorAdapter, DirectorGateDecision
+
 # Subagent components (lazy import to avoid circular dependency)
 if TYPE_CHECKING:
     from src.subagents import SubAgentManager, SubAgentResult
@@ -337,6 +342,10 @@ class CodingAgent(AgentInterface):
         # Session ID for plan mode (will be set when session starts)
         self._session_id: Optional[str] = None
 
+        # Initialize director adapter (disciplined workflow mode)
+        from src.director.adapter import DirectorAdapter
+        self.director_adapter = DirectorAdapter()
+
         # Initialize tools
         self.tool_executor = ToolExecutor(hook_manager=hook_manager)
         self._register_tools()
@@ -394,6 +403,16 @@ class CodingAgent(AgentInterface):
         self.tool_executor.register_tool(
             DelegateToSubagentTool(self.subagent_manager)
         )
+
+        # Register director checkpoint tools
+        from src.director.tools import (
+            DirectorCompleteUnderstandTool,
+            DirectorCompletePlanTool,
+            DirectorCompleteSliceTool,
+        )
+        self.tool_executor.register_tool(DirectorCompleteUnderstandTool(self.director_adapter))
+        self.tool_executor.register_tool(DirectorCompletePlanTool(self.director_adapter))
+        self.tool_executor.register_tool(DirectorCompleteSliceTool(self.director_adapter))
 
         # Initialize ClarAIty hook (if available and enabled)
         self.clarity_hook = None
@@ -574,6 +593,72 @@ class CodingAgent(AgentInterface):
             }
 
         return None  # Allowed
+
+    def _check_director_gate(
+        self,
+        tool_name: str,
+        tool_args: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Check if a tool call is allowed under director mode restrictions.
+
+        Args:
+            tool_name: Name of the tool being called
+            tool_args: Arguments to the tool
+
+        Returns:
+            None if allowed, or a gated response dict if denied
+        """
+        if not self.director_adapter.is_active:
+            return None
+
+        from src.director.adapter import DirectorGateDecision
+        decision = self.director_adapter.gate_tool(tool_name, tool_args)
+
+        if decision == DirectorGateDecision.DENY:
+            phase = self.director_adapter.phase.name
+            return {
+                "status": "denied",
+                "error_code": "DIRECTOR_MODE_GATED",
+                "message": (
+                    f"Tool '{tool_name}' is not allowed in Director "
+                    f"{phase} phase. Use read-only tools or the "
+                    f"appropriate director checkpoint tool."
+                ),
+                "phase": phase,
+            }
+
+        return None  # Allowed
+
+    def _refresh_director_context(self, current_context: list) -> None:
+        """
+        Refresh the director mode injection in the system prompt.
+
+        Called after director checkpoint tools change the phase so the LLM
+        sees the new phase instructions on its next iteration without
+        rebuilding the entire context.
+        """
+        if not current_context or not self.director_adapter.is_active:
+            return
+
+        system_msg = current_context[0]
+        if system_msg.get("role") != "system":
+            return
+
+        content = system_msg.get("content", "")
+
+        # Remove old director injection (from <director-mode to end of content)
+        marker = "<director-mode"
+        idx = content.find(marker)
+        if idx > 0:
+            content = content[:idx].rstrip()
+
+        # Append fresh injection for the current phase
+        new_injection = self.director_adapter.get_prompt_injection()
+        if new_injection:
+            content = content + "\n\n" + new_injection
+
+        system_msg["content"] = content
 
     def _sync_plan_mode_from_store(self) -> None:
         """
@@ -938,6 +1023,29 @@ class CodingAgent(AgentInterface):
                     self.tool_execution_history.append(tool_result)
                     continue  # Skip to next tool call
 
+                # Check director mode gating BEFORE approval and execution
+                director_gate_result = self._check_director_gate(tool_name, tool_args)
+                if director_gate_result is not None:
+                    if debug:
+                        print(f"  [GATED] {director_gate_result['message']}")
+                    import json
+                    gated_output = json.dumps(director_gate_result, indent=2)
+                    tool_result = {
+                        "tool": tool_name,
+                        "arguments": tool_args,
+                        "success": False,
+                        "error": director_gate_result["message"]
+                    }
+                    tool_results.append(tool_result)
+                    tool_messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "name": tool_name,
+                        "content": gated_output
+                    })
+                    self.tool_execution_history.append(tool_result)
+                    continue  # Skip to next tool call
+
                 # Check if approval is required (NORMAL mode only)
                 # NOTE: MCP tools are TUI-only (enabled via async enable_mcp_integration).
                 # They should never appear in this sync path. If they do, block them.
@@ -1222,6 +1330,24 @@ class CodingAgent(AgentInterface):
                         "arguments": tool_args,
                         "success": False,
                         "error": plan_gate_result["message"]
+                    })
+                    continue  # Skip to next tool call
+
+                # Check director mode gating
+                director_gate_result = self._check_director_gate(tool_name, tool_args)
+                if director_gate_result is not None:
+                    gated_output = json.dumps(director_gate_result, indent=2)
+                    tool_messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "name": tool_name,
+                        "content": gated_output
+                    })
+                    self.tool_execution_history.append({
+                        "tool": tool_name,
+                        "arguments": tool_args,
+                        "success": False,
+                        "error": director_gate_result["message"]
                     })
                     continue  # Skip to next tool call
 
@@ -1821,6 +1947,113 @@ class CodingAgent(AgentInterface):
         )
         return (result_text, False)
 
+    async def _handle_director_plan_approval(
+        self,
+        call_id: str,
+        tool_result,
+        ui_protocol: Optional['UIProtocol'] = None,
+    ) -> tuple:
+        """
+        Handle director plan approval flow after director_complete_plan executes.
+
+        Similar to _handle_request_plan_approval_tool but for Director mode.
+        Reuses PlanApprovalWidget via the same UIProtocol mechanism.
+
+        Returns (result_text, rejected_without_feedback).
+        """
+        import hashlib
+
+        # Build plan excerpt for the approval widget
+        plan = self.director_adapter._protocol.plan
+        plan_summary = plan.summary if plan else "Director plan"
+
+        # Read the plan document file if available (rich markdown)
+        excerpt = ""
+        if plan and plan.plan_document:
+            try:
+                import os
+                if os.path.isfile(plan.plan_document):
+                    with open(plan.plan_document, "r", encoding="utf-8") as f:
+                        excerpt = f.read()
+                    logger.info(
+                        "director_plan_approval: read plan document (%d chars)",
+                        len(excerpt),
+                    )
+            except Exception as e:
+                logger.error("director_plan_approval: failed to read plan file: %s", e)
+
+        # Fallback: build excerpt from structured data if no plan file
+        if not excerpt:
+            slices_text = ""
+            if plan:
+                for s in plan.slices:
+                    slices_text += f"\n- Slice {s.id}: {s.title}"
+            excerpt = (
+                f"## Director Plan\n\n"
+                f"{plan_summary}\n\n"
+                f"### Vertical Slices:{slices_text}"
+            )
+        plan_hash = hashlib.sha256(excerpt.encode()).hexdigest()
+
+        # Persist event for TUI to mount approval widget
+        if self.memory.has_message_store:
+            self.memory.persist_system_event(
+                event_type="director_plan_submitted",
+                content="[Director plan submitted for approval]",
+                extra={
+                    "call_id": call_id,
+                    "plan_hash": plan_hash,
+                    "excerpt": excerpt,
+                    "truncated": False,
+                },
+                include_in_llm_context=False,
+            )
+
+        # Wait for user approval via UIProtocol (TUI path)
+        if ui_protocol:
+            try:
+                from src.core.protocol import PlanApprovalResult
+                approval = await ui_protocol.wait_for_plan_approval(plan_hash)
+
+                if approval.approved:
+                    self.director_adapter.approve_plan()
+                    result_text = (
+                        "Plan approved! Moving to EXECUTE phase.\n\n"
+                        "Implement each slice using RED-GREEN-REFACTOR:\n"
+                        "1. Write a failing test (RED)\n"
+                        "2. Write minimum code to pass (GREEN)\n"
+                        "3. Call director_complete_slice when done\n\n"
+                        f"{excerpt}"
+                    )
+                    return (result_text, False)
+                else:
+                    feedback = approval.feedback
+                    self.director_adapter.reject_plan(feedback)
+                    if feedback is None:
+                        return ("Director plan approval cancelled.", True)
+                    else:
+                        plan_doc_path = plan.plan_document if plan else ""
+                        result_text = (
+                            "Plan rejected. Revise based on feedback and resubmit.\n\n"
+                            f"User feedback: {feedback}\n\n"
+                            f"To revise: update the plan document"
+                            f"{' at ' + plan_doc_path if plan_doc_path else ''}"
+                            f" using write_file, then call director_complete_plan again "
+                            f"with the updated file path and slices."
+                        )
+                        return (result_text, False)
+
+            except asyncio.CancelledError:
+                return ("Director plan approval was cancelled.", True)
+
+        # No UI protocol (CLI mode) - auto-approve
+        self.director_adapter.approve_plan()
+        result_text = (
+            "Plan approved! Moving to EXECUTE phase.\n\n"
+            f"{excerpt}"
+        )
+        return (result_text, False)
+
     def _print_tool_announcement(self, tool_name: str, tool_args: Dict[str, Any]) -> None:
         """
         Print a clean tool announcement for CLI output.
@@ -1938,6 +2171,7 @@ class CodingAgent(AgentInterface):
             file_references=file_references if file_references else None,
             agent_state=self.todo_state if self.todo_state.get('todos') else None,
             plan_mode_state=self.plan_mode_state,
+            director_adapter=self.director_adapter,
         )
 
         # Execute with tool calling loop
@@ -2252,6 +2486,7 @@ class CodingAgent(AgentInterface):
             file_references=file_references if file_references else None,
             agent_state=self.todo_state if self.todo_state.get('todos') else None,
             plan_mode_state=self.plan_mode_state,
+            director_adapter=self.director_adapter,
         )
 
         # Execute with tool calling loop (LLM decides what to do)
@@ -2427,6 +2662,7 @@ class CodingAgent(AgentInterface):
                 file_references=file_references if file_references else None,
                 agent_state=self.todo_state if self.todo_state.get('todos') else None,
                 plan_mode_state=self.plan_mode_state,
+                director_adapter=self.director_adapter,
             )
 
             # NOTE: Context usage is emitted after each LLM response with real token count
@@ -2826,6 +3062,33 @@ class CodingAgent(AgentInterface):
                         )
                         continue  # Skip to next tool call
 
+                    # Check director mode gating
+                    director_gate_result = self._check_director_gate(tc.function.name, tool_args)
+                    if director_gate_result is not None:
+                        if self.memory.message_store:
+                            self.memory.message_store.update_tool_state(
+                                call_id,
+                                CoreToolStatus.ERROR,
+                                error=director_gate_result["message"]
+                            )
+
+                        import json
+                        gated_output = json.dumps(director_gate_result, indent=2)
+                        tool_messages.append({
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "name": tc.function.name,
+                            "content": gated_output
+                        })
+
+                        self.memory.add_tool_result(
+                            tool_call_id=call_id,
+                            content=gated_output,
+                            tool_name=tc.function.name,
+                            status="gated",
+                        )
+                        continue  # Skip to next tool call
+
                     requires_approval = needs_approval(tc.function.name, tc.function.get_parsed_arguments())
 
                     # Freeze approval policy in render meta registry (store-driven UI)
@@ -3072,6 +3335,99 @@ class CodingAgent(AgentInterface):
 
                         continue  # Skip to next tool call
 
+                    # Special handling for director_complete_plan (requires UI approval)
+                    if tc.function.name == "director_complete_plan":
+                        # Execute the tool first (transitions to AWAITING_APPROVAL)
+                        try:
+                            tool_kwargs = tc.function.get_parsed_arguments()
+                        except Exception as parse_err:
+                            logger.error("director_complete_plan: failed to parse arguments: %s", parse_err)
+                            tool_kwargs = {}
+                        result = await self.tool_executor.execute_tool_async(
+                            tc.function.name, **tool_kwargs
+                        )
+
+                        if result.is_success():
+                            # Emit AWAITING_APPROVAL phase change for UI status bar
+                            self.memory.persist_system_event(
+                                event_type="director_phase_changed",
+                                content="Director phase: AWAITING_APPROVAL",
+                                extra={"phase": "AWAITING_APPROVAL"},
+                                include_in_llm_context=False,
+                            )
+
+                            # Now handle the approval flow
+                            approval_result, plan_rejected = await self._handle_director_plan_approval(
+                                call_id, result, ui
+                            )
+
+                            duration_ms = int((time.monotonic() - start_time) * 1000)
+                            tool_status = CoreToolStatus.REJECTED if plan_rejected else CoreToolStatus.SUCCESS
+                            result_status = "rejected" if plan_rejected else "success"
+
+                            if self.memory.message_store:
+                                self.memory.message_store.update_tool_state(
+                                    call_id, tool_status,
+                                    result=approval_result,
+                                    duration_ms=duration_ms
+                                )
+
+                            self.memory.add_tool_result(
+                                tool_call_id=call_id,
+                                content=approval_result,
+                                tool_name=tc.function.name,
+                                status=result_status,
+                                duration_ms=duration_ms,
+                            )
+
+                            tool_messages.append({
+                                "role": "tool",
+                                "tool_call_id": call_id,
+                                "name": tc.function.name,
+                                "content": approval_result
+                            })
+
+                            # Persist director phase change for UI status bar
+                            new_phase = self.director_adapter.phase.name
+                            self.memory.persist_system_event(
+                                event_type="director_phase_changed",
+                                content=f"Director phase: {new_phase}",
+                                extra={"phase": new_phase},
+                                include_in_llm_context=False,
+                            )
+
+                            # Refresh system prompt so LLM sees EXECUTE (or PLAN) injection
+                            if not plan_rejected:
+                                self._refresh_director_context(current_context)
+
+                            if plan_rejected:
+                                user_rejected = True
+                                break
+                        else:
+                            # Tool execution failed
+                            duration_ms = int((time.monotonic() - start_time) * 1000)
+                            error_msg = result.error or "director_complete_plan failed"
+                            if self.memory.message_store:
+                                self.memory.message_store.update_tool_state(
+                                    call_id, CoreToolStatus.ERROR,
+                                    error=error_msg, duration_ms=duration_ms
+                                )
+                            self.memory.add_tool_result(
+                                tool_call_id=call_id,
+                                content=error_msg,
+                                tool_name=tc.function.name,
+                                status="error",
+                                duration_ms=duration_ms,
+                            )
+                            tool_messages.append({
+                                "role": "tool",
+                                "tool_call_id": call_id,
+                                "name": tc.function.name,
+                                "content": error_msg
+                            })
+
+                        continue  # Skip to next tool call
+
                     try:
                         tool_kwargs = tc.function.get_parsed_arguments()
                         # Pass tool_call_id for delegation tool (registry linking)
@@ -3147,6 +3503,20 @@ class CodingAgent(AgentInterface):
                                     extra={"old_mode": "normal", "new_mode": "plan"},
                                     include_in_llm_context=False,
                                 )
+
+                            # Persist director phase change events for UI status bar
+                            # and refresh system prompt so LLM sees new phase instructions
+                            # (director_complete_plan is handled specially above with approval flow)
+                            if tc.function.name in ('director_complete_understand', 'director_complete_slice'):
+                                new_phase = self.director_adapter.phase.name
+                                self.memory.persist_system_event(
+                                    event_type="director_phase_changed",
+                                    content=f"Director phase: {new_phase}",
+                                    extra={"phase": new_phase},
+                                    include_in_llm_context=False,
+                                )
+                                # Refresh system prompt so LLM sees new phase instructions
+                                self._refresh_director_context(current_context)
 
                             tool_messages.append({
                                 "role": "tool",
@@ -3644,6 +4014,7 @@ REQUIRED: Choose a DIFFERENT approach:
             file_references=file_references if file_references else None,
             agent_state=self.todo_state if self.todo_state.get('todos') else None,
             plan_mode_state=self.plan_mode_state,
+            director_adapter=self.director_adapter,
         )
 
         # Execute with async tool calling loop

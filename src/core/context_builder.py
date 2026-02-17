@@ -183,6 +183,7 @@ class ContextBuilder:
         file_references: Optional[List[FileReference]] = None,
         agent_state: Optional[Dict[str, Any]] = None,
         plan_mode_state: Optional[Any] = None,
+        director_adapter: Optional[Any] = None,
         log_report: bool = True,
     ) -> List[Dict[str, str]]:
         """
@@ -202,6 +203,7 @@ class ContextBuilder:
             agent_state: Optional agent state (todos, current_todo_id, last_stop_reason)
                         for task continuation support
             plan_mode_state: Optional PlanModeState instance for plan mode injection
+            director_adapter: Optional DirectorAdapter for director mode injection
             log_report: Whether to log the context assembly report (default True)
 
         Returns:
@@ -236,6 +238,12 @@ class ContextBuilder:
                 is_awaiting_approval=plan_mode_state.is_awaiting_approval()
             )
             system_prompt = system_prompt + "\n\n" + plan_injection
+
+        # Inject director mode context if active
+        if director_adapter and director_adapter.is_active:
+            director_injection = director_adapter.get_prompt_injection()
+            if director_injection:
+                system_prompt = system_prompt + "\n\n" + director_injection
 
         # Compress if needed
         if self.optimizer.count_tokens(system_prompt) > system_prompt_budget:

@@ -1,0 +1,301 @@
+"""Director phase prompts and tool allowlists.
+
+The script for each act of the movie -- tells the LLM what phase
+it's in, what to focus on, and what tools are available.
+"""
+
+from typing import Dict, Optional
+
+from src.director.models import (
+    ContextDocument,
+    DirectorPhase,
+    DirectorPlan,
+)
+
+# Reuse the read-only tools set from plan_mode to avoid duplication
+from src.core.plan_mode import READ_ONLY_TOOLS
+
+
+# =============================================================================
+# Phase Prompts -- system prompt injection per phase
+# =============================================================================
+
+PHASE_PROMPTS: Dict[DirectorPhase, str] = {
+
+    DirectorPhase.UNDERSTAND: """\
+<director-mode phase="UNDERSTAND">
+You are in UNDERSTAND mode. Your job is to explore the codebase and build
+a complete picture of what exists before any code is written.
+
+Do NOT write code. Do NOT modify any files. Only read and explore.
+
+TOOLS AVAILABLE:
+- read_file, search_code, glob, list_directory -- explore the codebase
+- web_search, web_fetch -- research best practices, libraries, patterns
+- `clarify` -- ask the user up to 4 structured clarifying questions
+- `director_complete_understand` -- submit findings and advance to PLAN
+
+WORKFLOW:
+1. Explore the codebase (or note it is greenfield if empty)
+2. If the task is ambiguous or key decisions are needed, use the `clarify`
+   tool to ask the user 2-3 focused questions (tech stack, scope, priorities)
+3. Once you have sufficient understanding, call `director_complete_understand`
+   with your findings (affected files, existing patterns, constraints, risks)
+
+IMPORTANT: You MUST eventually call `director_complete_understand` to advance.
+Do not end your turn with only text output -- always finish with the tool call.
+Keep your text responses brief. Save detailed findings for the tool call.
+</director-mode>""",
+
+    DirectorPhase.PLAN: """\
+<director-mode phase="PLAN">
+You are in PLAN mode. Your job is to design the implementation as a series
+of vertical slices -- thin, independently testable increments.
+
+Do NOT write application code. You may ONLY write plan documents.
+
+TOOLS AVAILABLE:
+- read_file, search_code, glob, list_directory -- explore if needed
+- web_search, web_fetch -- research best practices, libraries, patterns
+- `clarify` -- ask the user if a design decision needs their input
+- `write_file` -- write your plan document to .clarity/plans/ ONLY
+- `director_complete_plan` -- submit plan and advance to approval
+
+WORKFLOW:
+1. Design your implementation plan with full detail:
+   - Tech stack decisions with rationale and alternatives compared
+   - Architecture approach with trade-offs explained
+   - Vertical slices (3-5) with what each builds
+   - Risk assessment and constraints
+2. Write the COMPLETE plan as a markdown document using write_file:
+   Path: .clarity/plans/director_plan.md
+   Include: executive summary, decision rationale with comparison tables,
+   slice details, test criteria, risks
+3. Call `director_complete_plan` with:
+   - plan_document: the file path you wrote
+   - slices: list of slice titles (for execution tracking)
+   - summary: brief one-line overview
+
+RULES:
+- Keep the plan to 3-5 slices maximum for the initial MVP
+- If the scope is broad, pick the smallest useful starting point
+- Each slice should be small enough to verify in one pass
+- Put ALL detail in the markdown file, NOT in the tool call JSON
+- The user reviews the markdown file, so make it thorough and readable
+
+IMPORTANT: You MUST end this phase by calling `director_complete_plan`.
+Do not end your turn with only text output.
+</director-mode>""",
+
+    DirectorPhase.AWAITING_APPROVAL: """\
+<director-mode phase="AWAITING_APPROVAL">
+Your plan has been submitted and is awaiting user approval.
+Wait for the user to approve, reject with feedback, or cancel.
+Do not proceed with any code changes until the plan is approved.
+</director-mode>""",
+
+    DirectorPhase.EXECUTE: """\
+<director-mode phase="EXECUTE">
+You are in EXECUTE mode. START IMPLEMENTING IMMEDIATELY. Do NOT wait for
+user instruction -- begin working on the current slice right now.
+
+For each slice, follow RED-GREEN-REFACTOR:
+
+1. RED:    Write a failing test that defines the expected behavior.
+2. GREEN:  Write the minimum code to make the test pass.
+3. REFACTOR: Clean up while keeping tests green.
+
+After completing a slice:
+- Run the tests to verify everything passes
+- Call `director_complete_slice` with the slice ID and test results
+- Then immediately proceed to the next slice
+
+IMPORTANT: Begin implementation now. Write the first failing test for
+the current slice as your very next action.
+</director-mode>""",
+
+    DirectorPhase.INTEGRATE: """\
+<director-mode phase="INTEGRATE">
+You are in INTEGRATE mode. All slices are complete.
+
+Run the full test suite to verify no regressions.
+Review cross-slice coherence -- do the pieces fit together correctly?
+
+If everything is green, signal completion.
+If there are issues, document them clearly.
+</director-mode>""",
+}
+
+
+# =============================================================================
+# Director Tool Names -- referenced by prompts and allowlists
+# =============================================================================
+
+DIRECTOR_TOOLS = frozenset({
+    "director_complete_understand",
+    "director_complete_plan",
+    "director_complete_slice",
+})
+
+
+# =============================================================================
+# Phase Allowed Tools -- what the LLM can use in each phase
+# =============================================================================
+
+# UNDERSTAND and PLAN: read-only exploration + clarify + web research + checkpoint
+_UNDERSTAND_TOOLS = READ_ONLY_TOOLS | frozenset({
+    "director_complete_understand",
+    "clarify",
+    "web_search",
+    "web_fetch",
+    "list_directory",
+})
+
+_PLAN_TOOLS = READ_ONLY_TOOLS | frozenset({
+    "director_complete_plan",
+    "clarify",
+    "web_search",
+    "web_fetch",
+    "list_directory",
+    # NOTE: write_file is NOT in this set. The adapter handles it
+    # with path-based gating (only .clarity/plans/ allowed).
+})
+
+# EXECUTE: all tools (read + write + delegation + run + director)
+_EXECUTE_TOOLS = READ_ONLY_TOOLS | frozenset({
+    "write_file",
+    "edit_file",
+    "append_to_file",
+    "run_command",
+    "git_commit",
+    "git_status",
+    "git_diff",
+    "delegate_to_subagent",
+    "director_complete_slice",
+    "list_directory",
+})
+
+# INTEGRATE: read-only + test execution + git (no file writes)
+_INTEGRATE_TOOLS = READ_ONLY_TOOLS | frozenset({
+    "run_command",
+    "list_directory",
+    "git_commit",
+}) | DIRECTOR_TOOLS
+
+# AWAITING_APPROVAL: read-only only (waiting for user)
+_AWAITING_APPROVAL_TOOLS = READ_ONLY_TOOLS
+
+
+PHASE_ALLOWED_TOOLS: Dict[DirectorPhase, frozenset] = {
+    DirectorPhase.UNDERSTAND: _UNDERSTAND_TOOLS,
+    DirectorPhase.PLAN: _PLAN_TOOLS,
+    DirectorPhase.AWAITING_APPROVAL: _AWAITING_APPROVAL_TOOLS,
+    DirectorPhase.EXECUTE: _EXECUTE_TOOLS,
+    DirectorPhase.INTEGRATE: _INTEGRATE_TOOLS,
+}
+
+
+# =============================================================================
+# Dynamic Prompt Generator
+# =============================================================================
+
+def get_director_phase_prompt(
+    phase: DirectorPhase,
+    task_description: str,
+    context: Optional[ContextDocument] = None,
+    plan: Optional[DirectorPlan] = None,
+    current_slice_id: Optional[int] = None,
+) -> Optional[str]:
+    """Build the complete system prompt injection for the current phase.
+
+    Returns None for phases that don't need injection (IDLE, COMPLETE, FAILED).
+
+    Args:
+        phase: Current director phase
+        task_description: The task being worked on
+        context: ContextDocument from UNDERSTAND phase (if available)
+        plan: DirectorPlan from PLAN phase (if available)
+        current_slice_id: ID of the current slice being executed (EXECUTE phase)
+
+    Returns:
+        System prompt injection string, or None
+    """
+    base_prompt = PHASE_PROMPTS.get(phase)
+    if base_prompt is None:
+        return None
+
+    parts = [base_prompt]
+
+    # Always include task description
+    parts.append(f"\n<director-task>{task_description}</director-task>")
+
+    # Include context summary in PLAN and later phases
+    if context and phase in (
+        DirectorPhase.PLAN,
+        DirectorPhase.EXECUTE,
+        DirectorPhase.INTEGRATE,
+    ):
+        context_lines = []
+        if context.existing_patterns:
+            context_lines.append(
+                f"Existing patterns: {', '.join(context.existing_patterns)}"
+            )
+        if context.constraints:
+            context_lines.append(
+                f"Constraints: {', '.join(context.constraints)}"
+            )
+        if context.affected_files:
+            file_paths = [f.path for f in context.affected_files]
+            context_lines.append(
+                f"Affected files: {', '.join(file_paths)}"
+            )
+        if context_lines:
+            parts.append(
+                "\n<director-context>\n"
+                + "\n".join(context_lines)
+                + "\n</director-context>"
+            )
+
+    # Include plan summary in EXECUTE and INTEGRATE phases
+    if plan and phase in (DirectorPhase.EXECUTE, DirectorPhase.INTEGRATE):
+        plan_lines = [f"Plan: {plan.summary}"]
+        plan_lines.append(f"Total slices: {plan.total_slices}")
+        for s in plan.slices:
+            status = s.status.name if hasattr(s.status, 'name') else str(s.status)
+            plan_lines.append(f"  Slice {s.id}: {s.title} [{status}]")
+        parts.append(
+            "\n<director-plan>\n"
+            + "\n".join(plan_lines)
+            + "\n</director-plan>"
+        )
+
+    # Include current slice details in EXECUTE phase
+    if plan and current_slice_id is not None and phase == DirectorPhase.EXECUTE:
+        current_slice = None
+        for s in plan.slices:
+            if s.id == current_slice_id:
+                current_slice = s
+                break
+        if current_slice:
+            slice_lines = [
+                f"Current slice: {current_slice.id} - {current_slice.title}",
+            ]
+            if current_slice.files_to_create:
+                slice_lines.append(
+                    f"Files to create: {', '.join(current_slice.files_to_create)}"
+                )
+            if current_slice.files_to_modify:
+                slice_lines.append(
+                    f"Files to modify: {', '.join(current_slice.files_to_modify)}"
+                )
+            if current_slice.test_criteria:
+                slice_lines.append(
+                    f"Test criteria: {', '.join(current_slice.test_criteria)}"
+                )
+            parts.append(
+                "\n<director-current-slice>\n"
+                + "\n".join(slice_lines)
+                + "\n</director-current-slice>"
+            )
+
+    return "\n".join(parts)

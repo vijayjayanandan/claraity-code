@@ -207,6 +207,8 @@ def simple_chat_mode(agent: CodingAgent, controller: Optional[LongRunningControl
         style=style
     )
 
+    director_pending = False  # True when user typed /director with no task
+
     while True:
         try:
             # Simple prompt - mode is shown in status bar only
@@ -323,6 +325,34 @@ def simple_chat_mode(agent: CodingAgent, controller: Optional[LongRunningControl
                     console.print("[dim]  /mode n  - Set to Normal mode[/dim]")
                     console.print("[dim]  /mode a  - Set to Auto mode[/dim]")
                 continue
+
+            # Director mode commands
+            if user_input.lower().startswith("/director") and not user_input.lower().startswith("/director-"):
+                task = user_input[len("/director"):].strip()
+                if not task:
+                    # Bare /director -- wait for next message as task
+                    director_pending = True
+                    console.print("[green]Director mode ready. Type your task to begin.[/green]")
+                    continue
+                agent.director_adapter.start(task)
+                director_pending = False
+                console.print(f"[green]Director mode activated - UNDERSTAND phase[/green]")
+                console.print(f"[dim]Task: {task}[/dim]")
+                user_input = task  # Send task as the user message (fall through)
+
+            elif user_input.lower() == "/director-reset":
+                agent.director_adapter.reset()
+                director_pending = False
+                console.print("[green]Director mode reset[/green]")
+                continue
+
+            # Handle pending director activation -- next message becomes the task
+            if director_pending and not user_input.startswith("/"):
+                agent.director_adapter.start(user_input)
+                director_pending = False
+                console.print(f"[green]Director mode activated - UNDERSTAND phase[/green]")
+                console.print(f"[dim]Task: {user_input}[/dim]")
+                # Fall through to send as message
 
             # Hooks commands
             if user_input.lower() in ["hooks", "hooks-status"]:
