@@ -130,6 +130,7 @@ class SessionStartContext(HookContext):
             setup_logger(context.working_directory)
             return HookResult(decision=HookDecision.PERMIT)
     """
+    model_config = ConfigDict(protected_namespaces=())
 
     working_directory: str = Field(..., description="Current working directory")
     model_name: str = Field(..., description="LLM model being used")

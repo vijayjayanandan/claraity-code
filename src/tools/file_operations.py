@@ -694,12 +694,27 @@ class RunCommandTool(Tool):
                     }
                 )
 
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as e:
+            # subprocess.run() kills the process and collects buffered output
+            # e.stdout/e.stderr contain whatever was captured before the timeout
+            output_parts = []
+            if e.stdout:
+                output_parts.append(f"STDOUT:\n{e.stdout}")
+            if e.stderr:
+                output_parts.append(f"STDERR:\n{e.stderr}")
+            partial_output = "\n\n".join(output_parts) if output_parts else None
+
             return ToolResult(
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
-                output=None,
-                error=f"Command timed out after {timeout} seconds"
+                output=partial_output,
+                error=f"Command timed out after {timeout} seconds",
+                metadata={
+                    "command": command,
+                    "timeout": timeout,
+                    "working_directory": cwd or "current",
+                    "partial_output": partial_output is not None
+                }
             )
         except Exception as e:
             return ToolResult(

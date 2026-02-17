@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional, AsyncIterator, Iterator, TYPE_CHECKING
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from enum import Enum
 import os
 
@@ -25,6 +25,7 @@ class LLMBackendType(str, Enum):
 
 class LLMConfig(BaseModel):
     """Configuration for LLM backend. All values should come from .env file."""
+    model_config = ConfigDict(protected_namespaces=(), use_enum_values=True)
 
     backend_type: LLMBackendType
     model_name: str
@@ -53,9 +54,6 @@ class LLMConfig(BaseModel):
 
     # Timeout
     timeout: float = Field(default_factory=lambda: float(os.getenv("REQUEST_TIMEOUT", "300")))
-
-    class Config:
-        use_enum_values = True
 
 
 class ToolParameter(BaseModel):

@@ -1133,11 +1133,15 @@ class CodingAgent(AgentInterface):
                         tool_results.append(tool_result)
 
                         # Format error for function calling API
+                        # Include result.output (stdout/stderr) so LLM can see what went wrong
+                        error_content = f"Error: {result.error}"
+                        if result.output:
+                            error_content += f"\n\nOutput:\n{result.output}"
                         tool_messages.append({
                             "role": "tool",
                             "tool_call_id": tool_call.id,
                             "name": tool_name,
-                            "content": f"Error: {result.error}"
+                            "content": error_content
                         })
 
                         # Track in history for validation/testing
@@ -1424,11 +1428,15 @@ class CodingAgent(AgentInterface):
                             "result": output
                         })
                     else:
+                        # Include result.output (stdout/stderr) so LLM can see what went wrong
+                        error_content = f"Error: {result.error}"
+                        if result.output:
+                            error_content += f"\n\nOutput:\n{result.output}"
                         tool_messages.append({
                             "role": "tool",
                             "tool_call_id": tool_call.id,
                             "name": tool_name,
-                            "content": f"Error: {result.error}"
+                            "content": error_content
                         })
 
                         self.tool_execution_history.append({
@@ -3535,21 +3543,30 @@ class CodingAgent(AgentInterface):
                                 )
 
                             # Record failure for intelligent retry
+                            # Extract exit_code from metadata; pass result.output as stdout
+                            # (ToolResult has .output with combined stdout/stderr, not separate .stdout/.stderr)
                             error_type = self._classify_tool_error(result.error or "Unknown error")
                             error_context = self._error_tracker.record_failure(
                                 error_type=error_type,
                                 tool_name=tc.function.name,
                                 tool_args=tc.function.get_parsed_arguments(),
                                 error_message=result.error or "Unknown error",
-                                exit_code=getattr(result, 'exit_code', None),
-                                stdout=getattr(result, 'stdout', None),
-                                stderr=getattr(result, 'stderr', None)
+                                exit_code=result.metadata.get("exit_code"),
+                                stdout=result.output if result.output else None,
+                                stderr=None  # stderr is included in result.output
                             )
+
+                            # Build tool message with both output and error context
+                            error_prompt = error_context.to_prompt_block()
+                            if result.output:
+                                tool_error_content = f"Command output:\n{result.output}\n\n{error_prompt}"
+                            else:
+                                tool_error_content = error_prompt
 
                             # Persist tool result to MessageStore for session replay
                             self.memory.add_tool_result(
                                 tool_call_id=call_id,
-                                content=error_context.to_prompt_block(),
+                                content=tool_error_content,
                                 tool_name=tc.function.name,
                                 status="error",
                                 duration_ms=duration_ms,
@@ -3559,12 +3576,12 @@ class CodingAgent(AgentInterface):
                             allowed, reason = self._error_tracker.should_allow_retry(tc.function.name, error_type)
 
                             if allowed:
-                                # Inject structured error context for LLM
+                                # Inject structured error context + output for LLM
                                 tool_messages.append({
                                     "role": "tool",
                                     "tool_call_id": call_id,
                                     "name": tc.function.name,
-                                    "content": error_context.to_prompt_block()
+                                    "content": tool_error_content
                                 })
                             else:
                                 # Error budget exceeded - pause instead of hard stop
@@ -3575,7 +3592,7 @@ class CodingAgent(AgentInterface):
                                         "role": "tool",
                                         "tool_call_id": call_id,
                                         "name": tc.function.name,
-                                        "content": error_context.to_prompt_block()
+                                        "content": tool_error_content
                                     })
                                     continue  # Let approval resolve first
 
