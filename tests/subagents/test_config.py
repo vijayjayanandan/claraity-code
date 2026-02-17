@@ -545,6 +545,49 @@ Prompt {i}
         assert "agent1" in names
         assert "agent2" in names
 
+    def test_discover_all_includes_explore(self):
+        """Built-in discovery should include explore subagent."""
+        loader = SubAgentConfigLoader()
+        configs = loader.discover_all()
+        assert "explore" in configs
+        assert configs["explore"].metadata.get("source") == "builtin"
+
+    def test_discover_all_includes_planner(self):
+        """Built-in discovery should include planner subagent."""
+        loader = SubAgentConfigLoader()
+        configs = loader.discover_all()
+        assert "planner" in configs
+        assert configs["planner"].metadata.get("source") == "builtin"
+
+    def test_discover_all_includes_general_purpose(self):
+        """Built-in discovery should include general-purpose subagent."""
+        loader = SubAgentConfigLoader()
+        configs = loader.discover_all()
+        assert "general-purpose" in configs
+        assert configs["general-purpose"].metadata.get("source") == "builtin"
+
+    def test_discover_all_includes_code_writer(self):
+        """Built-in discovery should include code-writer subagent."""
+        loader = SubAgentConfigLoader()
+        configs = loader.discover_all()
+        assert "code-writer" in configs
+        assert configs["code-writer"].metadata.get("source") == "builtin"
+
+    def test_builtin_explore_has_tools_allowlist(self):
+        """Built-in explore should have a tools allowlist (not None)."""
+        loader = SubAgentConfigLoader()
+        configs = loader.discover_all()
+        assert configs["explore"].tools is not None
+        assert len(configs["explore"].tools) > 0
+
+    def test_builtin_planner_has_web_tools(self):
+        """Built-in planner should include web_search in its tools."""
+        loader = SubAgentConfigLoader()
+        configs = loader.discover_all()
+        assert configs["planner"].tools is not None
+        assert "web_search" in configs["planner"].tools
+        assert "web_fetch" in configs["planner"].tools
+
     def test_loader_handles_invalid_configs(self, temp_config_dir):
         """Test that loader continues loading when encountering invalid configs."""
         # Valid config

@@ -418,6 +418,12 @@ class SubAgentConfigLoader:
                 CODE_REVIEWER_PROMPT,
                 TEST_WRITER_PROMPT,
                 DOC_WRITER_PROMPT,
+                CODE_WRITER_PROMPT,
+                EXPLORE_PROMPT,
+                PLANNER_PROMPT,
+                GENERAL_PURPOSE_PROMPT,
+                EXPLORE_TOOLS,
+                PLANNER_TOOLS,
             )
 
             # Define subagent configurations
@@ -437,6 +443,28 @@ class SubAgentConfigLoader:
                     'description': 'Expert technical writer creating clear, comprehensive documentation',
                     'prompt': DOC_WRITER_PROMPT,
                 },
+                {
+                    'name': 'code-writer',
+                    'description': 'Implementation engineer that writes minimum code to satisfy requirements and tests',
+                    'prompt': CODE_WRITER_PROMPT,
+                },
+                {
+                    'name': 'explore',
+                    'description': 'Fast read-only codebase explorer for finding code, tracing execution flows, and answering architecture questions',
+                    'prompt': EXPLORE_PROMPT,
+                    'tools': EXPLORE_TOOLS,
+                },
+                {
+                    'name': 'planner',
+                    'description': 'Implementation planner that explores code and produces detailed step-by-step plans without writing any code',
+                    'prompt': PLANNER_PROMPT,
+                    'tools': PLANNER_TOOLS,
+                },
+                {
+                    'name': 'general-purpose',
+                    'description': 'Versatile agent with full tool access for multi-step research and implementation tasks',
+                    'prompt': GENERAL_PURPOSE_PROMPT,
+                },
             ]
 
             # Create SubAgentConfig objects
@@ -445,7 +473,7 @@ class SubAgentConfigLoader:
                     name=subagent['name'],
                     description=subagent['description'],
                     system_prompt=subagent['prompt'],
-                    tools=None,  # Inherit all tools
+                    tools=subagent.get('tools'),  # None = inherit all, list = allowlist
                     llm=None,  # Inherit LLM config from main agent
                     config_path=None,  # No file path for Python constants
                     metadata={'source': 'builtin'}

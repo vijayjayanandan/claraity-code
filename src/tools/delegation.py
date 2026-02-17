@@ -522,7 +522,7 @@ Use this tool proactively when appropriate!"""
             "properties": {
                 "subagent": {
                     "type": "string",
-                    "description": "Name of the subagent to use (e.g., 'code-reviewer', 'test-writer', 'doc-writer')"
+                    "description": "Name of the subagent to use (e.g., 'code-reviewer', 'test-writer', 'doc-writer', 'code-writer', 'explore', 'planner', 'general-purpose')"
                 },
                 "task": {
                     "type": "string",

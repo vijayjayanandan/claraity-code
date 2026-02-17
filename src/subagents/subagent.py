@@ -461,8 +461,44 @@ class SubAgent:
 
         return tools
 
+    def _load_project_instructions(self) -> str:
+        """Load CLARAITY.md project instructions from the working directory.
+
+        Looks for CLARAITY.md in the working directory (case-insensitive).
+        Returns the file contents if found, empty string otherwise.
+        """
+        working_dir = self._working_directory
+        if not working_dir:
+            return ""
+
+        working_path = Path(working_dir)
+        # Check common casing variants
+        for filename in ("CLARAITY.md", "claraity.md", "Claraity.md"):
+            instructions_path = working_path / filename
+            try:
+                if instructions_path.is_file():
+                    content = instructions_path.read_text(encoding="utf-8")
+                    if content.strip():
+                        logger.info(
+                            f"SubAgent [{self.config.name}]: Loaded project "
+                            f"instructions from {instructions_path}"
+                        )
+                        return content.strip()
+            except (OSError, UnicodeDecodeError) as e:
+                logger.warning(
+                    f"SubAgent [{self.config.name}]: Failed to read "
+                    f"{instructions_path}: {e}"
+                )
+        return ""
+
     def _build_context(self, task_description: str) -> tuple[List[Dict[str, str]], str]:
         """Build fresh LLM context with specialized system prompt.
+
+        Assembles the system message from three layers:
+        1. SUBAGENT_BASE_PROMPT -- universal rules for all subagents
+        2. config.system_prompt -- role-specific instructions
+        3. CLARAITY.md -- project-specific conventions (if found)
+        4. Working directory context
 
         Also adds the system and user messages to the MessageStore for persistence.
 
@@ -473,9 +509,10 @@ class SubAgent:
             Tuple of (messages for LLM, last message UUID for parent chaining)
         """
         from src.session.models.message import Message
+        from src.prompts.subagents import SUBAGENT_BASE_PROMPT
 
-        # Start with specialized system prompt from config
-        system_message = self.config.system_prompt
+        # Layer 1: Universal base prompt + Layer 2: Role-specific prompt
+        system_message = SUBAGENT_BASE_PROMPT + "\n\n" + self.config.system_prompt
 
         # Defensive check: warn if tool_executor has no workspace_root
         if self._tool_executor and getattr(self._tool_executor, '_workspace_root', None) is None:
@@ -484,7 +521,15 @@ class SubAgent:
                 f"file operations may use incorrect paths"
             )
 
-        # Add working directory context so LLM uses correct paths
+        # Layer 3: Project-specific instructions from CLARAITY.md
+        project_instructions = self._load_project_instructions()
+        if project_instructions:
+            system_message += (
+                "\n\n# Project Instructions (from CLARAITY.md)\n\n"
+                + project_instructions
+            )
+
+        # Layer 4: Working directory context so LLM uses correct paths
         working_dir = self._working_directory
         if working_dir:
             system_message += f"\n\n## Working Directory:\nThe current working directory is: {working_dir}\nAll file paths should be relative to this directory.\n"
