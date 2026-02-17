@@ -78,6 +78,19 @@ class TestPhasePromptsContent:
         prompt = PHASE_PROMPTS[DirectorPhase.EXECUTE].lower()
         assert "red" in prompt and "green" in prompt
 
+    def test_execute_prompt_instructs_delegation(self):
+        from src.director.prompts import PHASE_PROMPTS
+        prompt = PHASE_PROMPTS[DirectorPhase.EXECUTE].lower()
+        assert "delegate" in prompt
+        assert "test-writer" in prompt
+        assert "code-writer" in prompt
+        assert "code-reviewer" in prompt
+
+    def test_execute_prompt_forbids_direct_coding(self):
+        from src.director.prompts import PHASE_PROMPTS
+        prompt = PHASE_PROMPTS[DirectorPhase.EXECUTE].lower()
+        assert "do not write code" in prompt or "not write code yourself" in prompt
+
     def test_integrate_prompt_mentions_test_suite(self):
         from src.director.prompts import PHASE_PROMPTS
         prompt = PHASE_PROMPTS[DirectorPhase.INTEGRATE].lower()

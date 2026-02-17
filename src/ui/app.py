@@ -2953,14 +2953,27 @@ class CodingAgentApp(App):
                         )
             elif event_type == "director_plan_submitted":
                 # Director plan approval - reuse PlanApprovalWidget
+                # Same replay guard as plan_submitted: skip if tool result exists
                 extra = message.meta.extra if message.meta else {}
                 plan_hash = extra.get("plan_hash") if extra else None
+                call_id = extra.get("call_id") if extra else None
                 if plan_hash:
-                    await self.mount_plan_approval(
-                        plan_hash=plan_hash,
-                        excerpt=extra.get("excerpt", ""),
-                        truncated=extra.get("truncated", False),
-                    )
+                    if call_id and self._message_store:
+                        tool_result = self._message_store.get_tool_result(call_id)
+                        if tool_result:
+                            logger.info(f"[DIRECTOR] Skipping approval mount - tool result exists for call_id={call_id}")
+                        else:
+                            await self.mount_plan_approval(
+                                plan_hash=plan_hash,
+                                excerpt=extra.get("excerpt", ""),
+                                truncated=extra.get("truncated", False),
+                            )
+                    else:
+                        await self.mount_plan_approval(
+                            plan_hash=plan_hash,
+                            excerpt=extra.get("excerpt", ""),
+                            truncated=extra.get("truncated", False),
+                        )
             elif event_type == "director_phase_changed":
                 # Update status bar director phase badge
                 extra = message.meta.extra if message.meta else {}

@@ -96,22 +96,52 @@ Do not proceed with any code changes until the plan is approved.
 
     DirectorPhase.EXECUTE: """\
 <director-mode phase="EXECUTE">
-You are in EXECUTE mode. START IMPLEMENTING IMMEDIATELY. Do NOT wait for
-user instruction -- begin working on the current slice right now.
+You are in EXECUTE mode. You are the DIRECTOR -- you orchestrate, you do
+NOT write code yourself. Begin working on the current slice immediately.
 
-For each slice, follow RED-GREEN-REFACTOR:
+For each slice, follow RED-GREEN-REFACTOR by DELEGATING to specialists:
 
-1. RED:    Write a failing test that defines the expected behavior.
-2. GREEN:  Write the minimum code to make the test pass.
-3. REFACTOR: Clean up while keeping tests green.
+1. RED -- Delegate to `test-writer` subagent:
+   - Use `delegate_to_subagent` with subagent="test-writer"
+   - In the task, specify: what behavior to test, which files to read for
+     context, what patterns/frameworks the project uses
+   - Review the returned test -- does it test the right behavior?
+   - Run the test with `run_command` to confirm it FAILS (red means the
+     test is valid but the feature is not yet implemented)
+
+2. GREEN -- Delegate to `code-writer` subagent:
+   - Use `delegate_to_subagent` with subagent="code-writer"
+   - In the task, specify: the failing test file, what to implement, which
+     existing files to read for patterns and conventions
+   - Review the returned code -- is it minimal? Does it follow conventions?
+   - Run ALL tests with `run_command` to confirm they PASS
+
+3. REFACTOR (only if needed):
+   - If the code is messy, delegate cleanup to `code-writer`
+   - Run ALL tests again to confirm they still PASS
+
+4. REVIEW -- Delegate to `code-reviewer` subagent:
+   - Use `delegate_to_subagent` with subagent="code-reviewer"
+   - In the task, specify: which files were created/modified, what the
+     slice was supposed to accomplish
+   - If the reviewer flags issues, delegate fixes to `code-writer`
 
 After completing a slice:
-- Run the tests to verify everything passes
+- Verify ALL tests pass
 - Call `director_complete_slice` with the slice ID and test results
 - Then immediately proceed to the next slice
 
-IMPORTANT: Begin implementation now. Write the first failing test for
-the current slice as your very next action.
+CONTEXT CURATION -- For every delegation, tell the subagent:
+- Which specific files to read (not "the whole project")
+- What patterns/conventions to follow (from your UNDERSTAND findings)
+- What the acceptance criteria are (from the plan)
+
+You may use `read_file`, `search_code`, `glob`, and `run_command` directly
+to explore, verify, and run tests. But for writing or modifying code,
+DELEGATE to a subagent.
+
+IMPORTANT: Begin now. Delegate the first failing test for the current
+slice to the test-writer subagent as your very next action.
 </director-mode>""",
 
     DirectorPhase.INTEGRATE: """\
