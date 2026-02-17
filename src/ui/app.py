@@ -70,7 +70,11 @@ if TYPE_CHECKING:
 
 
 # Tools that should NOT display a ToolCard in the UI (silent/internal tools)
-SILENT_TOOLS = {'task_create', 'task_update', 'task_list', 'task_get', 'enter_plan_mode'}
+SILENT_TOOLS = {
+    'task_create', 'task_update', 'task_list', 'task_get', 'enter_plan_mode',
+    'director_complete_understand', 'director_complete_plan',
+    'director_complete_slice', 'director_complete_integration',
+}
 
 # =============================================================================
 # FOCUSABLE CONVERSATION CONTAINER

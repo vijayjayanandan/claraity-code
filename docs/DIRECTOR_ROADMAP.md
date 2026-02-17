@@ -21,7 +21,7 @@ The CodingAgent evolves from a "solo developer that wings it" into a **Director*
 **Tests:** 130 passing
 **Location:** `src/director/`
 
-The state machine that enforces the disciplined workflow. Pure logic — no LLM calls, no agent integration yet.
+The state machine that enforces the disciplined workflow. Pure logic — no LLM calls, no agent integration.
 
 ```
 src/director/
@@ -40,145 +40,151 @@ src/director/
 
 | Class | File | Purpose |
 |-------|------|---------|
-| `DirectorProtocol` | `protocol.py` | State machine — start, complete_understand, complete_plan, approve, reject, reset |
+| `DirectorProtocol` | `protocol.py` | State machine — start, complete_understand, complete_plan, approve, reject, complete_integration, reset |
 | `DirectorPhase` | `models.py` | Enum with 8 states: IDLE, UNDERSTAND, PLAN, AWAITING_APPROVAL, EXECUTE, INTEGRATE, COMPLETE, FAILED |
 | `ContextDocument` | `models.py` | Output of UNDERSTAND — affected files, patterns, constraints, risks |
 | `DirectorPlan` | `models.py` | Output of PLAN — ordered vertical slices with test criteria |
 | `VerticalSlice` | `models.py` | One unit of work — files, test criteria, dependencies, status |
 | `PhaseHandler` | `phases/base.py` | ABC — every phase checkpoint validates input and formats output |
 
-**How it works:**
+---
 
-```python
-from src.director import DirectorProtocol, ContextDocument, DirectorPlan, VerticalSlice
+### Phase 2: Director Adapter + Full Lifecycle (DONE)
 
-protocol = DirectorProtocol()
-protocol.start("Add user authentication")          # IDLE -> UNDERSTAND
-protocol.complete_understand(context_document)       # UNDERSTAND -> PLAN
-protocol.complete_plan(plan)                         # PLAN -> AWAITING_APPROVAL
-protocol.approve_plan()                              # AWAITING_APPROVAL -> EXECUTE
-# or
-protocol.reject_plan("needs more slices")            # AWAITING_APPROVAL -> PLAN (revision cycle)
+**Commits:** `2509320`, `17a0415`, plus current uncommitted work
+**Tests:** 297 passing (130 protocol + 167 adapter/tools/integration)
+**Location:** `src/director/`, `src/core/agent.py`, `src/ui/app.py`
+
+The adapter bridges the state machine to the living CodingAgent using three mechanisms:
+
+```
+System prompt injection -> controls what the LLM is TOLD to do
+Tool gating            -> controls what the LLM CAN do
+Director tools         -> checkpoints where the LLM signals "I'm done with this phase"
 ```
 
-**Design decisions:**
-- Transition table is a dict — adding new phases is 3 lines of code
-- Errors are pure data (no logging) — the protocol logs with full context via `get_logger`
-- Phase handlers validate input/output but don't call LLMs — that's the adapter's job
-- State machine is sync — async is the adapter's concern
+**Components built:**
 
-**Tests:** `tests/director/` — 6 test files, 130 tests covering models, errors, protocol transitions, phase handlers, and end-to-end lifecycle.
+| Component | File | Purpose |
+|-----------|------|---------|
+| `DirectorAdapter` | `src/director/adapter.py` | Holds protocol, manages prompt/gating per phase |
+| Phase prompts | `src/director/prompts.py` | Phase-specific system prompt injection + tool allowlists |
+| Director tools | `src/director/tools.py` | 4 checkpoint tools for phase transitions |
+| Tool schemas | `src/tools/tool_schemas.py` | LLM-visible tool definitions |
+| Agent integration | `src/core/agent.py` | Tool registration, gate checks, context injection |
+| TUI integration | `src/ui/app.py` | Status bar phase display, plan approval widget, silent tool cards |
+
+**Director checkpoint tools:**
+
+| Tool | Phase | Transition |
+|------|-------|-----------|
+| `director_complete_understand` | UNDERSTAND | -> PLAN |
+| `director_complete_plan` | PLAN | -> AWAITING_APPROVAL |
+| `director_complete_slice` | EXECUTE | -> next slice or INTEGRATE |
+| `director_complete_integration` | INTEGRATE | -> COMPLETE |
+
+**How a full cycle works:**
+
+```
+1. User: /director Add authentication
+
+2. UNDERSTAND phase:
+   - Prompt: "Explore the codebase. Do NOT write code."
+   - Tools: read-only + director_complete_understand
+   - LLM explores, then calls director_complete_understand(context)
+
+3. PLAN phase:
+   - Prompt: "Write a plan to .clarity/plans/, then call director_complete_plan."
+   - Tools: read-only + write_file (only .clarity/plans/) + director_complete_plan
+   - LLM writes plan markdown, then calls director_complete_plan(plan_document, slices)
+
+4. AWAITING_APPROVAL:
+   - Plan displayed to user via PlanApprovalWidget
+   - User approves -> EXECUTE / rejects with feedback -> back to PLAN
+
+5. EXECUTE phase (per slice):
+   - Prompt: "DELEGATE to subagents. Do NOT write code yourself."
+   - Tools: all tools + director_complete_slice
+   - For each slice:
+     RED:    Director delegates to test-writer -> writes failing test
+     GREEN:  Director delegates to code-writer -> writes implementation
+     REVIEW: Director delegates to code-reviewer -> checks quality
+   - Director calls director_complete_slice after each slice
+
+6. INTEGRATE phase:
+   - Prompt: "Run full test suite. Verify cross-slice coherence."
+   - Tools: read-only + run_command + director_complete_integration
+   - Director runs tests, then calls director_complete_integration
+
+7. COMPLETE:
+   - Director mode deactivates (is_active = False)
+   - Normal agent behavior resumes
+```
+
+**Key design decisions:**
+- File-based plan: LLM writes rich markdown to `.clarity/plans/`, tool references file path (avoids JSON escaping issues)
+- Path-based gating: `write_file` allowed in PLAN phase only for `.clarity/plans/` paths
+- Delegation-first EXECUTE: prompt instructs Director to delegate, not code directly (Approach A: prompt-driven, not enforced)
+- Silent tool cards: Director checkpoint tools hidden from TUI (phase transitions are internal)
+- Approval widget replay guard: skips mounting during session replay if tool result already exists
+
+**Specialist subagents (7 total):**
+
+| Subagent | Purpose | Director Phase |
+|----------|---------|---------------|
+| `code-writer` | Write minimum code to pass tests | EXECUTE (GREEN) |
+| `test-writer` | Write comprehensive test suites | EXECUTE (RED) |
+| `code-reviewer` | Review quality, security, patterns | EXECUTE (REVIEW) |
+| `explore` | Read-only codebase exploration | UNDERSTAND |
+| `planner` | Design step-by-step plans | PLAN |
+| `doc-writer` | Technical documentation | Any |
+| `general-purpose` | Multi-step research/implementation | Any |
 
 ---
 
 ## What's Next
 
-### Phase 2: Director Adapter + EXECUTE (NEXT)
+### Phase 2.5: User-in-the-Loop (NEXT)
 
-**Status:** Designed, not yet built
-**Depends on:** Phase 1 (done)
-**Enables:** Full end-to-end Director cycle — from task to working code
+**Status:** Identified, not yet built
+**Depends on:** Phase 2 (done)
 
-The adapter bridges the state machine to the living CodingAgent. It follows the exact same architecture as the existing `plan_mode.py` — system prompt injection + tool gating. Includes the EXECUTE phase so the full value is visible: UNDERSTAND -> PLAN -> APPROVE -> EXECUTE (RED-GREEN-REFACTOR).
+The Director lifecycle works end-to-end but the user is only involved at plan approval. The Director Philosophy says "delegation without review is abdication" — this applies to the user-Director relationship too. The user should validate understanding, see progress during execution, and review the final result.
 
-**Approach: System prompt injection + tool gating + Director tools**
+**Gap 1: Understanding alignment (UNDERSTAND -> PLAN)**
 
-```
-System prompt injection → controls what the LLM is TOLD to do
-Tool gating             → controls what the LLM CAN do
-Director tools          → checkpoints where the LLM signals "I'm done with this phase"
-```
+Currently the agent explores silently, calls `director_complete_understand`, and jumps to PLAN. The user never sees or validates the context document. The `clarify` tool exists but is optional.
 
-**How a full cycle works:**
+*Fix:* Add an approval step after UNDERSTAND — similar to plan approval. Present the context document (affected files, patterns, constraints, risks) to the user for validation before planning begins. "Here's what I found. Does this match your expectations?"
 
-```
-1. Director activates for "Add authentication"
+**Gap 2: Code review enforcement (EXECUTE)**
 
-2. UNDERSTAND phase:
-   - System prompt: "Explore the codebase. Do NOT write code.
-     When you understand enough, call director_complete_understand."
-   - Tool gating: only read tools + director_complete_understand
-   - LLM uses read_file, search_code, glob naturally
-   - LLM calls director_complete_understand(context)
-   - Protocol validates → transitions to PLAN
+The EXECUTE prompt tells the Director to delegate to `code-reviewer`, but nothing enforces it. The Director can skip review and call `director_complete_slice` immediately. No user visibility into what each slice produced.
 
-3. PLAN phase:
-   - System prompt: "Create vertical slices for this task.
-     When done, call director_complete_plan."
-   - Tool gating: only read tools + director_complete_plan
-   - LLM thinks and produces slices
-   - LLM calls director_complete_plan(plan)
-   - Protocol validates → transitions to AWAITING_APPROVAL
+*Fix options:*
+- Require review delegation before `director_complete_slice` accepts (structural)
+- Show user a per-slice summary (what was created/modified, test results) before advancing
+- Add a per-slice approval step (heavier, but gives user full control)
 
-4. AWAITING_APPROVAL:
-   - Plan presented to user (reuses plan_mode approval pattern)
-   - User approves → EXECUTE
-   - User rejects with feedback → back to PLAN
+**Gap 3: User checkpoint between slices (EXECUTE)**
 
-5. EXECUTE phase (per slice):
-   - System prompt: "Execute slice N using RED-GREEN-REFACTOR.
-     Delegate to subagents. Verify with tests."
-   - Tool gating: all tools + delegation + director_complete_slice
+Once the plan is approved, the Director runs autonomously through all slices. For a 4-slice plan, the user has zero visibility or control until INTEGRATE. This is a lot of unsupervised work.
 
-   For each vertical slice:
-     RED:
-       Director delegates to Test Writer subagent → writes failing test
-       Director runs pytest                       → confirms test FAILS
+*Fix:* Optional pause-between-slices mode. After each slice, show a brief summary and let the user approve or course-correct before the next slice begins.
 
-     GREEN:
-       Director delegates to Code Writer subagent → writes implementation
-       Director runs pytest                       → confirms test PASSES
-       Director runs full test suite              → confirms NO REGRESSIONS
+**Gap 4: Final review (INTEGRATE)**
 
-     REVIEW:
-       Director delegates to Code Reviewer        → checks quality
+The Director runs tests and calls `director_complete_integration` but the user never sees a summary of what was built. The session just ends.
 
-     COMMIT:
-       Director commits the slice                 → progress locked in
-
-   After all slices → transitions to INTEGRATE
-
-6. INTEGRATE phase:
-   - Director runs full test suite
-   - Director reviews cross-slice coherence
-   - All green → COMPLETE
-```
-
-**Components to build:**
-
-| Component | File | Purpose |
-|-----------|------|---------|
-| `DirectorAdapter` | `src/director/adapter.py` | Holds protocol, manages prompt/gating per phase |
-| Phase prompts | `src/director/prompts.py` | "You are in UNDERSTAND mode..." per phase |
-| Director tools | `src/director/tools.py` | `director_complete_understand`, `director_complete_plan`, `director_complete_slice` |
-| Code Writer prompt | `src/prompts/subagents/__init__.py` | New CODE_WRITER_PROMPT (test-writer and code-reviewer already exist) |
-| Tool gating | Inside adapter | Like `plan_mode.gate_tool()` but phase-aware |
-| Agent integration | `src/core/agent.py` | ~15 lines: init adapter, hook into tool loop |
-
-**Key pattern to follow:** `src/core/plan_mode.py` (393 lines) — PlanModeState with enter/exit/approve/reject/reset and gate_tool() for controlling available tools per state.
-
-**Agent.py touch points (minimal):**
-- `__init__` (~line 398): Add `self.director_adapter = DirectorAdapter(self)` — 2 lines
-- `_execute_with_tools_async` (~line 900): Check director phase for prompt injection — ~10 lines
-- Tool registration: Register director tools — ~3 lines
-
-**New subagent needed: Code Writer**
-- test-writer and code-reviewer already exist in `src/prompts/subagents/__init__.py`
-- Add CODE_WRITER_PROMPT following the same pattern
-- Focus: "Write the minimum code to make the failing test pass. Follow existing patterns."
-
-**Test verification tooling:**
-- Director needs to run `pytest` and interpret pass/fail
-- Could be a dedicated tool (`run_tests`) or use existing `execute_command` tool
-- Must parse pytest output to determine: all passed, which failed, error messages
+*Fix:* Before COMPLETE, present a final summary to the user: what was delivered, test results, any known limitations. Similar to a PR description.
 
 ---
 
 ### Phase 3: Codebase Survey (PARKED)
 
-**Status:** Fully planned, parked until Phase 2 is done
+**Status:** Fully planned, parked
 **Plan:** `docs/CODEBASE_SURVEY_PLAN.md`
-**Depends on:** Phase 2 (adapter must exist to load the survey)
+**Depends on:** Phase 2 (done)
 
 A codebase surveyor that scans the project and generates `.clarity/codebase_context.md` — a persistent, LLM-consumable document loaded into every session.
 
@@ -198,7 +204,8 @@ A codebase surveyor that scans the project and generates `.clarity/codebase_cont
 - `/code-survey` TUI command
 - Auto-detect complex tasks and suggest Director mode
 - Incremental survey updates on git changes
-- Director progress visible in TUI (phase indicator, slice progress)
+- Session persistence for Director state (survive app restart)
+- Enforced delegation (Approach B: gate write tools in EXECUTE)
 - ClarityDB backing store for queryable codebase intelligence
 
 ---
@@ -206,16 +213,19 @@ A codebase surveyor that scans the project and generates `.clarity/codebase_cont
 ## Dependency Graph
 
 ```
-Phase 1: Protocol MVP          ← DONE (130 tests, committed)
+Phase 1: Protocol MVP          <- DONE (130 tests, committed)
     |
     v
-Phase 2: Adapter + EXECUTE     ← NEXT (full end-to-end Director cycle)
+Phase 2: Adapter + Lifecycle   <- DONE (297 tests, full IDLE-to-COMPLETE cycle)
     |
     v
-Phase 3: Codebase Survey       ← PARKED (persistent project intelligence)
+Phase 2.5: User-in-the-Loop   <- NEXT (understanding alignment, review enforcement, progress visibility)
     |
     v
-Phase 4: Full Integration      ← FUTURE (TUI, auto-detect, ClarityDB)
+Phase 3: Codebase Survey       <- PARKED (persistent project intelligence)
+    |
+    v
+Phase 4: Full Integration      <- FUTURE (TUI, auto-detect, ClarityDB)
 ```
 
 ## Key Documents
@@ -225,21 +235,5 @@ Phase 4: Full Integration      ← FUTURE (TUI, auto-detect, ClarityDB)
 | Director Philosophy | `docs/DIRECTOR_PHILOSOPHY.md` | Why — the principles and ideology |
 | This Roadmap | `docs/DIRECTOR_ROADMAP.md` | What — built vs planned |
 | Survey Plan | `docs/CODEBASE_SURVEY_PLAN.md` | Phase 3 detailed plan (parked) |
-| Plan Mode (reference) | `src/core/plan_mode.py` | Pattern to follow for adapter |
-| Director Protocol | `src/director/` | Phase 1 implementation |
-| Director Tests | `tests/director/` | 130 tests, 6 files |
-
-## How to Resume
-
-To continue building in a new session:
-
-1. Read this roadmap for full context
-2. Read `docs/DIRECTOR_PHILOSOPHY.md` for principles
-3. The next task is **Phase 2: Director Adapter + EXECUTE**
-4. Follow the protocol: UNDERSTAND (read plan_mode.py and existing subagent prompts) -> PLAN (vertical slices) -> EXECUTE (RED-GREEN-REFACTOR per slice)
-5. Key patterns to follow:
-   - `src/core/plan_mode.py` — system prompt injection + tool gating
-   - `src/prompts/subagents/__init__.py` — existing subagent prompt patterns (for new code-writer prompt)
-   - `src/tools/delegation.py` — how tools delegate to subagents
-6. The full cycle to demo: UNDERSTAND -> PLAN -> APPROVE -> EXECUTE (RED-GREEN-REFACTOR per slice) -> INTEGRATE -> COMPLETE
-7. The value proof: run the Director on a real task on the ClarAIty codebase itself and watch it plan, delegate, verify, and commit — slice by slice
+| Director Protocol | `src/director/` | State machine + adapter + tools |
+| Director Tests | `tests/director/` | 297 tests, 12 files |
