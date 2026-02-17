@@ -463,3 +463,88 @@ class DirectorCompleteSliceTool(Tool):
             },
             "required": ["slice_id"],
         }
+
+
+class DirectorCompleteIntegrationTool(Tool):
+    """Checkpoint for the INTEGRATE phase.
+
+    Called by the LLM after running the full test suite and verifying
+    cross-slice coherence. Transitions INTEGRATE -> COMPLETE.
+    """
+
+    def __init__(self, adapter: 'DirectorAdapter'):
+        self._adapter = adapter
+        super().__init__(
+            name="director_complete_integration",
+            description=(
+                "Signal that integration is complete -- all tests pass "
+                "and all slices work together correctly. This finishes "
+                "Director mode."
+            ),
+        )
+
+    def execute(self, **kwargs: Any) -> ToolResult:
+        """Mark integration complete and finish Director mode."""
+        # Validate phase
+        if self._adapter.phase != DirectorPhase.INTEGRATE:
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.ERROR,
+                output=None,
+                error=(
+                    f"Cannot complete integration: currently in "
+                    f"{self._adapter.phase.name} phase. "
+                    f"This tool can only be called during INTEGRATE."
+                ),
+            )
+
+        test_results = kwargs.get("test_results_summary", "")
+        issues = kwargs.get("issues", "")
+
+        try:
+            self._adapter.complete_integration()
+
+            output_parts = [
+                "Integration complete! Director mode finished.",
+                f"Task: {self._adapter._protocol.task_description}",
+            ]
+            if test_results:
+                output_parts.append(f"Final test results: {test_results}")
+            if issues:
+                output_parts.append(f"Known issues: {issues}")
+
+            plan = self._adapter._protocol.plan
+            if plan:
+                output_parts.append(
+                    f"Slices delivered: {plan.completed_slices}/{plan.total_slices}"
+                )
+
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.SUCCESS,
+                output="\n".join(output_parts),
+            )
+        except Exception as e:
+            logger.error(f"director_complete_integration failed: {e}")
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.ERROR,
+                output=None,
+                error=str(e),
+            )
+
+    def _get_parameters(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "test_results_summary": {
+                    "type": "string",
+                    "description": "Summary of the full test suite results",
+                },
+                "issues": {
+                    "type": "string",
+                    "description": "Any known issues or notes (empty if none)",
+                },
+            },
+            "required": [],
+        }

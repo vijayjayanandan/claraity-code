@@ -146,13 +146,19 @@ slice to the test-writer subagent as your very next action.
 
     DirectorPhase.INTEGRATE: """\
 <director-mode phase="INTEGRATE">
-You are in INTEGRATE mode. All slices are complete.
+You are in INTEGRATE mode. All slices are complete. Verify everything
+works together before closing out.
 
-Run the full test suite to verify no regressions.
-Review cross-slice coherence -- do the pieces fit together correctly?
+WORKFLOW:
+1. Run the FULL test suite with `run_command` (not just slice tests)
+2. Review cross-slice coherence -- do the pieces fit together correctly?
+3. If there are failures, fix them (delegate to code-writer if needed)
+4. Once ALL tests pass, call `director_complete_integration` with:
+   - test_results_summary: final test suite output
+   - issues: any known limitations or follow-up items (empty if none)
 
-If everything is green, signal completion.
-If there are issues, document them clearly.
+IMPORTANT: You MUST call `director_complete_integration` to finish.
+Do not end your turn with only text output.
 </director-mode>""",
 }
 
@@ -165,6 +171,7 @@ DIRECTOR_TOOLS = frozenset({
     "director_complete_understand",
     "director_complete_plan",
     "director_complete_slice",
+    "director_complete_integration",
 })
 
 

@@ -30,6 +30,7 @@ from .tools import (
     DirectorCompleteUnderstandTool,
     DirectorCompletePlanTool,
     DirectorCompleteSliceTool,
+    DirectorCompleteIntegrationTool,
 )
 
 __all__ = [
@@ -63,4 +64,5 @@ __all__ = [
     "DirectorCompleteUnderstandTool",
     "DirectorCompletePlanTool",
     "DirectorCompleteSliceTool",
+    "DirectorCompleteIntegrationTool",
 ]

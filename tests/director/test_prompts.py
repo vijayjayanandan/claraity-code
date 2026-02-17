@@ -96,6 +96,11 @@ class TestPhasePromptsContent:
         prompt = PHASE_PROMPTS[DirectorPhase.INTEGRATE].lower()
         assert "test" in prompt
 
+    def test_integrate_prompt_mentions_checkpoint_tool(self):
+        from src.director.prompts import PHASE_PROMPTS
+        prompt = PHASE_PROMPTS[DirectorPhase.INTEGRATE]
+        assert "director_complete_integration" in prompt
+
 
 class TestGetDirectorPhasePrompt:
     """Dynamic prompt generation with context, plan, and slice info."""
@@ -244,6 +249,14 @@ class TestPhaseAllowedTools:
     def test_integrate_blocks_write_file(self):
         from src.director.prompts import PHASE_ALLOWED_TOOLS
         assert "write_file" not in PHASE_ALLOWED_TOOLS[DirectorPhase.INTEGRATE]
+
+    def test_integrate_allows_director_integration_checkpoint(self):
+        from src.director.prompts import PHASE_ALLOWED_TOOLS
+        assert "director_complete_integration" in PHASE_ALLOWED_TOOLS[DirectorPhase.INTEGRATE]
+
+    def test_director_tools_includes_integration(self):
+        from src.director.prompts import DIRECTOR_TOOLS
+        assert "director_complete_integration" in DIRECTOR_TOOLS
 
     def test_idle_has_no_allowlist(self):
         from src.director.prompts import PHASE_ALLOWED_TOOLS

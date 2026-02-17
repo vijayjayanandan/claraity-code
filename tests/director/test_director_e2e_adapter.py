@@ -16,6 +16,7 @@ from src.director.tools import (
     DirectorCompleteUnderstandTool,
     DirectorCompletePlanTool,
     DirectorCompleteSliceTool,
+    DirectorCompleteIntegrationTool,
 )
 
 
@@ -32,12 +33,13 @@ def _make_plan_file(content: str = "# Test Plan\n\nTest plan content.") -> str:
 
 
 def _make_adapter_with_tools():
-    """Create adapter + all 3 checkpoint tools."""
+    """Create adapter + all 4 checkpoint tools."""
     adapter = DirectorAdapter()
     understand = DirectorCompleteUnderstandTool(adapter)
     plan = DirectorCompletePlanTool(adapter)
     slice_tool = DirectorCompleteSliceTool(adapter)
-    return adapter, understand, plan, slice_tool
+    integration_tool = DirectorCompleteIntegrationTool(adapter)
+    return adapter, understand, plan, slice_tool, integration_tool
 
 
 def _advance_to_execute(adapter, understand, plan):
@@ -77,7 +79,7 @@ class TestFullHappyPath:
     """Walk through every phase from IDLE to INTEGRATE."""
 
     def test_idle_to_understand(self):
-        adapter, _, _, _ = _make_adapter_with_tools()
+        adapter, _, _, _, _ = _make_adapter_with_tools()
         assert adapter.phase == DirectorPhase.IDLE
         assert not adapter.is_active
 
@@ -86,7 +88,7 @@ class TestFullHappyPath:
         assert adapter.is_active
 
     def test_understand_to_plan(self):
-        adapter, understand, _, _ = _make_adapter_with_tools()
+        adapter, understand, _, _, _ = _make_adapter_with_tools()
         adapter.start("Add search feature")
 
         result = understand.execute(
@@ -97,7 +99,7 @@ class TestFullHappyPath:
         assert adapter.phase == DirectorPhase.PLAN
 
     def test_plan_to_awaiting_approval(self):
-        adapter, understand, plan, _ = _make_adapter_with_tools()
+        adapter, understand, plan, _, _ = _make_adapter_with_tools()
         adapter.start("Add search feature")
         understand.execute(task_description="Add search feature")
 
@@ -110,7 +112,7 @@ class TestFullHappyPath:
         assert adapter.phase == DirectorPhase.AWAITING_APPROVAL
 
     def test_approve_to_execute(self):
-        adapter, understand, plan, _ = _make_adapter_with_tools()
+        adapter, understand, plan, _, _ = _make_adapter_with_tools()
         adapter.start("Add search feature")
         understand.execute(task_description="Add search feature")
         plan.execute(
@@ -123,7 +125,7 @@ class TestFullHappyPath:
         assert adapter.phase == DirectorPhase.EXECUTE
 
     def test_execute_single_slice_to_integrate(self):
-        adapter, understand, plan, slice_tool = _make_adapter_with_tools()
+        adapter, understand, plan, slice_tool, _ = _make_adapter_with_tools()
         adapter.start("Add search feature")
         understand.execute(task_description="Add search feature")
         plan.execute(
@@ -139,7 +141,7 @@ class TestFullHappyPath:
 
     def test_execute_multi_slice_incremental(self):
         """Two slices: first stays in EXECUTE, second transitions to INTEGRATE."""
-        adapter, understand, plan, slice_tool = _make_adapter_with_tools()
+        adapter, understand, plan, slice_tool, _ = _make_adapter_with_tools()
         _advance_to_execute(adapter, understand, plan)
 
         # Complete slice 1 -- should stay in EXECUTE
@@ -154,7 +156,7 @@ class TestFullHappyPath:
 
     def test_full_lifecycle_status_progression(self):
         """Verify get_status() reflects correct state at each transition."""
-        adapter, understand, plan, slice_tool = _make_adapter_with_tools()
+        adapter, understand, plan, slice_tool, _ = _make_adapter_with_tools()
 
         # IDLE
         status = adapter.get_status()
@@ -183,6 +185,49 @@ class TestFullHappyPath:
         slice_tool.execute(slice_id=1, test_results_summary="all pass")
         assert adapter.get_status()["phase"] == "INTEGRATE"
 
+    def test_integrate_to_complete(self):
+        """INTEGRATE -> COMPLETE finishes the lifecycle."""
+        adapter, understand, plan, slice_tool, integration_tool = _make_adapter_with_tools()
+        adapter.start("Add feature")
+        understand.execute(task_description="Add feature")
+        plan.execute(summary="One slice", slices=[{"title": "The feature"}], plan_document=_make_plan_file())
+        adapter.approve_plan()
+        slice_tool.execute(slice_id=1, test_results_summary="3 passed")
+        assert adapter.phase == DirectorPhase.INTEGRATE
+
+        result = integration_tool.execute(test_results_summary="all green")
+        assert result.is_success()
+        assert adapter.phase == DirectorPhase.COMPLETE
+        assert not adapter.is_active
+
+    def test_full_lifecycle_idle_to_complete(self):
+        """Full happy path: IDLE -> UNDERSTAND -> PLAN -> APPROVE -> EXECUTE -> INTEGRATE -> COMPLETE."""
+        adapter, understand, plan, slice_tool, integration_tool = _make_adapter_with_tools()
+
+        assert adapter.phase == DirectorPhase.IDLE
+        adapter.start("Build REST API")
+        assert adapter.phase == DirectorPhase.UNDERSTAND
+
+        understand.execute(task_description="Build REST API")
+        assert adapter.phase == DirectorPhase.PLAN
+
+        plan.execute(summary="Two slices", slices=[{"title": "Models"}, {"title": "Routes"}], plan_document=_make_plan_file())
+        assert adapter.phase == DirectorPhase.AWAITING_APPROVAL
+
+        adapter.approve_plan()
+        assert adapter.phase == DirectorPhase.EXECUTE
+
+        slice_tool.execute(slice_id=1, test_results_summary="5 passed")
+        assert adapter.phase == DirectorPhase.EXECUTE
+
+        slice_tool.execute(slice_id=2, test_results_summary="8 passed")
+        assert adapter.phase == DirectorPhase.INTEGRATE
+
+        result = integration_tool.execute(test_results_summary="13 passed, 0 failed")
+        assert result.is_success()
+        assert adapter.phase == DirectorPhase.COMPLETE
+        assert not adapter.is_active
+
 
 # =============================================================================
 # Rejection Cycle
@@ -192,7 +237,7 @@ class TestRejectionCycle:
     """Plan rejected with feedback, revised, then approved."""
 
     def test_reject_revise_approve(self):
-        adapter, understand, plan, _ = _make_adapter_with_tools()
+        adapter, understand, plan, _, _ = _make_adapter_with_tools()
         adapter.start("Add caching")
         understand.execute(task_description="Add caching")
 
@@ -220,7 +265,7 @@ class TestRejectionCycle:
         assert adapter.phase == DirectorPhase.EXECUTE
 
     def test_double_rejection(self):
-        adapter, understand, plan, _ = _make_adapter_with_tools()
+        adapter, understand, plan, _, _ = _make_adapter_with_tools()
         adapter.start("Add caching")
         understand.execute(task_description="Add caching")
 
@@ -270,7 +315,7 @@ class TestToolGatingByPhase:
 
     def test_plan_write_file_path_restricted(self):
         """write_file allowed in PLAN only for .clarity/plans/ paths."""
-        adapter, understand, _, _ = _make_adapter_with_tools()
+        adapter, understand, _, _, _ = _make_adapter_with_tools()
         adapter.start("task")
         understand.execute(task_description="task")
         assert adapter.phase == DirectorPhase.PLAN
@@ -292,7 +337,7 @@ class TestToolGatingByPhase:
         assert adapter.gate_tool("edit_file") == DirectorGateDecision.DENY
 
     def test_execute_allows_reads_writes_exec_and_slice_checkpoint(self):
-        adapter, understand, plan, _ = _make_adapter_with_tools()
+        adapter, understand, plan, _, _ = _make_adapter_with_tools()
         _advance_to_execute(adapter, understand, plan)
         assert adapter.phase == DirectorPhase.EXECUTE
 
@@ -304,7 +349,7 @@ class TestToolGatingByPhase:
             assert adapter.gate_tool(tool) == DirectorGateDecision.ALLOW, f"{tool} should be allowed in EXECUTE"
 
     def test_integrate_denies_writes(self):
-        adapter, understand, plan, slice_tool = _make_adapter_with_tools()
+        adapter, understand, plan, slice_tool, _ = _make_adapter_with_tools()
         _advance_to_execute(adapter, understand, plan)
         # Complete all slices to reach INTEGRATE
         slice_tool.execute(slice_id=1, test_results_summary="pass")
@@ -315,7 +360,7 @@ class TestToolGatingByPhase:
             assert adapter.gate_tool(tool) == DirectorGateDecision.DENY, f"{tool} should be denied in INTEGRATE"
 
     def test_integrate_allows_reads_and_exec(self):
-        adapter, understand, plan, slice_tool = _make_adapter_with_tools()
+        adapter, understand, plan, slice_tool, _ = _make_adapter_with_tools()
         _advance_to_execute(adapter, understand, plan)
         slice_tool.execute(slice_id=1, test_results_summary="pass")
         slice_tool.execute(slice_id=2, test_results_summary="pass")
@@ -348,7 +393,7 @@ class TestPromptInjectionByPhase:
         assert "director_complete_understand" in injection
 
     def test_plan_injection_content(self):
-        adapter, understand, _, _ = _make_adapter_with_tools()
+        adapter, understand, _, _, _ = _make_adapter_with_tools()
         adapter.start("Build REST API")
         understand.execute(
             task_description="Build REST API",
@@ -361,7 +406,7 @@ class TestPromptInjectionByPhase:
         assert "Build REST API" in injection
 
     def test_execute_injection_includes_plan(self):
-        adapter, understand, plan, _ = _make_adapter_with_tools()
+        adapter, understand, plan, _, _ = _make_adapter_with_tools()
         _advance_to_execute(adapter, understand, plan)
         injection = adapter.get_prompt_injection()
 
@@ -371,7 +416,7 @@ class TestPromptInjectionByPhase:
 
     def test_injection_changes_after_transition(self):
         """Injection content updates when phase changes."""
-        adapter, understand, _, _ = _make_adapter_with_tools()
+        adapter, understand, _, _, _ = _make_adapter_with_tools()
         adapter.start("Test task")
 
         understand_injection = adapter.get_prompt_injection()
@@ -401,7 +446,7 @@ class TestResetBehavior:
         assert adapter.get_prompt_injection() is None
 
     def test_reset_from_plan(self):
-        adapter, understand, _, _ = _make_adapter_with_tools()
+        adapter, understand, _, _, _ = _make_adapter_with_tools()
         adapter.start("task")
         understand.execute(task_description="task")
         assert adapter.phase == DirectorPhase.PLAN
@@ -410,7 +455,7 @@ class TestResetBehavior:
         assert adapter.phase == DirectorPhase.IDLE
 
     def test_reset_from_execute(self):
-        adapter, understand, plan, _ = _make_adapter_with_tools()
+        adapter, understand, plan, _, _ = _make_adapter_with_tools()
         _advance_to_execute(adapter, understand, plan)
         assert adapter.phase == DirectorPhase.EXECUTE
 
@@ -419,7 +464,7 @@ class TestResetBehavior:
         assert not adapter.is_active
 
     def test_reset_from_integrate(self):
-        adapter, understand, plan, slice_tool = _make_adapter_with_tools()
+        adapter, understand, plan, slice_tool, _ = _make_adapter_with_tools()
         _advance_to_execute(adapter, understand, plan)
         slice_tool.execute(slice_id=1, test_results_summary="pass")
         slice_tool.execute(slice_id=2, test_results_summary="pass")
@@ -430,7 +475,7 @@ class TestResetBehavior:
 
     def test_reset_allows_fresh_start(self):
         """After reset, can start a completely new Director session."""
-        adapter, understand, plan, _ = _make_adapter_with_tools()
+        adapter, understand, plan, _, _ = _make_adapter_with_tools()
         _advance_to_execute(adapter, understand, plan)
 
         adapter.reset()
@@ -501,7 +546,7 @@ class TestSliceStatusTracking:
     """Verify slice statuses are tracked correctly through EXECUTE phase."""
 
     def test_slices_start_as_pending(self):
-        adapter, understand, plan, _ = _make_adapter_with_tools()
+        adapter, understand, plan, _, _ = _make_adapter_with_tools()
         _advance_to_execute(adapter, understand, plan)
 
         status = adapter.get_status()
@@ -509,7 +554,7 @@ class TestSliceStatusTracking:
         assert status["completed_slices"] == 0
 
     def test_completed_slice_count_increments(self):
-        adapter, understand, plan, slice_tool = _make_adapter_with_tools()
+        adapter, understand, plan, slice_tool, _ = _make_adapter_with_tools()
         _advance_to_execute(adapter, understand, plan)
 
         slice_tool.execute(slice_id=1, test_results_summary="pass")
@@ -517,7 +562,7 @@ class TestSliceStatusTracking:
         assert status["completed_slices"] == 1
 
     def test_all_slices_completed_count(self):
-        adapter, understand, plan, slice_tool = _make_adapter_with_tools()
+        adapter, understand, plan, slice_tool, _ = _make_adapter_with_tools()
         _advance_to_execute(adapter, understand, plan)
 
         slice_tool.execute(slice_id=1, test_results_summary="pass")

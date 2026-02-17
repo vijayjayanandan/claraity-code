@@ -234,3 +234,84 @@ class TestCompleteSliceTool:
         adapter, tool = setup
         result = tool.execute(test_results_summary="ok")
         assert not result.is_success()
+
+
+class TestCompleteIntegrationTool:
+    """director_complete_integration: INTEGRATE -> COMPLETE."""
+
+    def _advance_to_integrate(self):
+        """Helper: advance adapter through full lifecycle to INTEGRATE."""
+        from src.director.adapter import DirectorAdapter
+        from src.director.tools import (
+            DirectorCompleteUnderstandTool,
+            DirectorCompletePlanTool,
+            DirectorCompleteSliceTool,
+            DirectorCompleteIntegrationTool,
+        )
+        adapter = DirectorAdapter()
+        understand = DirectorCompleteUnderstandTool(adapter)
+        plan_tool = DirectorCompletePlanTool(adapter)
+        slice_tool = DirectorCompleteSliceTool(adapter)
+        integration_tool = DirectorCompleteIntegrationTool(adapter)
+
+        adapter.start("Build feature")
+        understand.execute(task_description="Build feature")
+        plan_file = _make_plan_file()
+        plan_tool.execute(
+            plan_document=plan_file,
+            summary="One slice",
+            slices=[{"title": "The feature"}],
+        )
+        adapter.approve_plan()
+        slice_tool.execute(slice_id=1, test_results_summary="5 passed")
+        assert adapter.phase == DirectorPhase.INTEGRATE
+        return adapter, integration_tool
+
+    def test_tool_creates(self):
+        from src.director.adapter import DirectorAdapter
+        from src.director.tools import DirectorCompleteIntegrationTool
+        adapter = DirectorAdapter()
+        tool = DirectorCompleteIntegrationTool(adapter)
+        assert tool.name == "director_complete_integration"
+
+    def test_happy_path_transitions_to_complete(self):
+        adapter, tool = self._advance_to_integrate()
+        result = tool.execute(
+            test_results_summary="12 passed, 0 failed",
+        )
+        assert result.is_success()
+        assert adapter.phase == DirectorPhase.COMPLETE
+
+    def test_output_includes_task(self):
+        adapter, tool = self._advance_to_integrate()
+        result = tool.execute(test_results_summary="all green")
+        assert "Build feature" in result.output
+
+    def test_output_includes_test_results(self):
+        adapter, tool = self._advance_to_integrate()
+        result = tool.execute(test_results_summary="12 passed")
+        assert "12 passed" in result.output
+
+    def test_output_includes_issues(self):
+        adapter, tool = self._advance_to_integrate()
+        result = tool.execute(
+            test_results_summary="ok",
+            issues="Need to add rate limiting later",
+        )
+        assert "rate limiting" in result.output
+
+    def test_wrong_phase_returns_error(self):
+        from src.director.adapter import DirectorAdapter
+        from src.director.tools import DirectorCompleteIntegrationTool
+        adapter = DirectorAdapter()
+        tool = DirectorCompleteIntegrationTool(adapter)
+        adapter.start("task")
+        # In UNDERSTAND, not INTEGRATE
+        result = tool.execute(test_results_summary="ok")
+        assert not result.is_success()
+        assert "UNDERSTAND" in result.error
+
+    def test_director_inactive_after_complete(self):
+        adapter, tool = self._advance_to_integrate()
+        tool.execute(test_results_summary="all green")
+        assert not adapter.is_active

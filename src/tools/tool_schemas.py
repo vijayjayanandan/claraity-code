@@ -351,13 +351,13 @@ GIT_COMMIT_TOOL = ToolDefinition(
 
 DELEGATE_TO_SUBAGENT_TOOL = ToolDefinition(
     name="delegate_to_subagent",
-    description="Delegate a task to a specialized subagent for focused execution. Subagents have independent context (no pollution of main conversation). Available: code-reviewer, test-writer, doc-writer.",
+    description="Delegate a task to a specialized subagent for focused execution. Subagents have independent context (no pollution of main conversation). Available: code-writer, code-reviewer, test-writer, doc-writer, explore, planner, general-purpose.",
     parameters={
         "type": "object",
         "properties": {
             "subagent": {
                 "type": "string",
-                "description": "Name of the subagent to use (e.g., 'code-reviewer', 'test-writer', 'doc-writer')"
+                "description": "Name of the subagent: 'code-writer' (implement code), 'test-writer' (write tests), 'code-reviewer' (review quality), 'explore' (read-only codebase search), 'planner' (design plans), 'doc-writer' (documentation), 'general-purpose' (multi-step tasks)"
             },
             "task": {
                 "type": "string",
@@ -1131,6 +1131,25 @@ DIRECTOR_COMPLETE_SLICE_TOOL = ToolDefinition(
     },
 )
 
+DIRECTOR_COMPLETE_INTEGRATION_TOOL = ToolDefinition(
+    name="director_complete_integration",
+    description="Signal that integration is complete -- all tests pass and all slices work together. This finishes Director mode.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "test_results_summary": {
+                "type": "string",
+                "description": "Summary of the full test suite results",
+            },
+            "issues": {
+                "type": "string",
+                "description": "Any known issues or follow-up items (empty if none)",
+            },
+        },
+        "required": [],
+    },
+)
+
 # Tool Collections
 
 ALL_TOOLS = [
@@ -1152,22 +1171,23 @@ ALL_TOOLS = [
     DELEGATE_TO_SUBAGENT_TOOL,
     TODO_WRITE_TOOL,
     CREATE_CHECKPOINT_TOOL,
-    QUERY_COMPONENT_TOOL,
-    QUERY_DEPENDENCIES_TOOL,
-    QUERY_DECISIONS_TOOL,
-    QUERY_FLOWS_TOOL,
-    QUERY_ARCHITECTURE_SUMMARY_TOOL,
-    SEARCH_COMPONENTS_TOOL,
-    CLARITY_SETUP_TOOL,
-    GET_NEXT_TASK_TOOL,
-    UPDATE_COMPONENT_STATUS_TOOL,
-    ADD_ARTIFACT_TOOL,
-    GET_IMPLEMENTATION_SPEC_TOOL,
-    ADD_METHOD_TOOL,
-    ADD_ACCEPTANCE_CRITERION_TOOL,
-    UPDATE_METHOD_TOOL,
-    UPDATE_ACCEPTANCE_CRITERION_TOOL,
-    UPDATE_IMPLEMENTATION_PATTERN_TOOL,
+    # Clarity tools removed from LLM context - migrating to markdown knowledge base
+    # QUERY_COMPONENT_TOOL,
+    # QUERY_DEPENDENCIES_TOOL,
+    # QUERY_DECISIONS_TOOL,
+    # QUERY_FLOWS_TOOL,
+    # QUERY_ARCHITECTURE_SUMMARY_TOOL,
+    # SEARCH_COMPONENTS_TOOL,
+    # CLARITY_SETUP_TOOL,
+    # GET_NEXT_TASK_TOOL,
+    # UPDATE_COMPONENT_STATUS_TOOL,
+    # ADD_ARTIFACT_TOOL,
+    # GET_IMPLEMENTATION_SPEC_TOOL,
+    # ADD_METHOD_TOOL,
+    # ADD_ACCEPTANCE_CRITERION_TOOL,
+    # UPDATE_METHOD_TOOL,
+    # UPDATE_ACCEPTANCE_CRITERION_TOOL,
+    # UPDATE_IMPLEMENTATION_PATTERN_TOOL,
     RUN_TESTS_TOOL,
     DETECT_TEST_FRAMEWORK_TOOL,
     WEB_SEARCH_TOOL,
@@ -1178,6 +1198,7 @@ ALL_TOOLS = [
     DIRECTOR_COMPLETE_UNDERSTAND_TOOL,
     DIRECTOR_COMPLETE_PLAN_TOOL,
     DIRECTOR_COMPLETE_SLICE_TOOL,
+    DIRECTOR_COMPLETE_INTEGRATION_TOOL,
 ]
 
 PLAN_MODE_TOOLS = [

@@ -189,6 +189,12 @@ class DirectorAdapter:
                 self._current_slice_id = None
                 self._protocol._transition(DirectorPhase.INTEGRATE)
 
+    def complete_integration(self) -> PhaseResult:
+        """INTEGRATE -> COMPLETE. The final curtain."""
+        result = self._protocol.complete_integration()
+        logger.info("director_integration_complete")
+        return result
+
     def reset(self) -> None:
         """Emergency stop -- return to IDLE."""
         self._protocol.reset()

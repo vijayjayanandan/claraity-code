@@ -45,22 +45,23 @@ from src.tools import (
     TaskListTool,
     TaskGetTool,
     CreateCheckpointTool,
-    QueryComponentTool,
-    QueryDependenciesTool,
-    QueryDecisionsTool,
-    QueryFlowsTool,
-    QueryArchitectureSummaryTool,
-    SearchComponentsTool,
-    ClaritySetupTool,
-    GetNextTaskTool,
-    UpdateComponentStatusTool,
-    AddArtifactTool,
-    GetImplementationSpecTool,
-    AddMethodTool,
-    AddAcceptanceCriterionTool,
-    UpdateMethodTool,
-    UpdateAcceptanceCriterionTool,
-    UpdateImplementationPatternTool,
+    # Clarity tools disconnected - migrating to markdown-based knowledge system
+    # QueryComponentTool,
+    # QueryDependenciesTool,
+    # QueryDecisionsTool,
+    # QueryFlowsTool,
+    # QueryArchitectureSummaryTool,
+    # SearchComponentsTool,
+    # ClaritySetupTool,
+    # GetNextTaskTool,
+    # UpdateComponentStatusTool,
+    # AddArtifactTool,
+    # GetImplementationSpecTool,
+    # AddMethodTool,
+    # AddAcceptanceCriterionTool,
+    # UpdateMethodTool,
+    # UpdateAcceptanceCriterionTool,
+    # UpdateImplementationPatternTool,
     EnterPlanModeTool,
     RequestPlanApprovalTool,
 )
@@ -409,10 +410,12 @@ class CodingAgent(AgentInterface):
             DirectorCompleteUnderstandTool,
             DirectorCompletePlanTool,
             DirectorCompleteSliceTool,
+            DirectorCompleteIntegrationTool,
         )
         self.tool_executor.register_tool(DirectorCompleteUnderstandTool(self.director_adapter))
         self.tool_executor.register_tool(DirectorCompletePlanTool(self.director_adapter))
         self.tool_executor.register_tool(DirectorCompleteSliceTool(self.director_adapter))
+        self.tool_executor.register_tool(DirectorCompleteIntegrationTool(self.director_adapter))
 
         # Initialize ClarAIty hook (if available and enabled)
         self.clarity_hook = None
@@ -763,27 +766,9 @@ class CodingAgent(AgentInterface):
         self.tool_executor.register_tool(GitDiffTool())
         self.tool_executor.register_tool(GitCommitTool())
 
-        # ClarAIty architecture query tools
-        self.tool_executor.register_tool(QueryComponentTool())
-        self.tool_executor.register_tool(QueryDependenciesTool())
-        self.tool_executor.register_tool(QueryDecisionsTool())
-        self.tool_executor.register_tool(QueryFlowsTool())
-        self.tool_executor.register_tool(QueryArchitectureSummaryTool())
-        self.tool_executor.register_tool(SearchComponentsTool())
-        self.tool_executor.register_tool(ClaritySetupTool())
-
-        # ClarAIty workflow tools (task management)
-        self.tool_executor.register_tool(GetNextTaskTool())
-        self.tool_executor.register_tool(UpdateComponentStatusTool())
-        self.tool_executor.register_tool(AddArtifactTool())
-
-        # ClarAIty implementation spec tools
-        self.tool_executor.register_tool(GetImplementationSpecTool())
-        self.tool_executor.register_tool(AddMethodTool())
-        self.tool_executor.register_tool(AddAcceptanceCriterionTool())
-        self.tool_executor.register_tool(UpdateMethodTool())
-        self.tool_executor.register_tool(UpdateAcceptanceCriterionTool())
-        self.tool_executor.register_tool(UpdateImplementationPatternTool())
+        # ClarAIty tools disconnected - migrating to markdown-based knowledge system
+        # See discussion: SQL DB not LLM-friendly, replacing with .clarity/knowledge/ markdown files
+        # Code preserved in src/tools/clarity_tools.py and src/tools/clarity_setup_tool.py
 
         # Testing & Validation tools
         from src.testing.validation_tool import RunTestsTool, DetectTestFrameworkTool
@@ -3515,7 +3500,7 @@ class CodingAgent(AgentInterface):
                             # Persist director phase change events for UI status bar
                             # and refresh system prompt so LLM sees new phase instructions
                             # (director_complete_plan is handled specially above with approval flow)
-                            if tc.function.name in ('director_complete_understand', 'director_complete_slice'):
+                            if tc.function.name in ('director_complete_understand', 'director_complete_slice', 'director_complete_integration'):
                                 new_phase = self.director_adapter.phase.name
                                 self.memory.persist_system_event(
                                     event_type="director_phase_changed",

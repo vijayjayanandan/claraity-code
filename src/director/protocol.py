@@ -175,6 +175,17 @@ class DirectorProtocol:
         self._rejection_feedback = feedback
         self._transition(DirectorPhase.PLAN)
 
+    def complete_integration(self) -> PhaseResult:
+        """Final curtain: INTEGRATE -> COMPLETE."""
+        result = PhaseResult(
+            phase=DirectorPhase.INTEGRATE,
+            success=True,
+            output=None,
+        )
+        self._phase_history.append(result)
+        self._transition(DirectorPhase.COMPLETE)
+        return result
+
     def reset(self) -> None:
         """Emergency stop — return to IDLE from anywhere."""
         self._phase = DirectorPhase.IDLE
