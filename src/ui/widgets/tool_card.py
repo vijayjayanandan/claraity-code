@@ -9,6 +9,7 @@ Features:
 - Duration tracking
 - Content preview for write_file
 - Diff preview for edit_file
+- Collapsible command preview for run_command
 """
 
 from textual.app import ComposeResult
@@ -48,6 +49,50 @@ class ScrollableDiffContainer(VerticalScroll):
         border: round #555555;
     }
     """
+
+
+class CommandPreviewBlock(Static):
+    """Collapsible command preview for run_command tool calls.
+
+    Expanded by default so users see the exact command before approving.
+    Click to collapse/expand. Follows SubAgentCard's [+]/[-] pattern.
+    """
+
+    DEFAULT_CSS = """
+    CommandPreviewBlock {
+        height: auto;
+        padding: 0;
+    }
+    """
+
+    PREVIEW_LENGTH = 80
+
+    def __init__(self, command: str, **kwargs):
+        super().__init__(**kwargs)
+        self.command = command
+        self._collapsed = False
+
+    def render(self) -> RenderableType:
+        t = Text()
+        if self._collapsed:
+            t.append("[+]", style="bold #cca700")
+        else:
+            t.append("[-]", style="bold #73c991")
+        t.append(" ", style="")
+        t.append("$ ", style="bold #73c991")
+
+        if self._collapsed:
+            preview = self.command.replace('\n', ' ')[:self.PREVIEW_LENGTH]
+            if len(self.command) > self.PREVIEW_LENGTH:
+                preview += "..."
+            t.append(preview, style="#d4d4d4")
+        else:
+            t.append(self.command, style="#d4d4d4")
+        return t
+
+    def on_click(self) -> None:
+        self._collapsed = not self._collapsed
+        self.refresh()
 
 
 class ToolCard(Static):
@@ -168,7 +213,6 @@ class ToolCard(Static):
         """
         from src.observability import get_logger
         logger = get_logger("tool_card")
-        logger.info(f"[WATCH_STATUS] {self.call_id}: new_status={new_status}, is_attached={self.is_attached}, has_widget={self._approval_widget is not None}")
 
         self._update_classes()
 
@@ -313,6 +357,16 @@ class ToolCard(Static):
                 scroll_container.mount(diff_widget)
                 self._diff_mounted = True
 
+        elif self.tool_name == 'run_command':
+            command = self.args.get('command', '')
+            if command:
+                # Mount header as child (render() is hidden when children exist)
+                self.mount(Static(self._render_header_line()))
+                scroll_container = ScrollableDiffContainer()
+                self.mount(scroll_container)
+                scroll_container.mount(CommandPreviewBlock(command))
+                self._diff_mounted = True
+
     def _mount_approval_after_diff(self) -> None:
         """Mount approval widget after deferred diff mount completes."""
         if self._approval_widget and not self._approval_widget.is_attached:
@@ -421,36 +475,41 @@ class ToolCard(Static):
 
         return result
 
-    def render(self) -> RenderableType:
-        """Render the tool card in polished VS Code style."""
+    def _render_header_line(self) -> Text:
+        """Build the header line (status badge + tool name + args).
+
+        Used both by render() and as a mounted child widget when preview
+        children are present (Textual hides render() when children exist).
+        """
         icon, fg_color, bg_color = self.STATUS_CONFIG.get(
             self.status,
             ("?", "#888888", "#2a2a2a")
         )
 
         result = Text()
-
-        # Badge-style status indicator: [ icon ] with background
         result.append(" ", style="")
         result.append(f" {icon} ", style=f"bold {fg_color} on {bg_color}")
         result.append(" ", style="")
-
-        # Tool name with refined styling
         result.append(self.tool_name, style="bold #e0e0e0")
 
-        # Format main argument inline with tool name - subtle styling
         main_arg = self._get_main_arg()
         if main_arg:
             result.append("(", style="#6e7681")
-            result.append(main_arg, style="#9cdcfe")  # VS Code variable color
+            result.append(main_arg, style="#9cdcfe")
             result.append(")", style="#6e7681")
 
-        # Add secondary args on same line if short enough
         secondary_args = self._format_secondary_args()
         if secondary_args:
             result.append(f"  {secondary_args}", style="#6e7681")
 
+        return result
+
+    def render(self) -> RenderableType:
+        """Render the tool card in polished VS Code style."""
+        result = self._render_header_line()
+
         # NOTE: Content/Diff preview is now handled by DiffWidget (mounted as child)
+        # run_command preview is handled by CommandPreviewBlock (mounted as child)
         # The DiffWidget provides professional formatting with:
         # - Line numbers
         # - Background colors (green for additions, red for deletions)
@@ -475,6 +534,10 @@ class ToolCard(Static):
     def _get_main_arg(self) -> str:
         """Get the main argument value for inline display."""
         if not self.args:
+            return ""
+
+        # run_command: full command shown on dedicated line in render(), skip inline
+        if self.tool_name == 'run_command':
             return ""
 
         # Common main argument names by priority
