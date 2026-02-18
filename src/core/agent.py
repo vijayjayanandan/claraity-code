@@ -66,7 +66,7 @@ from src.tools import (
     RequestPlanApprovalTool,
 )
 from src.tools.tool_parser import ToolCallParser, ParsedResponse
-from src.tools.tool_schemas import ALL_TOOLS, get_all_tools
+
 from src.prompts import PromptLibrary, TaskType
 from .context_builder import ContextBuilder
 from .file_reference_parser import FileReferenceParser
@@ -546,6 +546,11 @@ class CodingAgent(AgentInterface):
         if hasattr(self, '_enter_plan_mode_tool'):
             self._enter_plan_mode_tool.session_id = session_id
 
+        # Enable task state file persistence for this session
+        # Saves to .clarity/sessions/{session_id}/todos.json
+        todos_path = self.working_directory / ".clarity" / "sessions" / session_id / "todos.json"
+        self.task_state.set_persistence_path(todos_path)
+
     def is_in_plan_mode(self) -> bool:
         """Check if currently in plan mode."""
         return self.plan_mode_state.is_active
@@ -803,9 +808,19 @@ class CodingAgent(AgentInterface):
         # Will be registered separately via _register_delegation_tool()
 
     def _get_tools(self):
-        """Build the tool list for LLM requests (native + MCP)."""
-        mcp_defs = self._mcp_manager.get_all_tool_definitions() or None
-        return get_all_tools(mcp_definitions=mcp_defs)
+        """Build the tool list for LLM requests (native + MCP).
+
+        Builds dynamically from the tool executor's registered tools to
+        ensure schema names always match implementations. Static ALL_TOOLS
+        is no longer used here to avoid stale schema mismatches.
+        """
+        from src.llm.base import ToolDefinition
+        native_defs = [
+            ToolDefinition(**t.get_schema())
+            for t in self.tool_executor.tools.values()
+        ]
+        mcp_defs = self._mcp_manager.get_all_tool_definitions() or []
+        return native_defs + list(mcp_defs)
 
     async def enable_mcp_integration(self, name, mcp_registry, client, secret_store=None):
         """Enable a named MCP integration by connecting and discovering tools.
@@ -2810,6 +2825,10 @@ class CodingAgent(AgentInterface):
                         # Feed delta to MemoryManager (uses StreamingPipeline internally)
                         finalized_message = self.memory.process_provider_delta(delta)
 
+                        # Yield text deltas to TUI for incremental rendering
+                        if delta.text_delta:
+                            yield TextDelta(content=delta.text_delta)
+
                         # Track usage for context update
                         if delta.usage:
                             last_usage = delta.usage
@@ -4222,14 +4241,8 @@ REQUIRED: Choose a DIFFERENT approach:
         """
         Resume session from JSONL file using SessionHydrator.
 
-        This implements Option A (MessageStore as Single Source of Truth):
-        1. Hydrates MessageStore from JSONL
-        2. Injects MessageStore into MemoryManager as conversation source
-        3. Restores agent runtime state (todos, etc.)
-
-        The key innovation is that resumed sessions use the SAME code path
-        as fresh sessions - MemoryManager.get_context_for_llm() always provides
-        conversation history, whether from MessageStore (resumed) or WorkingMemory (legacy).
+        Restores conversation history only. Task state (todos) is restored
+        separately from todos.json when the caller invokes set_session_id().
 
         Args:
             jsonl_path: Path to session.jsonl file
@@ -4239,8 +4252,7 @@ REQUIRED: Choose a DIFFERENT approach:
 
         Usage:
             result = agent.resume_session_from_jsonl(Path(".clarity/sessions/abc/session.jsonl"))
-            # MemoryManager now uses MessageStore for conversation history
-            # agent.todo_state is restored
+            agent.set_session_id(session_id, is_new_session=False)  # enables todo persistence
         """
         from src.session import SessionHydrator, HydrationResult
 
@@ -4253,25 +4265,20 @@ REQUIRED: Choose a DIFFERENT approach:
         # Extract session_id from hydration result
         session_id = result.report.session_id
 
-        # OPTION A: Inject MessageStore into MemoryManager as single source of truth
+        # Inject MessageStore into MemoryManager as single source of truth
         # This replaces the old dual-path approach (_resumed_base_context + _sync_to_working_memory)
         # Now MemoryManager.get_context_for_llm() uses MessageStore directly
         self.memory.set_message_store(result.store, session_id)
 
-        # Restore agent state into TaskState
-        if result.agent_state.todos:
-            self.task_state.restore(
-                todos=result.agent_state.todos,
-                current_id=result.agent_state.current_todo_id,
-                stop_reason=result.agent_state.last_stop_reason,
-            )
-        elif result.agent_state.last_stop_reason:
-            self.task_state.last_stop_reason = result.agent_state.last_stop_reason
+        # Todos are NOT restored from JSONL. The JSON file (todos.json) is the
+        # single source of truth for task state. It gets loaded automatically
+        # when set_session_id() -> set_persistence_path() is called by the
+        # caller (e.g. app._load_session).
 
         from src.observability import get_logger
         logger = get_logger(__name__)
         logger.info(f"Session resumed: {result.report.context_messages} context messages, "
-                   f"todos={len(result.agent_state.todos)}, using MessageStore")
+                   f"using MessageStore")
 
         return result
 

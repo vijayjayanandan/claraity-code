@@ -368,40 +368,6 @@ DELEGATE_TO_SUBAGENT_TOOL = ToolDefinition(
     }
 )
 
-TODO_WRITE_TOOL = ToolDefinition(
-    name="todo_write",
-    description="Create and update a task list to track progress through multi-step work. Use for complex tasks with 3+ steps.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "todos": {
-                "type": "array",
-                "description": "Array of todo items",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "content": {
-                            "type": "string",
-                            "description": "Task description (imperative: 'Fix bug')"
-                        },
-                        "activeForm": {
-                            "type": "string",
-                            "description": "Present continuous form ('Fixing bug')"
-                        },
-                        "status": {
-                            "type": "string",
-                            "enum": ["pending", "in_progress", "completed"],
-                            "description": "Task status"
-                        }
-                    },
-                    "required": ["content", "status", "activeForm"]
-                }
-            }
-        },
-        "required": ["todos"]
-    }
-)
-
 CREATE_CHECKPOINT_TOOL = ToolDefinition(
     name="create_checkpoint",
     description="Save current work to a checkpoint (save point for long-running sessions). Use at logical stopping points: module complete, tests passing, major milestone achieved, before risky changes, etc. This allows resuming work later if interrupted.",
@@ -942,8 +908,8 @@ ENTER_PLAN_MODE_TOOL = ToolDefinition(
 )
 
 EXIT_PLAN_MODE_TOOL = ToolDefinition(
-    name="exit_plan_mode",
-    description="Exit plan mode and submit your plan for user approval. Call this after writing your implementation plan to the plan file. The user will review the plan and approve or request changes.",
+    name="request_plan_approval",
+    description="Submit your implementation plan for user approval. Call this after writing your plan to the plan file. The user will review and either approve, reject, or request changes.",
     parameters={
         "type": "object",
         "properties": {},
@@ -1169,7 +1135,8 @@ ALL_TOOLS = [
     GIT_DIFF_TOOL,
     GIT_COMMIT_TOOL,
     DELEGATE_TO_SUBAGENT_TOOL,
-    TODO_WRITE_TOOL,
+    # TODO_WRITE_TOOL removed - replaced by task_create/task_update/task_list/task_get
+    # (registered dynamically via tool_executor, not listed here)
     CREATE_CHECKPOINT_TOOL,
     # Clarity tools removed from LLM context - migrating to markdown knowledge base
     # QUERY_COMPONENT_TOOL,
@@ -1311,7 +1278,6 @@ __all__ = [
     "GIT_DIFF_TOOL",
     "GIT_COMMIT_TOOL",
     "DELEGATE_TO_SUBAGENT_TOOL",
-    "TODO_WRITE_TOOL",
     "CREATE_CHECKPOINT_TOOL",
     "QUERY_COMPONENT_TOOL",
     "QUERY_DEPENDENCIES_TOOL",

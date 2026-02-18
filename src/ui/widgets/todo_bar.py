@@ -61,7 +61,7 @@ class TodoBar(Static):
 
             for todo in self.todos:
                 status = todo.get('status', 'pending')
-                content = todo.get('content', '')
+                content = todo.get('subject', todo.get('content', ''))
                 active_form = todo.get('activeForm', content)
 
                 if status == 'completed':
@@ -101,5 +101,5 @@ class TodoBar(Static):
         """Get the activeForm of the current in_progress task."""
         for todo in self.todos:
             if todo.get('status') == 'in_progress':
-                return todo.get('activeForm', todo.get('content', ''))
+                return todo.get('activeForm', todo.get('subject', todo.get('content', '')))
         return ""

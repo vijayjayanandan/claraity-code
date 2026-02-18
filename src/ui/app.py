@@ -847,6 +847,7 @@ class CodingAgentApp(App):
         self._store_message_widgets: dict[str, MessageWidget] = {}  # stream_id -> widget
         self._store_rendered_segment_idx: dict[str, int] = {}  # stream_id -> last rendered segment index
         self._is_replaying: bool = False  # True during BULK_LOAD (replay mode)
+        self._pre_mounted_user_widget: Optional[MessageWidget] = None  # Eagerly-mounted UserMessage
         self._session_id: Optional[str] = None  # Current session ID for persistence
         self._session_writer = None  # SessionWriter, opened in on_mount
 
@@ -1459,12 +1460,19 @@ class CodingAgentApp(App):
         # Re-enable auto-scroll on new message (user expects to follow the response)
         self._auto_scroll = True
 
-        # Add user message to conversation (with attachment indicator)
+        # Mount user message immediately (no store round-trip)
         attachment_summary = ""
         if attachments:
             parts = [f"[{a.kind.upper()}: {a.filename}]" for a in attachments]
             attachment_summary = " " + " ".join(parts)
-        await self._add_user_message(user_input + attachment_summary)
+        try:
+            conversation = self.query_one("#conversation", ConversationContainer)
+            user_widget = UserMessage(content=user_input + attachment_summary)
+            await conversation.mount(user_widget)
+            self._pre_mounted_user_widget = user_widget
+            self._scroll_to_bottom(conversation)
+        except NoMatches:
+            pass
 
         # Start streaming response in a worker - DO NOT await here!
         # This allows Textual to keep processing key events and messages
@@ -1693,11 +1701,12 @@ class CodingAgentApp(App):
         1. Close current session writer
         2. Clear current conversation
         3. Hydrate session via agent.resume_session_from_jsonl()
-           - Loads JSONL into MessageStore
-           - Injects MessageStore into MemoryManager (Option A: Single Source of Truth)
-           - Restores agent state (todos, etc.)
-        4. Rebind store and writer
-        5. Render loaded messages
+           - Loads JSONL into MessageStore (conversation history)
+           - Injects MessageStore into MemoryManager
+        4. Enable todo persistence via set_session_id()
+           - Loads tasks from todos.json (single source of truth)
+        5. Rebind store and writer
+        6. Render loaded messages
 
         Args:
             session_id: Session ID to load
@@ -1731,9 +1740,13 @@ class CodingAgentApp(App):
 
             # Use agent's hydration method if agent is available
             if self.agent:
-                # Hydrate via agent (restores todos, sets base context)
+                # Hydrate conversation history from JSONL
                 result = self.agent.resume_session_from_jsonl(session_path)
                 store = result.store
+
+                # Enable todo persistence and load tasks from todos.json
+                # (is_new_session=False preserves plan mode state)
+                self.agent.set_session_id(session_id, is_new_session=False)
 
                 # Log hydration report
                 logger.info(f"Session hydrated: {result.report}")
@@ -2014,6 +2027,30 @@ class CodingAgentApp(App):
         elif isinstance(event, StreamStart):
             await self._flush_file_read_notes(conversation)
 
+        # TextDelta — feed incremental text to segment buffer for live rendering
+        elif isinstance(event, TextDelta):
+            if not self._current_message:
+                self._current_message = AssistantMessage()
+                await conversation.mount(self._current_message)
+            # Stop loading spinner on first text
+            try:
+                await self._current_message.set_loading(False)
+            except Exception:
+                pass
+            # Buffer text for batched rendering
+            self._segment_chunks.append(event.content)
+            self._segment_chars += len(event.content)
+            # Schedule flush (uses existing timer infrastructure)
+            if not self._segment_flush_handle:
+                try:
+                    loop = asyncio.get_running_loop()
+                    self._segment_flush_handle = loop.call_later(
+                        self._segment_flush_interval_sec,
+                        self._schedule_segment_flush,
+                    )
+                except RuntimeError:
+                    pass
+
         # PausePromptStart — mount the pause widget
         elif isinstance(event, PausePromptStart):
             await self._flush_segment()
@@ -2164,6 +2201,9 @@ class CodingAgentApp(App):
         Called by loop.call_later() as a method reference.
         Guards against stale timers and prevents overlapping flushes.
         """
+        # Timer has fired — clear handle so TextDelta can schedule the next one
+        self._segment_flush_handle = None
+
         # Guard: Only flush if still streaming and not already flushing
         if not self._is_streaming or self._segment_flush_running:
             return
@@ -2910,6 +2950,13 @@ class CodingAgentApp(App):
 
         # Create appropriate widget based on role
         if message.is_user:
+            # Adopt pre-mounted widget (mounted immediately on submit)
+            if not bulk_load and self._pre_mounted_user_widget is not None:
+                widget = self._pre_mounted_user_widget
+                self._pre_mounted_user_widget = None
+                if stream_id:
+                    self._store_message_widgets[stream_id] = widget
+                return  # Already mounted, skip
             # Pass raw content and UUID for clickable image support
             message_uuid = message.meta.uuid if message.meta else ""
             widget = UserMessage(content=message.content or "", message_uuid=message_uuid)
@@ -2918,6 +2965,22 @@ class CodingAgentApp(App):
                 # Check if widget already exists for this stream_id
                 if stream_id and stream_id in self._store_message_widgets:
                     return  # Widget already exists
+
+                # Adopt streaming widget: text already rendered incrementally
+                if self._current_message is not None:
+                    widget = self._current_message
+                    if stream_id:
+                        self._store_message_widgets[stream_id] = widget
+                    # Flush any remaining buffered text
+                    if self._segment_flush_handle:
+                        self._segment_flush_handle.cancel()
+                        self._segment_flush_handle = None
+                    await self._flush_segment()
+                    # Render only tool call segments (text/code already streamed)
+                    segments = message.meta.segments if message.meta and message.meta.segments else []
+                    if segments:
+                        await self._render_tool_segments_only(widget, message, segments)
+                    return
 
             widget = AssistantMessage()
         elif message.is_tool:
@@ -3277,6 +3340,48 @@ class CodingAgentApp(App):
                             card.status = ToolStatus.AWAITING_APPROVAL
             rendered += 1
         return rendered
+
+    async def _render_tool_segments_only(
+        self,
+        widget: "AssistantMessage",
+        message: "Message",
+        segments: list
+    ) -> None:
+        """Render only tool call segments from a finalized message.
+
+        Called when text was already streamed incrementally via TextDelta.
+        Skips TextSegment and CodeBlockSegment (already rendered).
+        """
+        import json
+        from src.session.models.message import (
+            ToolCallSegment, ToolCallRefSegment
+        )
+
+        for segment in segments:
+            if isinstance(segment, ToolCallRefSegment):
+                tc = self._get_tool_call_by_id(message, segment.tool_call_id)
+                if tc and tc.function.name not in SILENT_TOOLS:
+                    if tc.id not in self._tool_cards:
+                        args = json.loads(tc.function.arguments) if tc.function.arguments else {}
+                        card = widget.add_tool_card(tc.id, tc.function.name, args, requires_approval=False)
+                        self._tool_cards[tc.id] = card
+                        self._on_tool_card_created(tc.id, card)
+                        if self._message_store:
+                            tool_state = self._message_store.get_tool_state(tc.id)
+                            if tool_state and tool_state.status == CoreToolStatus.AWAITING_APPROVAL:
+                                card.status = ToolStatus.AWAITING_APPROVAL
+            elif isinstance(segment, ToolCallSegment):
+                tc = self._get_tool_call_safe(message, segment.tool_call_index, "streaming_dedup")
+                if tc and tc.function.name not in SILENT_TOOLS:
+                    if tc.id not in self._tool_cards:
+                        args = json.loads(tc.function.arguments) if tc.function.arguments else {}
+                        card = widget.add_tool_card(tc.id, tc.function.name, args, requires_approval=False)
+                        self._tool_cards[tc.id] = card
+                        self._on_tool_card_created(tc.id, card)
+                        if self._message_store:
+                            tool_state = self._message_store.get_tool_state(tc.id)
+                            if tool_state and tool_state.status == CoreToolStatus.AWAITING_APPROVAL:
+                                card.status = ToolStatus.AWAITING_APPROVAL
 
     def _get_tool_call_safe(
         self,
