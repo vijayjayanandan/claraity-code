@@ -1748,6 +1748,11 @@ class CodingAgentApp(App):
                 # (is_new_session=False preserves plan mode state)
                 self.agent.set_session_id(session_id, is_new_session=False)
 
+                # Refresh TodoBar and StatusBar with loaded tasks
+                todos = self.agent.task_state.get_todos_list()
+                if todos:
+                    self._on_todos_updated(todos)
+
                 # Log hydration report
                 logger.info(f"Session hydrated: {result.report}")
             else:
@@ -2980,6 +2985,13 @@ class CodingAgentApp(App):
                     segments = message.meta.segments if message.meta and message.meta.segments else []
                     if segments:
                         await self._render_tool_segments_only(widget, message, segments)
+                    return
+
+            # Skip assistant messages with no text and only silent tool calls
+            # (e.g. task_create/task_update only — nothing visible to render)
+            if not message.content:
+                tool_calls = message.tool_calls or []
+                if tool_calls and all(tc.function.name in SILENT_TOOLS for tc in tool_calls):
                     return
 
             widget = AssistantMessage()
