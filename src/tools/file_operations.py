@@ -635,6 +635,9 @@ class RunCommandTool(Tool):
             # Execute command
             # On Windows, use PowerShell instead of cmd.exe for better Unix compatibility
             # Use explicit UTF-8 encoding with error replacement to avoid cp1252 decode errors
+            # stdin=DEVNULL prevents subprocess from reading terminal input
+            # CREATE_NO_WINDOW / start_new_session isolate subprocess from parent terminal,
+            # preventing tools like npx from writing escape sequences directly to the TUI
             if platform.system() == "Windows":
                 result = subprocess.run(
                     ["powershell", "-NoProfile", "-Command", command],
@@ -643,7 +646,9 @@ class RunCommandTool(Tool):
                     text=True,
                     timeout=timeout,
                     encoding='utf-8',
-                    errors='replace'  # Replace undecodable chars to prevent crashes
+                    errors='replace',
+                    stdin=subprocess.DEVNULL,
+                    creationflags=subprocess.CREATE_NO_WINDOW
                 )
             else:
                 # On Unix-like systems, use the default shell
@@ -655,7 +660,9 @@ class RunCommandTool(Tool):
                     text=True,
                     timeout=timeout,
                     encoding='utf-8',
-                    errors='replace'
+                    errors='replace',
+                    stdin=subprocess.DEVNULL,
+                    start_new_session=True
                 )
 
             # Prepare output

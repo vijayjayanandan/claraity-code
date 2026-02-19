@@ -36,17 +36,17 @@ class ScrollableDiffContainer(VerticalScroll):
     ScrollableDiffContainer {
         max-height: 20;
         height: auto;
-        margin: 1 0 1 2;
+        margin: 0 0 0 2;
         padding: 0 1;
-        background: #1a1a1a;
-        border: round #333333;
+        background: #000000;
+        border: round #222222;
         scrollbar-size: 1 1;
-        scrollbar-color: #444444;
-        scrollbar-background: #1a1a1a;
+        scrollbar-color: #333333;
+        scrollbar-background: #000000;
     }
 
     ScrollableDiffContainer:focus {
-        border: round #555555;
+        border: round #3794ff;
     }
     """
 
@@ -67,10 +67,19 @@ class CommandPreviewBlock(Static):
 
     PREVIEW_LENGTH = 80
 
+    MAX_OUTPUT_LINES = 50
+
     def __init__(self, command: str, **kwargs):
         super().__init__(**kwargs)
         self.command = command
         self._collapsed = False
+        self._output: str | None = None
+
+    def set_output(self, output: str) -> None:
+        """Set the command output to display below the command."""
+        self._output = output
+        self._collapsed = True  # Collapse by default once output arrives
+        self.refresh(layout=True)
 
     def render(self) -> RenderableType:
         t = Text()
@@ -86,13 +95,26 @@ class CommandPreviewBlock(Static):
             if len(self.command) > self.PREVIEW_LENGTH:
                 preview += "..."
             t.append(preview, style="#d4d4d4")
+            # Show output summary when collapsed
+            if self._output:
+                line_count = self._output.count('\n') + 1
+                t.append(f"  ({line_count} lines)", style="#6e7681")
         else:
             t.append(self.command, style="#d4d4d4")
+            # Show full output when expanded
+            if self._output:
+                t.append("\n", style="")
+                lines = self._output.split('\n')
+                truncated = len(lines) > self.MAX_OUTPUT_LINES
+                for line in lines[:self.MAX_OUTPUT_LINES]:
+                    t.append(f"  {line}\n", style="#a0a0a0")
+                if truncated:
+                    t.append(f"  ... ({len(lines) - self.MAX_OUTPUT_LINES} more lines)\n", style="#6e7681")
         return t
 
     def on_click(self) -> None:
         self._collapsed = not self._collapsed
-        self.refresh()
+        self.refresh(layout=True)
 
 
 class ToolCard(Static):
@@ -138,18 +160,17 @@ class ToolCard(Static):
     error_message = reactive("")
     duration_ms = reactive(0)
 
-    # Status display configuration: (icon, fg_color, bg_color)
-    # Using text symbols instead of emojis for Windows compatibility
-    # Badge-style format with background colors for visual distinction
-    STATUS_CONFIG = {
-        ToolStatus.PENDING:           ("~", "#888888", "#2a2a2a"),
-        ToolStatus.AWAITING_APPROVAL: ("?", "#1e1e1e", "#cca700"),
-        ToolStatus.APPROVED:          (">", "#1e1e1e", "#3794ff"),
-        ToolStatus.REJECTED:          ("x", "#888888", "#3a3a3a"),
-        ToolStatus.RUNNING:           ("*", "#1e1e1e", "#cca700"),
-        ToolStatus.SUCCESS:           ("+", "#1e1e1e", "#73c991"),
-        ToolStatus.FAILED:            ("!", "#ffffff", "#f14c4c"),
-        ToolStatus.CANCELLED:         ("-", "#666666", "#2a2a2a"),
+    # Status display configuration: color for the dot indicator
+    # Subtle colored dot instead of badge - status is conveyed by color alone
+    STATUS_COLORS = {
+        ToolStatus.PENDING:           "#888888",
+        ToolStatus.AWAITING_APPROVAL: "#cca700",
+        ToolStatus.APPROVED:          "#3794ff",
+        ToolStatus.REJECTED:          "#3a3a3a",
+        ToolStatus.RUNNING:           "#cca700",
+        ToolStatus.SUCCESS:           "#73c991",
+        ToolStatus.FAILED:            "#f14c4c",
+        ToolStatus.CANCELLED:         "#666666",
     }
 
     DEFAULT_CSS = """
@@ -183,6 +204,7 @@ class ToolCard(Static):
         self._approval_widget: ToolApprovalOptions | None = None
         self._defer_diff_mount: bool = False  # Set True during bulk load for performance
         self._diff_mounted: bool = False  # Track if diff already mounted
+        self._header_widget: Static | None = None  # Mounted header for tools with children
 
         super().__init__(**kwargs)
         self.call_id = call_id
@@ -215,6 +237,10 @@ class ToolCard(Static):
         logger = get_logger("tool_card")
 
         self._update_classes()
+
+        # Refresh mounted header widget if present (children hide render())
+        if self._header_widget and self._header_widget.is_attached:
+            self._header_widget.update(self._render_header_line())
 
         if new_status == ToolStatus.AWAITING_APPROVAL:
             # Show approval widget - create if not exists
@@ -329,8 +355,7 @@ class ToolCard(Static):
         if self.tool_name == 'write_file':
             content = self.args.get('content', '')
             if content:
-                # Use scrollable container with large max_lines
-                # Scrolling handles overflow instead of truncation
+                self._mount_header()
                 diff_widget = DiffWidget(
                     file_path=self.args.get('file_path', ''),
                     new_content=content,
@@ -346,11 +371,15 @@ class ToolCard(Static):
             old_text = self.args.get('old_text', '')
             new_text = self.args.get('new_text', '')
             if old_text or new_text:
+                self._mount_header()
+                file_path = self.args.get('file_path', '')
+                start_line = self._find_line_offset(file_path, old_text)
                 diff_widget = DiffWidget(
-                    file_path=self.args.get('file_path', ''),
+                    file_path=file_path,
                     new_content=new_text,
                     old_content=old_text,
-                    max_lines=500  # Large value - scrolling handles overflow
+                    max_lines=500,
+                    start_line=start_line,
                 )
                 scroll_container = ScrollableDiffContainer()
                 self.mount(scroll_container)
@@ -360,12 +389,39 @@ class ToolCard(Static):
         elif self.tool_name == 'run_command':
             command = self.args.get('command', '')
             if command:
-                # Mount header as child (render() is hidden when children exist)
-                self.mount(Static(self._render_header_line()))
+                self._mount_header()
                 scroll_container = ScrollableDiffContainer()
                 self.mount(scroll_container)
                 scroll_container.mount(CommandPreviewBlock(command))
                 self._diff_mounted = True
+
+    def _mount_header(self) -> None:
+        """Mount a header widget that can be updated on status change.
+
+        Mounting children hides render(), so tools with children need an
+        explicit header widget. Stored as _header_widget so watch_status
+        can refresh it when status changes.
+        """
+        self._header_widget = Static(self._render_header_line())
+        self.mount(self._header_widget)
+
+    @staticmethod
+    def _find_line_offset(file_path: str, old_text: str) -> int:
+        """Read file and find the line number where old_text starts.
+
+        Returns 1 if the file can't be read or old_text isn't found (safe fallback).
+        """
+        if not file_path or not old_text:
+            return 1
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read()
+            pos = content.find(old_text)
+            if pos == -1:
+                return 1
+            return content[:pos].count('\n') + 1
+        except Exception:
+            return 1
 
     def _mount_approval_after_diff(self) -> None:
         """Mount approval widget after deferred diff mount completes."""
@@ -481,15 +537,12 @@ class ToolCard(Static):
         Used both by render() and as a mounted child widget when preview
         children are present (Textual hides render() when children exist).
         """
-        icon, fg_color, bg_color = self.STATUS_CONFIG.get(
-            self.status,
-            ("?", "#888888", "#2a2a2a")
-        )
+        color = self.STATUS_COLORS.get(self.status, "#888888")
 
         result = Text()
         result.append(" ", style="")
-        result.append(f" {icon} ", style=f"bold {fg_color} on {bg_color}")
-        result.append(" ", style="")
+        result.append("\u2022", style=f"bold {color}")
+        result.append("  ", style="")
         result.append(self.tool_name, style="bold #e0e0e0")
 
         main_arg = self._get_main_arg()
@@ -519,9 +572,7 @@ class ToolCard(Static):
         if self.error_message:
             result.append("\n")
             result.append("      ", style="")
-            result.append(" ERROR ", style="bold #ffffff on #f14c4c")
-            result.append(" ", style="")
-            result.append(self.error_message, style="#f14c4c")
+            result.append(self.error_message, style="dim #d48a8a")
         elif self.result_preview:
             result.append("\n")
             result.append("      ", style="")
@@ -644,15 +695,31 @@ class ToolCard(Static):
         if duration_ms:
             self.duration_ms = duration_ms
 
+        # For run_command, pass output to the CommandPreviewBlock
+        if self.tool_name == 'run_command' and isinstance(result, str) and result:
+            for child in self.query(CommandPreviewBlock):
+                child.set_output(result)
+                break
+
     def set_error(self, error: str) -> None:
         """
         Set error state.
 
+        Extracts human-readable message from structured <tool_failure> blocks
+        that are designed for the LLM, not the user.
+
         Args:
-            error: Error message
+            error: Error message (may be a structured tool_failure prompt)
         """
         self.status = ToolStatus.FAILED
-        self.error_message = error[:100]  # Truncate long errors
+        # Extract "error: ..." line from structured <tool_failure> blocks
+        if error and '<tool_failure>' in error:
+            for line in error.split('\n'):
+                stripped = line.strip()
+                if stripped.startswith('error:'):
+                    self.error_message = stripped[6:].strip()[:100]
+                    return
+        self.error_message = error.split('\n')[0].strip()[:100] if error else "(unknown error)"
 
     def _format_result(self, result: Any) -> str:
         """Format result for preview."""
