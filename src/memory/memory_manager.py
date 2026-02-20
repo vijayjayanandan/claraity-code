@@ -5,6 +5,10 @@ from pathlib import Path
 from datetime import datetime
 import uuid
 
+from src.observability import get_logger
+
+logger = get_logger("memory")
+
 from .working_memory import WorkingMemory
 from .episodic_memory import EpisodicMemory
 from .semantic_memory import SemanticMemory
@@ -95,6 +99,12 @@ class MemoryManager:
         # Initialize file-based memory loader
         self.file_loader = MemoryFileLoader()
         self.file_memory_content = ""
+
+        # Knowledge base cache
+        self._knowledge_core_content: Optional[str] = None
+
+        # Project root for knowledge base loading (avoids Path.cwd() dependency)
+        self._project_root: Path = Path(starting_directory).resolve() if starting_directory else Path.cwd()
 
         # Load file memories if requested
         if load_file_memories:
@@ -819,6 +829,9 @@ class MemoryManager:
                 }
             )
 
+        # 2b. Knowledge base is now injected by ContextBuilder directly
+        # into the system prompt (not as a separate system message).
+
         # 3. Episodic memory summary (if requested)
         # Skip if using MessageStore (it has its own compaction handling)
         if include_episodic and self._message_store is None and self.episodic_memory.conversation_turns:
@@ -859,8 +872,6 @@ class MemoryManager:
             # Debug: Log tool messages being retrieved
             tool_msgs = [m for m in conversation_context if m.get("role") == "tool"]
             if tool_msgs:
-                from src.observability import get_logger
-                logger = get_logger("memory")
                 logger.warning(
                     f"[CONTEXT_BUILD] Retrieved {len(tool_msgs)} tool messages from MessageStore: "
                     f"{[m.get('tool_call_id') for m in tool_msgs]}"
@@ -1155,12 +1166,12 @@ class MemoryManager:
 
     def load_file_memories(self, starting_dir: Optional[Path] = None) -> str:
         """
-        Load hierarchical file memories from .opencodeagent/memory.md files.
+        Load hierarchical file memories from .clarity/memory.md files.
 
         Loads from:
-        1. Enterprise: /etc/opencodeagent/memory.md (Linux/Mac)
-        2. User: ~/.opencodeagent/memory.md
-        3. Project: .opencodeagent/memory.md (traverses upward from starting_dir)
+        1. Enterprise: /etc/clarity/memory.md (Linux/Mac)
+        2. User: ~/.clarity/memory.md
+        3. Project: .clarity/memory.md (traverses upward from starting_dir)
 
         Args:
             starting_dir: Directory to start search (default: cwd)
@@ -1189,6 +1200,82 @@ class MemoryManager:
         self.file_loader = MemoryFileLoader()
         return self.load_file_memories(starting_dir)
 
+    # Knowledge files loaded into agent context, in order.
+    # core.md is capped at 200 lines; decisions/lessons at 100 lines each.
+    # Others have no hard cap (written by knowledge-builder to be concise).
+    _KNOWLEDGE_FILES = [
+        ("core.md", 200),
+        ("architecture.md", 0),
+        ("file-guide.md", 0),
+        ("conventions.md", 0),
+        ("decisions.md", 100),
+        ("lessons.md", 100),
+    ]
+
+    def _load_knowledge_base(self, force_reload: bool = False) -> str:
+        """Load all knowledge base files into a single combined string.
+
+        Loads core.md, architecture.md, file-guide.md, conventions.md,
+        decisions.md, and lessons.md from .clarity/knowledge/ and combines
+        them with section separators.
+        core.md is capped at 200 lines; decisions/lessons at 100 lines each.
+
+        Args:
+            force_reload: If True, bypass cache and reload from disk
+
+        Returns:
+            Combined knowledge content or empty string if no files found
+        """
+        if not force_reload and self._knowledge_core_content is not None:
+            return self._knowledge_core_content
+
+        knowledge_dir = self._project_root / ".clarity" / "knowledge"
+
+        if not knowledge_dir.exists():
+            self._knowledge_core_content = ""
+            return ""
+
+        sections = []
+        for filename, max_lines in self._KNOWLEDGE_FILES:
+            filepath = knowledge_dir / filename
+            if not filepath.exists():
+                continue
+
+            try:
+                content = filepath.read_text(encoding='utf-8')
+                if not content.strip():
+                    continue
+
+                # Apply line cap if set (only core.md has one)
+                if max_lines > 0:
+                    lines = content.split('\n')
+                    if len(lines) > max_lines:
+                        content = '\n'.join(lines[:max_lines])
+                        content += f'\n\n[... {filename} truncated to {max_lines} lines ...]'
+
+                sections.append(content)
+
+            except Exception:
+                continue
+
+        combined = "\n\n---\n\n".join(sections) if sections else ""
+        self._knowledge_core_content = combined
+        return combined
+
+    def get_knowledge_base(self) -> str:
+        """Get combined knowledge base content (cached after first load)."""
+        return self._load_knowledge_base()
+
+    def reload_knowledge_base(self) -> str:
+        """Reload all knowledge base files (useful after editing).
+
+        Clears the cache and reloads from disk.
+
+        Returns:
+            Updated combined knowledge content
+        """
+        return self._load_knowledge_base(force_reload=True)
+
     def quick_add_memory(self, text: str, location: str = "project") -> Path:
         """
         Quick add memory to file (# syntax from user input).
@@ -1202,7 +1289,7 @@ class MemoryManager:
 
         Example:
             >>> manager.quick_add_memory("Always use 2-space indent", "project")
-            PosixPath('/path/to/project/.opencodeagent/memory.md')
+            PosixPath('/path/to/project/.clarity/memory.md')
 
             >>> # Reload to see the change
             >>> manager.reload_file_memories()
@@ -1217,7 +1304,7 @@ class MemoryManager:
         Initialize a new project memory file with template.
 
         Args:
-            path: Path to create file (default: ./.opencodeagent/memory.md)
+            path: Path to create file (default: ./.clarity/memory.md)
 
         Returns:
             Path to created file
@@ -1227,7 +1314,7 @@ class MemoryManager:
 
         Example:
             >>> manager.init_project_memory()
-            PosixPath('/path/to/project/.opencodeagent/memory.md')
+            PosixPath('/path/to/project/.clarity/memory.md')
 
             >>> # Reload to include the new template
             >>> manager.reload_file_memories()
@@ -1236,9 +1323,9 @@ class MemoryManager:
 
         # Auto-reload to include the new template
         # If custom path provided, reload from its parent's parent directory
-        # (to find the .opencodeagent directory)
+        # (to find the .clarity directory)
         if path:
-            # path is like: /some/dir/.opencodeagent/memory.md
+            # path is like: /some/dir/.clarity/memory.md
             # We want to search from /some/dir
             search_dir = created_path.parent.parent
             self.reload_file_memories(starting_dir=search_dir)

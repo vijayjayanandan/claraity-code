@@ -245,6 +245,16 @@ class ContextBuilder:
             if director_injection:
                 system_prompt = system_prompt + "\n\n" + director_injection
 
+        # Inject project knowledge base (same pattern as CLAUDE.md in Claude Code)
+        knowledge_content = self.memory.get_knowledge_base()
+        if knowledge_content:
+            system_prompt = (
+                system_prompt
+                + "\n\n"
+                + "Contents of .clarity/knowledge/ (project knowledge base - auto-loaded each session):\n\n"
+                + knowledge_content
+            )
+
         # Compress if needed
         if self.optimizer.count_tokens(system_prompt) > system_prompt_budget:
             system_prompt = self.optimizer.compress_prompt(
