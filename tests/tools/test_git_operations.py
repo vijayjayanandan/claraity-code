@@ -132,7 +132,8 @@ class TestGitDiffTool:
 
         assert result.status == ToolStatus.SUCCESS
         assert "test.txt" in result.output
-        assert "-Line 2" in result.output or "Modified Line 2" in result.output
+        # Default is --stat summary, so expect stat format not raw diff
+        assert "1 file changed" in result.output
         assert result.metadata["has_changes"] is True
 
     def test_git_diff_staged_changes(self, git_repo):

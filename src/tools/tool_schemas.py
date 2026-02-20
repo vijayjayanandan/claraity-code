@@ -318,13 +318,17 @@ GIT_STATUS_TOOL = ToolDefinition(
 
 GIT_DIFF_TOOL = ToolDefinition(
     name="git_diff",
-    description="View git diff - shows changes in modified files",
+    description="View git diff summary. Returns --stat summary by default (file names + change counts). Use file_path to get the full diff for a specific file.",
     parameters={
         "type": "object",
         "properties": {
             "staged": {
                 "type": "boolean",
                 "description": "If true, show diff of staged changes. If false, show unstaged changes."
+            },
+            "file_path": {
+                "type": "string",
+                "description": "Specific file to get the full diff for. Omit to get a stat summary of all changes."
             }
         },
         "required": []

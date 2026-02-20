@@ -180,11 +180,14 @@ class GitDiffTool(Tool):
                 cwd = str(repo_path.absolute())
 
             # Build git diff command
+            # Default: --stat summary (compact). Full diff only for specific files.
             cmd = ["git", "diff"]
             if staged:
                 cmd.append("--cached")
             if file_path:
-                cmd.append(file_path)
+                cmd.extend(["--", file_path])
+            else:
+                cmd.append("--stat")
 
             # Execute git diff
             result = subprocess.run(
@@ -200,6 +203,12 @@ class GitDiffTool(Tool):
             if result.returncode == 0:
                 diff_output = result.stdout if result.stdout else "(no changes)"
 
+                # Safety cap: truncate if output exceeds 300 lines
+                lines = diff_output.split('\n')
+                if len(lines) > 300:
+                    diff_output = '\n'.join(lines[:300])
+                    diff_output += f"\n\n[TRUNCATED: showing 300 of {len(lines)} lines. Use file_path to view a specific file.]"
+
                 return ToolResult(
                     tool_name=self.name,
                     status=ToolStatus.SUCCESS,
@@ -207,7 +216,7 @@ class GitDiffTool(Tool):
                     metadata={
                         "repository_path": cwd or "current",
                         "staged": staged,
-                        "file_path": file_path or "all files",
+                        "file_path": file_path or "all files (stat summary)",
                         "has_changes": bool(result.stdout)
                     }
                 )
