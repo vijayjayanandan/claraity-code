@@ -1899,6 +1899,13 @@ class CodingAgentApp(App):
             self._user_interrupt_requested = False  # Reset for next stream
             self._segment_flush_running = False  # Fix #6: always reset flush guard
 
+            # Drain any remaining buffered text before finalizing the widget.
+            # Must happen here — live streaming owns the flush, not store notifications.
+            if self._segment_flush_handle:
+                self._segment_flush_handle.cancel()
+                self._segment_flush_handle = None
+            await self._flush_segment()
+
             # Finalize the specific message we captured (not whatever is current now)
             # This prevents clearing a new message if a new stream started during cleanup
             self._finalize_current_message(msg_to_finalize)
@@ -2971,20 +2978,14 @@ class CodingAgentApp(App):
                 if stream_id and stream_id in self._store_message_widgets:
                     return  # Widget already exists
 
-                # Adopt streaming widget: text already rendered incrementally
+                # Live stream in progress — register widget, render tool cards only.
+                # Text already rendered by live streaming; tool cards come from segments.
                 if self._current_message is not None:
-                    widget = self._current_message
                     if stream_id:
-                        self._store_message_widgets[stream_id] = widget
-                    # Flush any remaining buffered text
-                    if self._segment_flush_handle:
-                        self._segment_flush_handle.cancel()
-                        self._segment_flush_handle = None
-                    await self._flush_segment()
-                    # Render only tool call segments (text/code already streamed)
+                        self._store_message_widgets[stream_id] = self._current_message
                     segments = message.meta.segments if message.meta and message.meta.segments else []
                     if segments:
-                        await self._render_tool_segments_only(widget, message, segments)
+                        await self._render_tool_segments_only(self._current_message, message, segments)
                     return
 
             # Skip assistant messages with no text and only silent tool calls
