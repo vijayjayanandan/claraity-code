@@ -332,3 +332,119 @@ class TestProperties:
         assert conn is not None
         assert conn.name == "jira"
         assert manager.get_connection("nonexistent") is None
+
+
+# ---------------------------------------------------------------------------
+# Regression: _get_tools() must not produce duplicate tool names
+# ---------------------------------------------------------------------------
+
+class TestGetToolsNoDuplicates:
+    """Regression test for duplicate MCP tool names sent to LLM API.
+
+    MCP bridge tools are registered in ToolExecutor (for execution) AND
+    returned by McpConnectionManager.get_all_tool_definitions() (for schemas).
+    CodingAgent._get_tools() must not include them twice.
+
+    Bug introduced in 1a9a0b3 when _get_tools() switched from static
+    ALL_TOOLS to tool_executor.tools.values() without filtering bridge tools.
+    """
+
+    @pytest.mark.asyncio
+    async def test_no_duplicate_tool_names_with_mcp(self):
+        """_get_tools() returns unique tool names when MCP is connected."""
+        import os
+        from src.core.agent import CodingAgent
+
+        agent = CodingAgent(
+            backend="openai",
+            model_name="test-model",
+            base_url="http://localhost:1234",
+            api_key="sk-test",
+            context_window=8000,
+            embedding_api_key="sk-test",
+            embedding_base_url="http://localhost:1234",
+            load_file_memories=False,
+        )
+
+        # Connect a mock MCP server (reuse existing helpers)
+        config = McpServerConfig(
+            name="test-jira", tool_prefix="jira", cache_ttl_seconds=3600.0,
+        )
+        transport = _make_mock_transport()
+        client = McpClient(config, transport)
+        policy_gate = McpPolicyGate()
+        registry = McpToolRegistry(config, policy_gate)
+
+        await agent._mcp_manager.connect(
+            name="jira",
+            config=config,
+            client=client,
+            registry=registry,
+            tool_executor=agent.tool_executor,
+        )
+
+        tools = agent._get_tools()
+        names = [t.name for t in tools]
+
+        # Core assertion: no duplicates
+        assert len(names) == len(set(names)), (
+            f"Duplicate tool names sent to LLM API: "
+            f"{[n for n in names if names.count(n) > 1]}"
+        )
+
+        # MCP tools should be present exactly once
+        assert names.count("jira_search_issues") == 1
+        assert names.count("jira_create_issue") == 1
+
+    @pytest.mark.asyncio
+    async def test_no_duplicates_with_multiple_mcp_connections(self):
+        """_get_tools() stays unique with multiple MCP servers connected."""
+        from src.core.agent import CodingAgent
+
+        agent = CodingAgent(
+            backend="openai",
+            model_name="test-model",
+            base_url="http://localhost:1234",
+            api_key="sk-test",
+            context_window=8000,
+            embedding_api_key="sk-test",
+            embedding_base_url="http://localhost:1234",
+            load_file_memories=False,
+        )
+
+        # Connect first MCP server (jira)
+        config1 = McpServerConfig(
+            name="jira-server", tool_prefix="jira", cache_ttl_seconds=3600.0,
+        )
+        client1 = McpClient(config1, _make_mock_transport())
+        registry1 = McpToolRegistry(config1, McpPolicyGate())
+        await agent._mcp_manager.connect(
+            "jira", config1, client1, registry1, agent.tool_executor,
+        )
+
+        # Connect second MCP server (github)
+        config2 = McpServerConfig(
+            name="gh-server", tool_prefix="gh", cache_ttl_seconds=3600.0,
+        )
+        transport2 = _make_mock_transport([
+            {
+                "name": "list_prs",
+                "description": "List PRs",
+                "inputSchema": {"type": "object", "properties": {}},
+                "annotations": {"readOnlyHint": True, "destructiveHint": False},
+            },
+        ])
+        client2 = McpClient(config2, transport2)
+        registry2 = McpToolRegistry(config2, McpPolicyGate())
+        await agent._mcp_manager.connect(
+            "github", config2, client2, registry2, agent.tool_executor,
+        )
+
+        tools = agent._get_tools()
+        names = [t.name for t in tools]
+
+        assert len(names) == len(set(names)), (
+            f"Duplicate tool names: {[n for n in names if names.count(n) > 1]}"
+        )
+        assert "jira_search_issues" in names
+        assert "gh_list_prs" in names
