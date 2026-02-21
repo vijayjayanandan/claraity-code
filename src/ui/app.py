@@ -1159,6 +1159,10 @@ class CodingAgentApp(App):
             if sub_info.get("unsubscribe"):
                 sub_info["unsubscribe"]()
 
+        # Log cache summary (avoid full agent.shutdown() during event loop teardown)
+        if self.agent and hasattr(self.agent, 'llm') and hasattr(self.agent.llm, 'log_cache_summary'):
+            self.agent.llm.log_cache_summary()
+
         # Synchronously kill MCP subprocesses (event loop may be closed)
         if self.agent and self.agent._mcp_manager.has_connections:
             self.agent._mcp_manager.shutdown_sync()

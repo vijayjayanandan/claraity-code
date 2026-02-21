@@ -1,6 +1,5 @@
 """Context builder for assembling LLM context."""
 
-import logging
 import os
 import re
 from dataclasses import dataclass, field
@@ -8,13 +7,14 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from xml.sax.saxutils import escape as xml_escape
 
+from src.observability import get_logger
 from src.memory import MemoryManager
 from src.rag import HybridRetriever, CodeChunk
 from src.prompts import PromptOptimizer
 from src.prompts.system_prompts import get_system_prompt, get_plan_mode_injection
 from src.core.file_reference_parser import FileReference
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

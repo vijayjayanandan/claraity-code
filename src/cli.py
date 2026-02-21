@@ -234,6 +234,7 @@ def simple_chat_mode(agent: CodingAgent, controller: Optional[LongRunningControl
                         controller.create_checkpoint(description=description)
                         console.print("[green]Checkpoint saved[/green]")
 
+                agent.shutdown()
                 console.print("[yellow]Goodbye![/yellow]")
                 break
 

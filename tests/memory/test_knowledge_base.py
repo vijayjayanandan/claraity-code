@@ -191,8 +191,8 @@ class TestKnowledgeBaseLoading:
         assert "Line 100" not in knowledge
         assert "truncated to 100 lines" in knowledge
 
-    def test_other_files_not_truncated(self, knowledge_dir):
-        """Test that non-core files have no line cap."""
+    def test_architecture_truncation_at_150_lines(self, knowledge_dir):
+        """Test that architecture.md is capped at 150 lines."""
         lines = [f"Line {i}" for i in range(300)]
         (knowledge_dir / "architecture.md").write_text(
             '\n'.join(lines), encoding='utf-8'
@@ -201,8 +201,9 @@ class TestKnowledgeBaseLoading:
         manager = MemoryManager(**_MM_KWARGS)
         knowledge = manager._load_knowledge_base()
 
-        assert "Line 299" in knowledge
-        assert "truncated" not in knowledge
+        assert "Line 149" in knowledge
+        assert "Line 150" not in knowledge
+        assert "truncated to 150 lines" in knowledge
 
     def test_caching(self, knowledge_dir):
         """Test that knowledge is cached after first load."""

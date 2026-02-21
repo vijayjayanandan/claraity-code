@@ -113,6 +113,7 @@ class LLMResponse(BaseModel):
     prompt_tokens: Optional[int] = None
     completion_tokens: Optional[int] = None
     total_tokens: Optional[int] = None
+    cached_tokens: Optional[int] = None  # Prompt tokens served from cache
 
     # Timing
     eval_duration: Optional[float] = None  # seconds
@@ -136,6 +137,7 @@ class StreamChunk(BaseModel):
     prompt_tokens: Optional[int] = None
     completion_tokens: Optional[int] = None
     total_tokens: Optional[int] = None
+    cached_tokens: Optional[int] = None  # Prompt tokens served from cache
 
 
 # =============================================================================

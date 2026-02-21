@@ -813,11 +813,17 @@ class CodingAgent(AgentInterface):
         Builds dynamically from the tool executor's registered tools to
         ensure schema names always match implementations. Static ALL_TOOLS
         is no longer used here to avoid stale schema mismatches.
+
+        MCP bridge tools live in both ToolExecutor (for execution) and
+        the MCP manager (for schema definitions). Exclude them from the
+        native loop to avoid sending duplicate tool names to the LLM API.
         """
         from src.llm.base import ToolDefinition
+        from src.integrations.mcp.bridge import McpBridgeTool
         native_defs = [
             ToolDefinition(**t.get_schema())
             for t in self.tool_executor.tools.values()
+            if not isinstance(t, McpBridgeTool)
         ]
         mcp_defs = self._mcp_manager.get_all_tool_definitions() or []
         return native_defs + list(mcp_defs)
@@ -4617,6 +4623,10 @@ REQUIRED: Choose a DIFFERENT approach:
 
         Emits SessionEnd hook if hook_manager is configured.
         """
+        # Log prompt cache summary for the session
+        if hasattr(self, 'llm') and hasattr(self.llm, 'log_cache_summary'):
+            self.llm.log_cache_summary()
+
         # SESSION END HOOK
         if self.hook_manager:
             try:

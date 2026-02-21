@@ -1205,9 +1205,9 @@ class MemoryManager:
     # Others have no hard cap (written by knowledge-builder to be concise).
     _KNOWLEDGE_FILES = [
         ("core.md", 200),
-        ("architecture.md", 0),
-        ("file-guide.md", 0),
-        ("conventions.md", 0),
+        ("architecture.md", 150),
+        ("file-guide.md", 150),
+        ("conventions.md", 150),
         ("decisions.md", 100),
         ("lessons.md", 100),
     ]
@@ -1255,7 +1255,8 @@ class MemoryManager:
 
                 sections.append(content)
 
-            except Exception:
+            except Exception as e:
+                logger.warning("Failed to load knowledge file", file=filename, error=str(e))
                 continue
 
         combined = "\n\n---\n\n".join(sections) if sections else ""

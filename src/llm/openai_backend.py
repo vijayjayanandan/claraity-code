@@ -51,6 +51,105 @@ from src.session.models.message import ToolCall, ToolCallFunction
 from .failure_handler import LLMFailureHandler
 
 
+class CacheTracker:
+    """Accumulates prompt cache metrics across a session.
+
+    Tracks cache reads, writes, and hit rate to measure
+    the effectiveness of prompt caching.
+    """
+
+    def __init__(self):
+        self.total_input_tokens = 0
+        self.cache_read_tokens = 0
+        self.cache_write_tokens = 0
+        self.total_calls = 0
+        self.cache_hits = 0
+
+    def record(self, usage) -> None:
+        """Record cache metrics from an API response usage object.
+
+        Args:
+            usage: The usage object from an OpenAI-compatible API response.
+                   Can be an SDK object (with attributes) or a dict.
+        """
+        if not usage:
+            return
+
+        self.total_calls += 1
+
+        # Support both SDK objects (attributes) and dicts (ProviderDelta.usage)
+        if isinstance(usage, dict):
+            prompt = usage.get("input_tokens") or 0
+            cached = usage.get("cached_tokens") or 0
+            # Anthropic-style fields from proxy
+            cache_read = usage.get("cache_read_tokens") or 0
+            cache_write = usage.get("cache_write_tokens") or 0
+        else:
+            prompt = getattr(usage, "prompt_tokens", 0) or 0
+            # OpenAI-style
+            details = getattr(usage, "prompt_tokens_details", None)
+            cached = getattr(details, "cached_tokens", 0) or 0 if details else 0
+            # Anthropic-style
+            cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+            cache_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
+
+        self.total_input_tokens += prompt
+
+        # Use whichever style reports a higher value
+        read_tokens = max(cached, cache_read)
+        self.cache_read_tokens += read_tokens
+        self.cache_write_tokens += cache_write
+
+        if read_tokens > 0:
+            self.cache_hits += 1
+
+    def summary(self) -> Dict[str, Any]:
+        """Return a summary dict of cache performance.
+
+        Calculates effective savings: cache reads save 90% but
+        cache writes cost 25% extra. Net savings is the difference.
+        """
+        if self.total_calls == 0:
+            return {"total_calls": 0, "message": "No LLM calls recorded"}
+
+        hit_rate = (self.cache_hits / self.total_calls * 100) if self.total_calls > 0 else 0
+
+        # Cost without caching: all tokens at 1.0x
+        cost_without = self.total_input_tokens
+
+        # Cost with caching: each bucket charged at its actual rate
+        uncached_tokens = max(0, self.total_input_tokens - self.cache_read_tokens - self.cache_write_tokens)
+        cost_with = (
+            self.cache_read_tokens * 0.1       # 90% savings
+            + self.cache_write_tokens * 1.25   # 25% surcharge
+            + uncached_tokens * 1.0            # full price
+        )
+
+        savings_pct = ((cost_without - cost_with) / cost_without * 100) if cost_without > 0 else 0
+
+        return {
+            "total_calls": self.total_calls,
+            "cache_hits": self.cache_hits,
+            "hit_rate_pct": round(hit_rate, 1),
+            "total_input_tokens": self.total_input_tokens,
+            "cache_read_tokens": self.cache_read_tokens,
+            "cache_write_tokens": self.cache_write_tokens,
+            "savings_pct": round(savings_pct, 1),
+        }
+
+    def format_summary(self) -> str:
+        """Return a human-readable one-line summary."""
+        s = self.summary()
+        if s["total_calls"] == 0:
+            return "[CACHE] No LLM calls recorded"
+        return (
+            f"[CACHE SUMMARY] {s['total_calls']} calls | "
+            f"{s['cache_hits']} cache hits ({s['hit_rate_pct']}%) | "
+            f"{s['cache_read_tokens']:,} tokens served from cache | "
+            f"~{s['savings_pct']}% effective input cost reduction"
+        )
+
+
 class OpenAIBackend(LLMBackend):
     """
     Generic OpenAI-compatible API backend.
@@ -121,6 +220,89 @@ class OpenAIBackend(LLMBackend):
         # Initialize failure handler for robust error handling
         self.failure_handler = LLMFailureHandler(logger_instance=logger)
 
+        # Prompt cache metrics tracker (accumulates across session)
+        self.cache_tracker = CacheTracker()
+
+    def log_cache_summary(self) -> None:
+        """Log the session-level cache summary to the application log."""
+        summary = self.cache_tracker.summary()
+        if summary["total_calls"] > 0:
+            logger.info(self.cache_tracker.format_summary())
+
+    @staticmethod
+    def _extract_cached_tokens(usage) -> Optional[int]:
+        """Extract cached prompt tokens from usage object (returns None if unavailable)."""
+        if not usage:
+            return None
+        details = getattr(usage, 'prompt_tokens_details', None)
+        if details:
+            val = getattr(details, 'cached_tokens', None)
+            if val is not None and val > 0:
+                return val
+        return None
+
+    def _is_anthropic_model(self) -> bool:
+        """Check if the configured model is an Anthropic (Claude) model."""
+        return "claude" in self.config.model_name.lower()
+
+    @staticmethod
+    def _add_cache_control_to_message(message: Dict[str, Any]) -> Dict[str, Any]:
+        """Add cache_control breakpoint to a message's content.
+
+        Converts plain string content to content blocks format with
+        cache_control, which Anthropic requires for prompt caching.
+        If content is already in blocks format, adds cache_control
+        to the last block.
+        """
+        msg = message.copy()
+        content = msg.get("content")
+
+        if content is None:
+            # Tool-call-only assistant messages have no content
+            return msg
+
+        if isinstance(content, str):
+            msg["content"] = [
+                {
+                    "type": "text",
+                    "text": content,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
+        elif isinstance(content, list) and len(content) > 0:
+            last_block = content[-1].copy()
+            last_block["cache_control"] = {"type": "ephemeral"}
+            msg["content"] = content[:-1] + [last_block]
+
+        return msg
+
+    def _apply_cache_control(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Apply Anthropic prompt caching breakpoints to messages.
+
+        BP1: First system message (static across session)
+        BP2: Second-to-last message (caches conversation history prefix)
+
+        For non-Anthropic models, returns messages unchanged.
+        """
+        if not self._is_anthropic_model() or len(messages) < 2:
+            return messages
+
+        result = [m for m in messages]
+
+        # BP1: First system message
+        if result[0].get("role") == "system":
+            result[0] = self._add_cache_control_to_message(result[0])
+
+        # BP2: Walk backwards from second-to-last to find a message with
+        # content (skips tool-call-only assistant messages with content=None)
+        if len(result) >= 3:
+            for i in range(len(result) - 2, 0, -1):
+                if result[i].get("content") is not None:
+                    result[i] = self._add_cache_control_to_message(result[i])
+                    break
+
+        return result
+
     def generate(
         self,
         messages: List[Dict[str, str]],
@@ -141,7 +323,7 @@ class OpenAIBackend(LLMBackend):
         # Merge config parameters with kwargs
         params = {
             "model": self.config.model_name,
-            "messages": messages,
+            "messages": self._apply_cache_control(messages),
             "temperature": kwargs.get("temperature", self.config.temperature),
             "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
             "top_p": kwargs.get("top_p", self.config.top_p),
@@ -167,6 +349,11 @@ class OpenAIBackend(LLMBackend):
             if content:
                 self.failure_handler.validate_response(content)
 
+            # Track cache metrics
+            self.cache_tracker.record(response.usage)
+            cached = self._extract_cached_tokens(response.usage)
+            logger.info(f"[CACHE] prompt={response.usage.prompt_tokens if response.usage else 0} cached={cached or 0}")
+
             # Build LLMResponse
             return LLMResponse(
                 content=content,
@@ -175,6 +362,7 @@ class OpenAIBackend(LLMBackend):
                 prompt_tokens=response.usage.prompt_tokens if response.usage else None,
                 completion_tokens=response.usage.completion_tokens if response.usage else None,
                 total_tokens=response.usage.total_tokens if response.usage else None,
+                cached_tokens=cached,
                 raw_response={
                     "id": response.id,
                     "created": response.created,
@@ -204,17 +392,27 @@ class OpenAIBackend(LLMBackend):
         # Merge config parameters with kwargs
         params = {
             "model": self.config.model_name,
-            "messages": messages,
+            "messages": self._apply_cache_control(messages),
             "temperature": kwargs.get("temperature", self.config.temperature),
             "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
             "top_p": kwargs.get("top_p", self.config.top_p),
             "stream": True,
         }
 
+        # Request usage in stream for cache tracking
+        if self.config.stream_usage:
+            params["stream_options"] = {"include_usage": True}
+
         try:
             stream = self.client.chat.completions.create(**params)
 
             for chunk in stream:
+                # Capture usage from any chunk that has it
+                if hasattr(chunk, 'usage') and chunk.usage:
+                    cached_tokens = self._extract_cached_tokens(chunk.usage)
+                    self.cache_tracker.record(chunk.usage)
+                    logger.info(f"[CACHE] prompt={chunk.usage.prompt_tokens} cached={cached_tokens or 0}")
+
                 if chunk.choices and len(chunk.choices) > 0:
                     delta = chunk.choices[0].delta
                     content = delta.content if delta.content else ""
@@ -224,7 +422,7 @@ class OpenAIBackend(LLMBackend):
                         content=content,
                         done=finish_reason is not None,
                         model=chunk.model,
-                        finish_reason=finish_reason
+                        finish_reason=finish_reason,
                     )
 
         except Exception as e:
@@ -335,7 +533,7 @@ class OpenAIBackend(LLMBackend):
         # Build parameters for API call
         params = {
             "model": self.config.model_name,
-            "messages": messages,
+            "messages": self._apply_cache_control(messages),
             "temperature": kwargs.get("temperature", self.config.temperature),
             "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
             "top_p": kwargs.get("top_p", self.config.top_p),
@@ -363,6 +561,10 @@ class OpenAIBackend(LLMBackend):
             # Validate response if content is present
             if content:
                 self.failure_handler.validate_response(content)
+
+            # Track cache metrics
+            self.cache_tracker.record(response.usage)
+            logger.info(f"[CACHE] prompt={response.usage.prompt_tokens if response.usage else 0} cached={self._extract_cached_tokens(response.usage) or 0}")
 
             # Detect truncation
             truncation_info = {"truncated": False}
@@ -406,6 +608,7 @@ class OpenAIBackend(LLMBackend):
                 prompt_tokens=response.usage.prompt_tokens if response.usage else None,
                 completion_tokens=response.usage.completion_tokens if response.usage else None,
                 total_tokens=response.usage.total_tokens if response.usage else None,
+                cached_tokens=self._extract_cached_tokens(response.usage),
                 tool_calls=tool_calls,
                 raw_response={
                     "id": response.id,
@@ -476,7 +679,7 @@ class OpenAIBackend(LLMBackend):
         # Build parameters for API call
         params = {
             "model": self.config.model_name,
-            "messages": messages,
+            "messages": self._apply_cache_control(messages),
             "temperature": kwargs.get("temperature", self.config.temperature),
             "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
             "top_p": kwargs.get("top_p", self.config.top_p),
@@ -502,6 +705,7 @@ class OpenAIBackend(LLMBackend):
             prompt_tokens = None
             completion_tokens = None
             total_tokens = None
+            cached_tokens = None
 
             try:
                 for chunk in stream:
@@ -510,6 +714,9 @@ class OpenAIBackend(LLMBackend):
                         prompt_tokens = chunk.usage.prompt_tokens
                         completion_tokens = chunk.usage.completion_tokens
                         total_tokens = chunk.usage.total_tokens
+                        cached_tokens = self._extract_cached_tokens(chunk.usage)
+                        self.cache_tracker.record(chunk.usage)
+                        logger.info(f"[CACHE] prompt={prompt_tokens} cached={cached_tokens or 0}")
 
                     # Skip chunks with no choices (e.g., usage-only chunks)
                     if not chunk.choices or len(chunk.choices) == 0:
@@ -596,6 +803,7 @@ class OpenAIBackend(LLMBackend):
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
                     total_tokens=total_tokens,
+                    cached_tokens=cached_tokens,
                 ),
                 tool_calls
             )
@@ -697,7 +905,7 @@ class OpenAIBackend(LLMBackend):
         # Build parameters for API call
         params = {
             "model": self.config.model_name,
-            "messages": messages,
+            "messages": self._apply_cache_control(messages),
             "temperature": kwargs.get("temperature", self.config.temperature),
             "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
             "top_p": kwargs.get("top_p", self.config.top_p),
@@ -724,6 +932,7 @@ class OpenAIBackend(LLMBackend):
             prompt_tokens = None
             completion_tokens = None
             total_tokens = None
+            cached_tokens = None
 
             try:
                 async for chunk in stream:
@@ -732,6 +941,9 @@ class OpenAIBackend(LLMBackend):
                         prompt_tokens = chunk.usage.prompt_tokens
                         completion_tokens = chunk.usage.completion_tokens
                         total_tokens = chunk.usage.total_tokens
+                        cached_tokens = self._extract_cached_tokens(chunk.usage)
+                        self.cache_tracker.record(chunk.usage)
+                        logger.info(f"[CACHE] prompt={prompt_tokens} cached={cached_tokens or 0}")
 
                     # Skip chunks with no choices (e.g., usage-only chunks)
                     if not chunk.choices or len(chunk.choices) == 0:
@@ -818,6 +1030,7 @@ class OpenAIBackend(LLMBackend):
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
                     total_tokens=total_tokens,
+                    cached_tokens=cached_tokens,
                 ),
                 tool_calls
             )
@@ -900,7 +1113,7 @@ class OpenAIBackend(LLMBackend):
         # Build parameters
         params = {
             "model": self.config.model_name,
-            "messages": messages,
+            "messages": self._apply_cache_control(messages),
             "temperature": kwargs.get("temperature", self.config.temperature),
             "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
             "top_p": kwargs.get("top_p", self.config.top_p),
@@ -943,7 +1156,10 @@ class OpenAIBackend(LLMBackend):
                         usage_dict = {
                             "input_tokens": chunk.usage.prompt_tokens,
                             "output_tokens": chunk.usage.completion_tokens,
+                            "cached_tokens": self._extract_cached_tokens(chunk.usage),
                         }
+                        self.cache_tracker.record(chunk.usage)
+                        logger.info(f"[CACHE] prompt={chunk.usage.prompt_tokens} cached={usage_dict['cached_tokens'] or 0}")
 
                     # Skip chunks with no choices
                     if not chunk.choices or len(chunk.choices) == 0:
@@ -1040,7 +1256,7 @@ class OpenAIBackend(LLMBackend):
         # Build parameters
         params = {
             "model": self.config.model_name,
-            "messages": messages,
+            "messages": self._apply_cache_control(messages),
             "temperature": kwargs.get("temperature", self.config.temperature),
             "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
             "top_p": kwargs.get("top_p", self.config.top_p),
@@ -1083,7 +1299,10 @@ class OpenAIBackend(LLMBackend):
                         usage_dict = {
                             "input_tokens": chunk.usage.prompt_tokens,
                             "output_tokens": chunk.usage.completion_tokens,
+                            "cached_tokens": self._extract_cached_tokens(chunk.usage),
                         }
+                        self.cache_tracker.record(chunk.usage)
+                        logger.info(f"[CACHE] prompt={chunk.usage.prompt_tokens} cached={usage_dict['cached_tokens'] or 0}")
 
                     # Skip chunks with no choices
                     if not chunk.choices or len(chunk.choices) == 0:
@@ -1171,9 +1390,6 @@ class OpenAIBackend(LLMBackend):
             self.client.models.list()
             return True
         except Exception as e:
-            # DEBUG: Log what went wrong
-            import logging
-            logger = logging.getLogger(__name__)
             logger.error(f"Backend availability check failed: {type(e).__name__}: {str(e)}")
             return False
 
