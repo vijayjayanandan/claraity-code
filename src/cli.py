@@ -444,6 +444,7 @@ def simple_chat_mode(agent: CodingAgent, controller: Optional[LongRunningControl
                     controller.create_checkpoint(description=description)
                     console.print("[green]Checkpoint saved[/green]")
 
+            agent.shutdown()
             console.print("[yellow]Goodbye![/yellow]")
             break
         except Exception as e:
@@ -474,9 +475,9 @@ def init_project_memory(agent: CodingAgent) -> None:
     try:
         path = agent.memory.init_project_memory()
         console.print(f"[green]✓ Created project memory template: {path}[/green]")
-        console.print("[dim]Edit .opencodeagent/memory.md to customize for your project.[/dim]")
+        console.print("[dim]Edit .clarity/memory.md to customize for your project.[/dim]")
     except FileExistsError:
-        console.print("[yellow]Project memory file already exists at .opencodeagent/memory.md[/yellow]")
+        console.print("[yellow]Project memory file already exists at .clarity/memory.md[/yellow]")
         console.print("[dim]Run 'memory-reload' to refresh if you've edited it.[/dim]")
     except Exception as e:
         console.print(f"[red]Error creating project memory: {e}[/red]")
@@ -1263,7 +1264,7 @@ def show_help() -> None:
 
 **Memory Commands:**
 - `memory` - Show current file memories
-- `memory-init` - Create .opencodeagent/memory.md template
+- `memory-init` - Create .clarity/memory.md template
 - `memory-add <text>` - Quick add memory (e.g., "memory-add Use 2-space indent")
 - `memory-reload` - Reload file memories after editing
 
@@ -1299,9 +1300,9 @@ def show_help() -> None:
 
 **File-Based Memory:**
 The agent automatically loads memories from:
-- `.opencodeagent/memory.md` (project-specific, version controlled)
-- `~/.opencodeagent/memory.md` (user preferences)
-- `/etc/opencodeagent/memory.md` (enterprise policies)
+- `.clarity/memory.md` (project-specific, version controlled)
+- `~/.clarity/memory.md` (user preferences)
+- `/etc/clarity/memory.md` (enterprise policies)
 
 **Hooks System:**
 Extend agent behavior with custom Python hooks:
