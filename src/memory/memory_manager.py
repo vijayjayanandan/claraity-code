@@ -1204,21 +1204,23 @@ class MemoryManager:
     # core.md is capped at 200 lines; decisions/lessons at 100 lines each.
     # Others have no hard cap (written by knowledge-builder to be concise).
     _KNOWLEDGE_FILES = [
-        ("core.md", 200),
-        ("architecture.md", 150),
-        ("file-guide.md", 150),
-        ("conventions.md", 150),
-        ("decisions.md", 100),
-        ("lessons.md", 100),
+        "core.md",
+        "architecture.md",
+        "file-guide.md",
+        "conventions.md",
+        "decisions.md",
+        "lessons.md",
     ]
+
+    _KNOWLEDGE_WARN_LINES = 200  # Log warning if any file exceeds this
 
     def _load_knowledge_base(self, force_reload: bool = False) -> str:
         """Load all knowledge base files into a single combined string.
 
         Loads core.md, architecture.md, file-guide.md, conventions.md,
         decisions.md, and lessons.md from .clarity/knowledge/ and combines
-        them with section separators.
-        core.md is capped at 200 lines; decisions/lessons at 100 lines each.
+        them with section separators. Logs a warning if any file exceeds
+        _KNOWLEDGE_WARN_LINES but does not truncate.
 
         Args:
             force_reload: If True, bypass cache and reload from disk
@@ -1236,7 +1238,7 @@ class MemoryManager:
             return ""
 
         sections = []
-        for filename, max_lines in self._KNOWLEDGE_FILES:
+        for filename in self._KNOWLEDGE_FILES:
             filepath = knowledge_dir / filename
             if not filepath.exists():
                 continue
@@ -1246,12 +1248,11 @@ class MemoryManager:
                 if not content.strip():
                     continue
 
-                # Apply line cap if set (only core.md has one)
-                if max_lines > 0:
-                    lines = content.split('\n')
-                    if len(lines) > max_lines:
-                        content = '\n'.join(lines[:max_lines])
-                        content += f'\n\n[... {filename} truncated to {max_lines} lines ...]'
+                line_count = content.count('\n') + 1
+                if line_count > self._KNOWLEDGE_WARN_LINES:
+                    logger.warning("Knowledge file exceeds recommended size",
+                                   file=filename, lines=line_count,
+                                   recommended=self._KNOWLEDGE_WARN_LINES)
 
                 sections.append(content)
 

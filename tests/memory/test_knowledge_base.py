@@ -133,77 +133,37 @@ class TestKnowledgeBaseLoading:
 
         assert knowledge == ""
 
-    def test_core_truncation_at_200_lines(self, knowledge_dir):
-        """Test core.md is capped at 200 lines."""
+    def test_large_file_not_truncated(self, knowledge_dir):
+        """Test that large files are loaded in full (no truncation)."""
+        lines = [f"Line {i}" for i in range(300)]
+        (knowledge_dir / "core.md").write_text(
+            '\n'.join(lines), encoding='utf-8'
+        )
+
+        manager = MemoryManager(**_MM_KWARGS)
+        knowledge = manager._load_knowledge_base()
+
+        assert "Line 0" in knowledge
+        assert "Line 199" in knowledge
+        assert "Line 299" in knowledge
+        assert "truncated" not in knowledge
+
+    def test_large_file_logs_warning(self, knowledge_dir):
+        """Test that files exceeding _KNOWLEDGE_WARN_LINES trigger a warning log."""
         lines = [f"Line {i}" for i in range(250)]
         (knowledge_dir / "core.md").write_text(
             '\n'.join(lines), encoding='utf-8'
         )
 
         manager = MemoryManager(**_MM_KWARGS)
-        knowledge = manager._load_knowledge_base()
-
-        assert "Line 0" in knowledge
-        assert "Line 199" in knowledge
-        assert "Line 200" not in knowledge
-        assert "truncated to 200 lines" in knowledge
-
-    def test_core_exactly_200_lines_not_truncated(self, knowledge_dir):
-        """Test that exactly 200 lines is not truncated."""
-        lines = [f"Line {i}" for i in range(200)]
-        (knowledge_dir / "core.md").write_text(
-            '\n'.join(lines), encoding='utf-8'
-        )
-
-        manager = MemoryManager(**_MM_KWARGS)
-        knowledge = manager._load_knowledge_base()
-
-        assert "Line 199" in knowledge
-        assert "truncated" not in knowledge
-
-    def test_decisions_truncation_at_100_lines(self, knowledge_dir):
-        """Test decisions.md is capped at 100 lines."""
-        lines = [f"Line {i}" for i in range(150)]
-        (knowledge_dir / "decisions.md").write_text(
-            '\n'.join(lines), encoding='utf-8'
-        )
-
-        manager = MemoryManager(**_MM_KWARGS)
-        knowledge = manager._load_knowledge_base()
-
-        assert "Line 0" in knowledge
-        assert "Line 99" in knowledge
-        assert "Line 100" not in knowledge
-        assert "truncated to 100 lines" in knowledge
-
-    def test_lessons_truncation_at_100_lines(self, knowledge_dir):
-        """Test lessons.md is capped at 100 lines."""
-        lines = [f"Line {i}" for i in range(150)]
-        (knowledge_dir / "lessons.md").write_text(
-            '\n'.join(lines), encoding='utf-8'
-        )
-
-        manager = MemoryManager(**_MM_KWARGS)
-        knowledge = manager._load_knowledge_base()
-
-        assert "Line 0" in knowledge
-        assert "Line 99" in knowledge
-        assert "Line 100" not in knowledge
-        assert "truncated to 100 lines" in knowledge
-
-    def test_architecture_truncation_at_150_lines(self, knowledge_dir):
-        """Test that architecture.md is capped at 150 lines."""
-        lines = [f"Line {i}" for i in range(300)]
-        (knowledge_dir / "architecture.md").write_text(
-            '\n'.join(lines), encoding='utf-8'
-        )
-
-        manager = MemoryManager(**_MM_KWARGS)
-        knowledge = manager._load_knowledge_base()
-
-        assert "Line 149" in knowledge
-        assert "Line 150" not in knowledge
-        assert "truncated to 150 lines" in knowledge
+        with patch("src.memory.memory_manager.logger") as mock_logger:
+            manager._load_knowledge_base()
+            mock_logger.warning.assert_called_once_with(
+                "Knowledge file exceeds recommended size",
+                file="core.md",
+                lines=250,
+                recommended=MemoryManager._KNOWLEDGE_WARN_LINES,
+            )
 
     def test_caching(self, knowledge_dir):
         """Test that knowledge is cached after first load."""
