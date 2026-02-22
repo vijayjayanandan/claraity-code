@@ -21,6 +21,7 @@ class LLMBackendType(str, Enum):
     LOCALAI = "localai"
     LLAMACPP = "llamacpp"
     OPENAI = "openai"  # Generic OpenAI-compatible API
+    ANTHROPIC = "anthropic"  # Native Anthropic Messages API
 
 
 class LLMConfig(BaseModel):

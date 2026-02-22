@@ -298,6 +298,13 @@ class CodingAgent(AgentInterface):
                 api_key=api_key,
                 api_key_env=api_key_env
             )
+        elif backend == "anthropic":
+            from src.llm.anthropic_backend import AnthropicBackend
+            self.llm: LLMBackend = AnthropicBackend(
+                llm_config,
+                api_key=api_key,
+                api_key_env=api_key_env if api_key_env != "OPENAI_API_KEY" else "ANTHROPIC_API_KEY",
+            )
         else:
             raise ValueError(f"Unsupported backend: {backend}")
 

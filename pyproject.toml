@@ -3,18 +3,18 @@ requires = ["setuptools>=65.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ai-coding-agent"
-version = "0.1.0"
-description = "Advanced AI coding agent optimized for small open-source LLMs with state-of-the-art memory and context management"
+name = "claraity-code"
+version = "0.11.0"
+description = "ClarAIty Code - An AI-powered coding agent with TUI interface, tool execution, multi-layered memory, prompt caching, and intelligent context management"
 authors = [
-    {name = "Your Name", email = "your.email@example.com"}
+    {name = "Vijay Jayanandan"}
 ]
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
-keywords = ["ai", "coding-agent", "llm", "rag", "memory-management", "open-source"]
+keywords = ["ai", "coding-agent", "llm", "tui", "context-management", "prompt-caching", "tool-use"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3.10",
@@ -67,6 +67,10 @@ dev = [
     "pre-commit>=3.7.0",
 ]
 
+anthropic = [
+    "anthropic>=0.39.0",
+]
+
 ollama = [
     "ollama>=0.2.0",
 ]
@@ -76,17 +80,11 @@ vllm = [
 ]
 
 all = [
-    "ai-coding-agent[dev,ollama,vllm]",
+    "ai-coding-agent[dev,anthropic,ollama,vllm]",
 ]
 
 [project.scripts]
-ai-agent = "src.cli:main"
-
-[project.urls]
-Homepage = "https://github.com/yourusername/ai-coding-agent"
-Documentation = "https://github.com/yourusername/ai-coding-agent/docs"
-Repository = "https://github.com/yourusername/ai-coding-agent"
-Issues = "https://github.com/yourusername/ai-coding-agent/issues"
+claraity = "src.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

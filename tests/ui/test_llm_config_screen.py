@@ -99,9 +99,15 @@ class TestSubagentNames:
         """Screen should default to built-in subagent names when none given."""
         config_path = str(tmp_path / "config.yaml")
         screen = ConfigLLMScreen(config_path=config_path)
+        # Verify all 7 built-in subagents are included
         assert "code-reviewer" in screen._subagent_names
         assert "test-writer" in screen._subagent_names
         assert "doc-writer" in screen._subagent_names
+        assert "code-writer" in screen._subagent_names
+        assert "explore" in screen._subagent_names
+        assert "planner" in screen._subagent_names
+        assert "general-purpose" in screen._subagent_names
+        assert len(screen._subagent_names) == 7
 
 
 class TestSaveConfig:

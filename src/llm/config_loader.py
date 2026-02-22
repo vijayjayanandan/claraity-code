@@ -29,7 +29,7 @@ from typing import Dict, Optional
 
 DEFAULT_CONFIG_PATH = ".clarity/config.yaml"
 
-VALID_BACKEND_TYPES = {"openai", "ollama", "vllm", "localai", "llamacpp"}
+VALID_BACKEND_TYPES = {"openai", "ollama", "vllm", "localai", "llamacpp", "anthropic"}
 
 
 # =============================================================================
