@@ -161,7 +161,8 @@ class TestToolFiltering:
     def test_tool_guard_blocks_unlisted_tool(self, mock_main_agent, mock_tool_definitions):
         """Defense-in-depth: tool execution should be blocked if not in allowlist."""
         config = make_config(tools=["read_file"])
-        subagent = SubAgent(config, mock_main_agent)
+        # Use auto mode so approval gate doesn't interfere with allowlist test
+        subagent = SubAgent(config, mock_main_agent, permission_mode="auto")
 
         # Mock LLM to return a tool call for write_file (not in allowlist)
         mock_tool_call = Mock()

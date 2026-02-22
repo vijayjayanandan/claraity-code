@@ -2,14 +2,16 @@
 
 Wire protocol: JSON lines over stdin/stdout.
 
-Parent -> Child (stdin, single JSON line, then close):
-    SubprocessInput with config, LLM settings, task, working directory.
+Parent -> Child (stdin, kept open for bidirectional communication):
+    Line 1: SubprocessInput with config, LLM settings, task, working directory.
+    Line 2+: ApprovalResponse JSON lines (sent in reply to APPROVAL_REQUEST events).
 
 Child -> Parent (stdout, one JSON line per event):
-    IPCEventType.REGISTERED  - subagent bootstrapped
-    IPCEventType.NOTIFICATION - serialized StoreNotification
-    IPCEventType.DONE         - SubAgentResult
-    IPCEventType.ERROR        - fatal error string
+    IPCEventType.REGISTERED        - subagent bootstrapped
+    IPCEventType.NOTIFICATION      - serialized StoreNotification
+    IPCEventType.APPROVAL_REQUEST  - subagent needs user approval for a tool
+    IPCEventType.DONE              - SubAgentResult
+    IPCEventType.ERROR             - fatal error string
 """
 
 import json
@@ -47,6 +49,8 @@ class SubprocessInput:
     working_directory: str
     max_iterations: int = 50
     transcript_path: str = ""
+    permission_mode: str = "normal"
+    auto_approve_tools: List[str] = field(default_factory=list)
 
     def __repr__(self) -> str:
         """Redact api_key from repr to prevent leakage in tracebacks/logs."""
@@ -73,10 +77,11 @@ class SubprocessInput:
 
 class IPCEventType(str, Enum):
     """Event types emitted by the subprocess child."""
-    REGISTERED = "registered"       # Subagent bootstrapped, sends id + model
-    NOTIFICATION = "notification"   # Serialized StoreNotification
-    DONE = "done"                   # SubAgentResult
-    ERROR = "error"                 # Fatal error string
+    REGISTERED = "registered"              # Subagent bootstrapped, sends id + model
+    NOTIFICATION = "notification"          # Serialized StoreNotification
+    APPROVAL_REQUEST = "approval_request"  # Child needs user approval for a tool
+    DONE = "done"                          # SubAgentResult
+    ERROR = "error"                        # Fatal error string
 
 
 # ============================================================================
@@ -222,6 +227,78 @@ def deserialize_result(data: Dict[str, Any]) -> "SubAgentResult":
         tool_calls=data.get("tool_calls", []),
         execution_time=data.get("execution_time", 0.0),
     )
+
+
+# ============================================================================
+# Tool Approval IPC (bidirectional)
+# ============================================================================
+
+@dataclass
+class ApprovalRequest:
+    """Request from child to parent for user interaction (emitted on stdout).
+
+    Used for both tool approval and clarify requests via request_type:
+    - "tool_approval": risky tool needs permission before executing
+    - "clarify": subagent needs structured answers from user
+    """
+    tool_call_id: str
+    tool_name: str
+    tool_args: Dict[str, Any]
+    subagent_name: str
+    args_summary: str
+    request_type: str = "tool_approval"
+    # Clarify-specific fields (only when request_type="clarify")
+    questions: Optional[List[Dict[str, Any]]] = None
+    context: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'ApprovalRequest':
+        known = {f.name for f in cls.__dataclass_fields__.values()}
+        return cls(**{k: v for k, v in data.items() if k in known})
+
+
+@dataclass
+class ApprovalResponse:
+    """Response from parent to child for user interaction (sent on stdin).
+
+    Used for both tool approval and clarify responses:
+    - Tool approval: uses approved/feedback fields
+    - Clarify: uses clarify_result dict
+    """
+    tool_call_id: str
+    approved: bool
+    auto_approve_future: bool = False
+    feedback: Optional[str] = None
+    # Clarify-specific: structured response from ClarifyWidget
+    clarify_result: Optional[Dict[str, Any]] = None
+
+    def to_json_line(self) -> str:
+        return json.dumps(asdict(self), ensure_ascii=True)
+
+    @classmethod
+    def from_json_line(cls, line: str) -> 'ApprovalResponse':
+        data = json.loads(line.strip())
+        known = {f.name for f in cls.__dataclass_fields__.values()}
+        return cls(**{k: v for k, v in data.items() if k in known})
+
+
+def read_approval_response_from_stdin() -> ApprovalResponse:
+    """Block until the parent writes an ApprovalResponse on stdin.
+
+    Called by the subprocess approval callback. The subprocess is
+    single-threaded and synchronous, so blocking here is fine -- the
+    parent's async event loop stays alive handling the TUI.
+
+    Raises:
+        EOFError: Parent closed stdin (crash/cancel) -- treat as rejection.
+    """
+    line = sys.stdin.readline()
+    if not line:
+        raise EOFError("Parent closed stdin - treating as rejection")
+    return ApprovalResponse.from_json_line(line)
 
 
 # ============================================================================

@@ -366,7 +366,13 @@ class SubAgentCard(Container):
         state = notification.tool_state
         status = state.status
 
-        if status == ToolStatus.RUNNING:
+        if status == ToolStatus.AWAITING_APPROVAL:
+            card.status = ToolStatus.AWAITING_APPROVAL
+        elif status == ToolStatus.APPROVED:
+            card.status = ToolStatus.APPROVED
+        elif status == ToolStatus.REJECTED:
+            card.status = ToolStatus.REJECTED
+        elif status == ToolStatus.RUNNING:
             card.start_running()
         elif status == ToolStatus.SUCCESS:
             # Result content comes from tool MESSAGE_ADDED, not state update.

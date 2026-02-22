@@ -23,6 +23,11 @@ from .base import Tool, ToolResult, ToolStatus
 
 logger = get_logger("tools.delegation")
 
+# ClarAIty project root (where our src/ package lives).
+# Used as subprocess cwd to prevent namespace collisions when the target
+# project also has a src/ package (e.g., target's src/llm/ shadowing ours).
+_AGENT_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
+
 
 class DelegateToSubagentTool(Tool):
     """Tool for delegating tasks to specialized subagents.
@@ -43,6 +48,7 @@ class DelegateToSubagentTool(Tool):
         """
         self.subagent_manager = subagent_manager
         self._registry = None  # SubagentRegistry for TUI visibility
+        self._ui_protocol = None  # UIProtocol for TUI approval relay
 
         # Generate dynamic description with available subagents
         description = self._generate_description()
@@ -59,6 +65,14 @@ class DelegateToSubagentTool(Tool):
         """
         self._registry = registry
         logger.info("DelegateToSubagentTool: Registry wired")
+
+    def set_ui_protocol(self, protocol) -> None:
+        """Wire up UIProtocol for relaying subagent approval requests to TUI.
+
+        Called by app.py during _setup_subagent_registry().
+        """
+        self._ui_protocol = protocol
+        logger.info("DelegateToSubagentTool: UIProtocol wired")
 
     def _generate_description(self) -> str:
         """Generate dynamic tool description listing available subagents."""
@@ -126,6 +140,19 @@ Use this tool proactively when appropriate!"""
                 output=None,
                 error=f"Subagent '{subagent}' not found. Available: {', '.join(available)}"
             )
+
+        # Inject approval settings from parent agent
+        main_agent = self.subagent_manager.main_agent
+        permission_mode = "normal"
+        if hasattr(main_agent, 'permission_manager') and main_agent.permission_manager:
+            permission_mode = main_agent.permission_manager.get_mode().value
+
+        if permission_mode != "auto":
+            def _cli_approval_callback(tool_name, tool_args, tool_call_id):
+                approved = main_agent._prompt_tool_approval(tool_name, tool_args)
+                return (approved, None)
+            subagent_instance._permission_mode = permission_mode
+            subagent_instance._approval_callback = _cli_approval_callback
 
         # Register with TUI registry for live visibility
         registered = False
@@ -211,16 +238,30 @@ Use this tool proactively when appropriate!"""
         # Resolve LLM config and API key for the subprocess
         llm_config_dict, api_key = self._resolve_llm_config(config)
 
-        # Determine working directory
-        working_directory = str(
-            getattr(self.subagent_manager.main_agent, 'working_directory', Path.cwd())
-        )
+        # Determine working directory — MUST be absolute.
+        # main_agent.working_directory is often Path(".") which is relative.
+        # The subprocess starts with cwd=_AGENT_PROJECT_ROOT (for correct imports),
+        # so a relative "." would resolve to the wrong directory in the subprocess.
+        working_dir = getattr(self.subagent_manager.main_agent, 'working_directory', Path.cwd())
+        working_directory = str(Path(working_dir).resolve())
 
         # Build subprocess input
         session_id = str(uuid.uuid4())[:8]
+        # transcript_path must also be absolute — after os.chdir in the subprocess
+        # switches to the target project, a relative path would resolve there instead
+        # of in the agent's own .clarity directory.
         transcript_path = str(
-            Path(".clarity/sessions/subagents") / f"{config.name}-{session_id}.jsonl"
+            Path(working_directory) / ".clarity" / "sessions" / "subagents" / f"{config.name}-{session_id}.jsonl"
         )
+
+        # Resolve permission mode and auto-approve set from parent agent
+        main_agent = self.subagent_manager.main_agent
+        permission_mode = "normal"
+        if hasattr(main_agent, 'permission_manager') and main_agent.permission_manager:
+            permission_mode = main_agent.permission_manager.get_mode().value
+        auto_approve_tools = []
+        if self._ui_protocol:
+            auto_approve_tools = list(self._ui_protocol._auto_approve)
 
         subprocess_input = SubprocessInput(
             config=asdict(config),
@@ -230,6 +271,8 @@ Use this tool proactively when appropriate!"""
             working_directory=working_directory,
             max_iterations=50,
             transcript_path=transcript_path,
+            permission_mode=permission_mode,
+            auto_approve_tools=auto_approve_tools,
         )
 
         # Launch subprocess
@@ -240,17 +283,16 @@ Use this tool proactively when appropriate!"""
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=working_directory,
+            cwd=_AGENT_PROJECT_ROOT,
             # Default asyncio StreamReader limit is 64KB per line.
             # Subagent DONE events with large outputs (code reviews, etc.)
             # can easily exceed that as a single JSON line. 16MB is generous.
             limit=16 * 1024 * 1024,
         )
 
-        # Send input, close stdin
+        # Send input (keep stdin open for approval responses)
         process.stdin.write(input_json.encode('utf-8') + b'\n')
         await process.stdin.drain()
-        process.stdin.close()
 
         # Drain stderr in background to prevent deadlock.
         # If the subprocess writes >64KB to stderr (tracebacks, stray prints),
@@ -316,6 +358,11 @@ Use this tool proactively when appropriate!"""
                                 f"Failed to deserialize notification: {e}"
                             )
 
+                elif event_type == IPCEventType.APPROVAL_REQUEST:
+                    await self._handle_approval_request(
+                        event, process, subagent_id
+                    )
+
                 elif event_type == IPCEventType.DONE:
                     result_data = event.get("result", {})
                     sa_result = deserialize_result(result_data)
@@ -359,6 +406,9 @@ Use this tool proactively when appropriate!"""
             )
 
         finally:
+            # Close stdin (signals EOF to child if still waiting for approval)
+            if not process.stdin.is_closing():
+                process.stdin.close()
             # Unregister from TUI
             if subagent_id and self._registry:
                 self._registry.unregister(subagent_id)
@@ -398,6 +448,84 @@ Use this tool proactively when appropriate!"""
     # =========================================================================
     # Helpers
     # =========================================================================
+
+    async def _handle_approval_request(
+        self,
+        event: dict,
+        process: asyncio.subprocess.Process,
+        subagent_id: str,
+    ) -> None:
+        """Relay an APPROVAL_REQUEST from subprocess to TUI, send response back.
+
+        Dispatches on request_type:
+        - "tool_approval": shows ToolApprovalOptions, returns approved/feedback
+        - "clarify": shows ClarifyWidget, returns structured answers
+        """
+        from src.subagents.ipc import ApprovalRequest, ApprovalResponse
+
+        request = ApprovalRequest.from_dict(event.get("request", {}))
+        call_id = request.tool_call_id
+
+        if request.request_type == "clarify":
+            response = await self._handle_clarify_request(request)
+        else:
+            response = await self._handle_tool_approval(request)
+
+        try:
+            process.stdin.write(response.to_json_line().encode('utf-8') + b'\n')
+            await process.stdin.drain()
+        except (BrokenPipeError, ConnectionResetError):
+            logger.warning("Subprocess stdin closed before response could be sent")
+
+    async def _handle_tool_approval(self, request) -> 'ApprovalResponse':
+        """Handle tool_approval request type."""
+        from src.subagents.ipc import ApprovalResponse
+
+        approved = True
+        feedback = None
+        auto_approve_future = False
+
+        if self._ui_protocol:
+            result = await self._ui_protocol.wait_for_approval(
+                request.tool_call_id, request.tool_name, timeout=None
+            )
+            approved = result.approved
+            feedback = result.feedback
+            auto_approve_future = result.auto_approve_future
+        else:
+            logger.warning("No UIProtocol - auto-approving subagent tool call")
+
+        return ApprovalResponse(
+            tool_call_id=request.tool_call_id,
+            approved=approved,
+            auto_approve_future=auto_approve_future,
+            feedback=feedback,
+        )
+
+    async def _handle_clarify_request(self, request) -> 'ApprovalResponse':
+        """Handle clarify request type."""
+        from src.subagents.ipc import ApprovalResponse
+
+        clarify_result = {"cancelled": True}
+
+        if self._ui_protocol:
+            result = await self._ui_protocol.wait_for_clarify_response(
+                request.tool_call_id, timeout=None
+            )
+            if result.submitted:
+                clarify_result = {"submitted": True, "responses": result.responses}
+            elif result.chat_instead:
+                clarify_result = {"mode": "chat", "message": result.chat_message}
+            else:
+                clarify_result = {"cancelled": True}
+        else:
+            logger.warning("No UIProtocol - returning cancelled for subagent clarify")
+
+        return ApprovalResponse(
+            tool_call_id=request.tool_call_id,
+            approved=True,
+            clarify_result=clarify_result,
+        )
 
     def _validate_inputs(self, subagent: str, task: str) -> Optional[ToolResult]:
         """Validate subagent and task inputs.

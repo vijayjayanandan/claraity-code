@@ -1199,7 +1199,8 @@ class CodingAgentApp(App):
                 delegation_tool = self.agent.tool_executor.tools.get("delegate_to_subagent")
                 if delegation_tool and hasattr(delegation_tool, "set_registry"):
                     delegation_tool.set_registry(self._subagent_registry)
-                    logger.info("Wired SubagentRegistry to delegation tool")
+                    delegation_tool.set_ui_protocol(self.ui_protocol)
+                    logger.info("Wired SubagentRegistry and UIProtocol to delegation tool")
                 else:
                     logger.warning(
                         "delegate_to_subagent tool not found or missing set_registry - "
@@ -2323,6 +2324,14 @@ class CodingAgentApp(App):
     # Message Handlers (from widgets)
     # -------------------------------------------------------------------------
 
+    def _find_subagent_tool_card(self, call_id: str):
+        """Search active SubAgentCards for a tool card with the given call_id."""
+        for sub_info in self._subagent_subscriptions.values():
+            sa_card = sub_info.get("card")
+            if sa_card and call_id in sa_card._tool_cards:
+                return sa_card._tool_cards[call_id]
+        return None
+
     def on_approval_response_message(self, message: ApprovalResponseMessage) -> None:
         """Handle approval response from ToolApprovalOptions."""
         approved = message.action in ("yes", "yes_all")
@@ -2337,10 +2346,12 @@ class CodingAgentApp(App):
         # Clear from pending approvals
         self._pending_approval_ids.discard(message.call_id)
 
-        # Update tool card status
+        # Update tool card status (check parent cards, then subagent cards)
         tool_name = ""
-        if message.call_id in self._tool_cards:
-            card = self._tool_cards[message.call_id]
+        card = self._tool_cards.get(message.call_id)
+        if not card:
+            card = self._find_subagent_tool_card(message.call_id)
+        if card:
             tool_name = card.tool_name
             if approved:
                 card.status = ToolStatus.APPROVED

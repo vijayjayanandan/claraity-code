@@ -243,16 +243,27 @@ class ToolCard(Static):
             self._header_widget.update(self._render_header_line())
 
         if new_status == ToolStatus.AWAITING_APPROVAL:
-            # Show approval widget - create if not exists
+            # Show interaction widget - clarify or approval depending on tool
             if not self._approval_widget and self.is_attached:
-                logger.info(f"[WATCH_STATUS] {self.call_id}: Creating approval widget")
-                self._approval_widget = ToolApprovalOptions(
-                    call_id=self.call_id,
-                    tool_name=self.tool_name,
-                    args=self.args
-                )
-                # Mount diff first if not already mounted, then approval
-                # This ensures approval appears BELOW diff preview
+                if self.tool_name == "clarify":
+                    logger.info(f"[WATCH_STATUS] {self.call_id}: Creating clarify widget")
+                    from .clarify_widget import ClarifyWidget
+                    questions = self.args.get("questions", [])
+                    context = self.args.get("context")
+                    self._approval_widget = ClarifyWidget(
+                        call_id=self.call_id,
+                        questions=questions,
+                        context=context,
+                    )
+                else:
+                    logger.info(f"[WATCH_STATUS] {self.call_id}: Creating approval widget")
+                    self._approval_widget = ToolApprovalOptions(
+                        call_id=self.call_id,
+                        tool_name=self.tool_name,
+                        args=self.args
+                    )
+                # Mount diff first if not already mounted, then widget
+                # This ensures widget appears BELOW diff preview
                 if not self._diff_mounted:
                     self._mount_diff_widget_if_applicable()
                 self.mount(self._approval_widget)
@@ -294,12 +305,20 @@ class ToolCard(Static):
         if self.status == ToolStatus.AWAITING_APPROVAL and not self._approval_widget:
             from src.observability import get_logger
             logger = get_logger("tool_card")
-            logger.info(f"[ON_MOUNT] {self.call_id}: Creating approval widget (status was set before mount)")
-            self._approval_widget = ToolApprovalOptions(
-                call_id=self.call_id,
-                tool_name=self.tool_name,
-                args=self.args
-            )
+            logger.info(f"[ON_MOUNT] {self.call_id}: Creating widget (status was set before mount)")
+            if self.tool_name == "clarify":
+                from .clarify_widget import ClarifyWidget
+                self._approval_widget = ClarifyWidget(
+                    call_id=self.call_id,
+                    questions=self.args.get("questions", []),
+                    context=self.args.get("context"),
+                )
+            else:
+                self._approval_widget = ToolApprovalOptions(
+                    call_id=self.call_id,
+                    tool_name=self.tool_name,
+                    args=self.args
+                )
             # Approval should appear AFTER diff - defer if diff mount was deferred
             if self._defer_diff_mount and not self._diff_mounted:
                 # Diff will be mounted later, schedule approval after it
@@ -541,7 +560,7 @@ class ToolCard(Static):
 
         result = Text()
         result.append(" ", style="")
-        result.append("\u2022", style=f"bold {color}")
+        result.append("\u25cf", style=f"bold {color}")
         result.append("  ", style="")
         result.append(self.tool_name, style="bold #e0e0e0")
 

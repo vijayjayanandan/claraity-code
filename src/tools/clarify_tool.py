@@ -20,8 +20,16 @@ class ClarifyTool(Tool):
     In CLI mode: This tool provides a simple numbered menu fallback.
     """
 
-    name = "clarify"
-    description = "Ask the user clarifying questions before proceeding"
+    def __init__(self):
+        super().__init__(
+            name="clarify",
+            description="Ask the user clarifying questions before proceeding"
+        )
+
+    def _get_parameters(self) -> Dict[str, Any]:
+        """Get parameter schema."""
+        from .tool_schemas import CLARIFY_TOOL
+        return CLARIFY_TOOL.parameters
 
     def execute(self, **kwargs) -> ToolResult:
         """

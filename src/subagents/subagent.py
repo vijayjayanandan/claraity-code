@@ -105,6 +105,11 @@ class SubAgent:
         >>> print(result.output)
     """
 
+    # Tools that require user approval in NORMAL permission mode
+    RISKY_TOOLS = frozenset({
+        'write_file', 'edit_file', 'append_to_file', 'run_command', 'git_commit',
+    })
+
     def __init__(
         self,
         config: 'SubAgentConfig',
@@ -114,6 +119,9 @@ class SubAgent:
         llm: Optional[Any] = None,
         tool_executor: Optional[Any] = None,
         working_directory: Optional[str] = None,
+        permission_mode: str = "normal",
+        approval_callback: Optional[Callable[[str, Dict[str, Any], str], tuple]] = None,
+        auto_approve_tools: Optional[set] = None,
     ):
         """Initialize subagent with own persistence and configurable LLM/tools.
 
@@ -130,9 +138,17 @@ class SubAgent:
             llm: LLMBackend instance (direct injection for subprocess mode)
             tool_executor: ToolExecutor instance (direct injection for subprocess mode)
             working_directory: Working directory path (direct injection for subprocess mode)
+            permission_mode: "normal" (ask for risky tools), "auto" (never ask), "plan" (read-only)
+            approval_callback: Callable(tool_name, tool_args, tool_call_id) -> (approved, feedback)
+            auto_approve_tools: Set of tool names pre-approved by the user (session-scoped)
         """
         self.config = config
         self.main_agent = main_agent  # May be None in subprocess mode
+
+        # Tool approval settings (inherited from parent agent)
+        self._permission_mode = permission_mode
+        self._approval_callback = approval_callback
+        self._auto_approve_tools: set = auto_approve_tools or set()
 
         # Resolve dependencies: direct injection or extract from main_agent
         if main_agent is not None:
@@ -266,6 +282,27 @@ class SubAgent:
                 f"{e}. Falling back to main agent's LLM."
             )
             return None
+
+    def _needs_approval(self, tool_name: str, tool_args: Dict[str, Any]) -> bool:
+        """Check if a tool call requires user approval before execution.
+
+        Mirrors the parent agent's needs_approval() logic:
+        - AUTO mode: never ask
+        - Tool already auto-approved by user: skip
+        - Agent-internal writes (.clarity/): skip
+        - NORMAL mode + risky tool: ask
+        """
+        if self._permission_mode == "auto":
+            return False
+
+        if tool_name in self._auto_approve_tools:
+            return False
+
+        from src.core.plan_mode import is_agent_internal_write
+        if is_agent_internal_write(tool_name, tool_args):
+            return False
+
+        return tool_name in self.RISKY_TOOLS
 
     def cancel(self) -> None:
         """Signal cancellation to stop execution."""
@@ -453,6 +490,13 @@ class SubAgent:
         # Apply config.tools allowlist if specified
         if self.config.tools is not None:
             allowed = set(self.config.tools)
+            available_names = {t.name for t in tools}
+            missing = allowed - available_names
+            if missing:
+                logger.warning(
+                    f"SubAgent [{self.config.name}]: Allowlist includes tools "
+                    f"not found in executor: {sorted(missing)}"
+                )
             tools = [t for t in tools if t.name in allowed]
             logger.debug(
                 f"SubAgent [{self.config.name}]: Tool allowlist active - "
@@ -669,6 +713,79 @@ class SubAgent:
                     for k, v in list(tool_args.items())[:3]
                 )
 
+                # --- Clarify interception: can't use ClarifyTool.execute() in
+                # subprocess (it calls input()). Route through same IPC callback.
+                if tool_name == "clarify" and self._approval_callback:
+                    import json as _json
+                    self._message_store.update_tool_state(
+                        tool_call_id=tool_call_id, status=ToolStatus.AWAITING_APPROVAL,
+                        tool_name=tool_name, extra_metadata={"args_summary": args_summary},
+                    )
+                    _, clarify_result = self._approval_callback(tool_name, tool_args, tool_call_id)
+                    result_dict = clarify_result if isinstance(clarify_result, dict) else {}
+                    tool_messages.append({
+                        "role": "tool", "tool_call_id": tool_call_id,
+                        "name": tool_name, "content": _json.dumps(result_dict),
+                    })
+                    self._message_store.update_tool_state(
+                        tool_call_id=tool_call_id, status=ToolStatus.SUCCESS,
+                        tool_name=tool_name,
+                    )
+                    continue
+
+                # --- Approval gate: ask user before executing risky tools ---
+                if self._needs_approval(tool_name, tool_args):
+                    self._message_store.update_tool_state(
+                        tool_call_id=tool_call_id,
+                        status=ToolStatus.AWAITING_APPROVAL,
+                        tool_name=tool_name,
+                        extra_metadata={"args_summary": args_summary},
+                    )
+
+                    if self._approval_callback:
+                        approved, feedback = self._approval_callback(
+                            tool_name, tool_args, tool_call_id
+                        )
+                    else:
+                        # No callback (shouldn't happen) - safe default: reject
+                        approved, feedback = False, None
+
+                    if not approved:
+                        rejection_msg = (
+                            f"User rejected with feedback: {feedback}"
+                            if feedback
+                            else "Tool call rejected by user"
+                        )
+                        self._message_store.update_tool_state(
+                            tool_call_id=tool_call_id,
+                            status=ToolStatus.REJECTED,
+                            tool_name=tool_name,
+                        )
+                        tool_messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "name": tool_name,
+                            "content": rejection_msg,
+                        })
+                        all_tool_calls.append({
+                            "tool": tool_name, "arguments": tool_args,
+                            "args_summary": args_summary, "success": False,
+                            "result": None, "error": rejection_msg,
+                            "tool_call_id": tool_call_id,
+                        })
+                        if feedback:
+                            # Feedback: LLM sees the guidance and can retry
+                            continue
+                        else:
+                            # Hard rejection: stop the subagent
+                            break
+                    # Approved
+                    self._message_store.update_tool_state(
+                        tool_call_id=tool_call_id,
+                        status=ToolStatus.APPROVED,
+                        tool_name=tool_name,
+                    )
+
                 # Notify store: tool is RUNNING
                 self._message_store.update_tool_state(
                     tool_call_id=tool_call_id,
@@ -681,6 +798,11 @@ class SubAgent:
                     # Defense-in-depth: block tools not in the allowlist
                     allowed_tool_names = {t.name for t in subagent_tools}
                     if tool_name not in allowed_tool_names:
+                        logger.warning(
+                            f"SubAgent [{self.config.name}]: Blocked tool "
+                            f"'{tool_name}'. Allowed: {sorted(allowed_tool_names)}. "
+                            f"Config allowlist: {self.config.tools}"
+                        )
                         raise PermissionError(
                             f"Tool '{tool_name}' is not allowed for "
                             f"subagent '{self.config.name}'"

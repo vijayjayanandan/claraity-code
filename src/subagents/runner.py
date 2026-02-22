@@ -17,6 +17,7 @@ Stdout is exclusively for IPC events (JSON lines).
 All logging goes to JSONL file via get_logger() framework.
 """
 
+import json
 import os
 import sys
 import signal
@@ -38,6 +39,8 @@ from src.subagents.ipc import (
     read_input_from_stdin,
     serialize_notification,
     serialize_result,
+    ApprovalRequest,
+    read_approval_response_from_stdin,
 )
 
 logger = get_logger("subagents.runner")
@@ -89,6 +92,8 @@ def _create_tool_executor(tools_allowlist=None):
     from src.tools.search_tools import GrepTool, GlobTool
     from src.tools.git_operations import GitStatusTool, GitDiffTool, GitCommitTool
     from src.tools.lsp_tools import GetFileOutlineTool, GetSymbolContextTool
+    from src.tools.knowledge_tools import KBDetectChangesTool, KBUpdateManifestTool
+    from src.tools.clarify_tool import ClarifyTool
 
     executor = ToolExecutor(hook_manager=None)
 
@@ -109,6 +114,9 @@ def _create_tool_executor(tools_allowlist=None):
         GitCommitTool(),
         GetFileOutlineTool(),
         GetSymbolContextTool(),
+        KBDetectChangesTool(),
+        KBUpdateManifestTool(),
+        ClarifyTool(),
     ]
 
     # Apply allowlist filter if specified
@@ -152,6 +160,55 @@ def _create_subagent_config(config_dict):
     )
 
 
+def _create_ipc_approval_callback(subagent_name, auto_approve_set):
+    """Create a callback that talks to the parent via IPC for user interaction.
+
+    Handles both tool approval and clarify requests through the same
+    IPC channel (APPROVAL_REQUEST event), dispatching on tool_name.
+
+    Args:
+        subagent_name: Subagent name (shown in parent's UI)
+        auto_approve_set: Mutable set of auto-approved tool names.
+
+    Returns:
+        Callable(tool_name, tool_args, tool_call_id) -> (bool, Any)
+        - Tool approval: (approved, feedback_or_None)
+        - Clarify: (True, result_dict)
+    """
+    def _callback(tool_name, tool_args, tool_call_id):
+        is_clarify = (tool_name == "clarify")
+        args_summary = ", ".join(
+            f'{k}="{v}"' if isinstance(v, str) else f"{k}={v}"
+            for k, v in list(tool_args.items())[:3]
+        )
+        request = ApprovalRequest(
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
+            tool_args=tool_args,
+            subagent_name=subagent_name,
+            args_summary=args_summary,
+            request_type="clarify" if is_clarify else "tool_approval",
+            questions=tool_args.get("questions") if is_clarify else None,
+            context=tool_args.get("context") if is_clarify else None,
+        )
+        emit_event(IPCEventType.APPROVAL_REQUEST, request=request.to_dict())
+
+        try:
+            response = read_approval_response_from_stdin()
+            if is_clarify:
+                return (True, response.clarify_result or {"cancelled": True})
+            if response.auto_approve_future and response.approved:
+                auto_approve_set.add(tool_name)
+            return (response.approved, response.feedback)
+        except (EOFError, ValueError, json.JSONDecodeError) as e:
+            logger.warning(f"IPC read failed: {e} - treating as rejection/cancel")
+            if is_clarify:
+                return (True, {"cancelled": True, "reason": str(e)})
+            return (False, None)
+
+    return _callback
+
+
 def main():
     """Subprocess entry point.
 
@@ -181,10 +238,23 @@ def main():
         from src.tools.file_operations import FileOperationTool
         FileOperationTool._workspace_root = Path(input_data.working_directory)
 
+        # 3c. Switch process cwd to the target project's working directory.
+        # The subprocess starts with cwd=ClarAIty root (for correct src.* imports).
+        # Now that all imports are done, set cwd to the target project so tools
+        # like run_command default to the correct directory.
+        os.chdir(input_data.working_directory)
+
         # 4. Reconstruct SubAgentConfig
         config = _create_subagent_config(input_data.config)
 
         # 5. Create SubAgent with direct dependency injection
+        # Build approval callback if permission mode requires it
+        permission_mode = input_data.permission_mode
+        auto_approve_set = set(input_data.auto_approve_tools)
+        approval_cb = None
+        if permission_mode != "auto":
+            approval_cb = _create_ipc_approval_callback(config.name, auto_approve_set)
+
         from src.subagents.subagent import SubAgent
         subagent = SubAgent(
             config=config,
@@ -192,6 +262,9 @@ def main():
             tool_executor=tool_executor,
             working_directory=input_data.working_directory,
             transcript_dir=Path(input_data.transcript_path).parent if input_data.transcript_path else None,
+            permission_mode=permission_mode,
+            approval_callback=approval_cb,
+            auto_approve_tools=auto_approve_set,
         )
 
         # 6. Set up cancellation signal handler
