@@ -3,10 +3,9 @@
 Coverage:
 - TaskState persistence: round-trip, auto-load, save-on-create, save-on-update,
   save-on-delete, graceful failures, no-op when path not set
+- TaskState auto-cleanup: completed tasks removed on create
 - TaskUpdateTool schema: new fields (owner, metadata, addBlocks, addBlockedBy)
 - TaskUpdateTool execute: new fields applied correctly via TaskState
-
-Total: 19 tests
 """
 
 import json
@@ -237,6 +236,102 @@ class TestTaskStatePersistence:
         saved = _read_tasks_from_file(todos_path)
         blocked_task = [t for t in saved if t["id"] == t2["id"]][0]
         assert t1["id"] not in blocked_task["blockedBy"]
+
+
+# ===========================================================================
+# TaskState Auto-Cleanup on Create Tests
+# ===========================================================================
+
+class TestTaskStateAutoCleanup:
+    """Tests for auto-cleanup of completed tasks when create() is called."""
+
+    @pytest.fixture
+    def state(self):
+        return TaskState()
+
+    @pytest.fixture
+    def todos_path(self, tmp_path):
+        return tmp_path / "sessions" / "test-session" / "todos.json"
+
+    def test_create_cleans_completed_tasks(self, state):
+        """Creating a new task should remove all completed tasks."""
+        t1 = state.create(subject="Old task A")
+        t2 = state.create(subject="Old task B")
+        state.update(t1["id"], status="completed")
+        state.update(t2["id"], status="completed")
+
+        # Create a new task - should clean up the two completed ones
+        t3 = state.create(subject="New task")
+
+        tasks = state.list_all()
+        assert len(tasks) == 1
+        assert tasks[0]["id"] == t3["id"]
+        assert tasks[0]["subject"] == "New task"
+
+    def test_create_preserves_non_completed_tasks(self, state):
+        """Only completed tasks are removed; pending and in_progress survive."""
+        t1 = state.create(subject="Completed")
+        t2 = state.create(subject="In progress")
+        t3 = state.create(subject="Pending")
+        state.update(t1["id"], status="completed")
+        state.update(t2["id"], status="in_progress")
+
+        # Create a new task
+        t4 = state.create(subject="Brand new")
+
+        tasks = state.list_all()
+        task_ids = {t["id"] for t in tasks}
+
+        # Completed task removed, others preserved
+        assert t1["id"] not in task_ids
+        assert t2["id"] in task_ids
+        assert t3["id"] in task_ids
+        assert t4["id"] in task_ids
+        assert len(tasks) == 3
+
+    def test_create_with_no_completed_tasks(self, state):
+        """When nothing is completed, create should not remove anything."""
+        t1 = state.create(subject="Pending task")
+        t2 = state.create(subject="Another pending")
+
+        assert len(state.list_all()) == 2
+
+        t3 = state.create(subject="Third task")
+
+        tasks = state.list_all()
+        assert len(tasks) == 3
+        task_ids = {t["id"] for t in tasks}
+        assert t1["id"] in task_ids
+        assert t2["id"] in task_ids
+        assert t3["id"] in task_ids
+
+    def test_cleanup_persists_to_file(self, state, todos_path):
+        """After auto-cleanup, the JSON file should reflect the cleaned state."""
+        state.set_persistence_path(todos_path)
+        t1 = state.create(subject="Will complete")
+        state.update(t1["id"], status="completed")
+
+        # Create new task - triggers cleanup + save
+        t2 = state.create(subject="Fresh task")
+
+        saved = _read_tasks_from_file(todos_path)
+        assert len(saved) == 1
+        assert saved[0]["id"] == t2["id"]
+        assert saved[0]["subject"] == "Fresh task"
+
+    def test_next_id_not_reset_after_cleanup(self, state):
+        """Task IDs should keep incrementing even after completed tasks are
+        cleaned up -- no ID collisions with removed tasks."""
+        t1 = state.create(subject="Task 1")  # id=1
+        t2 = state.create(subject="Task 2")  # id=2
+        state.update(t1["id"], status="completed")
+        state.update(t2["id"], status="completed")
+
+        # Both cleaned up on next create
+        t3 = state.create(subject="Task 3")
+
+        # ID should be 3 (not 1 or 2)
+        assert int(t3["id"]) > int(t2["id"])
 
 
 # ===========================================================================

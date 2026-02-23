@@ -34,7 +34,20 @@ class TaskState:
 
     def create(self, subject: str, description: str = "",
                active_form: str = "", metadata: Optional[Dict] = None) -> Dict[str, Any]:
-        """Create a new task and return it."""
+        """Create a new task and return it.
+
+        Automatically clears completed tasks before creating the new one,
+        keeping the todo list tidy without needing a separate clear tool.
+        """
+        # Auto-cleanup: remove completed tasks before adding new work
+        completed_ids = [tid for tid, t in self._tasks.items()
+                         if t.get("status") == "completed"]
+        if completed_ids:
+            logger.debug("Auto-cleanup: removing %d completed task(s): %s",
+                         len(completed_ids), completed_ids)
+        for tid in completed_ids:
+            del self._tasks[tid]
+
         task_id = str(self._next_id)
         self._next_id += 1
         task = {

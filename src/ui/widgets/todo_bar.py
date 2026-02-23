@@ -59,7 +59,14 @@ class TodoBar(Static):
             result = Text()
             result.append(f"Tasks ({completed}/{total})\n", style="bold")
 
-            for todo in self.todos:
+            # Sort: in_progress first, then pending, then completed at bottom
+            status_order = {"in_progress": 0, "pending": 1, "completed": 2}
+            sorted_todos = sorted(
+                self.todos,
+                key=lambda t: status_order.get(t.get("status", "pending"), 1)
+            )
+
+            for todo in sorted_todos:
                 status = todo.get('status', 'pending')
                 content = todo.get('subject', todo.get('content', ''))
                 active_form = todo.get('activeForm', content)
