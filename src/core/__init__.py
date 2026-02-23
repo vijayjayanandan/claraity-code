@@ -30,7 +30,6 @@ _LAZY_IMPORTS = {
     "CodingAgent": ".agent",
     "ContextBuilder": ".context_builder",
     "ContextAssemblyReport": ".context_builder",
-    "ContextBudgetExceededError": ".context_builder",
 }
 
 
@@ -54,7 +53,6 @@ __all__ = [
     "AgentToolProxy",
     "ContextBuilder",
     "ContextAssemblyReport",
-    "ContextBudgetExceededError",
     "FileReferenceParser",
     "FileReference",
     "SessionManager",

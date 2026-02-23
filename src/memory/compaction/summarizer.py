@@ -19,12 +19,13 @@ Features:
 """
 
 import re
-import logging
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Callable
 import tiktoken
 
-logger = logging.getLogger(__name__)
+from src.observability import get_logger
+
+logger = get_logger(__name__)
 
 
 # Configuration

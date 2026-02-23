@@ -35,7 +35,7 @@ from .events import (
     TextDelta, CodeBlockStart, CodeBlockDelta, CodeBlockEnd,
     ThinkingStart, ThinkingDelta, ThinkingEnd,
     PausePromptStart, PausePromptEnd,
-    ContextUpdated, ContextCompacted,
+    ContextUpdated, ContextCompacting, ContextCompacted,
     FileReadEvent,
     ErrorEvent, ToolStatus,
 )
@@ -2092,6 +2092,26 @@ class CodingAgentApp(App):
             try:
                 status_bar = self.query_one("#status", StatusBar)
                 status_bar.update_context(event.used, event.limit, event.pressure_level)
+            except NoMatches:
+                pass
+
+        # ContextCompacting — show "Compacting Conversation" with spinner+timer
+        elif isinstance(event, ContextCompacting):
+            try:
+                status_bar = self.query_one("#status", StatusBar)
+                status_bar.set_current_task("Compacting Conversation")
+            except NoMatches:
+                pass
+
+        # ContextCompacted — clear compacting indicator, show brief result
+        elif isinstance(event, ContextCompacted):
+            try:
+                status_bar = self.query_one("#status", StatusBar)
+                status_bar.clear_current_task()
+                status_bar.show_info(
+                    f"Compacted: {event.messages_removed} messages summarized",
+                    duration=5.0,
+                )
             except NoMatches:
                 pass
 

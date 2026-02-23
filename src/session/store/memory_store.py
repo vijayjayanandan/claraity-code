@@ -722,6 +722,69 @@ class MessageStore:
                 return self._messages.get(self._compact_boundary_uuid)
             return None
 
+    def compact(self, summary_content: str, evicted_count: int, pre_tokens: int = 0) -> int:
+        """
+        Compact conversation by setting a boundary and inserting a summary.
+
+        All prior messages are evicted (excluded from future get_llm_context()
+        calls). The summary replaces the entire conversation history, giving
+        the LLM a clean continuation point. This matches how Claude Code
+        handles compaction.
+
+        Args:
+            summary_content: Summary of evicted messages (from PrioritizedSummarizer)
+            evicted_count: Number of messages being evicted (for logging/event)
+            pre_tokens: Token count before compaction (for logging/meta)
+
+        Returns:
+            Number of messages evicted
+        """
+        from ..models.message import Message
+
+        with self._lock:
+            session_id = self._session_id
+            if not session_id:
+                logger.warning("compact_skipped: no session_id")
+                return 0
+
+            # 1. Insert compact_boundary system message.
+            #    add_message() detects event_type="compact_boundary" and sets
+            #    _last_compact_boundary_seq to this message's seq. Since this
+            #    seq is higher than all prior messages, get_llm_context() will
+            #    exclude everything before it.
+            boundary_msg = Message.create_system(
+                content="[Conversation compacted]",
+                session_id=session_id,
+                seq=self.next_seq(),
+                event_type="compact_boundary",
+                include_in_llm_context=False,
+                pre_tokens=pre_tokens,
+            )
+            self.add_message(boundary_msg)
+
+            # 2. Insert summary as user message with is_compact_summary flag.
+            #    This is the only prior context the LLM will see going forward.
+            summary_msg = Message.create_user(
+                content=(
+                    "[Conversation summary - earlier messages were compacted "
+                    "to free context space]\n\n"
+                    + summary_content
+                ),
+                session_id=session_id,
+                parent_uuid=None,
+                seq=self.next_seq(),
+                is_compact_summary=True,
+            )
+            self.add_message(summary_msg)
+
+            logger.info(
+                "compact_complete",
+                evicted_count=evicted_count,
+                pre_tokens=pre_tokens,
+            )
+
+            return evicted_count
+
     def has_compaction(self) -> bool:
         """Check if session has been compacted."""
         with self._lock:

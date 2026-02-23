@@ -2575,7 +2575,7 @@ class CodingAgent(AgentInterface):
         from typing import AsyncIterator, Optional, List
         from src.core.events import (
             UIEvent, StreamStart, StreamEnd, TextDelta,
-            PausePromptStart, PausePromptEnd, ContextUpdated, ContextCompacted,
+            PausePromptStart, PausePromptEnd, ContextUpdated, ContextCompacting, ContextCompacted,
             FileReadEvent,
         )
         from src.core.tool_status import ToolStatus as CoreToolStatus
@@ -2791,19 +2791,6 @@ class CodingAgent(AgentInterface):
                 # Clear blocked calls from previous iteration
                 blocked_calls.clear()
 
-                # Check for context compaction (only after iteration 1, when tool results accumulate)
-                if iteration > 1 and self.memory.needs_compaction(threshold=0.85):
-                    tokens_before = self.memory.working_memory.get_current_token_count()
-                    messages_removed = self.memory.optimize_context()
-                    tokens_after = self.memory.working_memory.get_current_token_count()
-
-                    if messages_removed > 0:
-                        yield ContextCompacted(
-                            messages_removed=messages_removed,
-                            tokens_before=tokens_before,
-                            tokens_after=tokens_after,
-                        )
-
                 # Wrap LLM streaming in try/except to handle provider errors gracefully
                 # (e.g., ReadTimeout, connection errors) without silent exit
                 provider_error = None
@@ -2861,11 +2848,55 @@ class CodingAgent(AgentInterface):
                     if (last_usage and last_usage.get("input_tokens") is not None
                         and self.context_builder
                         and self.context_builder.max_context_tokens > 0):
+                        input_tokens = last_usage.get("input_tokens")
+                        pressure_level = self._get_pressure_level(input_tokens)
+
                         yield ContextUpdated(
-                            used=last_usage.get("input_tokens"),
+                            used=input_tokens,
                             limit=self.context_builder.max_context_tokens,
-                            pressure_level=self._get_pressure_level(last_usage.get("input_tokens")),
+                            pressure_level=pressure_level,
                         )
+
+                        # Compaction trigger: if context usage >= 85%, compact
+                        # and rebuild current_context so next LLM call is smaller.
+                        # Uses the LLM's real token count (ground truth).
+                        COMPACTION_THRESHOLD = 0.85
+                        utilization = input_tokens / self.context_builder.max_context_tokens
+                        if utilization >= COMPACTION_THRESHOLD:
+                            logger.info(
+                                "compaction_triggered",
+                                input_tokens=input_tokens,
+                                context_window=self.context_builder.max_context_tokens,
+                                utilization=f"{utilization:.1%}",
+                                iteration=iteration,
+                            )
+
+                            yield ContextCompacting(tokens_before=input_tokens)
+
+                            messages_removed = await self.memory.compact_conversation_async(
+                                current_input_tokens=input_tokens,
+                                llm_backend=self.llm,
+                            )
+
+                            if messages_removed > 0:
+                                # Rebuild current_context from compacted MessageStore
+                                current_context = self.context_builder.build_context(
+                                    user_query=user_input,
+                                    task_type="chat",
+                                    language="python",
+                                    use_rag=len(self.indexed_chunks) > 0,
+                                    available_chunks=self.indexed_chunks if self.indexed_chunks else None,
+                                    file_references=file_references if file_references else None,
+                                    agent_state=self.todo_state if self.todo_state.get('todos') else None,
+                                    plan_mode_state=self.plan_mode_state,
+                                    director_adapter=self.director_adapter,
+                                )
+
+                                yield ContextCompacted(
+                                    messages_removed=messages_removed,
+                                    tokens_before=input_tokens,
+                                    tokens_after=0,  # Real count comes from next LLM call
+                                )
 
                 except Exception as e:
                     # Provider error (ReadTimeout, connection error, API error)

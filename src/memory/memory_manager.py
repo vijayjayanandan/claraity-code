@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from src.session.store.memory_store import MessageStore
     from src.session.models.message import Message as SessionMessage
     from src.core.streaming import StreamingPipeline
-    from src.llm.base import ProviderDelta
+    from src.llm.base import ProviderDelta, LLMBackend
 
 
 class MemoryManager:
@@ -1336,70 +1336,100 @@ class MemoryManager:
 
         return created_path
 
-    def needs_compaction(self, threshold: float = 0.85) -> bool:
+    async def compact_conversation_async(
+        self,
+        current_input_tokens: int,
+        llm_backend: "LLMBackend",
+    ) -> int:
         """
-        Check if context usage exceeds threshold and compaction is needed.
+        Compact conversation via LLM summarization (async, non-blocking).
 
-        Called by orchestrator to decide whether to trigger compaction with user notification.
-
-        Args:
-            threshold: Trigger compaction when usage exceeds this fraction (default: 85%)
-                       Must be between 0.0 and 1.0 (exclusive)
-
-        Returns:
-            True if compaction is recommended
+        Reuses the same generate_provider_deltas_async() path that powers
+        normal TUI streaming — native async client, no thread pool.
         """
-        # Validate threshold bounds
-        if not 0.0 < threshold < 1.0:
-            raise ValueError(f"threshold must be between 0 and 1, got {threshold}")
+        if self._message_store is None:
+            logger.warning("compact_conversation_skipped: no MessageStore")
+            return 0
 
-        current = (
-            self.working_memory.get_current_token_count()
-            + self.episodic_memory.current_token_count
-        )
-        available = self.total_context_tokens - self.system_prompt_tokens
+        context_dicts = self._message_store.get_llm_context()
+        if len(context_dicts) <= 4:
+            return 0
 
-        # Guard against division by zero or negative available space
-        if available <= 0:
-            return False  # No usable space to manage, don't trigger compaction
+        evicted_count = len(context_dicts)
 
-        return current > (available * threshold)
+        from src.memory.compaction import PrioritizedSummarizer
 
-    def optimize_context(self, target_tokens: Optional[int] = None) -> int:
-        """
-        Optimize context to fit within target token budget.
-
-        Called by orchestrator when needs_compaction() returns True.
-
-        Args:
-            target_tokens: Target token count (uses total_context_tokens if not provided)
-
-        Returns:
-            Number of messages removed from working memory (for user notification)
-        """
-        target = target_tokens or (
-            self.total_context_tokens - self.system_prompt_tokens
-        )
-        current = (
-            self.working_memory.get_current_token_count()
-            + self.episodic_memory.current_token_count
+        token_budget = min(6000, current_input_tokens // 6)
+        summarizer = PrioritizedSummarizer(
+            token_budget=token_budget,
+            llm_caller=None,
         )
 
-        messages_removed = 0
+        # Build summarization prompt
+        try:
+            formatted = summarizer._format_messages_for_llm(context_dicts)
+        except Exception as e:
+            logger.error("compact_format_failed", error=str(e))
+            return 0
 
-        if current > target:
-            # First, compress episodic memory
-            self.episodic_memory._compress_old_turns()
+        prompt_text = (
+            "Analyze this conversation history and create a continuation "
+            "summary for an AI coding agent.\n\n"
+            f"CONVERSATION HISTORY:\n{formatted}\n\n"
+            "Generate a summary with these sections IN ORDER OF IMPORTANCE:\n\n"
+            "## Goal and Key Decisions\n"
+            "What is the user trying to accomplish? What important decisions were made?\n\n"
+            "## All User Messages\n"
+            "Include ALL user messages in chronological order.\n\n"
+            "## Code Snippets\n"
+            "Include actual code that was written or discussed.\n\n"
+            "## Errors and Fixes\n"
+            "What went wrong and how was it fixed?\n\n"
+            "## Files Modified\n"
+            "Which files were created/modified and why?\n\n"
+            "## Current State\n"
+            "What was just completed? What's the logical next step?\n\n"
+            "IMPORTANT: Preserve user messages VERBATIM. Include actual code snippets. "
+            f"Target approximately {token_budget} tokens.\n\n"
+            "Output the summary in clean markdown format."
+        )
 
-            # If still over, compact working memory
-            current = (
-                self.working_memory.get_current_token_count()
-                + self.episodic_memory.current_token_count
-            )
-            if current > target:
-                messages_removed = self.working_memory.compact()
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant that creates concise conversation summaries."},
+            {"role": "user", "content": prompt_text},
+        ]
 
-        return messages_removed
+        # Use the same async streaming path as normal TUI conversation
+        try:
+            summary_parts = []
+            async for delta in llm_backend.generate_provider_deltas_async(messages):
+                if delta.text_delta:
+                    summary_parts.append(delta.text_delta)
+            summary = "".join(summary_parts)
+
+            if not summary or summarizer.count_tokens(summary) > token_budget * 1.2:
+                logger.warning("compact_async: LLM summary empty or over budget, using fallback")
+                summary = summarizer._generate_deterministic_summary(context_dicts)
+        except Exception as e:
+            logger.error("compact_conversation_async_llm_failed", error=str(e))
+            try:
+                summary = summarizer._generate_deterministic_summary(context_dicts)
+            except Exception as e2:
+                logger.error("compact_conversation_async_fallback_failed", error=str(e2))
+                return 0
+
+        logger.info(
+            "compact_conversation_async",
+            evicted_count=evicted_count,
+            summary_length=len(summary),
+            input_tokens=current_input_tokens,
+        )
+
+        return self._message_store.compact(
+            summary_content=summary,
+            evicted_count=evicted_count,
+            pre_tokens=current_input_tokens,
+        )
 
     def set_value(self, key: str, value: Any) -> None:
         """
