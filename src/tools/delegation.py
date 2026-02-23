@@ -154,6 +154,15 @@ Use this tool proactively when appropriate!"""
             subagent_instance._permission_mode = permission_mode
             subagent_instance._approval_callback = _cli_approval_callback
 
+            def _cli_pause_callback(reason, reason_code, stats):
+                print(f"\n[PAUSED] Subagent '{subagent}': {reason}")
+                print(f"  Stats: {stats.get('iterations', '?')} iterations, "
+                      f"{stats.get('elapsed_s', '?')}s elapsed, "
+                      f"{stats.get('tool_calls', '?')} tool calls")
+                response = input("Continue? [y/N]: ").strip().lower()
+                return (response in ('y', 'yes'), None)
+            subagent_instance._pause_callback = _cli_pause_callback
+
         # Register with TUI registry for live visibility
         registered = False
         if self._registry and parent_tool_call_id:
@@ -270,6 +279,7 @@ Use this tool proactively when appropriate!"""
             task_description=task.strip(),
             working_directory=working_directory,
             max_iterations=50,
+            max_wall_time=600.0,
             transcript_path=transcript_path,
             permission_mode=permission_mode,
             auto_approve_tools=auto_approve_tools,
@@ -466,7 +476,9 @@ Use this tool proactively when appropriate!"""
         request = ApprovalRequest.from_dict(event.get("request", {}))
         call_id = request.tool_call_id
 
-        if request.request_type == "clarify":
+        if request.request_type == "pause":
+            response = await self._handle_pause_request(request)
+        elif request.request_type == "clarify":
             response = await self._handle_clarify_request(request)
         else:
             response = await self._handle_tool_approval(request)
@@ -525,6 +537,30 @@ Use this tool proactively when appropriate!"""
             tool_call_id=request.tool_call_id,
             approved=True,
             clarify_result=clarify_result,
+        )
+
+    async def _handle_pause_request(self, request) -> 'ApprovalResponse':
+        """Handle pause request type - relay to TUI PausePromptWidget."""
+        from src.subagents.ipc import ApprovalResponse
+
+        continue_work = False
+        feedback = None
+
+        if self._ui_protocol:
+            pause_result = await self._ui_protocol.request_pause(
+                reason=request.pause_reason or "Subagent limit reached",
+                reason_code=request.pause_reason_code or "unknown",
+                stats=request.pause_stats or {},
+            )
+            continue_work = pause_result.continue_work
+            feedback = pause_result.feedback
+        else:
+            logger.warning("No UIProtocol - auto-stopping subagent pause")
+
+        return ApprovalResponse(
+            tool_call_id=request.tool_call_id,
+            approved=continue_work,
+            feedback=feedback,
         )
 
     def _validate_inputs(self, subagent: str, task: str) -> Optional[ToolResult]:

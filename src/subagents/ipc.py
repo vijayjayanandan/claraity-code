@@ -48,6 +48,7 @@ class SubprocessInput:
     task_description: str
     working_directory: str
     max_iterations: int = 50
+    max_wall_time: Optional[float] = 300.0
     transcript_path: str = ""
     permission_mode: str = "normal"
     auto_approve_tools: List[str] = field(default_factory=list)
@@ -250,6 +251,10 @@ class ApprovalRequest:
     # Clarify-specific fields (only when request_type="clarify")
     questions: Optional[List[Dict[str, Any]]] = None
     context: Optional[str] = None
+    # Pause-specific fields (only when request_type="pause")
+    pause_reason: Optional[str] = None
+    pause_reason_code: Optional[str] = None
+    pause_stats: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

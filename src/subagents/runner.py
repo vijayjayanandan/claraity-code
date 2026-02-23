@@ -209,6 +209,43 @@ def _create_ipc_approval_callback(subagent_name, auto_approve_set):
     return _callback
 
 
+def _create_ipc_pause_callback(subagent_name):
+    """Create a callback that talks to the parent via IPC for pause decisions.
+
+    Sends an ApprovalRequest with request_type="pause" and waits for the
+    parent's ApprovalResponse. The parent relays this to the user via
+    PausePromptWidget (TUI) or input() prompt (CLI).
+
+    Args:
+        subagent_name: Subagent name (shown in parent's UI)
+
+    Returns:
+        Callable(reason, reason_code, stats) -> (continue_work, feedback)
+    """
+    def _callback(reason, reason_code, stats):
+        request = ApprovalRequest(
+            tool_call_id="__pause__",
+            tool_name="__pause__",
+            tool_args={},
+            subagent_name=subagent_name,
+            args_summary=reason,
+            request_type="pause",
+            pause_reason=reason,
+            pause_reason_code=reason_code,
+            pause_stats=stats,
+        )
+        emit_event(IPCEventType.APPROVAL_REQUEST, request=request.to_dict())
+
+        try:
+            response = read_approval_response_from_stdin()
+            return (response.approved, response.feedback)
+        except (EOFError, ValueError, json.JSONDecodeError) as e:
+            logger.warning(f"IPC pause read failed: {e} - treating as Stop")
+            return (False, None)
+
+    return _callback
+
+
 def main():
     """Subprocess entry point.
 
@@ -252,8 +289,13 @@ def main():
         permission_mode = input_data.permission_mode
         auto_approve_set = set(input_data.auto_approve_tools)
         approval_cb = None
+        pause_cb = None
         if permission_mode != "auto":
             approval_cb = _create_ipc_approval_callback(config.name, auto_approve_set)
+            pause_cb = _create_ipc_pause_callback(config.name)
+
+        # Resolve max_wall_time from input (None disables wall-clock limit)
+        max_wall_time = input_data.max_wall_time
 
         from src.subagents.subagent import SubAgent
         subagent = SubAgent(
@@ -265,6 +307,8 @@ def main():
             permission_mode=permission_mode,
             approval_callback=approval_cb,
             auto_approve_tools=auto_approve_set,
+            pause_callback=pause_cb,
+            max_wall_time=max_wall_time,
         )
 
         # 6. Set up cancellation signal handler

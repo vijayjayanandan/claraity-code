@@ -162,6 +162,9 @@ class UIProtocol:
         # Callback for todo updates (Agent -> UI)
         self._on_todos_updated: Optional[Callable[[List[Dict[str, Any]]], None]] = None
 
+        # Callback for pause requests (delegation tool -> UI)
+        self._on_pause_requested: Optional[Callable] = None
+
     # -------------------------------------------------------------------------
     # Agent-side methods
     # -------------------------------------------------------------------------
@@ -486,6 +489,58 @@ class UIProtocol:
     def remove_auto_approve(self, tool_name: str) -> None:
         """Remove a tool from auto-approve list."""
         self._auto_approve.discard(tool_name)
+
+    # -------------------------------------------------------------------------
+    # Pause Requests (Delegation Tool -> UI)
+    # -------------------------------------------------------------------------
+
+    def set_pause_requested_callback(
+        self,
+        callback: Optional[Callable]
+    ) -> None:
+        """
+        Register a callback invoked when a subagent requests a pause.
+
+        The callback signature is:
+            async def on_pause(reason, reason_code, pending_todos, stats) -> None
+
+        It should mount the PausePromptWidget. The existing
+        wait_for_pause_response() is then used to await the user's decision.
+
+        Args:
+            callback: Async callable or None to unregister.
+        """
+        self._on_pause_requested = callback
+
+    async def request_pause(
+        self,
+        reason: str,
+        reason_code: str,
+        stats: Dict[str, Any],
+        pending_todos: Optional[List[Dict[str, Any]]] = None,
+    ) -> 'PauseResult':
+        """
+        Request a pause from the user (called by delegation tool).
+
+        1. Calls the registered callback to mount the PausePromptWidget
+        2. Awaits user's decision via wait_for_pause_response()
+
+        Args:
+            reason: Human-readable pause reason
+            reason_code: Machine-readable code (e.g., "iteration_limit")
+            stats: Dict with iteration/time stats for display
+            pending_todos: Optional list of pending todo items
+
+        Returns:
+            PauseResult with user's decision
+        """
+        if self._on_pause_requested is not None:
+            result = self._on_pause_requested(reason, reason_code, pending_todos, stats)
+            # Support both sync and async callbacks
+            if asyncio.iscoroutine(result):
+                await result
+
+        return await self.wait_for_pause_response()
 
     # -------------------------------------------------------------------------
     # Todo Updates (Agent -> UI)

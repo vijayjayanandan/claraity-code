@@ -110,6 +110,9 @@ class SubAgent:
         'write_file', 'edit_file', 'append_to_file', 'run_command', 'git_commit',
     })
 
+    # No safety cap — user decides how many times to continue.
+    MAX_PAUSE_CONTINUES = None
+
     def __init__(
         self,
         config: 'SubAgentConfig',
@@ -122,6 +125,8 @@ class SubAgent:
         permission_mode: str = "normal",
         approval_callback: Optional[Callable[[str, Dict[str, Any], str], tuple]] = None,
         auto_approve_tools: Optional[set] = None,
+        pause_callback: Optional[Callable[[str, str, dict], tuple]] = None,
+        max_wall_time: Optional[float] = 300.0,
     ):
         """Initialize subagent with own persistence and configurable LLM/tools.
 
@@ -141,6 +146,9 @@ class SubAgent:
             permission_mode: "normal" (ask for risky tools), "auto" (never ask), "plan" (read-only)
             approval_callback: Callable(tool_name, tool_args, tool_call_id) -> (approved, feedback)
             auto_approve_tools: Set of tool names pre-approved by the user (session-scoped)
+            pause_callback: Callable(reason, reason_code, stats) -> (continue_work, feedback).
+                           If None, auto-summarize when limits are hit (backwards compatible).
+            max_wall_time: Wall-clock time limit in seconds. None disables wall-clock limit.
         """
         self.config = config
         self.main_agent = main_agent  # May be None in subprocess mode
@@ -149,6 +157,11 @@ class SubAgent:
         self._permission_mode = permission_mode
         self._approval_callback = approval_callback
         self._auto_approve_tools: set = auto_approve_tools or set()
+
+        # Pause-on-limit settings
+        self._pause_callback = pause_callback
+        self._max_wall_time = max_wall_time
+        self._pause_continue_count = 0  # Track how many times user said "Continue"
 
         # Resolve dependencies: direct injection or extract from main_agent
         if main_agent is not None:
@@ -603,6 +616,111 @@ class SubAgent:
 
         return messages, user_msg.uuid
 
+    def _generate_summary(
+        self,
+        current_context: List[Dict[str, str]],
+        subagent_tools: List,
+        parent_uuid: str,
+        all_tool_calls: List[Dict[str, Any]],
+    ) -> tuple[str, List[Dict[str, Any]]]:
+        """Generate a forced summary when the subagent must stop.
+
+        Appends a summary-request user message, calls the LLM with
+        tool_choice="none" to force a text response, and returns.
+
+        Args:
+            current_context: Current LLM conversation context
+            subagent_tools: Tool definitions (passed to LLM but forced to none)
+            parent_uuid: UUID of last message for store chaining
+            all_tool_calls: Accumulated tool call records
+
+        Returns:
+            Tuple of (summary_text, all_tool_calls)
+        """
+        from src.session.models.message import Message
+
+        current_context.append({
+            "role": "user",
+            "content": "You've reached the maximum number of tool iterations. Based on the information gathered, provide a clear, concise answer."
+        })
+
+        summary_msg = Message.create_user(
+            content="You've reached the maximum number of tool iterations. Based on the information gathered, provide a clear, concise answer.",
+            session_id=self.session_id,
+            parent_uuid=parent_uuid,
+            seq=self._message_store.next_seq(),
+        )
+        self._message_store.add_message(summary_msg)
+        parent_uuid = summary_msg.uuid
+
+        self._cancel_token.check_cancelled()
+        final_response = self.llm.generate_with_tools(
+            messages=current_context, tools=subagent_tools, tool_choice="none"
+        )
+
+        final_msg = Message.create_assistant(
+            content=final_response.content or "",
+            session_id=self.session_id,
+            parent_uuid=parent_uuid,
+            seq=self._message_store.next_seq(),
+        )
+        self._message_store.add_message(final_msg)
+
+        return final_response.content or "", all_tool_calls
+
+    def _handle_pause(
+        self,
+        reason: str,
+        reason_code: str,
+        stats: Dict[str, Any],
+    ) -> tuple[bool, Optional[str]]:
+        """Handle a pause event when a limit is hit.
+
+        Checks the safety cap, then delegates to the pause callback.
+        If no callback is registered, returns (False, None) to auto-summarize.
+
+        Args:
+            reason: Human-readable reason for the pause
+            reason_code: Machine-readable code ("iteration_limit" or "wall_time_limit")
+            stats: Dict with iteration/time stats
+
+        Returns:
+            Tuple of (continue_work, feedback_or_None)
+        """
+        # Safety cap (if configured): force stop after N continues
+        if self.MAX_PAUSE_CONTINUES is not None and self._pause_continue_count >= self.MAX_PAUSE_CONTINUES:
+            logger.warning(
+                f"SubAgent [{self.config.name}]: Safety cap reached "
+                f"({self.MAX_PAUSE_CONTINUES} continues) - forcing summary"
+            )
+            return False, None
+
+        # No callback = auto-summarize (backwards compatible)
+        if self._pause_callback is None:
+            logger.info(
+                f"SubAgent [{self.config.name}]: No pause callback - auto-summarizing"
+            )
+            return False, None
+
+        try:
+            continue_work, feedback = self._pause_callback(reason, reason_code, stats)
+            if continue_work:
+                self._pause_continue_count += 1
+                logger.info(
+                    f"SubAgent [{self.config.name}]: User chose Continue "
+                    f"(count={self._pause_continue_count}/{self.MAX_PAUSE_CONTINUES})"
+                )
+            else:
+                logger.info(
+                    f"SubAgent [{self.config.name}]: User chose Stop"
+                )
+            return continue_work, feedback
+        except Exception as e:
+            logger.error(
+                f"SubAgent [{self.config.name}]: Pause callback error: {e} - forcing summary"
+            )
+            return False, None
+
     def _execute_with_tools(
         self,
         context: List[Dict[str, str]],
@@ -611,9 +729,14 @@ class SubAgent:
     ) -> tuple[str, List[Dict[str, Any]]]:
         """Execute with tool calling loop using native function calling.
 
+        Uses a while-loop with iteration and wall-clock limit checks.
+        When a limit is hit, calls _handle_pause() to ask the user.
+        If the user says Continue, counters reset and the loop continues.
+        If the user says Stop (or no callback), _generate_summary() is called.
+
         Args:
             context: LLM context (messages)
-            max_iterations: Maximum iterations
+            max_iterations: Maximum iterations per pause window
             last_parent_uuid: UUID of the last message (for parent chaining)
 
         Returns:
@@ -634,7 +757,66 @@ class SubAgent:
         all_tool_calls = []
         parent_uuid = last_parent_uuid
 
-        for iteration in range(max_iterations):
+        iteration = 0
+        wall_start = time.time()
+
+        while True:
+            # --- Limit checks at top of each iteration ---
+            elapsed = time.time() - wall_start
+            hit_iteration_limit = iteration >= max_iterations
+            hit_wall_time = (
+                self._max_wall_time is not None and elapsed >= self._max_wall_time
+            )
+
+            if hit_iteration_limit or hit_wall_time:
+                if hit_iteration_limit:
+                    reason = f"Reached {max_iterations} tool iterations"
+                    reason_code = "iteration_limit"
+                else:
+                    reason = f"Reached {self._max_wall_time:.0f}s wall-clock limit"
+                    reason_code = "wall_time_limit"
+
+                logger.warning(
+                    f"SubAgent [{self.config.name}]: {reason} "
+                    f"(iteration={iteration}, elapsed={elapsed:.1f}s)"
+                )
+
+                stats = {
+                    "iterations": iteration,
+                    "max_iterations": max_iterations,
+                    "elapsed_s": round(elapsed, 1),
+                    "max_wall_time": self._max_wall_time,
+                    "tool_calls": len(all_tool_calls),
+                }
+
+                continue_work, feedback = self._handle_pause(reason, reason_code, stats)
+
+                if continue_work:
+                    # Reset counters for next window
+                    iteration = 0
+                    wall_start = time.time()
+                    # Inject feedback into context if provided
+                    if feedback:
+                        current_context.append({
+                            "role": "user",
+                            "content": f"User feedback: {feedback}\n\nContinue working on the task.",
+                        })
+                        fb_msg = Message.create_user(
+                            content=f"User feedback: {feedback}\n\nContinue working on the task.",
+                            session_id=self.session_id,
+                            parent_uuid=parent_uuid,
+                            seq=self._message_store.next_seq(),
+                        )
+                        self._message_store.add_message(fb_msg)
+                        parent_uuid = fb_msg.uuid
+                    continue  # Re-enter loop with reset counters
+                else:
+                    # User said Stop (or no callback) - generate summary
+                    return self._generate_summary(
+                        current_context, subagent_tools, parent_uuid, all_tool_calls
+                    )
+
+            # --- Normal iteration body (unchanged) ---
             # Check cancellation before each LLM call
             self._cancel_token.check_cancelled()
 
@@ -885,39 +1067,8 @@ class SubAgent:
                 self._message_store.add_message(tool_msg)
                 parent_uuid = tool_msg.uuid
 
-        # Max iterations reached - generate summary with tool_choice="none"
-        logger.warning(f"SubAgent [{self.config.name}]: Max iterations reached")
-
-        current_context.append({
-            "role": "user",
-            "content": "You've reached the maximum number of tool iterations. Based on the information gathered, provide a clear, concise answer."
-        })
-
-        # Add summary prompt to store
-        summary_msg = Message.create_user(
-            content="You've reached the maximum number of tool iterations. Based on the information gathered, provide a clear, concise answer.",
-            session_id=self.session_id,
-            parent_uuid=parent_uuid,
-            seq=self._message_store.next_seq(),
-        )
-        self._message_store.add_message(summary_msg)
-        parent_uuid = summary_msg.uuid
-
-        self._cancel_token.check_cancelled()
-        final_response = self.llm.generate_with_tools(
-            messages=current_context, tools=subagent_tools, tool_choice="none"
-        )
-
-        # Add final assistant message to store
-        final_msg = Message.create_assistant(
-            content=final_response.content or "",
-            session_id=self.session_id,
-            parent_uuid=parent_uuid,
-            seq=self._message_store.next_seq(),
-        )
-        self._message_store.add_message(final_msg)
-
-        return final_response.content or "", all_tool_calls
+            # Increment iteration counter
+            iteration += 1
 
     def get_statistics(self) -> Dict[str, Any]:
         """Get subagent statistics.

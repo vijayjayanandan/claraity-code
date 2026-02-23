@@ -1200,12 +1200,50 @@ class CodingAgentApp(App):
                 if delegation_tool and hasattr(delegation_tool, "set_registry"):
                     delegation_tool.set_registry(self._subagent_registry)
                     delegation_tool.set_ui_protocol(self.ui_protocol)
-                    logger.info("Wired SubagentRegistry and UIProtocol to delegation tool")
+                    self.ui_protocol.set_pause_requested_callback(
+                        self._on_subagent_pause_requested
+                    )
+                    logger.info("Wired SubagentRegistry, UIProtocol, and pause callback to delegation tool")
                 else:
                     logger.warning(
                         "delegate_to_subagent tool not found or missing set_registry - "
                         f"tools: {list(self.agent.tool_executor.tools.keys())}"
                     )
+
+    async def _on_subagent_pause_requested(
+        self,
+        reason: str,
+        reason_code: str,
+        pending_todos: Optional[list],
+        stats: Optional[dict],
+    ) -> None:
+        """Mount PausePromptWidget when a subagent requests a pause.
+
+        Called by UIProtocol.request_pause() via the registered callback.
+        After this returns, UIProtocol.wait_for_pause_response() waits for the
+        user's decision. The existing on_pause_response_message() handler
+        removes the widget and submits the PauseResult.
+        """
+        try:
+            conversation = self._conversation or self.query_one("#conversation", ConversationContainer)
+        except NoMatches:
+            logger.warning("No conversation container found for subagent pause widget")
+            return
+
+        # Guard: remove any existing pause widget to prevent orphaned DOM nodes
+        if self._pause_widget:
+            self._pause_widget.remove()
+            self._pause_widget = None
+
+        widget = PausePromptWidget(
+            reason=reason,
+            reason_code=reason_code,
+            pending_todos=pending_todos or [],
+            stats=stats or {},
+        )
+        self._pause_widget = widget
+        await conversation.mount(widget)
+        widget.scroll_visible()
 
     def _focus_input(self) -> None:
         """Set focus to input widget."""

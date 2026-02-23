@@ -39,8 +39,8 @@ TOOL_TIMEOUT_OVERRIDES = {
     # Commands can run long (builds, tests, etc.)
     "run_command": 600,  # 10 minutes
 
-    # Subagent delegation needs time for full subagent execution
-    "delegate_to_subagent": 600,  # 10 minutes (subagents run multiple tools)
+    # Subagent delegation: None disables outer timeout (internal pause handles limits)
+    "delegate_to_subagent": None,
 
     # LSP tools need extra time for server startup (jedi-language-server ~25s)
     "get_file_outline": 90,
