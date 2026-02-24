@@ -74,6 +74,7 @@ dmypy.json
 
 # Models (don't commit large model files)
 models/
+!src/session/models/
 *.bin
 *.safetensors
 *.gguf

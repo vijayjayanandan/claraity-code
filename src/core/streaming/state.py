@@ -25,13 +25,18 @@ class ToolCallAccumulator:
         return bool(self.id and self.name)
 
     def to_tool_call(self) -> ToolCall:
-        """Convert accumulated data to ToolCall object."""
+        """Convert accumulated data to ToolCall object.
+
+        The ID is already canonical (generated at ProviderDelta emission
+        in the backend), so we use the direct constructor to avoid
+        double-generating a new canonical ID.
+        """
         return ToolCall(
             id=self.id,
             function=ToolCallFunction(
                 name=self.name,
                 arguments=self.arguments_buffer or "{}"
-            )
+            ),
         )
 
 

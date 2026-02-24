@@ -20,6 +20,7 @@ from src.session.models import (
     generate_uuid,
     now_iso,
     generate_stream_id,
+    generate_tool_call_id,
 )
 
 
@@ -127,6 +128,62 @@ class TestToolCall:
         tc = ToolCall.from_dict(data)
         assert tc.id == "call_456"
         assert tc.function.name == "Write"
+
+
+class TestCanonicalToolCallIds:
+    """Tests for canonical tool call ID generation."""
+
+    def test_generate_tool_call_id_format(self):
+        tc_id = generate_tool_call_id()
+        assert tc_id.startswith("tc_")
+        assert len(tc_id) == 35
+        # All chars after prefix should be lowercase hex
+        assert all(c in "0123456789abcdef" for c in tc_id[3:])
+
+    def test_generate_tool_call_id_unique(self):
+        ids = {generate_tool_call_id() for _ in range(1000)}
+        assert len(ids) == 1000
+
+    def test_generate_tool_call_id_provider_safe(self):
+        """ID should satisfy all provider regex patterns."""
+        import re
+        tc_id = generate_tool_call_id()
+        # Anthropic: ^[a-zA-Z0-9_-]+$
+        assert re.match(r"^[a-zA-Z0-9_-]+$", tc_id)
+        # OpenAI: max 40 chars
+        assert len(tc_id) <= 40
+        # Mistral: min 9 chars
+        assert len(tc_id) >= 9
+
+    def test_from_provider_preserves_provider_id(self):
+        func = ToolCallFunction(name="read_file", arguments="{}")
+        tc = ToolCall.from_provider(provider_id="toolu_abc123", function=func)
+        assert tc.id.startswith("tc_")
+        assert tc.meta["provider_tool_id"] == "toolu_abc123"
+        assert tc.function.name == "read_file"
+
+    def test_from_provider_different_from_constructor(self):
+        """from_provider generates canonical ID; constructor preserves given ID."""
+        func = ToolCallFunction(name="read_file", arguments="{}")
+        # Constructor: preserves exact ID (used for JSONL deserialization)
+        tc_direct = ToolCall(id="call_xyz", function=func)
+        assert tc_direct.id == "call_xyz"
+        # Factory: generates canonical ID (used for new provider responses)
+        tc_factory = ToolCall.from_provider(provider_id="call_xyz", function=func)
+        assert tc_factory.id.startswith("tc_")
+        assert tc_factory.id != "call_xyz"
+
+    def test_from_dict_preserves_stored_id(self):
+        """Deserialization from JSONL should NOT generate new IDs."""
+        data = {
+            "id": "tc_abcdef1234567890abcdef1234567890",
+            "type": "function",
+            "function": {"name": "read_file", "arguments": "{}"},
+            "meta": {"provider_tool_id": "toolu_old"},
+        }
+        tc = ToolCall.from_dict(data)
+        assert tc.id == "tc_abcdef1234567890abcdef1234567890"
+        assert tc.meta["provider_tool_id"] == "toolu_old"
 
 
 class TestTokenUsage:

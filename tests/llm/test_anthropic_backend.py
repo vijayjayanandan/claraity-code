@@ -326,7 +326,9 @@ class TestResponseParsing:
 
         result = mock_anthropic._parse_tool_use_blocks([mock_block])
         assert len(result) == 1
-        assert result[0].id == "toolu_123"
+        assert result[0].id.startswith("tc_")
+        assert len(result[0].id) == 35
+        assert result[0].meta.get("provider_tool_id") == "toolu_123"
         assert result[0].function.name == "read_file"
         assert json.loads(result[0].function.arguments) == {"path": "main.py"}
 
@@ -353,7 +355,8 @@ class TestResponseParsing:
         ]
         result = mock_anthropic._parse_tool_use_blocks(blocks)
         assert len(result) == 1
-        assert result[0].id == "t1"
+        assert result[0].id.startswith("tc_")
+        assert result[0].meta.get("provider_tool_id") == "t1"
 
     def test_stop_reason_mapping(self, mock_anthropic):
         """All Anthropic stop reasons should map correctly."""
@@ -484,7 +487,8 @@ class TestGenerate:
 
         assert result.finish_reason == "tool_calls"
         assert len(result.tool_calls) == 1
-        assert result.tool_calls[0].id == "toolu_abc"
+        assert result.tool_calls[0].id.startswith("tc_")
+        assert result.tool_calls[0].meta.get("provider_tool_id") == "toolu_abc"
         assert result.tool_calls[0].function.name == "read_file"
         assert json.loads(result.tool_calls[0].function.arguments) == {"path": "test.py"}
 
@@ -553,7 +557,8 @@ class TestStreaming:
         assert final_chunk.done is True
         assert tool_calls is not None
         assert len(tool_calls) == 1
-        assert tool_calls[0].id == "toolu_1"
+        assert tool_calls[0].id.startswith("tc_")
+        assert tool_calls[0].meta.get("provider_tool_id") == "toolu_1"
         assert tool_calls[0].function.name == "read_file"
         assert json.loads(tool_calls[0].function.arguments) == {"path": "x.py"}
 
@@ -608,8 +613,8 @@ class TestProviderDeltas:
         tc_deltas = [d for d in deltas if d.tool_call_delta]
         assert len(tc_deltas) == 2  # start (id+name) + arguments
 
-        # First: start with id and name
-        assert tc_deltas[0].tool_call_delta.id == "toolu_1"
+        # First: start with canonical id and name
+        assert tc_deltas[0].tool_call_delta.id.startswith("tc_")
         assert tc_deltas[0].tool_call_delta.name == "read_file"
         assert tc_deltas[0].tool_call_delta.index == 0
 

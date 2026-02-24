@@ -48,6 +48,7 @@ from .base import (
 )
 # Use Session Model ToolCall as the canonical type
 from src.session.models.message import ToolCall, ToolCallFunction
+from src.session.models.base import generate_tool_call_id
 from .failure_handler import LLMFailureHandler
 from .cache_tracker import CacheTracker
 
@@ -493,12 +494,12 @@ class OpenAIBackend(LLMBackend):
                     args_json = json.dumps(parsed_args) if isinstance(parsed_args, dict) else str(parsed_args)
 
                     tool_calls.append(
-                        ToolCall(
-                            id=tc.id,
+                        ToolCall.from_provider(
+                            provider_id=tc.id,
                             function=ToolCallFunction(
                                 name=tc.function.name,
                                 arguments=args_json
-                            )
+                            ),
                         )
                     )
 
@@ -670,7 +671,7 @@ class OpenAIBackend(LLMBackend):
                 if stream is not None and hasattr(stream, 'close'):
                     stream.close()
 
-            # Stream complete - parse accumulated tool calls
+            # Stream complete - parse accumulated tool calls (sync)
             tool_calls = None
             if tool_calls_accumulator:
                 tool_calls = []
@@ -686,12 +687,12 @@ class OpenAIBackend(LLMBackend):
                     args_json = json.dumps(parsed_args) if isinstance(parsed_args, dict) else str(parsed_args)
 
                     tool_calls.append(
-                        ToolCall(
-                            id=tc_data["id"],
+                        ToolCall.from_provider(
+                            provider_id=tc_data["id"],
                             function=ToolCallFunction(
                                 name=tc_data["name"],
                                 arguments=args_json
-                            )
+                            ),
                         )
                     )
 
@@ -897,7 +898,7 @@ class OpenAIBackend(LLMBackend):
                 if stream is not None and hasattr(stream, 'close'):
                     await stream.close()
 
-            # Stream complete - parse accumulated tool calls
+            # Stream complete - parse accumulated tool calls (async)
             tool_calls = None
             if tool_calls_accumulator:
                 tool_calls = []
@@ -913,12 +914,12 @@ class OpenAIBackend(LLMBackend):
                     args_json = json.dumps(parsed_args) if isinstance(parsed_args, dict) else str(parsed_args)
 
                     tool_calls.append(
-                        ToolCall(
-                            id=tc_data["id"],
+                        ToolCall.from_provider(
+                            provider_id=tc_data["id"],
                             function=ToolCallFunction(
                                 name=tc_data["name"],
                                 arguments=args_json
-                            )
+                            ),
                         )
                     )
 
@@ -1083,17 +1084,18 @@ class OpenAIBackend(LLMBackend):
                             idx = tc_delta.index
 
                             # Track ID and name for this index
+                            # Generate canonical ID on first delta for each tool call
                             if tc_delta.id:
-                                tool_call_ids[idx] = tc_delta.id
+                                tool_call_ids[idx] = generate_tool_call_id()
                             if tc_delta.function and tc_delta.function.name:
                                 tool_call_names[idx] = tc_delta.function.name
 
-                            # Emit tool call delta
+                            # Emit tool call delta with canonical ID
                             yield ProviderDelta(
                                 stream_id=sid,
                                 tool_call_delta=ToolCallDelta(
                                     index=idx,
-                                    id=tc_delta.id if tc_delta.id else None,
+                                    id=tool_call_ids.get(idx) if tc_delta.id else None,
                                     name=tc_delta.function.name if tc_delta.function and tc_delta.function.name else None,
                                     arguments_delta=tc_delta.function.arguments if tc_delta.function and tc_delta.function.arguments else "",
                                 ),
@@ -1226,17 +1228,18 @@ class OpenAIBackend(LLMBackend):
                             idx = tc_delta.index
 
                             # Track ID and name for this index
+                            # Generate canonical ID on first delta for each tool call
                             if tc_delta.id:
-                                tool_call_ids[idx] = tc_delta.id
+                                tool_call_ids[idx] = generate_tool_call_id()
                             if tc_delta.function and tc_delta.function.name:
                                 tool_call_names[idx] = tc_delta.function.name
 
-                            # Emit tool call delta
+                            # Emit tool call delta with canonical ID
                             yield ProviderDelta(
                                 stream_id=sid,
                                 tool_call_delta=ToolCallDelta(
                                     index=idx,
-                                    id=tc_delta.id if tc_delta.id else None,
+                                    id=tool_call_ids.get(idx) if tc_delta.id else None,
                                     name=tc_delta.function.name if tc_delta.function and tc_delta.function.name else None,
                                     arguments_delta=tc_delta.function.arguments if tc_delta.function and tc_delta.function.arguments else "",
                                 ),

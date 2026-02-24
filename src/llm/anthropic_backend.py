@@ -45,6 +45,7 @@ from .base import (
     ProviderDelta, ToolCallDelta
 )
 from src.session.models.message import ToolCall, ToolCallFunction
+from src.session.models.base import generate_tool_call_id
 from .failure_handler import LLMFailureHandler
 from .cache_tracker import CacheTracker
 
@@ -364,8 +365,8 @@ class AnthropicBackend(LLMBackend):
                     tc_input = getattr(block, "input", {})
 
                 tool_calls.append(
-                    ToolCall(
-                        id=tc_id,
+                    ToolCall.from_provider(
+                        provider_id=tc_id,
                         function=ToolCallFunction(
                             name=tc_name,
                             arguments=json.dumps(tc_input),
@@ -771,7 +772,8 @@ class AnthropicBackend(LLMBackend):
                         idx = getattr(event, "index", 0)
                         if block and getattr(block, "type", "") == "tool_use":
                             tool_calls_acc[idx] = {
-                                "id": getattr(block, "id", ""),
+                                "id": generate_tool_call_id(),
+                                "provider_id": getattr(block, "id", ""),
                                 "name": getattr(block, "name", ""),
                                 "arguments": "",
                             }
@@ -821,7 +823,7 @@ class AnthropicBackend(LLMBackend):
                         f"cached={usage_dict.get('cached_tokens', 0)}"
                     )
 
-            # Build final tool calls
+            # Build final tool calls (sync)
             tool_calls = None
             if tool_calls_acc:
                 tool_calls = []
@@ -842,6 +844,7 @@ class AnthropicBackend(LLMBackend):
                                 name=tc["name"],
                                 arguments=json.dumps(parsed),
                             ),
+                            meta={"provider_tool_id": tc["provider_id"]},
                         )
                     )
 
@@ -933,7 +936,8 @@ class AnthropicBackend(LLMBackend):
                         idx = getattr(event, "index", 0)
                         if block and getattr(block, "type", "") == "tool_use":
                             tool_calls_acc[idx] = {
-                                "id": getattr(block, "id", ""),
+                                "id": generate_tool_call_id(),
+                                "provider_id": getattr(block, "id", ""),
                                 "name": getattr(block, "name", ""),
                                 "arguments": "",
                             }
@@ -980,7 +984,7 @@ class AnthropicBackend(LLMBackend):
                         f"cached={usage_dict.get('cached_tokens', 0)}"
                     )
 
-            # Build final tool calls
+            # Build final tool calls (async)
             tool_calls = None
             if tool_calls_acc:
                 tool_calls = []
@@ -1001,6 +1005,7 @@ class AnthropicBackend(LLMBackend):
                                 name=tc["name"],
                                 arguments=json.dumps(parsed),
                             ),
+                            meta={"provider_tool_id": tc["provider_id"]},
                         )
                     )
 
@@ -1100,7 +1105,7 @@ class AnthropicBackend(LLMBackend):
             params.pop("top_p", None)
 
         try:
-            # Track tool call ordinal (not content block index)
+            # Track tool call ordinal (not content block index) - sync
             tool_call_ordinal = 0
             finish_reason = None
             usage_dict = None
@@ -1116,7 +1121,7 @@ class AnthropicBackend(LLMBackend):
                                 stream_id=sid,
                                 tool_call_delta=ToolCallDelta(
                                     index=tool_call_ordinal,
-                                    id=getattr(block, "id", ""),
+                                    id=generate_tool_call_id(),
                                     name=getattr(block, "name", ""),
                                     arguments_delta="",
                                 ),
@@ -1248,7 +1253,7 @@ class AnthropicBackend(LLMBackend):
                                 stream_id=sid,
                                 tool_call_delta=ToolCallDelta(
                                     index=tool_call_ordinal,
-                                    id=getattr(block, "id", ""),
+                                    id=generate_tool_call_id(),
                                     name=getattr(block, "name", ""),
                                     arguments_delta="",
                                 ),
