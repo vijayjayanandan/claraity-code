@@ -2142,6 +2142,8 @@ class CodingAgentApp(App):
                 pass
 
         # ContextCompacted — clear compacting indicator, show brief result
+        # (Old widgets are already cleared by the compact_boundary handler
+        # in _render_store_message when the boundary MESSAGE_ADDED fires.)
         elif isinstance(event, ContextCompacted):
             try:
                 status_bar = self.query_one("#status", StatusBar)
@@ -3075,7 +3077,16 @@ class CodingAgentApp(App):
             return  # No new widget needed, ToolCard updated in place
         elif message.is_system:
             event_type = message.meta.event_type if message.meta else None
-            if event_type == "clarify_request":
+            if event_type == "compact_boundary":
+                # Compaction just happened — clear all old widgets from conversation.
+                # The compact summary + subsequent messages will mount naturally
+                # via the next MESSAGE_ADDED notifications.
+                for child in list(conversation.children):
+                    child.remove()
+                self._store_message_widgets.clear()
+                self._tool_cards.clear()
+                logger.info("compact_boundary: cleared pre-compaction widgets")
+            elif event_type == "clarify_request":
                 await self._on_clarify_request(message, conversation)
             elif event_type == "plan_submitted":
                 # Mount plan approval widget only if not already resolved.
@@ -3600,10 +3611,11 @@ class CodingAgentApp(App):
             self._is_replaying = False
             return
 
-        # Render all messages from store (in seq order)
+        # Render post-compaction messages only (get_transcript_view filters
+        # out pre-compaction messages when a compact boundary exists).
         messages = []
         try:
-            messages = self._message_store.get_ordered_messages()
+            messages = self._message_store.get_transcript_view()
 
             for message in messages:
                 await self._render_store_message(message, conversation, bulk_load=True)
