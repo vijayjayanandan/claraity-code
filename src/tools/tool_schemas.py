@@ -126,7 +126,7 @@ RUN_COMMAND_TOOL = ToolDefinition(
             },
             "timeout": {
                 "type": "number",
-                "description": "Optional timeout in seconds (default: 30s)"
+                "description": "Timeout in seconds (default: 120). Use higher values for long-running commands like test suites or builds (max: 600)"
             }
         },
         "required": ["command"]

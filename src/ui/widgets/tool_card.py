@@ -731,6 +731,22 @@ class ToolCard(Static):
             error: Error message (may be a structured tool_failure prompt)
         """
         self.status = ToolStatus.FAILED
+
+        # For run_command, extract command output and show in the preview block.
+        # The error content format is: "Command output:\n<output>\n\n<tool_failure>..."
+        if self.tool_name == 'run_command' and error:
+            output_text = error
+            # Strip the <tool_failure> metadata block (designed for LLM, not user)
+            if '<tool_failure>' in error:
+                output_text = error.split('<tool_failure>')[0].strip()
+            # Strip the "Command output:" prefix
+            if output_text.startswith('Command output:\n'):
+                output_text = output_text[len('Command output:\n'):]
+            if output_text:
+                for child in self.query(CommandPreviewBlock):
+                    child.set_output(output_text)
+                    break
+
         # Extract "error: ..." line from structured <tool_failure> blocks
         if error and '<tool_failure>' in error:
             for line in error.split('\n'):

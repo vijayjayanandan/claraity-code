@@ -16,6 +16,7 @@ Security:
 
 import platform
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 
@@ -378,10 +379,15 @@ class ListDirectoryTool(FileOperationTool):
 
             entries = []
             for entry in path.iterdir():
+                stat = entry.stat()
+                mtime_iso = datetime.fromtimestamp(
+                    stat.st_mtime, tz=timezone.utc
+                ).isoformat()
                 entry_info = {
                     "name": entry.name,
                     "type": "directory" if entry.is_dir() else "file",
-                    "size": entry.stat().st_size if entry.is_file() else None
+                    "size": stat.st_size if entry.is_file() else None,
+                    "mtime": mtime_iso,
                 }
                 entries.append(entry_info)
 
@@ -589,7 +595,13 @@ class RunCommandTool(Tool):
             "properties": {
                 "command": {"type": "string", "description": "Shell command to execute"},
                 "working_directory": {"type": "string", "description": "Working directory"},
-                "timeout": {"type": "integer", "description": "Timeout in seconds"}
+                "timeout": {
+                    "type": "integer",
+                    "description": (
+                        "Timeout in seconds (default: 120). Use higher values for "
+                        "long-running commands like test suites or builds (max: 600)"
+                    )
+                }
             },
             "required": ["command"]
         }
@@ -598,7 +610,7 @@ class RunCommandTool(Tool):
         self,
         command: str,
         working_directory: Optional[str] = None,
-        timeout: int = 30,
+        timeout: int = 120,
         **kwargs: Any
     ) -> ToolResult:
         """Execute a shell command."""
@@ -702,25 +714,36 @@ class RunCommandTool(Tool):
                 )
 
         except subprocess.TimeoutExpired as e:
-            # subprocess.run() kills the process and collects buffered output
-            # e.stdout/e.stderr contain whatever was captured before the timeout
+            # subprocess.run() kills the process and collects buffered output.
+            # e.stdout/e.stderr may be str (text=True) or bytes (on some platforms),
+            # or None/empty if PowerShell hadn't flushed its buffers before kill.
             output_parts = []
-            if e.stdout:
-                output_parts.append(f"STDOUT:\n{e.stdout}")
-            if e.stderr:
-                output_parts.append(f"STDERR:\n{e.stderr}")
-            partial_output = "\n\n".join(output_parts) if output_parts else None
+            stdout = e.stdout
+            stderr = e.stderr
+            # Handle bytes (can happen on some platforms despite text=True)
+            if isinstance(stdout, bytes):
+                stdout = stdout.decode('utf-8', errors='replace')
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode('utf-8', errors='replace')
+            if stdout:
+                output_parts.append(f"STDOUT:\n{stdout}")
+            if stderr:
+                output_parts.append(f"STDERR:\n{stderr}")
+            partial_output = "\n\n".join(output_parts) if output_parts else (
+                "(no output captured - process was killed before producing output)"
+            )
 
             return ToolResult(
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 output=partial_output,
-                error=f"Command timed out after {timeout} seconds",
+                error=f"Command timed out after {timeout} seconds. "
+                      f"Use a longer timeout if the command needs more time (max 600s).",
                 metadata={
                     "command": command,
                     "timeout": timeout,
                     "working_directory": cwd or "current",
-                    "partial_output": partial_output is not None
+                    "partial_output": bool(output_parts)
                 }
             )
         except Exception as e:
