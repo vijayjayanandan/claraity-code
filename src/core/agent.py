@@ -297,6 +297,10 @@ class CodingAgent(AgentInterface):
         # Tool output size limit (parsed once, not on every tool call)
         self._max_tool_output_chars = int(os.getenv("TOOL_OUTPUT_MAX_CHARS", "100000"))
 
+        # Compaction cooldown: skip further attempts after a failure
+        # within the same stream_response() call. Reset on next user message.
+        self._compaction_failed = False
+
         # Initialize plan mode state (Claude Code-style planning workflow)
         # Must be initialized before tools registration since plan mode tools need it
         self.plan_mode_state = PlanModeState(
@@ -1057,6 +1061,9 @@ class CodingAgent(AgentInterface):
         # (NOT in tool loop - that would reset mid-request)
         self._error_tracker.reset()
 
+        # Reset compaction cooldown for new user message
+        self._compaction_failed = False
+
         # Track blocked calls for controller constraint injection
         blocked_calls: List[str] = []
 
@@ -1286,9 +1293,10 @@ class CodingAgent(AgentInterface):
                         # Compaction trigger: if context usage >= 85%, compact
                         # and rebuild current_context so next LLM call is smaller.
                         # Uses the LLM's real token count (ground truth).
+                        # Skip if compaction already failed this request (cooldown).
                         COMPACTION_THRESHOLD = 0.85
                         utilization = input_tokens / self.context_builder.max_context_tokens
-                        if utilization >= COMPACTION_THRESHOLD:
+                        if utilization >= COMPACTION_THRESHOLD and not self._compaction_failed:
                             logger.info(
                                 "compaction_triggered",
                                 input_tokens=input_tokens,
@@ -1323,6 +1331,7 @@ class CodingAgent(AgentInterface):
                                     )
                             except Exception as compact_err:
                                 logger.error("compaction_failed", error=str(compact_err))
+                                self._compaction_failed = True
 
                             # Always emit ContextCompacted to clear status bar
                             yield ContextCompacted(

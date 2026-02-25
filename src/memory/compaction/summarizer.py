@@ -250,7 +250,7 @@ Output the summary in clean markdown format."""
         goal = None
         for msg in messages:
             if msg.get("role") == "user":
-                content = msg.get("content", "")
+                content = self._normalize_content(msg.get("content", ""))
                 if content:
                     goal = content[:300] + "..." if len(content) > 300 else content
                     break
@@ -267,7 +267,7 @@ Output the summary in clean markdown format."""
 
         for msg in messages:
             if msg.get("role") == "assistant":
-                content = msg.get("content", "")
+                content = self._normalize_content(msg.get("content", ""))
                 for pattern in decision_patterns:
                     matches = re.findall(pattern, content, re.IGNORECASE)
                     decisions.extend(matches[:2])  # Limit per message
@@ -297,7 +297,7 @@ Output the summary in clean markdown format."""
         user_messages = []
         for msg in messages:
             if msg.get("role") == "user":
-                content = msg.get("content", "")
+                content = self._normalize_content(msg.get("content", ""))
                 if content:
                     user_messages.append(content)
 
@@ -339,7 +339,7 @@ Output the summary in clean markdown format."""
         code_pattern = re.compile(r'```(\w*)\n(.*?)```', re.DOTALL)
 
         for msg in messages:
-            content = msg.get("content", "")
+            content = self._normalize_content(msg.get("content", ""))
             matches = code_pattern.findall(content)
             for lang, code in matches:
                 if len(code.strip()) > 20:  # Ignore trivial snippets
@@ -384,7 +384,7 @@ Output the summary in clean markdown format."""
         error_keywords = ["error", "failed", "wrong", "incorrect", "bug", "fix", "issue", "problem"]
 
         for msg in messages:
-            content = msg.get("content", "")
+            content = self._normalize_content(msg.get("content", ""))
             content_lower = content.lower()
 
             if any(kw in content_lower for kw in error_keywords):
@@ -430,7 +430,7 @@ Output the summary in clean markdown format."""
         ]
 
         for msg in messages:
-            content = msg.get("content", "")
+            content = self._normalize_content(msg.get("content", ""))
             for pattern in file_patterns:
                 matches = re.findall(pattern, content)
                 if isinstance(matches, list) and matches:
@@ -489,7 +489,7 @@ Output the summary in clean markdown format."""
         last_assistant = None
         for msg in reversed(messages):
             if msg.get("role") == "assistant":
-                last_assistant = msg.get("content", "")
+                last_assistant = self._normalize_content(msg.get("content", ""))
                 break
 
         if not last_assistant:
@@ -544,12 +544,36 @@ Output the summary in clean markdown format."""
 
     # ==================== Helpers ====================
 
+    @staticmethod
+    def _normalize_content(content: Any) -> str:
+        """Normalize message content to a plain string.
+
+        Handles multimodal content (list of dicts with type/text/image_url)
+        by extracting text parts. Returns empty string for non-string,
+        non-list types.
+        """
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts = []
+            for item in content:
+                if isinstance(item, dict):
+                    if item.get("type") == "text":
+                        parts.append(item.get("text", ""))
+                    elif item.get("type") == "image_url":
+                        filename = item.get("filename", "image")
+                        parts.append(f"[Image: {filename}]")
+                elif isinstance(item, str):
+                    parts.append(item)
+            return "\n".join(parts)
+        return str(content) if content else ""
+
     def _format_messages_for_llm(self, messages: List[Dict[str, Any]]) -> str:
         """Format messages for LLM prompt."""
         formatted = []
         for i, msg in enumerate(messages):
             role = msg.get("role", "unknown").upper()
-            content = msg.get("content", "")
+            content = self._normalize_content(msg.get("content", ""))
 
             # Truncate very long content
             if len(content) > 1000:

@@ -1344,8 +1344,9 @@ class MemoryManager:
         """
         Compact conversation via LLM summarization (async, non-blocking).
 
-        Reuses the same generate_provider_deltas_async() path that powers
-        normal TUI streaming — native async client, no thread pool.
+        Sends the actual structured conversation messages to the LLM with a
+        summarization system prompt — no serialization to text blob.
+        This avoids token inflation that caused the 378K prompt-too-long error.
         """
         if self._message_store is None:
             logger.warning("compact_conversation_skipped: no MessageStore")
@@ -1365,39 +1366,47 @@ class MemoryManager:
             llm_caller=None,
         )
 
-        # Build summarization prompt
-        try:
-            formatted = summarizer._format_messages_for_llm(context_dicts)
-        except Exception as e:
-            logger.error("compact_format_failed", error=str(e))
-            return 0
+        # Build summarization messages: system prompt + actual conversation + instruction
+        # Key insight: send native structured messages instead of serializing to text.
+        # The conversation messages are already in the right format from get_llm_context().
+        summarize_system = {
+            "role": "system",
+            "content": (
+                "You are a summarization assistant. You will receive a conversation "
+                "between a user and an AI coding agent. Summarize it for continuation."
+            ),
+        }
 
-        prompt_text = (
-            "Analyze this conversation history and create a continuation "
-            "summary for an AI coding agent.\n\n"
-            f"CONVERSATION HISTORY:\n{formatted}\n\n"
-            "Generate a summary with these sections IN ORDER OF IMPORTANCE:\n\n"
-            "## Goal and Key Decisions\n"
-            "What is the user trying to accomplish? What important decisions were made?\n\n"
-            "## All User Messages\n"
-            "Include ALL user messages in chronological order.\n\n"
-            "## Code Snippets\n"
-            "Include actual code that was written or discussed.\n\n"
-            "## Errors and Fixes\n"
-            "What went wrong and how was it fixed?\n\n"
-            "## Files Modified\n"
-            "Which files were created/modified and why?\n\n"
-            "## Current State\n"
-            "What was just completed? What's the logical next step?\n\n"
-            "IMPORTANT: Preserve user messages VERBATIM. Include actual code snippets. "
-            f"Target approximately {token_budget} tokens.\n\n"
-            "Output the summary in clean markdown format."
+        summarize_instruction = {
+            "role": "user",
+            "content": (
+                "The conversation above is between a user and an AI coding agent. "
+                "Create a continuation summary with these sections IN ORDER OF IMPORTANCE:\n\n"
+                "## Goal and Key Decisions\n"
+                "What is the user trying to accomplish? What important decisions were made?\n\n"
+                "## All User Messages\n"
+                "Include ALL user messages in chronological order.\n\n"
+                "## Code Snippets\n"
+                "Include actual code that was written or discussed.\n\n"
+                "## Errors and Fixes\n"
+                "What went wrong and how was it fixed?\n\n"
+                "## Files Modified\n"
+                "Which files were created/modified and why?\n\n"
+                "## Current State\n"
+                "What was just completed? What's the logical next step?\n\n"
+                "IMPORTANT: Preserve user messages VERBATIM. Include actual code snippets. "
+                f"Target approximately {token_budget} tokens.\n\n"
+                "Output the summary in clean markdown format."
+            ),
+        }
+
+        messages = [summarize_system] + context_dicts + [summarize_instruction]
+
+        logger.info(
+            "compact_sending_native_messages",
+            conversation_messages=len(context_dicts),
+            total_messages=len(messages),
         )
-
-        messages = [
-            {"role": "system", "content": "You are a helpful assistant that creates concise conversation summaries."},
-            {"role": "user", "content": prompt_text},
-        ]
 
         # Use the same async streaming path as normal TUI conversation
         try:
