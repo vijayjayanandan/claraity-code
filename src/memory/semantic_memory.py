@@ -4,9 +4,17 @@ import uuid
 import os
 from typing import List, Optional, Dict, Any, Tuple
 from pathlib import Path
-import chromadb
-from chromadb.config import Settings
 from openai import OpenAI
+
+# chromadb is an optional dependency (pip install claraity-code[rag])
+try:
+    import chromadb
+    from chromadb.config import Settings
+    CHROMADB_AVAILABLE = True
+except ImportError:
+    chromadb = None
+    Settings = None
+    CHROMADB_AVAILABLE = False
 
 from .models import MemoryEntry, MemoryType, CodeContext
 
@@ -42,6 +50,13 @@ class SemanticMemory:
             base_url: API base URL (from .env EMBEDDING_BASE_URL)
             embedding_dimension: Dimension of embeddings (from .env EMBEDDING_DIMENSION)
         """
+        self._available = CHROMADB_AVAILABLE
+        if not CHROMADB_AVAILABLE:
+            # RAG dependencies not installed - semantic memory disabled
+            self.collection = None
+            self.similarity_threshold = similarity_threshold
+            return
+
         self.persist_directory = Path(persist_directory)
         self.persist_directory.mkdir(parents=True, exist_ok=True)
 
@@ -107,6 +122,9 @@ class SemanticMemory:
         Returns:
             ID of stored memory
         """
+        if not self._available:
+            return ""
+
         memory_id = str(uuid.uuid4())
 
         # Generate embedding using Alibaba API
@@ -196,6 +214,9 @@ class SemanticMemory:
         Returns:
             List of (content, similarity_score, metadata) tuples
         """
+        if not self._available:
+            return []
+
         # Generate query embedding using Alibaba API
         response = self.client_api.embeddings.create(
             model=self.embedding_model_name, input=[query]
@@ -297,6 +318,8 @@ class SemanticMemory:
             memory_id: ID of memory to update
             new_importance: New importance score
         """
+        if not self._available:
+            return
         # Get existing memory
         result = self.collection.get(ids=[memory_id])
 
@@ -309,10 +332,14 @@ class SemanticMemory:
 
     def delete_memory(self, memory_id: str) -> None:
         """Delete a memory entry."""
+        if not self._available:
+            return
         self.collection.delete(ids=[memory_id])
 
     def get_all_code_files(self) -> List[str]:
         """Get list of all indexed code files."""
+        if not self._available:
+            return []
         results = self.collection.get(where={"type": "code_context"})
 
         files = set()
@@ -325,6 +352,8 @@ class SemanticMemory:
 
     def get_statistics(self) -> Dict[str, Any]:
         """Get semantic memory statistics."""
+        if not self._available:
+            return {"total_memories": 0, "status": "disabled (chromadb not installed)"}
         all_data = self.collection.get()
 
         # Count by type
@@ -345,6 +374,8 @@ class SemanticMemory:
 
     def clear(self) -> None:
         """Clear all semantic memory."""
+        if not self._available:
+            return
         # Delete collection and recreate
         self.client.delete_collection(name=self.collection.name)
         self.collection = self.client.get_or_create_collection(
@@ -359,6 +390,9 @@ class SemanticMemory:
         Args:
             filepath: Path to export file
         """
+        if not self._available:
+            return
+
         import json
 
         all_data = self.collection.get()

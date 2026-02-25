@@ -4,8 +4,16 @@ import os
 import uuid
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Set
-from tree_sitter_languages import get_language, get_parser
-import tree_sitter as ts
+# tree-sitter is an optional dependency (pip install claraity-code[rag])
+try:
+    from tree_sitter_languages import get_language, get_parser
+    import tree_sitter as ts
+    TREE_SITTER_AVAILABLE = True
+except ImportError:
+    get_language = None
+    get_parser = None
+    ts = None
+    TREE_SITTER_AVAILABLE = False
 
 from .models import CodeChunk, CodebaseIndex, DependencyGraph
 

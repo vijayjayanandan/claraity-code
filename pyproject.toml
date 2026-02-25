@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "claraity-code"
-version = "0.12.0"
+version = "0.12.2"
 description = "ClarAIty Code - An AI-powered coding agent with TUI interface, tool execution, multi-layered memory, prompt caching, and intelligent context management"
 authors = [
     {name = "Vijay Jayanandan"}
@@ -67,6 +67,10 @@ api = [
     "watchdog>=4.0.0",
 ]
 
+observability = [
+    "langfuse>=2.0.0",
+]
+
 ollama = [
     "ollama>=0.2.0",
 ]
@@ -76,7 +80,7 @@ vllm = [
 ]
 
 all = [
-    "claraity-code[dev,rag,api,ollama,vllm]",
+    "claraity-code[dev,rag,api,observability,ollama,vllm]",
 ]
 
 [project.scripts]

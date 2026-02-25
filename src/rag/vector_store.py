@@ -2,8 +2,15 @@
 
 from typing import List, Optional, Dict, Any
 from pathlib import Path
-import chromadb
-from chromadb.config import Settings
+# chromadb is an optional dependency (pip install claraity-code[rag])
+try:
+    import chromadb
+    from chromadb.config import Settings
+    CHROMADB_AVAILABLE = True
+except ImportError:
+    chromadb = None
+    Settings = None
+    CHROMADB_AVAILABLE = False
 
 from .models import CodeChunk, CodebaseIndex
 

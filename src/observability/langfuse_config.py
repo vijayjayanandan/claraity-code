@@ -58,11 +58,9 @@ def initialize_langfuse() -> Optional[Langfuse]:
         logger.info("Observability disabled via OBSERVABILITY_ENABLED=false")
         return None
 
-    # Check if Langfuse is installed
+    # Check if Langfuse is installed (optional dependency)
     if not LANGFUSE_AVAILABLE:
-        logger.warning(
-            "Langfuse not installed. Install with: pip install langfuse"
-        )
+        logger.debug("Langfuse not installed - observability tracing disabled")
         return None
 
     # Get configuration from environment
