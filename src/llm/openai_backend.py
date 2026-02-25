@@ -152,16 +152,29 @@ class OpenAIBackend(LLMBackend):
     def _add_cache_control_to_message(message: Dict[str, Any]) -> Dict[str, Any]:
         """Add cache_control breakpoint to a message's content.
 
-        Converts plain string content to content blocks format with
-        cache_control, which Anthropic requires for prompt caching.
-        If content is already in blocks format, adds cache_control
-        to the last block.
+        For role="tool" messages: adds cache_control as a top-level field on
+        the message dict, keeping content as a plain string. LiteLLM's
+        convert_to_anthropic_tool_result() reads message["cache_control"]
+        and propagates it onto the Anthropic tool_result content block.
+        Converting content to a block array breaks the litellm translation
+        and causes Vertex AI to reject the request.
+
+        For other roles: converts plain string content to content blocks
+        format with cache_control embedded, which Anthropic requires for
+        prompt caching. If content is already in blocks format, adds
+        cache_control to the last block.
         """
         msg = message.copy()
         content = msg.get("content")
 
         if content is None:
             # Tool-call-only assistant messages have no content
+            return msg
+
+        # Tool result messages: cache_control goes as a sibling field, not
+        # inside content blocks. See litellm convert_to_anthropic_tool_result().
+        if msg.get("role") == "tool":
+            msg["cache_control"] = {"type": "ephemeral"}
             return msg
 
         if isinstance(content, str):
@@ -182,8 +195,12 @@ class OpenAIBackend(LLMBackend):
     def _apply_cache_control(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Apply Anthropic prompt caching breakpoints to messages.
 
-        BP1: First system message (static across session)
-        BP2: Second-to-last message (caches conversation history prefix)
+        BP1: First system message (static across session).
+             Covers tools + system in the cache prefix (order: tools -> system -> messages).
+        BP2: Last message with content (caches entire conversation incrementally).
+             Matches Anthropic's recommended pattern: "mark the final block of the
+             final message with cache_control so the conversation can be incrementally
+             cached."
 
         For non-Anthropic models, returns messages unchanged.
         """
@@ -196,10 +213,10 @@ class OpenAIBackend(LLMBackend):
         if result[0].get("role") == "system":
             result[0] = self._add_cache_control_to_message(result[0])
 
-        # BP2: Walk backwards from second-to-last to find a message with
-        # content (skips tool-call-only assistant messages with content=None)
-        if len(result) >= 3:
-            for i in range(len(result) - 2, 0, -1):
+        # BP2: Walk backwards from last message to find one with content
+        # (skips tool-call-only assistant messages with content=None)
+        if len(result) >= 2:
+            for i in range(len(result) - 1, 0, -1):
                 if result[i].get("content") is not None:
                     result[i] = self._add_cache_control_to_message(result[i])
                     break
