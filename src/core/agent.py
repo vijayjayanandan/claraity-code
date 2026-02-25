@@ -1,10 +1,11 @@
 """Main coding agent orchestration."""
 
 import asyncio
+import json
 import os
 import traceback
 import uuid
-from typing import Optional, List, Dict, Any, TYPE_CHECKING, Callable, Awaitable
+from typing import Optional, List, Dict, Any, TYPE_CHECKING
 from pathlib import Path
 
 from src.observability import get_logger
@@ -12,13 +13,12 @@ from src.observability import get_logger
 if TYPE_CHECKING:
     from src.hooks import HookManager, HookDecision
     from src.core.protocol import UIProtocol
+    from src.rag import CodeIndexer, Embedder, HybridRetriever, CodeChunk
 
 from src.memory import MemoryManager, TaskContext
-from src.rag import CodeIndexer, Embedder, HybridRetriever, CodeChunk
 from src.llm import LLMBackend, OllamaBackend, OpenAIBackend, LLMConfig, LLMBackendType
 from src.llm.base import ProviderDelta
 from src.llm.failure_handler import LLMError, RateLimitError, TimeoutError
-from src.platform import safe_print, remove_emojis
 from src.tools import (
     ToolExecutor,
     ToolNotFoundError,
@@ -158,49 +158,6 @@ except ImportError:
 logger = get_logger("core.agent")
 
 
-class AgentResponse:
-    """Response from the coding agent."""
-
-    def __init__(
-        self,
-        content: str,
-        tool_calls: Optional[List[Dict]] = None,
-        metadata: Optional[Dict] = None,
-    ):
-        self.content = content
-        self.tool_calls = tool_calls or []
-        self.metadata = metadata or {}
-
-
-class ToolExecutionResult:
-    """
-    Result from tool execution loop.
-
-    Contains the exact ordered transcript of messages produced during the tool loop.
-    This preserves:
-    - Exact ordering (tool A before tool B)
-    - Correct grouping (which tool result maps to which call)
-    - Multi-iteration structure (assistant -> tool -> assistant -> tool -> ...)
-    - Replay/debug determinism
-
-    The turn_messages list contains OpenAI-format messages in exact order:
-    - {"role": "assistant", "content": "...", "tool_calls": [...]}
-    - {"role": "tool", "tool_call_id": "...", "name": "...", "content": "..."}
-    - {"role": "assistant", "content": "final answer"}
-    """
-
-    def __init__(self, content: str, turn_messages: Optional[List[Dict[str, Any]]] = None):
-        """
-        Initialize tool execution result.
-
-        Args:
-            content: Final assistant content (convenience accessor)
-            turn_messages: Exact ordered transcript of messages to persist
-        """
-        self.content = content
-        self.turn_messages = turn_messages or []
-
-
 class CodingAgent(AgentInterface):
     """
     Main AI coding agent that orchestrates all components.
@@ -278,7 +235,6 @@ class CodingAgent(AgentInterface):
 
         # Initialize LLM backend
         # Read from .env if not provided
-        import os
         llm_config = LLMConfig(
             backend_type=LLMBackendType(backend),
             model_name=model_name,
@@ -362,6 +318,7 @@ class CodingAgent(AgentInterface):
         # Connections added via enable_mcp_integration()
         from src.integrations.mcp.manager import McpConnectionManager
         self._mcp_manager = McpConnectionManager()
+        self._tools_cache = None  # Invalidated when tools are registered/unregistered
 
         # Set workspace root on file operation tools so path validation works
         from src.tools.file_operations import FileOperationTool
@@ -394,6 +351,26 @@ class CodingAgent(AgentInterface):
             print(f"Warning: {e}. Using NORMAL mode.")
             mode = PermissionMode.NORMAL
         self.permission_manager = PermissionManager(mode=mode)
+
+        # Centralized tool gating service (used by both sync and async tool loops)
+        from src.core.tool_gating import ToolGatingService
+        self._gating = ToolGatingService(
+            plan_mode_state=self.plan_mode_state,
+            director_adapter=self.director_adapter,
+            permission_manager=self.permission_manager,
+            error_tracker=self._error_tracker,
+            mcp_manager=self._mcp_manager,
+        )
+
+        # Special tool handlers (clarify, plan approval, director plan approval)
+        from src.core.special_tool_handlers import SpecialToolHandlers
+        self._special_handlers = SpecialToolHandlers(
+            memory=self.memory,
+            plan_mode_state=self.plan_mode_state,
+            director_adapter=self.director_adapter,
+            tool_executor=self.tool_executor,
+            permission_manager=self.permission_manager,
+        )
 
         # Initialize subagent manager (lazy import to avoid circular dependency)
         from src.subagents import SubAgentManager
@@ -450,75 +427,6 @@ class CodingAgent(AgentInterface):
                 # SessionStart hooks don't block, just log errors
                 logger.warning(f"SessionStart hook error: {e}", exc_info=True)
 
-    def delegate_to_subagent(
-        self,
-        subagent_name: str,
-        task_description: str,
-        context: Optional[Dict[str, Any]] = None,
-        max_iterations: int = 5
-    ) -> 'SubAgentResult':
-        """Delegate a task to a specialized subagent.
-
-        Subagents operate with independent context windows and specialized
-        system prompts, preventing context pollution in the main conversation.
-
-        Args:
-            subagent_name: Name of the subagent (e.g., 'code-reviewer')
-            task_description: Clear description of the task to delegate
-            context: Optional additional context for the subagent
-            max_iterations: Maximum tool-calling iterations for the subagent
-
-        Returns:
-            SubAgentResult with output, success status, and metadata
-
-        Example:
-            >>> result = agent.delegate_to_subagent(
-            ...     'code-reviewer',
-            ...     'Review src/api.py for security vulnerabilities'
-            ... )
-            >>> if result.success:
-            ...     print(result.output)
-        """
-        logger.info(f"Delegating to subagent '{subagent_name}': {task_description[:100]}...")
-
-        # Delegate to subagent
-        result = self.subagent_manager.delegate(
-            subagent_name=subagent_name,
-            task_description=task_description,
-            context=context,
-            max_iterations=max_iterations
-        )
-
-        if not result:
-            logger.error(f"Subagent '{subagent_name}' not found")
-            # Return error result
-            from src.subagents import SubAgentResult
-            return SubAgentResult(
-                success=False,
-                subagent_name=subagent_name,
-                output="",
-                error=f"Subagent '{subagent_name}' not found. Available: {self.get_available_subagents()}"
-            )
-
-        # Emit SubagentStop hook if hook manager exists
-        if self.hook_manager and result.success:
-            try:
-                self.hook_manager.emit_subagent_stop(
-                    subagent_name=subagent_name,
-                    result=result.output,
-                    duration=result.execution_time
-                )
-            except Exception as e:
-                logger.warning(f"SubagentStop hook error: {e}")
-
-        logger.info(
-            f"Subagent '{subagent_name}' completed: "
-            f"{'[OK] success' if result.success else '[FAIL] failed'} "
-            f"({result.execution_time:.2f}s)"
-        )
-
-        return result
-
     def get_available_subagents(self) -> List[str]:
         """Get list of all available subagent names.
 
@@ -562,88 +470,8 @@ class CodingAgent(AgentInterface):
         """Check if currently in plan mode."""
         return self.plan_mode_state.is_active
 
-    def _check_plan_mode_gate(
-        self,
-        tool_name: str,
-        tool_args: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Check if a tool call is allowed under plan mode restrictions.
-
-        Args:
-            tool_name: Name of the tool being called
-            tool_args: Arguments to the tool
-
-        Returns:
-            None if allowed, or a gated response dict if denied
-        """
-        # Extract target path from common argument names
-        target_path = tool_args.get("file_path") or tool_args.get("path")
-
-        decision = self.plan_mode_state.gate_tool(tool_name, target_path)
-
-        if decision == PlanGateDecision.DENY:
-            return {
-                "status": "denied",
-                "error_code": "PLAN_MODE_GATED",
-                "message": f"Tool '{tool_name}' is not allowed in plan mode. Only read-only tools and writing to the plan file are permitted.",
-                "plan_path": str(self.plan_mode_state.plan_file_path) if self.plan_mode_state.plan_file_path else None,
-                "allowed_actions": [
-                    "Use read-only tools (read_file, grep, glob, etc.)",
-                    f"Write to plan file: {self.plan_mode_state.plan_file_path}",
-                    "Call request_plan_approval when ready for approval"
-                ]
-            }
-
-        if decision == PlanGateDecision.REQUIRE_APPROVAL:
-            return {
-                "status": "denied",
-                "error_code": "PLAN_APPROVAL_REQUIRED",
-                "message": f"Tool '{tool_name}' cannot run until the plan is approved. The plan is awaiting user approval.",
-                "plan_path": str(self.plan_mode_state.plan_file_path) if self.plan_mode_state.plan_file_path else None,
-                "allowed_actions": [
-                    "Wait for user to approve or reject the plan",
-                    "Use read-only tools while waiting"
-                ]
-            }
-
-        return None  # Allowed
-
-    def _check_director_gate(
-        self,
-        tool_name: str,
-        tool_args: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Check if a tool call is allowed under director mode restrictions.
-
-        Args:
-            tool_name: Name of the tool being called
-            tool_args: Arguments to the tool
-
-        Returns:
-            None if allowed, or a gated response dict if denied
-        """
-        if not self.director_adapter.is_active:
-            return None
-
-        from src.director.adapter import DirectorGateDecision
-        decision = self.director_adapter.gate_tool(tool_name, tool_args)
-
-        if decision == DirectorGateDecision.DENY:
-            phase = self.director_adapter.phase.name
-            return {
-                "status": "denied",
-                "error_code": "DIRECTOR_MODE_GATED",
-                "message": (
-                    f"Tool '{tool_name}' is not allowed in Director "
-                    f"{phase} phase. Use read-only tools or the "
-                    f"appropriate director checkpoint tool."
-                ),
-                "phase": phase,
-            }
-
-        return None  # Allowed
+    # NOTE: _check_plan_mode_gate and _check_director_gate moved to
+    # src/core/tool_gating.py -> ToolGatingService (Phase 2 refactor)
 
     def _refresh_director_context(self, current_context: list) -> None:
         """
@@ -702,7 +530,6 @@ class CodingAgent(AgentInterface):
             if not self.plan_mode_state.is_active:
                 # Reconstruct plan mode state
                 if plan_path:
-                    from pathlib import Path
                     self.plan_mode_state.plan_file_path = Path(plan_path)
                     self.plan_mode_state.session_id = self._session_id
                 self.plan_mode_state.is_active = True
@@ -714,7 +541,6 @@ class CodingAgent(AgentInterface):
         elif current_mode == "awaiting_approval":
             # Awaiting approval - set awaiting state
             if plan_path:
-                from pathlib import Path
                 self.plan_mode_state.plan_file_path = Path(plan_path)
             self.plan_mode_state.is_active = False
             self.plan_mode_state._awaiting_approval = True
@@ -814,17 +640,15 @@ class CodingAgent(AgentInterface):
         # This is registered after subagent_manager is initialized in __init__
         # Will be registered separately via _register_delegation_tool()
 
+        self._invalidate_tools_cache()
+
     def _get_tools(self):
         """Build the tool list for LLM requests (native + MCP).
 
-        Builds dynamically from the tool executor's registered tools to
-        ensure schema names always match implementations. Static ALL_TOOLS
-        is no longer used here to avoid stale schema mismatches.
-
-        MCP bridge tools live in both ToolExecutor (for execution) and
-        the MCP manager (for schema definitions). Exclude them from the
-        native loop to avoid sending duplicate tool names to the LLM API.
+        Results are cached; call _invalidate_tools_cache() when tools change.
         """
+        if self._tools_cache is not None:
+            return self._tools_cache
         from src.llm.base import ToolDefinition
         from src.integrations.mcp.bridge import McpBridgeTool
         native_defs = [
@@ -833,7 +657,12 @@ class CodingAgent(AgentInterface):
             if not isinstance(t, McpBridgeTool)
         ]
         mcp_defs = self._mcp_manager.get_all_tool_definitions() or []
-        return native_defs + list(mcp_defs)
+        self._tools_cache = native_defs + list(mcp_defs)
+        return self._tools_cache
+
+    def _invalidate_tools_cache(self):
+        """Clear cached tool definitions (call after registering/unregistering tools)."""
+        self._tools_cache = None
 
     async def enable_mcp_integration(self, name, mcp_registry, client, secret_store=None):
         """Enable a named MCP integration by connecting and discovering tools.
@@ -847,7 +676,7 @@ class CodingAgent(AgentInterface):
         Returns:
             Number of MCP tools registered.
         """
-        return await self._mcp_manager.connect(
+        result = await self._mcp_manager.connect(
             name=name,
             config=client._config,
             client=client,
@@ -855,6 +684,8 @@ class CodingAgent(AgentInterface):
             tool_executor=self.tool_executor,
             secret_store=secret_store,
         )
+        self._invalidate_tools_cache()
+        return result
 
     async def disable_mcp_integration(self, name):
         """Disconnect a named MCP integration.
@@ -863,660 +694,7 @@ class CodingAgent(AgentInterface):
             name: Connection identifier.
         """
         await self._mcp_manager.disconnect(name, self.tool_executor)
-
-    @observe_agent_method("execute_with_tools", capture_input=False, capture_output=True)
-    def _execute_with_tools(
-        self,
-        context: List[Dict[str, str]],
-        max_iterations: int = 3,
-        stream: bool = False,
-        debug: bool = False,
-        on_stream_start: Optional[Callable[[], None]] = None
-    ) -> ToolExecutionResult:
-        """
-        Execute LLM with native function calling loop.
-
-        Uses OpenAI-compatible function calling API for reliable tool execution.
-        Tools are automatically synced from tool_schemas.py.
-
-        Args:
-            context: Initial conversation context
-            max_iterations: Maximum tool calling iterations (prevent infinite loops)
-            stream: Whether to stream responses
-            debug: Whether to print debug information (default: False for production)
-            on_stream_start: Optional callback invoked when streaming starts (for progress indicators)
-
-        Returns:
-            ToolExecutionResult with final content and ordered transcript of messages
-        """
-        iteration = 0
-        current_context = context.copy()
-        turn_messages = []  # Ordered transcript of messages to persist
-
-        while iteration < max_iterations:
-            iteration += 1
-            if debug:
-                print(f"\n[Tool Loop - Iteration {iteration}/{max_iterations}]")
-
-            # Generate LLM response with native function calling
-            if stream:
-                # Use streaming mode - display chunks as they arrive
-                response_content = ""
-                tool_calls = None
-                stream_started = False  # Track if callback was invoked
-
-                for chunk, tc in self.llm.generate_with_tools_stream(
-                    messages=current_context,
-                    tools=self._get_tools(),
-                    tool_choice="auto"
-                ):
-                    # Display content chunks as they arrive
-                    if chunk.content and not chunk.done:
-                        # Invoke on_stream_start callback once when first chunk arrives
-                        if not stream_started and on_stream_start:
-                            on_stream_start()
-                            stream_started = True
-
-                        # Strip emojis for Windows compatibility
-                        from src.platform import remove_emojis
-                        safe_content = remove_emojis(chunk.content)
-
-                        # Print content to console
-                        print(safe_content, end="", flush=True)
-                        response_content += safe_content
-
-                    # Stream complete - get tool calls
-                    if chunk.done:
-                        tool_calls = tc
-                        if response_content:
-                            print()  # New line after streaming completes
-
-                # If only tool calls (no content), response_content may be empty
-                if not response_content:
-                    response_content = ""
-            else:
-                # Non-streaming mode - original behavior
-                llm_response = self.llm.generate_with_tools(
-                    messages=current_context,
-                    tools=self._get_tools(),
-                    tool_choice="auto"  # Let LLM decide whether to use tools
-                )
-
-                response_content = llm_response.content or ""  # May be None if tool-only response
-                tool_calls = llm_response.tool_calls
-
-                # AUTO-RECOVERY: Check for truncation (non-streaming only)
-                if hasattr(llm_response, 'raw_response') and isinstance(llm_response.raw_response, dict):
-                    truncation_info = llm_response.raw_response.get('truncation_info', {})
-                    if truncation_info.get('truncated'):
-                        if debug:
-                            print(f"[AUTO-RECOVERY] Detected truncation, generating continuation...")
-
-                        # Add continuation prompt
-                        continuation_context = current_context.copy()
-                        continuation_context.append({
-                            "role": "assistant",
-                            "content": response_content
-                        })
-                        continuation_context.append({
-                            "role": "user",
-                            "content": "Your previous response was truncated due to token limits. Please continue from where you left off. Use append_to_file if you were creating a large file."
-                        })
-
-                        # Generate continuation
-                        continuation_response = self.llm.generate_with_tools(
-                            messages=continuation_context,
-                            tools=self._get_tools(),
-                            tool_choice="auto"
-                        )
-                        response_content = response_content + "\n\n" + (continuation_response.content or "")
-                        # Merge tool calls from continuation
-                        if continuation_response.tool_calls:
-                            tool_calls = (tool_calls or []) + continuation_response.tool_calls
-
-                        if debug:
-                            print(f"[AUTO-RECOVERY] Successfully generated continuation")
-
-            if debug:
-                print(f"LLM Response: {response_content[:200] if response_content else '(tool-only response)'}...")
-
-            # Check if there are tool calls
-            if not tool_calls:
-                # No tool calls - we're done
-                if debug:
-                    print("[Tool Loop] No tool calls detected - finishing")
-                # Add final assistant message to transcript (no tool_calls)
-                final_content = response_content if response_content else "Task completed."
-                turn_messages.append({
-                    "role": "assistant",
-                    "content": final_content
-                })
-                return ToolExecutionResult(content=final_content, turn_messages=turn_messages)
-
-            # Execute tool calls
-            if debug:
-                print(f"[Tool Loop] Found {len(tool_calls)} tool call(s)")
-
-            tool_results = []
-            tool_messages = []  # For function calling API format
-
-            for i, tool_call in enumerate(tool_calls, 1):
-                tool_name = tool_call.function.name
-                tool_args = tool_call.function.get_parsed_arguments()
-
-                # Print tool announcement (clean format for CLI)
-                self._print_tool_announcement(tool_name, tool_args)
-
-                if debug:
-                    print(f"  Arguments: {tool_args}")
-
-                # Check plan mode gating BEFORE approval and execution
-                plan_gate_result = self._check_plan_mode_gate(tool_name, tool_args)
-                if plan_gate_result is not None:
-                    # Tool is gated in plan mode
-                    if debug:
-                        print(f"  [GATED] {plan_gate_result['message']}")
-
-                    # Return gated response to LLM
-                    import json
-                    gated_output = json.dumps(plan_gate_result, indent=2)
-                    tool_result = {
-                        "tool": tool_name,
-                        "arguments": tool_args,
-                        "success": False,
-                        "error": plan_gate_result["message"]
-                    }
-                    tool_results.append(tool_result)
-                    tool_messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "name": tool_name,
-                        "content": gated_output
-                    })
-                    self.tool_execution_history.append(tool_result)
-                    continue  # Skip to next tool call
-
-                # Check director mode gating BEFORE approval and execution
-                director_gate_result = self._check_director_gate(tool_name, tool_args)
-                if director_gate_result is not None:
-                    if debug:
-                        print(f"  [GATED] {director_gate_result['message']}")
-                    import json
-                    gated_output = json.dumps(director_gate_result, indent=2)
-                    tool_result = {
-                        "tool": tool_name,
-                        "arguments": tool_args,
-                        "success": False,
-                        "error": director_gate_result["message"]
-                    }
-                    tool_results.append(tool_result)
-                    tool_messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "name": tool_name,
-                        "content": gated_output
-                    })
-                    self.tool_execution_history.append(tool_result)
-                    continue  # Skip to next tool call
-
-                # Check if approval is required (NORMAL mode only)
-                # NOTE: MCP tools are TUI-only (enabled via async enable_mcp_integration).
-                # They should never appear in this sync path. If they do, block them.
-                if self._mcp_manager.is_mcp_tool(tool_name):
-                    tool_result = f"[BLOCKED] MCP tool '{tool_name}' is only available in TUI mode"
-                    tool_results.append({"status": "error", "message": tool_result, "tool_name": tool_name})
-                    tool_messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "name": tool_name,
-                        "content": tool_result
-                    })
-                    continue
-
-                if self.permission_manager and self.permission_manager.mode == PermissionMode.NORMAL:
-                    # Only ask for risky operations
-                    risky_tools = ['write_file', 'edit_file', 'append_to_file', 'run_command', 'git_commit']
-
-                    if tool_name in risky_tools:
-                        approved = self._prompt_tool_approval(tool_name, tool_args)
-
-                        if not approved:
-                            # User rejected - stop execution immediately (Claude Code behavior)
-                            # Don't send to LLM, just return and wait for user's next message
-                            if debug:
-                                print(f"  [CANCEL] User rejected operation - stopping execution")
-
-                            # Return immediately - conversation stops, waiting for user input
-                            # Persist any messages accumulated so far (partial transcript)
-                            return ToolExecutionResult(content="", turn_messages=turn_messages)
-
-                try:
-                    # Pass tool_call_id for delegation tool (registry linking)
-                    if tool_name == 'delegate_to_subagent':
-                        tool_args['_tool_call_id'] = tool_call.id
-
-                    # Execute the tool
-                    result = self.tool_executor.execute_tool(
-                        tool_name,
-                        **tool_args
-                    )
-
-                    if result.is_success():
-                        output = result.output
-                        # Check for oversized outputs - return error with guidance instead of silent truncation
-                        if isinstance(output, str) and len(output) > self._max_tool_output_chars:
-                            error_msg, tool_msg, history = self._format_oversized_output_error(
-                                len(output), tool_name, tool_args, tool_call.id
-                            )
-                            tool_results.append(history)
-                            tool_messages.append(tool_msg)
-                            self.tool_execution_history.append(history)
-                            if debug:
-                                print(f"  [LIMIT] Output too large: {len(output):,} chars")
-                            continue  # Skip to next tool call
-
-                        tool_result = {
-                            "tool": tool_name,
-                            "arguments": tool_args,
-                            "success": True,
-                            "result": output
-                        }
-                        tool_results.append(tool_result)
-
-                        # Format for function calling API
-                        tool_messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "name": tool_name,
-                            "content": str(output)
-                        })
-
-                        # Track in history for validation/testing
-                        self.tool_execution_history.append(tool_result)
-
-                        if debug:
-                            print(f"  [OK] Success: {str(output)[:100]}...")
-                    else:
-                        tool_result = {
-                            "tool": tool_name,
-                            "arguments": tool_args,
-                            "success": False,
-                            "error": result.error
-                        }
-                        tool_results.append(tool_result)
-
-                        # Format error for function calling API
-                        # Include result.output (stdout/stderr) so LLM can see what went wrong
-                        error_content = f"Error: {result.error}"
-                        if result.output:
-                            error_content += f"\n\nOutput:\n{result.output}"
-                        tool_messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "name": tool_name,
-                            "content": error_content
-                        })
-
-                        # Track in history for validation/testing
-                        self.tool_execution_history.append(tool_result)
-
-                        if debug:
-                            print(f"  [FAIL] Error: {result.error}")
-
-                except Exception as e:
-                    tool_result = {
-                        "tool": tool_name,
-                        "arguments": tool_args,
-                        "success": False,
-                        "error": str(e)
-                    }
-                    tool_results.append(tool_result)
-
-                    # Format exception for function calling API
-                    tool_messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "name": tool_name,
-                        "content": f"Exception: {str(e)}"
-                    })
-
-                    # Track in history for validation/testing
-                    self.tool_execution_history.append(tool_result)
-
-                    if debug:
-                        print(f"  [FAIL] Exception: {e}")
-
-            # Build assistant message with tool_calls
-            import json
-            assistant_msg = {
-                "role": "assistant",
-                "content": response_content,
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments  # Already JSON string
-                        }
-                    }
-                    for tc in tool_calls
-                ]
-            }
-
-            # Add to transcript (for persistence) and context (for LLM)
-            turn_messages.append(assistant_msg)
-            current_context.append(assistant_msg)
-
-            # Add tool results to transcript and context
-            turn_messages.extend(tool_messages)
-            current_context.extend(tool_messages)
-
-        # Max iterations reached - generate final summary
-        if debug:
-            print(f"\n[Tool Loop] Max iterations ({max_iterations}) reached - generating final summary")
-
-        # Ask LLM to summarize what was learned
-        current_context.append({
-            "role": "user",
-            "content": "You've reached the maximum number of tool iterations. Based on the information you've gathered from the tools, please provide a clear, concise answer to the original user question."
-        })
-
-        # Generate final summary (no tools this time, just text)
-        final_response = self.llm.generate_with_tools(
-            messages=current_context,
-            tools=self._get_tools(),
-            tool_choice="none"  # Force text response only
-        )
-        final_content = final_response.content or "Task completed based on tool results."
-        # Add final assistant message to transcript
-        turn_messages.append({
-            "role": "assistant",
-            "content": final_content
-        })
-        return ToolExecutionResult(content=final_content, turn_messages=turn_messages)
-
-    async def _execute_with_tools_async(
-        self,
-        context: List[Dict[str, str]],
-        max_iterations: int = 3,
-        on_chunk: Optional[Callable[[str], Awaitable[None]]] = None,
-        request_approval: Optional[Callable[[str, Dict[str, Any]], Awaitable[bool]]] = None,
-        ui_protocol: Optional['UIProtocol'] = None,
-    ) -> ToolExecutionResult:
-        """
-        Execute LLM with native function calling loop (async version).
-
-        This is the async version for use with the TUI, allowing non-blocking
-        streaming and tool execution.
-
-        Args:
-            context: Initial conversation context
-            max_iterations: Maximum tool calling iterations
-            on_chunk: Async callback for each content chunk (for UI updates)
-            request_approval: Async callback for requesting user approval (TUI-native)
-
-        Returns:
-            ToolExecutionResult with final content and ordered transcript of messages
-        """
-        import json
-
-        iteration = 0
-        current_context = context.copy()
-        turn_messages = []  # Ordered transcript of messages to persist
-
-        while iteration < max_iterations:
-            iteration += 1
-
-            # Generate LLM response with async streaming
-            response_content = ""
-            tool_calls = None
-
-            async for chunk, tc in self.llm.generate_with_tools_stream_async(
-                messages=current_context,
-                tools=self._get_tools(),
-                tool_choice="auto"
-            ):
-                # Handle content chunks
-                if chunk.content and not chunk.done:
-                    # Strip emojis for Windows compatibility
-                    from src.platform import remove_emojis
-                    safe_content = remove_emojis(chunk.content)
-
-                    # Call the on_chunk callback if provided (for UI updates)
-                    if on_chunk:
-                        await on_chunk(safe_content)
-
-                    response_content += safe_content
-
-                # Stream complete - get tool calls
-                if chunk.done:
-                    tool_calls = tc
-
-            # Check if there are tool calls
-            if not tool_calls:
-                # Add final assistant message to transcript (no tool_calls)
-                final_content = response_content if response_content else "Task completed."
-                turn_messages.append({
-                    "role": "assistant",
-                    "content": final_content
-                })
-                return ToolExecutionResult(content=final_content, turn_messages=turn_messages)
-
-            # Execute tool calls asynchronously
-            tool_messages = []
-
-            for tool_call in tool_calls:
-                tool_name = tool_call.function.name
-                tool_args = tool_call.function.get_parsed_arguments()
-
-                # Special handling for clarify tool (requires UI interaction)
-                if tool_name == "clarify":
-                    clarify_result = await self._handle_clarify_tool(
-                        tool_call.id,
-                        tool_args,
-                        ui_protocol
-                    )
-                    tool_messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "name": tool_name,
-                        "content": json.dumps(clarify_result)
-                    })
-                    self.tool_execution_history.append({
-                        "tool": tool_name,
-                        "arguments": tool_args,
-                        "success": True,
-                        "result": clarify_result
-                    })
-                    continue  # Skip to next tool call
-
-                # Check plan mode gating BEFORE approval and execution
-                plan_gate_result = self._check_plan_mode_gate(tool_name, tool_args)
-                if plan_gate_result is not None:
-                    # Tool is gated in plan mode
-                    gated_output = json.dumps(plan_gate_result, indent=2)
-                    tool_messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "name": tool_name,
-                        "content": gated_output
-                    })
-                    self.tool_execution_history.append({
-                        "tool": tool_name,
-                        "arguments": tool_args,
-                        "success": False,
-                        "error": plan_gate_result["message"]
-                    })
-                    continue  # Skip to next tool call
-
-                # Check director mode gating
-                director_gate_result = self._check_director_gate(tool_name, tool_args)
-                if director_gate_result is not None:
-                    gated_output = json.dumps(director_gate_result, indent=2)
-                    tool_messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "name": tool_name,
-                        "content": gated_output
-                    })
-                    self.tool_execution_history.append({
-                        "tool": tool_name,
-                        "arguments": tool_args,
-                        "success": False,
-                        "error": director_gate_result["message"]
-                    })
-                    continue  # Skip to next tool call
-
-                # Check if approval is required (NORMAL mode)
-                # NOTE: MCP tools are TUI-only (enabled via async enable_mcp_integration).
-                # They should never appear in this legacy async path. If they do, block them.
-                if self._mcp_manager.is_mcp_tool(tool_name):
-                    tool_result_str = f"[BLOCKED] MCP tool '{tool_name}' is only available in TUI mode"
-                    tool_results.append({"status": "error", "message": tool_result_str, "tool_name": tool_name})
-                    tool_messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "name": tool_name,
-                        "content": tool_result_str
-                    })
-                    self.tool_execution_history.append({
-                        "tool": tool_name,
-                        "arguments": tool_args,
-                        "success": False,
-                        "error": tool_result_str
-                    })
-                    continue
-
-                if self.permission_manager and self.permission_manager.mode == PermissionMode.NORMAL:
-                    from src.core.plan_mode import is_agent_internal_write
-                    risky_tools = ['write_file', 'edit_file', 'append_to_file', 'run_command', 'git_commit']
-
-                    if tool_name in risky_tools and not is_agent_internal_write(tool_name, tool_args):
-                        if request_approval:
-                            # Use TUI-native approval (non-blocking, UI stays responsive)
-                            approved = await request_approval(tool_name, tool_args)
-                        else:
-                            # Fallback to sync approval (blocks UI - legacy)
-                            approved = self._prompt_tool_approval(tool_name, tool_args)
-
-                        if not approved:
-                            # Persist any messages accumulated so far (partial transcript)
-                            return ToolExecutionResult(content="", turn_messages=turn_messages)
-
-                try:
-                    # Pass tool_call_id for delegation tool (registry linking)
-                    if tool_name == 'delegate_to_subagent':
-                        tool_args['_tool_call_id'] = tool_call.id
-
-                    # Execute tool asynchronously (doesn't block event loop)
-                    result = await self.tool_executor.execute_tool_async(
-                        tool_name,
-                        **tool_args
-                    )
-
-                    if result.is_success():
-                        output = result.output
-                        # Check for oversized outputs - return error with guidance instead of silent truncation
-                        if isinstance(output, str) and len(output) > self._max_tool_output_chars:
-                            _, tool_msg, history = self._format_oversized_output_error(
-                                len(output), tool_name, tool_args, tool_call.id
-                            )
-                            tool_messages.append(tool_msg)
-                            self.tool_execution_history.append(history)
-                            continue  # Skip to next tool call
-
-                        tool_messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "name": tool_name,
-                            "content": str(output)
-                        })
-
-                        # Track in history
-                        self.tool_execution_history.append({
-                            "tool": tool_name,
-                            "arguments": tool_args,
-                            "success": True,
-                            "result": output
-                        })
-                    else:
-                        # Include result.output (stdout/stderr) so LLM can see what went wrong
-                        error_content = f"Error: {result.error}"
-                        if result.output:
-                            error_content += f"\n\nOutput:\n{result.output}"
-                        tool_messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "name": tool_name,
-                            "content": error_content
-                        })
-
-                        self.tool_execution_history.append({
-                            "tool": tool_name,
-                            "arguments": tool_args,
-                            "success": False,
-                            "error": result.error
-                        })
-
-                except Exception as e:
-                    tool_messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "name": tool_name,
-                        "content": f"Exception: {str(e)}"
-                    })
-
-                    self.tool_execution_history.append({
-                        "tool": tool_name,
-                        "arguments": tool_args,
-                        "success": False,
-                        "error": str(e)
-                    })
-
-            # Build assistant message with tool_calls
-            assistant_msg = {
-                "role": "assistant",
-                "content": response_content,
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments  # Already JSON string
-                        }
-                    }
-                    for tc in tool_calls
-                ]
-            }
-
-            # Add to transcript (for persistence) and context (for LLM)
-            turn_messages.append(assistant_msg)
-            current_context.append(assistant_msg)
-
-            # Add tool results to transcript and context
-            turn_messages.extend(tool_messages)
-            current_context.extend(tool_messages)
-
-        # Max iterations reached - generate final summary
-        current_context.append({
-            "role": "user",
-            "content": "You've reached the maximum number of tool iterations. Please provide a clear, concise answer."
-        })
-
-        final_response = self.llm.generate_with_tools(
-            messages=current_context,
-            tools=self._get_tools(),
-            tool_choice="none"
-        )
-        final_content = final_response.content or "Task completed based on tool results."
-        # Add final assistant message to transcript
-        turn_messages.append({
-            "role": "assistant",
-            "content": final_content
-        })
-        return ToolExecutionResult(content=final_content, turn_messages=turn_messages)
+        self._invalidate_tools_cache()
 
     def _fix_orphaned_tool_calls(self, context: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
@@ -1644,585 +822,9 @@ class CodingAgent(AgentInterface):
 
         return result_context
 
-    def _prompt_tool_approval(self, tool_name: str, tool_args: Dict[str, Any]) -> bool:
-        """
-        Prompt user for approval before executing a tool.
-
-        This is called AFTER the diff has been displayed in streaming mode,
-        so the user has already seen what will be changed.
-
-        Args:
-            tool_name: Name of the tool to execute
-            tool_args: Tool arguments
-
-        Returns:
-            True if approved, False if rejected
-        """
-        from pathlib import Path
-
-        # Create operation description
-        if tool_name == 'write_file':
-            file_path = tool_args.get('file_path', 'unknown')
-            operation = f"Write file: {Path(file_path).name}"
-
-        elif tool_name == 'edit_file':
-            file_path = tool_args.get('file_path', 'unknown')
-            operation = f"Edit file: {Path(file_path).name}"
-
-        elif tool_name == 'append_to_file':
-            file_path = tool_args.get('file_path', 'unknown')
-            operation = f"Append to file: {Path(file_path).name}"
-
-        elif tool_name == 'run_command':
-            command = tool_args.get('command', 'unknown')
-            if len(command) > 50:
-                command = command[:50] + '...'
-            operation = f"Run command: {command}"
-
-        elif tool_name == 'git_commit':
-            message = tool_args.get('message', 'unknown')
-            if len(message) > 50:
-                message = message[:50] + '...'
-            operation = f"Git commit: {message}"
-
-        else:
-            operation = f"{tool_name} operation"
-
-        # Show approval prompt (simple, Claude Code style)
-        safe_print("\n" + "-" * 60)
-        safe_print(f"[APPROVAL] {operation}")
-        safe_print("-" * 60)
-        safe_print("Approve this change? (yes/no): ", end="", flush=True)
-
-        try:
-            response = input().strip().lower()
-            approved = response in ["yes", "y"]
-
-            if approved:
-                safe_print("[OK] Approved - executing...\n")
-            else:
-                safe_print("[CANCEL] Rejected - operation cancelled\n")
-
-            return approved
-
-        except (EOFError, KeyboardInterrupt):
-            safe_print("\n[CANCEL] Interrupted - operation cancelled\n")
-            return False
-
-    async def _handle_clarify_tool(
-        self,
-        call_id: str,
-        tool_args: Dict[str, Any],
-        ui_protocol: Optional['UIProtocol'] = None,
-    ) -> Dict[str, Any]:
-        """
-        Handle the clarify tool - ask structured questions before proceeding.
-
-        Single-writer flow:
-        1. Validate questions
-        2. Persist clarify_request via MemoryManager (triggers TUI notification)
-        3. Wait for user response via UIProtocol (or CLI fallback)
-        4. Persist clarify_response via MemoryManager
-        5. Return result to LLM
-
-        Args:
-            call_id: Tool call ID for correlation
-            tool_args: Tool arguments (questions, context)
-            ui_protocol: Optional UIProtocol for TUI mode
-
-        Returns:
-            Dict with user responses or error/cancellation status
-        """
-        questions = tool_args.get("questions", [])
-        context = tool_args.get("context")
-
-        # Validate questions
-        if not questions:
-            return {"error": "clarify.questions is empty"}
-
-        if len(questions) > 4:
-            return {"error": "clarify.questions has more than 4 questions (max: 4)"}
-
-        # 1. Persist clarify_request via MemoryManager (SINGLE WRITER)
-        if self.memory.has_message_store:
-            self.memory.persist_system_event(
-                event_type="clarify_request",
-                content="[Clarification requested]",
-                extra={
-                    "call_id": call_id,
-                    "questions": questions,
-                    "context": context,
-                },
-                include_in_llm_context=False,
-            )
-
-        # 2. Wait for user response
-        if ui_protocol:
-            # TUI mode - use UIProtocol
-            try:
-                from src.core.protocol import ClarifyResult
-                result = await ui_protocol.wait_for_clarify_response(call_id)
-
-                # 3. Persist clarify_response via MemoryManager (SINGLE WRITER)
-                if self.memory.has_message_store:
-                    status = "submitted" if result.submitted else ("chat" if result.chat_instead else "cancelled")
-                    self.memory.persist_system_event(
-                        event_type="clarify_response",
-                        content=f"[Clarification {status}]",
-                        extra={
-                            "call_id": call_id,
-                            "submitted": result.submitted,
-                            "responses": result.responses,
-                            "chat_instead": result.chat_instead,
-                            "chat_message": result.chat_message,
-                        },
-                        include_in_llm_context=False,
-                    )
-
-                # 4. Return result to LLM
-                if result.submitted:
-                    return {"submitted": True, "responses": result.responses}
-                if result.chat_instead:
-                    return {"mode": "chat", "message": result.chat_message}
-                return {"cancelled": True}
-
-            except asyncio.CancelledError:
-                return {"cancelled": True, "reason": "interrupted"}
-
-        else:
-            # CLI fallback
-            from src.tools.clarify_tool import ClarifyTool
-            clarify_tool = ClarifyTool()
-            result = clarify_tool._cli_prompt(questions, context)
-
-            # Persist response via MemoryManager
-            if self.memory.has_message_store:
-                submitted = result.get("submitted", False)
-                cancelled = result.get("cancelled", False)
-                status = "submitted" if submitted else "cancelled"
-                self.memory.persist_system_event(
-                    event_type="clarify_response",
-                    content=f"[Clarification {status}]",
-                    extra={
-                        "call_id": call_id,
-                        "submitted": submitted,
-                        "responses": result.get("responses"),
-                        "chat_instead": False,
-                        "chat_message": None,
-                    },
-                    include_in_llm_context=False,
-                )
-
-            return result
-
-    async def _handle_request_plan_approval_tool(
-        self,
-        call_id: str,
-        ui_protocol: Optional['UIProtocol'] = None,
-    ) -> tuple[str, bool]:
-        """
-        Handle request_plan_approval tool - execute the tool, persist events, and wait for approval.
-
-        Returns a tuple (result_text, rejected_without_feedback):
-        - result_text: Human-readable string for LLM (includes plan content on approval)
-        - rejected_without_feedback: True if user rejected without feedback (Escape key)
-          - When True, caller should stop tool loop and wait for user input
-          - When False, caller should continue tool loop (LLM sees the result)
-
-        Flow:
-        1. Execute request_plan_approval tool (computes hash, sets awaiting_approval)
-        2. Read full plan content (before approval may clear state)
-        3. Persist plan_submitted system event (triggers TUI to mount approval widget)
-        4. Wait for user approval via UIProtocol
-        5. Apply approval/rejection to plan_mode_state
-        6. Return tuple with result and rejection flag
-        """
-        # 1. Execute the request_plan_approval tool
-        result = await self.tool_executor.execute_tool_async("request_plan_approval")
-
-        if not result.is_success():
-            return (f"Error: {result.error or 'Failed to request plan approval'}", False)
-
-        # Parse metadata from tool result
-        metadata = result.metadata or {}
-        plan_hash = metadata.get("plan_hash")
-        excerpt = metadata.get("excerpt", "")
-        truncated = metadata.get("truncated", False)
-        plan_path = metadata.get("plan_path")
-
-        if not plan_hash:
-            return ("Error: No plan hash returned from request_plan_approval", False)
-
-        # 2. Read full plan content before approval (state may reset after)
-        plan_content = self.plan_mode_state.get_plan_content() or excerpt
-
-        # 3. Persist plan_submitted system event (TUI will mount approval widget)
-        if self.memory.has_message_store:
-            self.memory.persist_system_event(
-                event_type="plan_submitted",
-                content="[Plan submitted for approval]",
-                extra={
-                    "call_id": call_id,
-                    "plan_hash": plan_hash,
-                    "excerpt": excerpt,
-                    "truncated": truncated,
-                    "plan_path": plan_path,
-                },
-                include_in_llm_context=False,
-            )
-
-        # Persist mode change event
-        if self.memory.has_message_store:
-            self.memory.persist_system_event(
-                event_type="permission_mode_changed",
-                content="Mode: plan -> awaiting_approval",
-                extra={"old_mode": "plan", "new_mode": "awaiting_approval"},
-                include_in_llm_context=False,
-            )
-
-        # 4. Wait for user approval via UIProtocol
-        if ui_protocol:
-            try:
-                from src.core.protocol import PlanApprovalResult
-                approval = await ui_protocol.wait_for_plan_approval(plan_hash)
-
-                if approval.approved:
-                    self.plan_mode_state.approve(plan_hash)
-
-                    if self.memory.has_message_store:
-                        self.memory.persist_system_event(
-                            event_type="plan_approved",
-                            content="[Plan approved]",
-                            extra={
-                                "plan_hash": plan_hash,
-                                "auto_accept_edits": approval.auto_accept_edits,
-                            },
-                            include_in_llm_context=False,
-                        )
-                        new_mode = "auto" if approval.auto_accept_edits else "normal"
-                        self.memory.persist_system_event(
-                            event_type="permission_mode_changed",
-                            content=f"Mode: plan -> {new_mode}",
-                            extra={"old_mode": "plan", "new_mode": new_mode},
-                            include_in_llm_context=False,
-                        )
-                        self.permission_manager.set_mode(
-                            PermissionManager.from_string(new_mode)
-                        )
-
-                    result_text = (
-                        "User has approved your plan. You can now start coding. "
-                        "Start with updating your todo list if applicable.\n\n"
-                        f"Your plan has been saved to: {plan_path}\n"
-                        "You can refer back to it if needed during implementation.\n\n"
-                        "## Approved Plan:\n"
-                        f"{plan_content}"
-                    )
-                    return (result_text, False)
-                else:
-                    self.plan_mode_state.reject()
-
-                    if self.memory.has_message_store:
-                        self.memory.persist_system_event(
-                            event_type="plan_rejected",
-                            content="[Plan rejected]",
-                            extra={
-                                "plan_hash": plan_hash,
-                                "feedback": approval.feedback,
-                            },
-                            include_in_llm_context=False,
-                        )
-                        # CRITICAL: Persist mode change back to plan mode
-                        self.memory.persist_system_event(
-                            event_type="permission_mode_changed",
-                            content="Mode: awaiting_approval -> plan",
-                            extra={"old_mode": "awaiting_approval", "new_mode": "plan"},
-                            include_in_llm_context=False,
-                        )
-
-                    # Check if user rejected without feedback (Escape key)
-                    if approval.feedback is None:
-                        # Pure rejection - stop tool loop, wait for user input
-                        return ("Plan approval cancelled.", True)
-                    else:
-                        # Rejection with feedback - continue tool loop so LLM can revise
-                        result_text = (
-                            "Plan rejected. You are back in plan mode. "
-                            f"Revise the plan and call request_plan_approval again.\n\n"
-                            f"User feedback: {approval.feedback}"
-                        )
-                        return (result_text, False)
-
-            except asyncio.CancelledError:
-                return ("Plan approval was cancelled.", True)
-
-        # No UI protocol (CLI mode) - auto-approve
-        self.plan_mode_state.approve(plan_hash)
-        result_text = (
-            "User has approved your plan. You can now start coding. "
-            "Start with updating your todo list if applicable.\n\n"
-            f"Your plan has been saved to: {plan_path}\n"
-            "You can refer back to it if needed during implementation.\n\n"
-            "## Approved Plan:\n"
-            f"{plan_content}"
-        )
-        return (result_text, False)
-
-    async def _handle_director_plan_approval(
-        self,
-        call_id: str,
-        tool_result,
-        ui_protocol: Optional['UIProtocol'] = None,
-    ) -> tuple:
-        """
-        Handle director plan approval flow after director_complete_plan executes.
-
-        Similar to _handle_request_plan_approval_tool but for Director mode.
-        Reuses PlanApprovalWidget via the same UIProtocol mechanism.
-
-        Returns (result_text, rejected_without_feedback).
-        """
-        import hashlib
-
-        # Build plan excerpt for the approval widget
-        plan = self.director_adapter._protocol.plan
-        plan_summary = plan.summary if plan else "Director plan"
-
-        # Read the plan document file if available (rich markdown)
-        excerpt = ""
-        if plan and plan.plan_document:
-            try:
-                import os
-                if os.path.isfile(plan.plan_document):
-                    with open(plan.plan_document, "r", encoding="utf-8") as f:
-                        excerpt = f.read()
-                    logger.info(
-                        "director_plan_approval: read plan document (%d chars)",
-                        len(excerpt),
-                    )
-            except Exception as e:
-                logger.error("director_plan_approval: failed to read plan file: %s", e)
-
-        # Fallback: build excerpt from structured data if no plan file
-        if not excerpt:
-            slices_text = ""
-            if plan:
-                for s in plan.slices:
-                    slices_text += f"\n- Slice {s.id}: {s.title}"
-            excerpt = (
-                f"## Director Plan\n\n"
-                f"{plan_summary}\n\n"
-                f"### Vertical Slices:{slices_text}"
-            )
-        plan_hash = hashlib.sha256(excerpt.encode()).hexdigest()
-
-        # Persist event for TUI to mount approval widget
-        if self.memory.has_message_store:
-            self.memory.persist_system_event(
-                event_type="director_plan_submitted",
-                content="[Director plan submitted for approval]",
-                extra={
-                    "call_id": call_id,
-                    "plan_hash": plan_hash,
-                    "excerpt": excerpt,
-                    "truncated": False,
-                },
-                include_in_llm_context=False,
-            )
-
-        # Wait for user approval via UIProtocol (TUI path)
-        if ui_protocol:
-            try:
-                from src.core.protocol import PlanApprovalResult
-                approval = await ui_protocol.wait_for_plan_approval(plan_hash)
-
-                if approval.approved:
-                    self.director_adapter.approve_plan()
-                    result_text = (
-                        "Plan approved! Moving to EXECUTE phase.\n\n"
-                        "Implement each slice using RED-GREEN-REFACTOR:\n"
-                        "1. Write a failing test (RED)\n"
-                        "2. Write minimum code to pass (GREEN)\n"
-                        "3. Call director_complete_slice when done\n\n"
-                        f"{excerpt}"
-                    )
-                    return (result_text, False)
-                else:
-                    feedback = approval.feedback
-                    self.director_adapter.reject_plan(feedback)
-                    if feedback is None:
-                        return ("Director plan approval cancelled.", True)
-                    else:
-                        plan_doc_path = plan.plan_document if plan else ""
-                        result_text = (
-                            "Plan rejected. Revise based on feedback and resubmit.\n\n"
-                            f"User feedback: {feedback}\n\n"
-                            f"To revise: update the plan document"
-                            f"{' at ' + plan_doc_path if plan_doc_path else ''}"
-                            f" using write_file, then call director_complete_plan again "
-                            f"with the updated file path and slices."
-                        )
-                        return (result_text, False)
-
-            except asyncio.CancelledError:
-                return ("Director plan approval was cancelled.", True)
-
-        # No UI protocol (CLI mode) - auto-approve
-        self.director_adapter.approve_plan()
-        result_text = (
-            "Plan approved! Moving to EXECUTE phase.\n\n"
-            f"{excerpt}"
-        )
-        return (result_text, False)
-
-    def _print_tool_announcement(self, tool_name: str, tool_args: Dict[str, Any]) -> None:
-        """
-        Print a clean tool announcement for CLI output.
-
-        Shows what tool is being called with key context (file path, command, etc.)
-        without verbose JSON dumps.
-
-        Args:
-            tool_name: Name of the tool being called
-            tool_args: Tool arguments dictionary
-        """
-        from pathlib import Path
-
-        # Format based on tool type
-        if tool_name == 'read_file':
-            file_path = tool_args.get('file_path', '')
-            safe_print(f"\n[READ] {Path(file_path).name}")
-
-        elif tool_name == 'write_file':
-            file_path = tool_args.get('file_path', '')
-            safe_print(f"\n[WRITE] {Path(file_path).name}")
-
-        elif tool_name == 'edit_file':
-            file_path = tool_args.get('file_path', '')
-            safe_print(f"\n[EDIT] {Path(file_path).name}")
-
-        elif tool_name == 'append_to_file':
-            file_path = tool_args.get('file_path', '')
-            safe_print(f"\n[APPEND] {Path(file_path).name}")
-
-        elif tool_name == 'list_directory':
-            path = tool_args.get('path', '.')
-            safe_print(f"\n[LIST] {path}")
-
-        elif tool_name == 'run_command':
-            command = tool_args.get('command', '')
-            # Truncate long commands
-            if len(command) > 60:
-                command = command[:60] + '...'
-            safe_print(f"\n[RUN] {command}")
-
-        elif tool_name == 'search_code':
-            pattern = tool_args.get('pattern', '')
-            safe_print(f"\n[SEARCH] {pattern}")
-
-        elif tool_name == 'git_status':
-            safe_print("\n[GIT] status")
-
-        elif tool_name == 'git_diff':
-            safe_print("\n[GIT] diff")
-
-        elif tool_name == 'git_commit':
-            message = tool_args.get('message', '')
-            if len(message) > 50:
-                message = message[:50] + '...'
-            safe_print(f"\n[GIT] commit: {message}")
-
-        elif tool_name == 'task_create':
-            subject = tool_args.get('subject', '')
-            safe_print(f"\n[TASK] Creating: {subject}")
-
-        elif tool_name == 'task_update':
-            task_id = tool_args.get('taskId', '?')
-            status = tool_args.get('status', '')
-            safe_print(f"\n[TASK] Updating {task_id}: {status}")
-
-        elif tool_name == 'delegate_to_subagent':
-            subagent = tool_args.get('subagent', 'unknown')
-            safe_print(f"\n[DELEGATE] {subagent}")
-
-        else:
-            # Generic announcement for other tools
-            safe_print(f"\n[TOOL] {tool_name}")
-
-    @observe_agent_method("execute_direct", capture_input=True, capture_output=True)
-    def _execute_direct(
-        self,
-        task_description: str,
-        task_type: str,
-        language: str,
-        use_rag: bool,
-        stream: bool,
-    ) -> str:
-        """
-        Execute task using direct LLM + tool calling (no workflow).
-
-        This is the original execution path for simple queries.
-
-        Args:
-            task_description: Description of the task
-            task_type: Type of task
-            language: Programming language
-            use_rag: Whether to use RAG retrieval
-            stream: Whether to stream responses
-
-        Returns:
-            Final response content
-        """
-        # Parse and load file references from task description
-        file_references = self.file_reference_parser.parse_and_load(task_description)
-
-        # Display loaded files to user
-        if file_references:
-            summary = self.file_reference_parser.format_summary(file_references)
-            print(f"\n{summary}\n")
-
-        # Build context (with agent state for task continuation)
-        # MemoryManager uses MessageStore when configured (Option A: Single Source of Truth)
-        context = self.context_builder.build_context(
-            user_query=task_description,
-            task_type=task_type,
-            language=language,
-            use_rag=use_rag and len(self.indexed_chunks) > 0,
-            available_chunks=self.indexed_chunks if use_rag else None,
-            file_references=file_references if file_references else None,
-            agent_state=self.todo_state if self.todo_state.get('todos') else None,
-            plan_mode_state=self.plan_mode_state,
-            director_adapter=self.director_adapter,
-        )
-
-        # Execute with tool calling loop
-        execution_result = self._execute_with_tools(
-            context=context,
-            max_iterations=3,
-            stream=stream,
-            debug=False  # Production mode - hide debug output
-        )
-
-        # Persist the ordered transcript to working memory
-        from src.memory.models import MessageRole
-        for msg in execution_result.turn_messages:
-            if msg["role"] == "assistant":
-                self.memory.working_memory.add_message(
-                    role=MessageRole.ASSISTANT,
-                    content=msg.get("content", ""),
-                    metadata={"tool_calls": msg.get("tool_calls")} if msg.get("tool_calls") else None
-                )
-            elif msg["role"] == "tool":
-                self.memory.working_memory.add_message(
-                    role=MessageRole.TOOL,
-                    content=msg.get("content", ""),
-                    metadata={
-                        "tool_call_id": msg.get("tool_call_id"),
-                        "name": msg.get("name")
-                    }
-                )
-
-        return execution_result.content
+    # NOTE: _handle_clarify_tool, _handle_request_plan_approval_tool, and
+    # _handle_director_plan_approval moved to src/core/special_tool_handlers.py
+    # -> SpecialToolHandlers (Phase 3 refactor)
 
     def index_codebase(
         self,
@@ -2243,6 +845,14 @@ class CodingAgent(AgentInterface):
             directory = str(self.working_directory)
 
         print(f"Indexing codebase at: {directory}")
+
+        # Lazy import RAG components (optional dependency)
+        try:
+            from src.rag import CodeIndexer, Embedder, HybridRetriever
+        except ImportError:
+            raise ImportError(
+                "RAG dependencies not installed. Install with: pip install claraity-code[rag]"
+            )
 
         # Initialize RAG components
         self.indexer = CodeIndexer(chunk_size=512, chunk_overlap=50)
@@ -2280,277 +890,127 @@ class CodingAgent(AgentInterface):
             "languages": index.languages,
         }
 
-    @observe_agent_method("execute_task", capture_input=True, capture_output=True)
-    def execute_task(
-        self,
-        task_description: str,
-        task_type: str = "implement",
-        language: str = "python",
-        use_rag: bool = True,
-        stream: bool = False,
-    ) -> AgentResponse:
+    async def _handle_error_budget_pause(
+        self, reason, tool_name, call_id, error_context_block,
+        tool_call_count, elapsed_seconds, ui, max_resumes
+    ):
+        """Handle error budget exceeded pause flow.
+
+        Returns dict with:
+            action: 'defer' | 'break' | 'continue'
+            events: list of UIEvent objects to yield
+            context_additions: list of messages to append to current_context
+            tool_message: optional tool result message dict
+            user_rejected: True if user chose to stop
         """
-        Execute a coding task using direct LLM execution.
-
-        Args:
-            task_description: Description of the task
-            task_type: Type of task (implement, debug, refactor, etc.)
-            language: Programming language
-            use_rag: Whether to use RAG retrieval
-            stream: Whether to stream response
-
-        Returns:
-            Agent response
-        """
-        # USER PROMPT SUBMIT HOOK
-        if self.hook_manager:
-            try:
-                from src.hooks import HookContinue
-
-                decision, modified_prompt = self.hook_manager.emit_user_prompt_submit(
-                    prompt=task_description,
-                    metadata={
-                        "task_type": task_type,
-                        "language": language,
-                        "use_rag": use_rag,
-                        "stream": stream
-                    }
-                )
-
-                if decision == HookContinue.BLOCK:
-                    return AgentResponse(
-                        content="Prompt blocked by hook",
-                        metadata={"blocked": True}
-                    )
-
-                # Use modified prompt if hook modified it
-                task_description = modified_prompt
-
-            except Exception as e:
-                # Check if it's a HookBlockedError
-                if e.__class__.__name__ == 'HookBlockedError':
-                    return AgentResponse(
-                        content=f"Prompt blocked by hook: {str(e)}",
-                        metadata={"blocked": True}
-                    )
-                # Other errors, log and continue
-                logger.warning(f"UserPromptSubmit hook error: {e}", exc_info=True)
-
-        # CLARAITY HOOK - Generate blueprint and get approval
-        if self.clarity_hook:
-            try:
-                clarity_result = self.clarity_hook.intercept_task(
-                    task_description=task_description,
-                    task_type=task_type,
-                    metadata={
-                        "language": language,
-                        "use_rag": use_rag,
-                        "stream": stream
-                    }
-                )
-
-                # Handle rejection
-                if not clarity_result.should_proceed:
-                    return AgentResponse(
-                        content=f"Task rejected by user during blueprint review.\nFeedback: {clarity_result.feedback or 'None'}",
-                        metadata={
-                            "clarity_status": "rejected",
-                            "clarity_feedback": clarity_result.feedback
-                        }
-                    )
-
-                # Store blueprint in memory context if approved
-                if clarity_result.blueprint:
-                    self.memory.add_metadata("clarity_blueprint", clarity_result.blueprint.to_dict())
-                    logger.info(
-                        f"Blueprint approved: {len(clarity_result.blueprint.components)} components"
-                    )
-
-            except Exception as e:
-                # ClarAIty errors shouldn't break the agent
-                logger.warning(f"ClarAIty hook error: {e}", exc_info=True)
-
-        # Create task context
-        task_context = TaskContext(
-            task_id=str(uuid.uuid4()),
-            description=task_description,
-            task_type=task_type,
-            key_concepts=[],
+        from src.core.events import (
+            TextDelta, PausePromptStart, PausePromptEnd,
         )
 
-        self.memory.set_task_context(task_context)
+        result = {
+            'action': 'break',
+            'events': [],
+            'context_additions': [],
+            'tool_message': None,
+            'user_rejected': False,
+        }
 
-        # Add user message to memory
-        self.memory.add_user_message(task_description)
-
-        # Execute using direct LLM-first approach (LLM decides tools vs conversation)
-        print("\n[DIRECT EXECUTION MODE]\n")
-        response_content = self._execute_direct(
-            task_description=task_description,
-            task_type=task_type,
-            language=language,
-            use_rag=use_rag,
-            stream=stream,
-        )
-
-        # Add assistant response to memory
-        self.memory.add_assistant_message(response_content)
-
-        return AgentResponse(
-            content=response_content,
-            metadata={
-                "task_type": task_type,
-                "language": language,
-                "used_rag": use_rag and len(self.indexed_chunks) > 0,
-                "execution_mode": "direct",
+        # Check approval precedence (don't show pause during approval wait)
+        if self._awaiting_approval:
+            logger.debug("error budget exceeded but approval pending; deferring pause")
+            result['action'] = 'defer'
+            result['tool_message'] = {
+                "role": "tool",
+                "tool_call_id": call_id,
+                "name": tool_name,
+                "content": error_context_block
             }
-        )
+            return result
 
-    @observe_agent_method("chat", capture_input=True, capture_output=True)
-    def chat(
-        self,
-        message: str,
-        stream: bool = True,
-        use_rag: bool = True,
-        on_stream_start: Optional[Callable[[], None]] = None
-    ) -> AgentResponse:
-        """
-        Interactive chat with the agent using LLM-first decision making.
+        # Set state for potential resumption
+        self.task_state.last_stop_reason = 'error_budget'
 
-        The LLM autonomously decides whether to:
-        - Respond conversationally (greetings, acknowledgments)
-        - Use tools directly (simple coding tasks)
-        - Create an execution plan (complex multi-step tasks)
+        # Check resume cap (prevent infinite Continue loops)
+        resume_count = self.task_state.error_budget_resume_count
+        progress_since_resume = self.task_state.successful_tools_since_resume
 
-        This follows industry best practice (OpenAI tool_choice="auto", Claude Code pattern)
-        where the LLM makes decisions, not application routing logic.
+        if resume_count >= max_resumes:
+            result['events'].append(TextDelta(content=(
+                f"\n[ERROR] Reached maximum error recovery attempts "
+                f"({max_resumes}). "
+                "Please provide guidance on how to proceed."
+            )))
+            result['user_rejected'] = True
+            return result
 
-        Args:
-            message: User message
-            stream: Whether to stream response
-            use_rag: Whether to use RAG retrieval (default: True)
-            on_stream_start: Optional callback invoked when streaming starts (for progress indicators)
+        # Check for no-progress (resumed but still failing)
+        pause_reason_code = 'error_budget'
+        if resume_count > 0 and progress_since_resume == 0:
+            pause_reason_code = 'error_budget_no_progress'
+            reason = f"{reason} (no progress since last resume)"
 
-        Returns:
-            Agent response
-        """
-        # USER PROMPT SUBMIT HOOK
-        if self.hook_manager:
-            try:
-                from src.hooks import HookContinue
-
-                decision, modified_prompt = self.hook_manager.emit_user_prompt_submit(
-                    prompt=message,
-                    metadata={
-                        "stream": stream,
-                        "use_rag": use_rag
-                    }
-                )
-
-                if decision == HookContinue.BLOCK:
-                    return AgentResponse(
-                        content="Prompt blocked by hook",
-                        metadata={"blocked": True}
-                    )
-
-                # Use modified prompt if hook modified it
-                message = modified_prompt
-
-            except Exception as e:
-                # Check if it's a HookBlockedError
-                if e.__class__.__name__ == 'HookBlockedError':
-                    return AgentResponse(
-                        content=f"Prompt blocked by hook: {str(e)}",
-                        metadata={"blocked": True}
-                    )
-                # Other errors, log and continue
-                logger.warning(f"UserPromptSubmit hook error: {e}", exc_info=True)
-
-        # Reset web tools budget for new turn
-        if hasattr(self, '_web_run_budget') and self._web_run_budget:
-            self._web_run_budget.reset()
-
-        # Create task context (generic for chat)
-        task_context = TaskContext(
-            task_id=str(uuid.uuid4()),
-            description=message,
-            task_type="chat",  # Generic type for chat messages
-            key_concepts=[],
-        )
-
-        self.memory.set_task_context(task_context)
-
-        # Add user message to memory
-        self.memory.add_user_message(message)
-
-        # Parse and load file references from message
-        file_references = self.file_reference_parser.parse_and_load(message)
-
-        # Display loaded files to user
-        if file_references:
-            summary = self.file_reference_parser.format_summary(file_references)
-            print(f"\n{summary}\n")
-
-        # CRITICAL: Sync plan mode state from MessageStore before building context
-        # This ensures agent's in-memory state matches persisted state (single source of truth)
-        self._sync_plan_mode_from_store()
-
-        # Build context with enhanced system prompt for decision-making
-        # Include agent state for task continuation support
-        # MemoryManager uses MessageStore when configured (Option A: Single Source of Truth)
-        context = self.context_builder.build_context(
-            user_query=message,
-            task_type="chat",
-            language="python",  # Default, LLM can handle any language
-            use_rag=use_rag and len(self.indexed_chunks) > 0,
-            available_chunks=self.indexed_chunks if use_rag else None,
-            file_references=file_references if file_references else None,
-            agent_state=self.todo_state if self.todo_state.get('todos') else None,
-            plan_mode_state=self.plan_mode_state,
-            director_adapter=self.director_adapter,
-        )
-
-        # Execute with tool calling loop (LLM decides what to do)
-        import os
-        debug_mode = os.getenv("DEBUG_MODE", "false").lower() == "true"
-        execution_result = self._execute_with_tools(
-            context=context,
-            max_iterations=10,  # Increased for complex tasks
-            stream=stream,
-            debug=debug_mode,  # Controlled by .env DEBUG_MODE
-            on_stream_start=on_stream_start  # Progress indicator callback
-        )
-
-        # Persist the ordered transcript to working memory
-        # This preserves: assistant(tool_calls) -> tool(result) -> assistant(final)
-        from src.memory.models import MessageRole
-        for msg in execution_result.turn_messages:
-            if msg["role"] == "assistant":
-                # Assistant message (may have tool_calls in metadata)
-                self.memory.working_memory.add_message(
-                    role=MessageRole.ASSISTANT,
-                    content=msg.get("content", ""),
-                    metadata={"tool_calls": msg.get("tool_calls")} if msg.get("tool_calls") else None
-                )
-            elif msg["role"] == "tool":
-                # Tool result message
-                self.memory.working_memory.add_message(
-                    role=MessageRole.TOOL,
-                    content=msg.get("content", ""),
-                    metadata={
-                        "tool_call_id": msg.get("tool_call_id"),
-                        "name": msg.get("name")
-                    }
-                )
-
-        response_content = execution_result.content
-        return AgentResponse(
-            content=response_content,
-            metadata={
-                "execution_mode": "llm_first",
-                "used_rag": use_rag and len(self.indexed_chunks) > 0,
+        # Check if UI supports interactive pause
+        if hasattr(ui, 'has_pause_capability') and ui.has_pause_capability():
+            pending_todos = self.task_state.get_pending_summary()
+            error_stats = self._error_tracker.get_stats()
+            stats = {
+                'tool_calls': tool_call_count,
+                'elapsed_s': elapsed_seconds,
+                'errors_total': error_stats['total_failures'],
+                'error_reason': reason,
             }
-        )
+
+            result['events'].append(PausePromptStart(
+                reason=f"Error budget: {reason}",
+                reason_code=pause_reason_code,
+                pending_todos=pending_todos,
+                stats=stats,
+            ))
+
+            try:
+                pause_result = await ui.wait_for_pause_response(timeout=None)
+                result['events'].append(PausePromptEnd(
+                    continue_work=pause_result.continue_work,
+                    feedback=pause_result.feedback,
+                ))
+
+                if not pause_result.continue_work:
+                    result['user_rejected'] = True
+                    return result
+
+                # User chose to continue - partial reset
+                self.task_state.error_budget_resume_count += 1
+                self.task_state.successful_tools_since_resume = 0
+                self._error_tracker.reset_tool_error_counts(tool_name=tool_name)
+
+                result['context_additions'].append({
+                    "role": "system",
+                    "content": "<notice>Continuing after error budget pause. Try a different approach; repeated identical calls are blocked.</notice>"
+                })
+
+                if pause_result.feedback:
+                    result['context_additions'].append({
+                        "role": "user",
+                        "content": f"[User guidance: {pause_result.feedback}]"
+                    })
+
+                result['tool_message'] = {
+                    "role": "tool",
+                    "tool_call_id": call_id,
+                    "name": tool_name,
+                    "content": error_context_block
+                }
+                result['action'] = 'continue'
+                return result
+
+            except asyncio.CancelledError:
+                result['user_rejected'] = True
+                return result
+        else:
+            # Fallback - no interactive pause available
+            result['events'].append(TextDelta(content=self._build_pause_message('error_budget')))
+            result['user_rejected'] = False
+            return result
 
     async def stream_response(
         self,
@@ -2580,7 +1040,7 @@ class CodingAgent(AgentInterface):
         )
         from src.core.tool_status import ToolStatus as CoreToolStatus
         from src.core.render_meta import ToolApprovalMeta
-        import json
+        from src.core.stream_phases import build_pause_stats
         import time
 
         # Bind context for logging correlation
@@ -2605,37 +1065,7 @@ class CodingAgent(AgentInterface):
         # Definition: 1 iteration = 1 LLM call cycle (can produce 0-5+ tool calls)
         ABSOLUTE_MAX_ITERATIONS = 50
 
-        # Helper to check if tool needs approval based on permission mode
-        def needs_approval(tool_name: str, tool_args: Dict[str, Any] = None) -> bool:
-            from src.core.plan_mode import is_agent_internal_write
-
-            # Get current permission mode
-            mode = self.permission_manager.get_mode() if self.permission_manager else PermissionMode.NORMAL
-
-            # In AUTO mode, never ask for approval
-            if mode == PermissionMode.AUTO:
-                return False
-
-            # In PLAN mode, don't ask for approval - use gating instead
-            # Read-only tools execute freely, write tools are blocked by plan_mode_state.gate_tool()
-            # Exception: MCP write tools are external side effects that gate_tool() can't catch
-            if mode == PermissionMode.PLAN:
-                if self._mcp_manager.is_mcp_tool(tool_name):
-                    return self._mcp_manager.requires_approval(tool_name)
-                return False
-
-            # Agent-internal writes (plan files, sessions, logs) bypass approval
-            # — same as MemoryManager writing session JSONL without approval
-            if tool_args and is_agent_internal_write(tool_name, tool_args):
-                return False
-
-            # MCP tools: delegate to policy gate for read/write classification
-            if self._mcp_manager.is_mcp_tool(tool_name):
-                return self._mcp_manager.requires_approval(tool_name)
-
-            # In NORMAL mode (default), ask only for risky tools
-            risky_tools = {'write_file', 'edit_file', 'append_to_file', 'run_command', 'git_commit'}
-            return tool_name in risky_tools
+        # Approval check delegated to self._gating.needs_approval()
 
         try:
             # Create task context
@@ -2743,17 +1173,12 @@ class CodingAgent(AgentInterface):
                     if hasattr(ui, 'has_pause_capability') and ui.has_pause_capability():
                         # TUI mode - use interactive widget
                         pending_todos = self.task_state.get_pending_summary()
-                        stats = {
-                            'tool_calls': tool_call_count,
-                            'elapsed_s': elapsed_seconds,
-                            'iterations': iteration,
-                        }
 
                         yield PausePromptStart(
                             reason=pause_reason,
                             reason_code=pause_reason_code,
                             pending_todos=pending_todos,
-                            stats=stats,
+                            stats=build_pause_stats(tool_call_count, elapsed_seconds, iteration),
                         )
 
                         try:
@@ -2769,6 +1194,7 @@ class CodingAgent(AgentInterface):
                             # User chose to continue - reset budgets
                             pause_continue_count += 1
                             tool_call_count = 0
+                            iteration = 0
                             loop_start_time = time.monotonic()
 
                             # Inject feedback into context if provided
@@ -2784,7 +1210,7 @@ class CodingAgent(AgentInterface):
                         except asyncio.CancelledError:
                             break
                     else:
-                        # CLI mode - fall back to text-based pause
+                        # Fallback - no interactive pause available
                         yield TextDelta(content=self._build_pause_message(pause_reason_code))
                         break
 
@@ -2873,30 +1299,37 @@ class CodingAgent(AgentInterface):
 
                             yield ContextCompacting(tokens_before=input_tokens)
 
-                            messages_removed = await self.memory.compact_conversation_async(
-                                current_input_tokens=input_tokens,
-                                llm_backend=self.llm,
+                            # Wrap compaction in its own try/except so failures
+                            # don't fall into the provider-error handler below.
+                            messages_removed = 0
+                            try:
+                                messages_removed = await self.memory.compact_conversation_async(
+                                    current_input_tokens=input_tokens,
+                                    llm_backend=self.llm,
+                                )
+
+                                if messages_removed > 0:
+                                    # Rebuild current_context from compacted MessageStore
+                                    current_context = self.context_builder.build_context(
+                                        user_query=user_input,
+                                        task_type="chat",
+                                        language="python",
+                                        use_rag=len(self.indexed_chunks) > 0,
+                                        available_chunks=self.indexed_chunks if self.indexed_chunks else None,
+                                        file_references=file_references if file_references else None,
+                                        agent_state=self.todo_state if self.todo_state.get('todos') else None,
+                                        plan_mode_state=self.plan_mode_state,
+                                        director_adapter=self.director_adapter,
+                                    )
+                            except Exception as compact_err:
+                                logger.error("compaction_failed", error=str(compact_err))
+
+                            # Always emit ContextCompacted to clear status bar
+                            yield ContextCompacted(
+                                messages_removed=messages_removed,
+                                tokens_before=input_tokens,
+                                tokens_after=0,
                             )
-
-                            if messages_removed > 0:
-                                # Rebuild current_context from compacted MessageStore
-                                current_context = self.context_builder.build_context(
-                                    user_query=user_input,
-                                    task_type="chat",
-                                    language="python",
-                                    use_rag=len(self.indexed_chunks) > 0,
-                                    available_chunks=self.indexed_chunks if self.indexed_chunks else None,
-                                    file_references=file_references if file_references else None,
-                                    agent_state=self.todo_state if self.todo_state.get('todos') else None,
-                                    plan_mode_state=self.plan_mode_state,
-                                    director_adapter=self.director_adapter,
-                                )
-
-                                yield ContextCompacted(
-                                    messages_removed=messages_removed,
-                                    tokens_before=input_tokens,
-                                    tokens_after=0,  # Real count comes from next LLM call
-                                )
 
                 except Exception as e:
                     # Provider error (ReadTimeout, connection error, API error)
@@ -2991,12 +1424,10 @@ class CodingAgent(AgentInterface):
                             reason=pause_reason,
                             reason_code=pause_reason_code,
                             pending_todos=pending_todos,
-                            stats={
-                                'tool_calls': tool_call_count,
-                                'elapsed_s': time.monotonic() - loop_start_time,
-                                'iterations': iteration,
-                                'error': provider_error
-                            }
+                            stats=build_pause_stats(
+                                tool_call_count, time.monotonic() - loop_start_time,
+                                iteration, error=provider_error
+                            ),
                         )
 
                         # Wait for user decision (with timeout to prevent deadlock)
@@ -3042,7 +1473,7 @@ class CodingAgent(AgentInterface):
                             yield PausePromptEnd(continue_work=False, feedback="Pause cancelled")
                             break
                     else:
-                        # CLI mode - yield pause message and break
+                        # Fallback - no interactive pause available
                         yield TextDelta(content=self._build_pause_message(pause_reason_code))
                         break
 
@@ -3063,73 +1494,37 @@ class CodingAgent(AgentInterface):
                 for tc in tool_calls:
                     call_id = tc.id or f"call_{uuid.uuid4().hex[:8]}"
 
-                    # Check if this exact call has failed before (ENFORCEMENT IN CODE)
-                    is_repeat, call_summary = self._error_tracker.is_repeated_failed_call(
-                        tc.function.name, tc.function.get_parsed_arguments()
-                    )
-                    if is_repeat:
-                        # Block this call - add to blocked_calls for controller constraint
-                        blocked_calls.append(call_summary)
+                    # Run all gating checks via centralized service
+                    tool_args = tc.function.get_parsed_arguments()
+                    from src.core.tool_gating import GateAction
+                    gate_result = self._gating.evaluate(tc.function.name, tool_args)
 
-                        # Update tool state in store (skipped)
+                    if gate_result.action == GateAction.BLOCKED_REPEAT:
+                        blocked_calls.append(gate_result.call_summary)
+
                         if self.memory.message_store:
                             self.memory.message_store.update_tool_state(
                                 call_id,
                                 CoreToolStatus.SKIPPED
                             )
 
-                        # LLM feedback: Add tool message so LLM knows to try different approach
                         tool_messages.append({
                             "role": "tool",
                             "tool_call_id": call_id,
                             "name": tc.function.name,
-                            "content": "[BLOCKED] This exact call failed previously. You must try a different approach or different arguments."
+                            "content": gate_result.message,
                         })
                         continue  # Move to next tool call
 
-                    # Check plan mode gating BEFORE approval and execution
-                    tool_args = tc.function.get_parsed_arguments()
-                    plan_gate_result = self._check_plan_mode_gate(tc.function.name, tool_args)
-                    if plan_gate_result is not None:
-                        # Tool is gated in plan mode - update store
+                    if gate_result.action == GateAction.DENY:
                         if self.memory.message_store:
                             self.memory.message_store.update_tool_state(
                                 call_id,
                                 CoreToolStatus.ERROR,
-                                error=plan_gate_result["message"]
+                                error=gate_result.message
                             )
 
-                        # Add gated response to tool messages for LLM feedback
-                        import json
-                        gated_output = json.dumps(plan_gate_result, indent=2)
-                        tool_messages.append({
-                            "role": "tool",
-                            "tool_call_id": call_id,
-                            "name": tc.function.name,
-                            "content": gated_output
-                        })
-
-                        # Persist tool result to MessageStore for session replay
-                        self.memory.add_tool_result(
-                            tool_call_id=call_id,
-                            content=gated_output,
-                            tool_name=tc.function.name,
-                            status="gated",
-                        )
-                        continue  # Skip to next tool call
-
-                    # Check director mode gating
-                    director_gate_result = self._check_director_gate(tc.function.name, tool_args)
-                    if director_gate_result is not None:
-                        if self.memory.message_store:
-                            self.memory.message_store.update_tool_state(
-                                call_id,
-                                CoreToolStatus.ERROR,
-                                error=director_gate_result["message"]
-                            )
-
-                        import json
-                        gated_output = json.dumps(director_gate_result, indent=2)
+                        gated_output = self._gating.format_gate_response(gate_result.gate_response)
                         tool_messages.append({
                             "role": "tool",
                             "tool_call_id": call_id,
@@ -3145,7 +1540,7 @@ class CodingAgent(AgentInterface):
                         )
                         continue  # Skip to next tool call
 
-                    requires_approval = needs_approval(tc.function.name, tc.function.get_parsed_arguments())
+                    requires_approval = gate_result.action == GateAction.NEEDS_APPROVAL
 
                     # Freeze approval policy in render meta registry (store-driven UI)
                     # This captures the policy at tool-call creation time (freeze semantics)
@@ -3314,8 +1709,8 @@ class CodingAgent(AgentInterface):
                     tool_call_count += 1
 
                     # Special handling for clarify tool (requires UI interaction)
-                    if tc.function.name == "clarify":
-                        clarify_result = await self._handle_clarify_tool(
+                    if self._special_handlers.handles(tc.function.name) and tc.function.name == "clarify":
+                        clarify_result = await self._special_handlers.handle_clarify(
                             call_id,
                             tc.function.get_parsed_arguments(),
                             ui
@@ -3350,8 +1745,8 @@ class CodingAgent(AgentInterface):
                         continue  # Skip to next tool call
 
                     # Special handling for request_plan_approval (requires UI approval)
-                    if tc.function.name == "request_plan_approval":
-                        approval_result, plan_rejected = await self._handle_request_plan_approval_tool(
+                    if self._special_handlers.handles(tc.function.name) and tc.function.name == "request_plan_approval":
+                        approval_result, plan_rejected = await self._special_handlers.handle_plan_approval(
                             call_id, ui
                         )
 
@@ -3392,7 +1787,7 @@ class CodingAgent(AgentInterface):
                         continue  # Skip to next tool call
 
                     # Special handling for director_complete_plan (requires UI approval)
-                    if tc.function.name == "director_complete_plan":
+                    if self._special_handlers.handles(tc.function.name) and tc.function.name == "director_complete_plan":
                         # Execute the tool first (transitions to AWAITING_APPROVAL)
                         try:
                             tool_kwargs = tc.function.get_parsed_arguments()
@@ -3413,7 +1808,7 @@ class CodingAgent(AgentInterface):
                             )
 
                             # Now handle the approval flow
-                            approval_result, plan_rejected = await self._handle_director_plan_approval(
+                            approval_result, plan_rejected = await self._special_handlers.handle_director_plan_approval(
                                 call_id, result, ui
                             )
 
@@ -3632,106 +2027,21 @@ class CodingAgent(AgentInterface):
                                     "content": tool_error_content
                                 })
                             else:
-                                # Error budget exceeded - pause instead of hard stop
-                                # Check approval precedence (don't show pause during approval wait)
-                                if self._awaiting_approval:
-                                    logger.debug("error budget exceeded but approval pending; deferring pause")
-                                    tool_messages.append({
-                                        "role": "tool",
-                                        "tool_call_id": call_id,
-                                        "name": tc.function.name,
-                                        "content": tool_error_content
-                                    })
-                                    continue  # Let approval resolve first
-
-                                # Set state for potential resumption
-                                self.task_state.last_stop_reason = 'error_budget'
-
-                                # Check resume cap (prevent infinite Continue loops)
-                                resume_count = self.task_state.error_budget_resume_count
-                                progress_since_resume = self.task_state.successful_tools_since_resume
-
-                                if resume_count >= MAX_ERROR_BUDGET_RESUMES:
-                                    # Force stop - too many resumes
-                                    yield TextDelta(content=(
-                                        f"\n[ERROR] Reached maximum error recovery attempts "
-                                        f"({MAX_ERROR_BUDGET_RESUMES}). "
-                                        "Please provide guidance on how to proceed."
-                                    ))
-                                    user_rejected = True
+                                # Error budget exceeded - pause flow
+                                pause = await self._handle_error_budget_pause(
+                                    reason, tc.function.name, call_id, tool_error_content,
+                                    tool_call_count, elapsed_seconds, ui, MAX_ERROR_BUDGET_RESUMES
+                                )
+                                for evt in pause['events']:
+                                    yield evt
+                                if pause['tool_message']:
+                                    tool_messages.append(pause['tool_message'])
+                                current_context.extend(pause['context_additions'])
+                                if pause['action'] == 'defer':
+                                    continue
+                                elif pause['user_rejected'] or pause['action'] == 'break':
+                                    user_rejected = pause['user_rejected']
                                     break
-
-                                # Check for no-progress (resumed but still failing)
-                                pause_reason_code = 'error_budget'
-                                if resume_count > 0 and progress_since_resume == 0:
-                                    # Still failing with no progress - change message
-                                    pause_reason_code = 'error_budget_no_progress'
-                                    reason = f"{reason} (no progress since last resume)"
-
-                                # Check if UI supports interactive pause
-                                if hasattr(ui, 'has_pause_capability') and ui.has_pause_capability():
-                                    # TUI mode - use interactive widget
-                                    pending_todos = self.task_state.get_pending_summary()
-                                    error_stats = self._error_tracker.get_stats()
-                                    stats = {
-                                        'tool_calls': tool_call_count,
-                                        'elapsed_s': elapsed_seconds,
-                                        'errors_total': error_stats['total_failures'],
-                                        'error_reason': reason,
-                                    }
-
-                                    yield PausePromptStart(
-                                        reason=f"Error budget: {reason}",
-                                        reason_code=pause_reason_code,  # error_budget or error_budget_no_progress
-                                        pending_todos=pending_todos,
-                                        stats=stats,
-                                    )
-
-                                    try:
-                                        pause_result = await ui.wait_for_pause_response(timeout=None)
-                                        yield PausePromptEnd(
-                                            continue_work=pause_result.continue_work,
-                                            feedback=pause_result.feedback,
-                                        )
-
-                                        if not pause_result.continue_work:
-                                            user_rejected = True
-                                            break  # User chose to stop
-
-                                        # User chose to continue - partial reset
-                                        self.task_state.error_budget_resume_count += 1
-                                        self.task_state.successful_tools_since_resume = 0
-
-                                        # Reset tool error counts (allow retries)
-                                        self._error_tracker.reset_tool_error_counts(tool_name=tc.function.name)
-
-                                        # Always inject hint to LLM
-                                        current_context.append({
-                                            "role": "system",
-                                            "content": "<notice>Continuing after error budget pause. Try a different approach; repeated identical calls are blocked.</notice>"
-                                        })
-
-                                        if pause_result.feedback:
-                                            current_context.append({
-                                                "role": "user",
-                                                "content": f"[User guidance: {pause_result.feedback}]"
-                                            })
-
-                                        # Add error context for LLM awareness
-                                        tool_messages.append({
-                                            "role": "tool",
-                                            "tool_call_id": call_id,
-                                            "name": tc.function.name,
-                                            "content": error_context.to_prompt_block()
-                                        })
-
-                                    except asyncio.CancelledError:
-                                        user_rejected = True
-                                        break
-                                else:
-                                    # CLI mode - text-based pause (not hard stop!)
-                                    yield TextDelta(content=self._build_pause_message('error_budget'))
-                                    break  # Returns to user, they can continue
 
                     except Exception as e:
                         duration_ms = int((time.monotonic() - start_time) * 1000)
@@ -3775,193 +2085,67 @@ class CodingAgent(AgentInterface):
                                 "content": error_context.to_prompt_block()
                             })
                         else:
-                            # Error budget exceeded - pause instead of hard stop
-                            # Check approval precedence (don't show pause during approval wait)
-                            if self._awaiting_approval:
-                                logger.debug("error budget exceeded but approval pending; deferring pause")
-                                tool_messages.append({
-                                    "role": "tool",
-                                    "tool_call_id": call_id,
-                                    "name": tc.function.name,
-                                    "content": error_context.to_prompt_block()
-                                })
-                                continue  # Let approval resolve first
-
-                            # Set state for potential resumption
-                            self.task_state.last_stop_reason = 'error_budget'
-
-                            # Check resume cap (prevent infinite Continue loops)
-                            resume_count = self.task_state.error_budget_resume_count
-                            progress_since_resume = self.task_state.successful_tools_since_resume
-
-                            if resume_count >= MAX_ERROR_BUDGET_RESUMES:
-                                # Force stop - too many resumes
-                                yield TextDelta(content=(
-                                    f"\n[ERROR] Reached maximum error recovery attempts "
-                                    f"({MAX_ERROR_BUDGET_RESUMES}). "
-                                    "Please provide guidance on how to proceed."
-                                ))
-                                user_rejected = True
+                            # Error budget exceeded - pause flow
+                            pause = await self._handle_error_budget_pause(
+                                reason, tc.function.name, call_id, error_context.to_prompt_block(),
+                                tool_call_count, elapsed_seconds, ui, MAX_ERROR_BUDGET_RESUMES
+                            )
+                            for evt in pause['events']:
+                                yield evt
+                            if pause['tool_message']:
+                                tool_messages.append(pause['tool_message'])
+                            current_context.extend(pause['context_additions'])
+                            if pause['action'] == 'defer':
+                                continue
+                            elif pause['user_rejected'] or pause['action'] == 'break':
+                                user_rejected = pause['user_rejected']
                                 break
-
-                            # Check for no-progress (resumed but still failing)
-                            pause_reason_code = 'error_budget'
-                            if resume_count > 0 and progress_since_resume == 0:
-                                # Still failing with no progress - change message
-                                pause_reason_code = 'error_budget_no_progress'
-                                reason = f"{reason} (no progress since last resume)"
-
-                            # Check if UI supports interactive pause
-                            if hasattr(ui, 'has_pause_capability') and ui.has_pause_capability():
-                                # TUI mode - use interactive widget
-                                pending_todos = self.task_state.get_pending_summary()
-                                error_stats = self._error_tracker.get_stats()
-                                stats = {
-                                    'tool_calls': tool_call_count,
-                                    'elapsed_s': elapsed_seconds,
-                                    'errors_total': error_stats['total_failures'],
-                                    'error_reason': reason,
-                                }
-
-                                yield PausePromptStart(
-                                    reason=f"Error budget: {reason}",
-                                    reason_code=pause_reason_code,  # error_budget or error_budget_no_progress
-                                    pending_todos=pending_todos,
-                                    stats=stats,
-                                )
-
-                                try:
-                                    pause_result = await ui.wait_for_pause_response(timeout=None)
-                                    yield PausePromptEnd(
-                                        continue_work=pause_result.continue_work,
-                                        feedback=pause_result.feedback,
-                                    )
-
-                                    if not pause_result.continue_work:
-                                        user_rejected = True
-                                        break  # User chose to stop
-
-                                    # User chose to continue - partial reset
-                                    self.task_state.error_budget_resume_count += 1
-                                    self.task_state.successful_tools_since_resume = 0
-
-                                    # Reset tool error counts (allow retries)
-                                    self._error_tracker.reset_tool_error_counts(tool_name=tc.function.name)
-
-                                    # Always inject hint to LLM
-                                    current_context.append({
-                                        "role": "system",
-                                        "content": "<notice>Continuing after error budget pause. Try a different approach; repeated identical calls are blocked.</notice>"
-                                    })
-
-                                    if pause_result.feedback:
-                                        current_context.append({
-                                            "role": "user",
-                                            "content": f"[User guidance: {pause_result.feedback}]"
-                                        })
-
-                                    # Add error context for LLM awareness
-                                    tool_messages.append({
-                                        "role": "tool",
-                                        "tool_call_id": call_id,
-                                        "name": tc.function.name,
-                                        "content": error_context.to_prompt_block()
-                                    })
-
-                                except asyncio.CancelledError:
-                                    user_rejected = True
-                                    break
-                            else:
-                                # CLI mode - text-based pause (not hard stop!)
-                                yield TextDelta(content=self._build_pause_message('error_budget'))
-                                break  # Returns to user, they can continue
 
                 # If user rejected a tool, add tool_results for remaining unprocessed calls
                 # Claude API requires every tool_use to have a corresponding tool_result
                 if user_rejected:
-                    # Find tool calls that weren't processed (after the rejected one)
+                    # Fill in skipped results for unprocessed tool calls
+                    from src.core.stream_phases import fill_skipped_tool_results
                     processed_call_ids = {msg.get("tool_call_id") for msg in tool_messages if msg.get("role") == "tool"}
-                    for tc in tool_calls:
-                        tc_id = tc.id or f"call_{tool_calls.index(tc)}"
-                        if tc_id not in processed_call_ids:
-                            skipped_msg = "Tool call skipped (previous tool rejected by user)"
-                            tool_messages.append({
-                                "role": "tool",
-                                "tool_call_id": tc_id,
-                                "name": tc.function.name,
-                                "content": skipped_msg
-                            })
-                            # Persist to MessageStore
-                            self.memory.add_tool_result(
-                                tool_call_id=tc_id,
-                                content=skipped_msg,
-                                tool_name=tc.function.name,
-                                status="skipped",
+                    skipped_msgs = fill_skipped_tool_results(
+                        tool_calls, processed_call_ids,
+                        reason="Tool call skipped (previous tool rejected by user)",
+                    )
+                    for msg in skipped_msgs:
+                        tool_messages.append(msg)
+                        self.memory.add_tool_result(
+                            tool_call_id=msg["tool_call_id"],
+                            content=msg["content"],
+                            tool_name=msg["name"],
+                            status="skipped",
+                        )
+                        if self.memory.message_store:
+                            self.memory.message_store.update_tool_state(
+                                msg["tool_call_id"],
+                                CoreToolStatus.SKIPPED,
                             )
-                            # Update tool_state
-                            if self.memory.message_store:
-                                self.memory.message_store.update_tool_state(
-                                    tc_id,
-                                    CoreToolStatus.SKIPPED
-                                )
 
-                    # Still add assistant message and tool_results to context
-                    # so next turn has complete conversation history
-                    current_context.append({
-                        "role": "assistant",
-                        "content": response_content,
-                        "tool_calls": [
-                            {
-                                "id": tc.id or f"call_{i}",
-                                "type": "function",
-                                "function": {
-                                    "name": tc.function.name,
-                                    "arguments": json.dumps(tc.function.get_parsed_arguments())
-                                }
-                            }
-                            for i, tc in enumerate(tool_calls)
-                        ]
-                    })
+                    # Add assistant message + tool_results to context for history
+                    from src.core.stream_phases import build_assistant_context_message
+                    current_context.append(
+                        build_assistant_context_message(response_content, tool_calls)
+                    )
                     current_context.extend(tool_messages)
 
                     break  # Exit main while loop
 
                 # Add assistant's response with tool calls to context
-                current_context.append({
-                    "role": "assistant",
-                    "content": response_content,
-                    "tool_calls": [
-                        {
-                            "id": tc.id or f"call_{i}",
-                            "type": "function",
-                            "function": {
-                                "name": tc.function.name,
-                                "arguments": json.dumps(tc.function.get_parsed_arguments())
-                            }
-                        }
-                        for i, tc in enumerate(tool_calls)
-                    ]
-                })
+                from src.core.stream_phases import build_assistant_context_message
+                current_context.append(
+                    build_assistant_context_message(response_content, tool_calls)
+                )
 
                 # Add tool results to context
                 current_context.extend(tool_messages)
 
                 # Inject controller constraint for blocked calls
-                # (These are calls that failed before and were blocked from re-execution)
-                if blocked_calls:
-                    constraint = f"""[CONTROLLER] The following tool calls were BLOCKED because they previously failed:
-{chr(10).join(f'- {call}' for call in blocked_calls)}
-
-REQUIRED: Choose a DIFFERENT approach:
-- Use a different tool, OR
-- Change arguments meaningfully (path, command), OR
-- Add a diagnostic step first (read_file, list_directory)
-- If impossible, explain to user why task cannot be completed"""
-
-                    current_context.append({
-                        "role": "user",
-                        "content": constraint
-                    })
+                from src.core.stream_phases import inject_controller_constraint
+                inject_controller_constraint(current_context, blocked_calls)
 
         except Exception as e:
             # Outer exception handler - catches any exceptions not handled by inner handlers
@@ -3983,140 +2167,6 @@ REQUIRED: Choose a DIFFERENT approach:
 
         # Yield StreamEnd to signal completion
         yield StreamEnd()
-
-    async def chat_async(
-        self,
-        message: str,
-        use_rag: bool = True,
-        on_chunk: Optional[Callable[[str], Awaitable[None]]] = None,
-        request_approval: Optional[Callable[[str, Dict[str, Any]], Awaitable[bool]]] = None,
-    ) -> AgentResponse:
-        """
-        Async interactive chat for TUI with real-time streaming.
-
-        This is the async version of chat() that allows the TUI to remain
-        responsive while streaming LLM responses and executing tools.
-
-        Args:
-            message: User message
-            use_rag: Whether to use RAG retrieval (default: True)
-            on_chunk: Async callback for each content chunk (for UI updates)
-            request_approval: Async callback for TUI-native approval dialogs
-
-        Returns:
-            Agent response
-
-        Example:
-            async def update_ui(chunk: str):
-                self.chat_history += chunk
-                self.app.invalidate()  # Refresh TUI
-
-            async def approve(tool_name: str, tool_args: dict) -> bool:
-                return await tui.request_approval(tool_name, tool_args)
-
-            response = await agent.chat_async(
-                message="write a hello world",
-                on_chunk=update_ui,
-                request_approval=approve
-            )
-        """
-        # USER PROMPT SUBMIT HOOK (same as sync version)
-        if self.hook_manager:
-            try:
-                from src.hooks import HookContinue
-
-                decision, modified_prompt = self.hook_manager.emit_user_prompt_submit(
-                    prompt=message,
-                    metadata={
-                        "stream": True,
-                        "use_rag": use_rag,
-                        "async": True
-                    }
-                )
-
-                if decision == HookContinue.BLOCK:
-                    return AgentResponse(
-                        content="Prompt blocked by hook",
-                        metadata={"blocked": True}
-                    )
-
-                message = modified_prompt
-
-            except Exception as e:
-                if e.__class__.__name__ == 'HookBlockedError':
-                    return AgentResponse(
-                        content=f"Prompt blocked by hook: {str(e)}",
-                        metadata={"blocked": True}
-                    )
-                logger.warning(f"UserPromptSubmit hook error: {e}", exc_info=True)
-
-        # Reset web tools budget for new turn
-        if hasattr(self, '_web_run_budget') and self._web_run_budget:
-            self._web_run_budget.reset()
-
-        # Create task context
-        task_context = TaskContext(
-            task_id=str(uuid.uuid4()),
-            description=message,
-            task_type="chat",
-            key_concepts=[],
-        )
-
-        self.memory.set_task_context(task_context)
-        self.memory.add_user_message(message)
-
-        # Parse and load file references
-        file_references = self.file_reference_parser.parse_and_load(message)
-
-        # Build context (with agent state for task continuation)
-        # MemoryManager uses MessageStore when configured (Option A: Single Source of Truth)
-        context = self.context_builder.build_context(
-            user_query=message,
-            task_type="chat",
-            language="python",
-            use_rag=use_rag and len(self.indexed_chunks) > 0,
-            available_chunks=self.indexed_chunks if use_rag else None,
-            file_references=file_references if file_references else None,
-            agent_state=self.todo_state if self.todo_state.get('todos') else None,
-            plan_mode_state=self.plan_mode_state,
-            director_adapter=self.director_adapter,
-        )
-
-        # Execute with async tool calling loop
-        execution_result = await self._execute_with_tools_async(
-            context=context,
-            max_iterations=10,
-            on_chunk=on_chunk,
-            request_approval=request_approval,  # TUI-native approval
-        )
-
-        # Persist the ordered transcript to working memory
-        from src.memory.models import MessageRole
-        for msg in execution_result.turn_messages:
-            if msg["role"] == "assistant":
-                self.memory.working_memory.add_message(
-                    role=MessageRole.ASSISTANT,
-                    content=msg.get("content", ""),
-                    metadata={"tool_calls": msg.get("tool_calls")} if msg.get("tool_calls") else None
-                )
-            elif msg["role"] == "tool":
-                self.memory.working_memory.add_message(
-                    role=MessageRole.TOOL,
-                    content=msg.get("content", ""),
-                    metadata={
-                        "tool_call_id": msg.get("tool_call_id"),
-                        "name": msg.get("name")
-                    }
-                )
-
-        response_content = execution_result.content
-        return AgentResponse(
-            content=response_content,
-            metadata={
-                "execution_mode": "llm_first_async",
-                "used_rag": use_rag and len(self.indexed_chunks) > 0,
-            }
-        )
 
     @observe_tool_execution("agent_execute_tool", capture_args=True)
     def execute_tool(self, tool_name: str, **kwargs: Any) -> Any:
@@ -4268,18 +2318,6 @@ REQUIRED: Choose a DIFFERENT approach:
             results = agent.get_memory('test_results', {'passed': 0, 'failed': 0})
         """
         return self.memory.get_value(key, default)
-
-    def get_available_tools(self) -> str:
-        """Get description of available tools."""
-        return self.tool_executor.get_tools_description()
-
-    def save_session(self, session_name: Optional[str] = None) -> Path:
-        """Save current session."""
-        return self.memory.save_session(session_name)
-
-    def load_session(self, session_path: Path) -> None:
-        """Load a saved session."""
-        self.memory.load_session(session_path)
 
     def resume_session_from_jsonl(self, jsonl_path: Path) -> "HydrationResult":
         """
@@ -4526,93 +2564,6 @@ REQUIRED: Choose a DIFFERENT approach:
 
         # Generic tool error
         return "tool_execution_error"
-
-    def _format_stop_explanation(self, reason: str, error_context: ErrorContext) -> str:
-        """
-        Generate clear user-facing explanation with actionable next steps.
-
-        Args:
-            reason: Reason for stopping (from should_allow_retry)
-            error_context: Structured error context
-
-        Returns:
-            Formatted markdown explanation for the user
-        """
-        attempts = "\n".join(
-            f"  - {a['tool']}: {a['result_summary']}"
-            for a in error_context.previous_attempts
-        )
-
-        # Generate specific actionable suggestions
-        action_menu = self._generate_action_menu(error_context)
-
-        return f"""
-
----
-**I was unable to complete this task.**
-
-**What failed:** {error_context.tool_name}
-**Error:** {error_context.error_message}
-**Reason for stopping:** {reason}
-
-**What I tried:**
-{attempts if attempts else "  (first attempt)"}
-
-**Suggested next steps:**
-{action_menu}
-
----
-"""
-
-    def _generate_action_menu(self, error_context: ErrorContext) -> str:
-        """
-        Generate SPECIFIC actionable next steps based on error type.
-
-        Args:
-            error_context: Structured error context
-
-        Returns:
-            Formatted markdown list of suggestions
-        """
-        error_msg = error_context.error_message.lower()
-        tool = error_context.tool_name
-
-        suggestions = []
-
-        # File/path related errors
-        if "not found" in error_msg or "no such file" in error_msg:
-            suggestions.append("1. **Verify the path** - Run `ls` or `dir` in the parent directory")
-            suggestions.append("2. **Search for the file** - Tell me what the file contains and I'll search")
-            if error_context.tool_args.get("file_path"):
-                path = error_context.tool_args["file_path"]
-                suggestions.append(f"3. **Confirm location** - Is `{path}` the correct path?")
-
-        # Permission errors
-        elif "permission" in error_msg or "access denied" in error_msg:
-            suggestions.append("1. **Check permissions** - Run `ls -la` on the file")
-            suggestions.append("2. **Run as admin** - You may need elevated privileges")
-            suggestions.append("3. **Choose different location** - Save to a directory you own")
-
-        # Command execution errors
-        elif tool == "run_command":
-            suggestions.append("1. **Check command syntax** - Copy and run manually to debug")
-            if error_context.stderr_tail:
-                suggestions.append(f"2. **Review stderr** - `{error_context.stderr_tail[:100]}...`")
-            suggestions.append("3. **Verify dependencies** - Is the required tool installed?")
-
-        # Edit/patch errors
-        elif tool in ("edit_file", "apply_patch"):
-            suggestions.append("1. **Show me the file** - I'll read it first to verify content")
-            suggestions.append("2. **Check for conflicts** - Has the file changed since I read it?")
-            suggestions.append("3. **Manual edit** - Copy my suggested changes and apply manually")
-
-        # Generic fallback
-        if not suggestions:
-            suggestions.append("1. **Provide more context** - What exactly are you trying to accomplish?")
-            suggestions.append("2. **Share error details** - Run the command with `--verbose` if available")
-            suggestions.append("3. **Try manual approach** - I can describe the steps for you to execute")
-
-        return "\n".join(suggestions)
 
     def _build_pause_message(self, reason: str) -> str:
         """

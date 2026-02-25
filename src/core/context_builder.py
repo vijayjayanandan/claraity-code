@@ -1,15 +1,19 @@
 """Context builder for assembling LLM context."""
 
+from __future__ import annotations
+
 import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, TYPE_CHECKING
 from xml.sax.saxutils import escape as xml_escape
+
+if TYPE_CHECKING:
+    from src.rag import HybridRetriever, CodeChunk
 
 from src.observability import get_logger
 from src.memory import MemoryManager
-from src.rag import HybridRetriever, CodeChunk
 from src.prompts import PromptOptimizer
 from src.prompts.system_prompts import get_system_prompt, get_plan_mode_injection
 from src.core.file_reference_parser import FileReference
