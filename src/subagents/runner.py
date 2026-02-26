@@ -224,8 +224,8 @@ def _create_ipc_pause_callback(subagent_name):
     """
     def _callback(reason, reason_code, stats):
         request = ApprovalRequest(
-            tool_call_id="__pause__",
-            tool_name="__pause__",
+            tool_call_id="pause-request",
+            tool_name="pause-request",
             tool_args={},
             subagent_name=subagent_name,
             args_summary=reason,
@@ -289,10 +289,13 @@ def main():
         permission_mode = input_data.permission_mode
         auto_approve_set = set(input_data.auto_approve_tools)
         approval_cb = None
-        pause_cb = None
         if permission_mode != "auto":
             approval_cb = _create_ipc_approval_callback(config.name, auto_approve_set)
-            pause_cb = _create_ipc_pause_callback(config.name)
+
+        # Pause callback is ALWAYS created regardless of permission mode.
+        # It asks the user whether to continue when iteration/wall-clock
+        # limits are hit — this is not a tool approval concern.
+        pause_cb = _create_ipc_pause_callback(config.name)
 
         # Resolve max_wall_time from input (None disables wall-clock limit)
         max_wall_time = input_data.max_wall_time
