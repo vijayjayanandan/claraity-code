@@ -1019,6 +1019,11 @@ class CodingAgentApp(App):
 
         # If agent already exists, config was just updated (not setup mode)
         if self.agent is not None:
+            self.notify(
+                "Config updated. Please restart the app for changes to take effect.",
+                severity="information",
+                timeout=8.0
+            )
             return
 
         # Setup mode: create agent from saved config
@@ -1264,6 +1269,7 @@ class CodingAgentApp(App):
         transcript_path: Path,
         parent_tool_call_id: str,
         model_name: str = "",
+        subagent_name: str = "",
     ) -> None:
         """Called on UI loop when subagent is registered.
 
@@ -1276,6 +1282,7 @@ class CodingAgentApp(App):
             transcript_path: Path to the subagent's JSONL transcript
             parent_tool_call_id: Tool call ID of the spawning delegation call
             model_name: LLM model name used by this subagent
+            subagent_name: Subagent type/name (e.g., "knowledge-builder", "planner")
         """
         logger.info(
             f"TUI: Subagent registered: {subagent_id}, "
@@ -1292,10 +1299,11 @@ class CodingAgentApp(App):
             "parent_tool_call_id": parent_tool_call_id,
             "store": store,  # May be None for subprocess mode
             "model_name": model_name,
+            "subagent_name": subagent_name,
         }
 
         # Try to mount card into parent ToolCard
-        self._try_mount_subagent_card(subagent_id, transcript_path, parent_tool_call_id, model_name)
+        self._try_mount_subagent_card(subagent_id, transcript_path, parent_tool_call_id, model_name, subagent_name)
 
     def _on_subagent_unregistered(self, subagent_id: str) -> None:
         """Called on UI loop when subagent completes.
@@ -1320,6 +1328,7 @@ class CodingAgentApp(App):
         transcript_path: Path,
         parent_tool_call_id: str,
         model_name: str = "",
+        subagent_name: str = "",
     ) -> None:
         """Mount SubAgentCard, or queue for retry if parent ToolCard doesn't exist yet.
 
@@ -1345,6 +1354,7 @@ class CodingAgentApp(App):
                 store=store,
                 buffered_notifications=buffered,
                 model_name=model_name,
+                subagent_name=subagent_name,
                 id=f"subagent-{subagent_id}"
             )
 
@@ -1365,6 +1375,7 @@ class CodingAgentApp(App):
                 "subagent_id": subagent_id,
                 "transcript_path": transcript_path,
                 "model_name": model_name,
+                "subagent_name": subagent_name,
             }
             logger.info(
                 f"TUI: Queued SubAgentCard {subagent_id} "
@@ -2133,21 +2144,21 @@ class CodingAgentApp(App):
             except NoMatches:
                 pass
 
-        # ContextCompacting — show "Compacting Conversation" with spinner+timer
+        # ContextCompacting — show info banner (higher render priority than task name,
+        # and has minimum display duration so it's visible even if compaction is fast)
         elif isinstance(event, ContextCompacting):
             try:
                 status_bar = self.query_one("#status", StatusBar)
-                status_bar.set_current_task("Compacting Conversation")
+                status_bar.show_info("Compacting conversation...", duration=30.0)
             except NoMatches:
                 pass
 
-        # ContextCompacted — clear compacting indicator, show brief result
+        # ContextCompacted — replace compacting banner with result summary
         # (Old widgets are already cleared by the compact_boundary handler
         # in _render_store_message when the boundary MESSAGE_ADDED fires.)
         elif isinstance(event, ContextCompacted):
             try:
                 status_bar = self.query_one("#status", StatusBar)
-                status_bar.clear_current_task()
                 status_bar.show_info(
                     f"Compacted: {event.messages_removed} messages summarized",
                     duration=5.0,
@@ -3085,6 +3096,10 @@ class CodingAgentApp(App):
                     child.remove()
                 self._store_message_widgets.clear()
                 self._tool_cards.clear()
+                # Reset live-streaming widget references (now detached from DOM)
+                self._current_message = None
+                self._current_code = None
+                self._current_thinking = None
                 logger.info("compact_boundary: cleared pre-compaction widgets")
             elif event_type == "clarify_request":
                 await self._on_clarify_request(message, conversation)
