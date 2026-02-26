@@ -242,6 +242,13 @@ class ToolCard(Static):
         if self._header_widget and self._header_widget.is_attached:
             self._header_widget.update(self._render_header_line())
 
+        # Mount diff when status advances past PENDING (deferred until active)
+        # This prevents batch tool calls from showing diffs for tools not yet
+        # processed, which caused visual confusion (diff from tool #3 appearing
+        # below the approval dialog for tool #1).
+        if new_status != ToolStatus.PENDING and not self._diff_mounted and self.is_attached:
+            self._mount_diff_widget_if_applicable()
+
         if new_status == ToolStatus.AWAITING_APPROVAL:
             # Show interaction widget - clarify or approval depending on tool
             if not self._approval_widget and self.is_attached:
@@ -262,10 +269,7 @@ class ToolCard(Static):
                         tool_name=self.tool_name,
                         args=self.args
                     )
-                # Mount diff first if not already mounted, then widget
-                # This ensures widget appears BELOW diff preview
-                if not self._diff_mounted:
-                    self._mount_diff_widget_if_applicable()
+                # Diff already mounted above; mount approval widget after it
                 self.mount(self._approval_widget)
                 self.call_after_refresh(self._focus_approval)
             elif not self.is_attached:
@@ -287,18 +291,24 @@ class ToolCard(Static):
 
         For file operations (write_file, edit_file), mounts a DiffWidget to show
         the changes with professional formatting (line numbers, background colors).
-        This happens regardless of approval mode - users should always see what
-        file operations are doing.
+
+        Diffs are only mounted for cards that have advanced past PENDING status.
+        This prevents batch tool calls from showing diffs prematurely (e.g., the
+        agent returns 3 write_file calls but only processes them sequentially —
+        only the active one should show its diff).
+
+        For session replay, cards are hydrated with their final status (SUCCESS,
+        ERROR, etc.) so diffs mount immediately on_mount.
 
         NOTE: Status is NOT reset here. The reactive default is PENDING, and the
         store-driven flow may have already set status to AWAITING_APPROVAL before
         mount. We check current status and create approval widget if needed, since
         watch_status() may have fired before is_attached was True.
         """
-        # Mount DiffWidget for file operations ALWAYS (regardless of approval mode)
-        # Users should see what's being written/edited even in AUTO mode
-        # NOTE: Must mount diff BEFORE approval so diff appears above approval in UI
-        self._mount_diff_widget_if_applicable()
+        # Only mount diff for cards past PENDING (active or completed).
+        # PENDING cards defer diff mounting until watch_status() advances them.
+        if self.status != ToolStatus.PENDING:
+            self._mount_diff_widget_if_applicable()
 
         # Check if we need to create approval widget
         # (watch_status may have been called before mount when is_attached=False)
@@ -384,6 +394,14 @@ class ToolCard(Static):
                 scroll_container = ScrollableDiffContainer()
                 self.mount(scroll_container)
                 scroll_container.mount(diff_widget)
+                self._diff_mounted = True
+            else:
+                # Empty file creation — show minimal info so approval dialog
+                # has context about what's being approved
+                self._mount_header()
+                file_name = os.path.basename(self.args.get('file_path', ''))
+                label = Static(f"  [dim]{file_name} (empty file)[/dim]")
+                self.mount(label)
                 self._diff_mounted = True
 
         elif self.tool_name == 'edit_file':
@@ -610,8 +628,12 @@ class ToolCard(Static):
         if self.tool_name == 'run_command':
             return ""
 
+        # delegate_to_subagent: show subagent type prominently
+        if self.tool_name == 'delegate_to_subagent' and 'subagent' in self.args:
+            return self.args['subagent']
+
         # Common main argument names by priority
-        main_keys = ['file_path', 'path', 'filename', 'command', 'query', 'pattern',
+        main_keys = ['subagent', 'file_path', 'path', 'filename', 'command', 'query', 'pattern',
                      'url', 'name', 'content', 'message', 'text']
 
         for key in main_keys:
@@ -641,7 +663,7 @@ class ToolCard(Static):
         # Keys to exclude from secondary args display
         # - main_keys: shown as the main argument in parentheses
         # - preview_keys: shown in content/diff preview section
-        main_keys = ['file_path', 'path', 'filename', 'command', 'query', 'pattern',
+        main_keys = ['subagent', 'file_path', 'path', 'filename', 'command', 'query', 'pattern',
                      'url', 'name', 'content', 'message', 'text']
         preview_keys = ['old_text', 'new_text']  # Shown in diff preview
 
