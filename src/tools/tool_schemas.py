@@ -116,13 +116,35 @@ LIST_DIRECTORY_TOOL = ToolDefinition(
 
 RUN_COMMAND_TOOL = ToolDefinition(
     name="run_command",
-    description="Execute a shell command and return its output. Use for testing, building, running scripts, etc.",
+    description=(
+        "Execute a shell command and return its output. "
+        "Use for running tests, building projects, executing scripts, package management, and git operations.\n\n"
+        "IMPORTANT - Shell environment:\n"
+        "- On Windows, commands run in PowerShell 5.1 (NOT cmd.exe, NOT bash).\n"
+        "- Do NOT use '&&' to chain commands -- PowerShell 5.1 does not support it. Use '; ' (semicolon) instead.\n"
+        "- Do NOT use 'cd /d' -- that is cmd.exe syntax. PowerShell uses 'Set-Location' or just 'cd'.\n"
+        "- Prefer the working_directory parameter over 'cd' commands.\n"
+        "- On Unix/macOS, commands run in the default shell (bash/zsh).\n\n"
+        "Do NOT use run_command for:\n"
+        "- Reading files (use read_file)\n"
+        "- Searching code (use grep or glob)\n"
+        "- Editing files (use edit_file)\n"
+        "- Listing directories (use list_directory)"
+    ),
     parameters={
         "type": "object",
         "properties": {
             "command": {
                 "type": "string",
-                "description": "Shell command to execute (e.g., 'python test.py', 'npm install', 'pytest')"
+                "description": "Shell command to execute (e.g., 'python test.py', 'npm install', 'pytest tests/ -v')"
+            },
+            "description": {
+                "type": "string",
+                "description": "Brief description of what this command does (e.g., 'Run unit tests', 'Install dependencies'). Helps with auditability."
+            },
+            "working_directory": {
+                "type": "string",
+                "description": "Directory to run the command in. Use this instead of 'cd' commands. Must be a valid existing directory path."
             },
             "timeout": {
                 "type": "number",
