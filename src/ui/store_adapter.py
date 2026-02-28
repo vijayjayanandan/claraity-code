@@ -435,7 +435,13 @@ class StoreAdapter:
     # =========================================================================
 
     def _handle_thinking_start(self) -> None:
-        """Start a thinking block."""
+        """Start a thinking block.
+
+        Note: Thinking is rendered live via ThinkingStart/Delta/End UIEvents
+        in app.py._handle_event(). This handler accumulates state for segment
+        completeness but _flush_to_store() is a no-op (MemoryManager is the
+        single writer; see UNIFIED_PERSISTENCE_ARCHITECTURE).
+        """
         if self._state is None:
             return
 

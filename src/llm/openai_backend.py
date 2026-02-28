@@ -149,6 +149,18 @@ class OpenAIBackend(LLMBackend):
         return "claude" in self.config.model_name.lower()
 
     @staticmethod
+    def _sanitize_temperature(temperature: float) -> float:
+        """Coerce temperature=1.0 to int(1) for API compatibility.
+
+        Some providers (Kimi K2.5, reasoning models) require temperature=1
+        exactly and reject 1.0 in the JSON payload. Python float 1.0
+        serializes as ``1.0`` while int 1 serializes as ``1``.
+        """
+        if temperature == 1.0:
+            return 1  # int serializes as JSON ``1``
+        return temperature
+
+    @staticmethod
     def _add_cache_control_to_message(message: Dict[str, Any]) -> Dict[str, Any]:
         """Add cache_control breakpoint to a message's content.
 
@@ -244,7 +256,7 @@ class OpenAIBackend(LLMBackend):
         params = {
             "model": self.config.model_name,
             "messages": self._apply_cache_control(messages),
-            "temperature": kwargs.get("temperature", self.config.temperature),
+            "temperature": self._sanitize_temperature(kwargs.get("temperature", self.config.temperature)),
             "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
             "top_p": kwargs.get("top_p", self.config.top_p),
             "stream": False,
@@ -272,7 +284,7 @@ class OpenAIBackend(LLMBackend):
             # Track cache metrics
             self.cache_tracker.record(response.usage)
             cached = self._extract_cached_tokens(response.usage)
-            logger.info(f"[CACHE] prompt={response.usage.prompt_tokens if response.usage else 0} cached={cached or 0}")
+            logger.debug(f"[CACHE] prompt={response.usage.prompt_tokens if response.usage else 0} cached={cached or 0}")
 
             # Build LLMResponse
             return LLMResponse(
@@ -313,7 +325,7 @@ class OpenAIBackend(LLMBackend):
         params = {
             "model": self.config.model_name,
             "messages": self._apply_cache_control(messages),
-            "temperature": kwargs.get("temperature", self.config.temperature),
+            "temperature": self._sanitize_temperature(kwargs.get("temperature", self.config.temperature)),
             "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
             "top_p": kwargs.get("top_p", self.config.top_p),
             "stream": True,
@@ -331,7 +343,7 @@ class OpenAIBackend(LLMBackend):
                 if hasattr(chunk, 'usage') and chunk.usage:
                     cached_tokens = self._extract_cached_tokens(chunk.usage)
                     self.cache_tracker.record(chunk.usage)
-                    logger.info(f"[CACHE] prompt={chunk.usage.prompt_tokens} cached={cached_tokens or 0}")
+                    logger.debug(f"[CACHE] prompt={chunk.usage.prompt_tokens} cached={cached_tokens or 0}")
 
                 if chunk.choices and len(chunk.choices) > 0:
                     delta = chunk.choices[0].delta
@@ -454,7 +466,7 @@ class OpenAIBackend(LLMBackend):
         params = {
             "model": self.config.model_name,
             "messages": self._apply_cache_control(messages),
-            "temperature": kwargs.get("temperature", self.config.temperature),
+            "temperature": self._sanitize_temperature(kwargs.get("temperature", self.config.temperature)),
             "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
             "top_p": kwargs.get("top_p", self.config.top_p),
             "tools": tools_json,
@@ -484,7 +496,7 @@ class OpenAIBackend(LLMBackend):
 
             # Track cache metrics
             self.cache_tracker.record(response.usage)
-            logger.info(f"[CACHE] prompt={response.usage.prompt_tokens if response.usage else 0} cached={self._extract_cached_tokens(response.usage) or 0}")
+            logger.debug(f"[CACHE] prompt={response.usage.prompt_tokens if response.usage else 0} cached={self._extract_cached_tokens(response.usage) or 0}")
 
             # Detect truncation
             truncation_info = {"truncated": False}
@@ -600,7 +612,7 @@ class OpenAIBackend(LLMBackend):
         params = {
             "model": self.config.model_name,
             "messages": self._apply_cache_control(messages),
-            "temperature": kwargs.get("temperature", self.config.temperature),
+            "temperature": self._sanitize_temperature(kwargs.get("temperature", self.config.temperature)),
             "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
             "top_p": kwargs.get("top_p", self.config.top_p),
             "tools": tools_json,
@@ -636,7 +648,7 @@ class OpenAIBackend(LLMBackend):
                         total_tokens = chunk.usage.total_tokens
                         cached_tokens = self._extract_cached_tokens(chunk.usage)
                         self.cache_tracker.record(chunk.usage)
-                        logger.info(f"[CACHE] prompt={prompt_tokens} cached={cached_tokens or 0}")
+                        logger.debug(f"[CACHE] prompt={prompt_tokens} cached={cached_tokens or 0}")
 
                     # Skip chunks with no choices (e.g., usage-only chunks)
                     if not chunk.choices or len(chunk.choices) == 0:
@@ -656,6 +668,25 @@ class OpenAIBackend(LLMBackend):
                                 finish_reason=None
                             ),
                             None  # No tool calls yet during streaming
+                        )
+
+                    # Yield reasoning content chunks (for Kimi K2.5 and other reasoning models)
+                    # Handle both direct Moonshot API (reasoning_content) and LiteLLM proxy (reasoning)
+                    reasoning_text = None
+                    if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
+                        reasoning_text = delta.reasoning_content
+                    elif hasattr(delta, 'reasoning') and delta.reasoning:
+                        reasoning_text = delta.reasoning
+                    
+                    if reasoning_text:
+                        yield (
+                            StreamChunk(
+                                content=reasoning_text,
+                                done=False,
+                                model=model_name,
+                                finish_reason=None
+                            ),
+                            None
                         )
 
                     # Accumulate tool call deltas
@@ -826,7 +857,7 @@ class OpenAIBackend(LLMBackend):
         params = {
             "model": self.config.model_name,
             "messages": self._apply_cache_control(messages),
-            "temperature": kwargs.get("temperature", self.config.temperature),
+            "temperature": self._sanitize_temperature(kwargs.get("temperature", self.config.temperature)),
             "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
             "top_p": kwargs.get("top_p", self.config.top_p),
             "tools": tools_json,
@@ -863,7 +894,7 @@ class OpenAIBackend(LLMBackend):
                         total_tokens = chunk.usage.total_tokens
                         cached_tokens = self._extract_cached_tokens(chunk.usage)
                         self.cache_tracker.record(chunk.usage)
-                        logger.info(f"[CACHE] prompt={prompt_tokens} cached={cached_tokens or 0}")
+                        logger.debug(f"[CACHE] prompt={prompt_tokens} cached={cached_tokens or 0}")
 
                     # Skip chunks with no choices (e.g., usage-only chunks)
                     if not chunk.choices or len(chunk.choices) == 0:
@@ -883,6 +914,25 @@ class OpenAIBackend(LLMBackend):
                                 finish_reason=None
                             ),
                             None  # No tool calls yet during streaming
+                        )
+
+                    # Yield reasoning content chunks (for Kimi K2.5 and other reasoning models)
+                    # Handle both direct Moonshot API (reasoning_content) and LiteLLM proxy (reasoning)
+                    reasoning_text = None
+                    if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
+                        reasoning_text = delta.reasoning_content
+                    elif hasattr(delta, 'reasoning') and delta.reasoning:
+                        reasoning_text = delta.reasoning
+                    
+                    if reasoning_text:
+                        yield (
+                            StreamChunk(
+                                content=reasoning_text,
+                                done=False,
+                                model=model_name,
+                                finish_reason=None
+                            ),
+                            None
                         )
 
                     # Accumulate tool call deltas
@@ -1034,11 +1084,17 @@ class OpenAIBackend(LLMBackend):
         params = {
             "model": self.config.model_name,
             "messages": self._apply_cache_control(messages),
-            "temperature": kwargs.get("temperature", self.config.temperature),
-            "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
-            "top_p": kwargs.get("top_p", self.config.top_p),
+            "temperature": self._sanitize_temperature(kwargs.get("temperature", self.config.temperature)),
             "stream": True,
         }
+
+        # max_tokens & top_p: omit for Kimi via LiteLLM proxy (Cline doesn't
+        # send them; reasoning tokens count against max_tokens causing abrupt stops).
+        _is_kimi = "kimi" in self.config.model_name.lower()
+        _is_proxy = "moonshot.ai" not in (self.config.base_url or "")
+        if not (_is_kimi and _is_proxy):
+            params["max_tokens"] = kwargs.get("max_tokens", self.config.max_tokens)
+            params["top_p"] = kwargs.get("top_p", self.config.top_p)
 
         # Add tools if provided
         if tools:
@@ -1058,6 +1114,11 @@ class OpenAIBackend(LLMBackend):
         # Add stream_options for usage tracking
         if getattr(self.config, 'stream_usage', True):
             params["stream_options"] = {"include_usage": True}
+
+        # Kimi K2.5 via LiteLLM proxy: disable parallel tool calls.
+        # Cline captures confirm this is required for reliable multi-turn.
+        if _is_kimi and _is_proxy:
+            params["parallel_tool_calls"] = False
 
         stream = None
         try:
@@ -1079,7 +1140,7 @@ class OpenAIBackend(LLMBackend):
                             "cached_tokens": self._extract_cached_tokens(chunk.usage),
                         }
                         self.cache_tracker.record(chunk.usage)
-                        logger.info(f"[CACHE] prompt={chunk.usage.prompt_tokens} cached={usage_dict['cached_tokens'] or 0}")
+                        logger.debug(f"[CACHE] prompt={chunk.usage.prompt_tokens} cached={usage_dict['cached_tokens'] or 0}")
 
                     # Skip chunks with no choices
                     if not chunk.choices or len(chunk.choices) == 0:
@@ -1093,6 +1154,17 @@ class OpenAIBackend(LLMBackend):
                         yield ProviderDelta(
                             stream_id=sid,
                             text_delta=delta.content,
+                        )
+
+                    # Emit reasoning content as thinking_delta (for Kimi K2.5 and other reasoning models)
+                    # Pydantic v2 stores unknown fields in model_extra, NOT accessible via hasattr/getattr
+                    _extra = getattr(delta, 'model_extra', None) or {}
+                    reasoning_text = _extra.get('reasoning') or _extra.get('reasoning_content')
+
+                    if reasoning_text:
+                        yield ProviderDelta(
+                            stream_id=sid,
+                            thinking_delta=reasoning_text,
                         )
 
                     # Emit tool call deltas
@@ -1178,11 +1250,17 @@ class OpenAIBackend(LLMBackend):
         params = {
             "model": self.config.model_name,
             "messages": self._apply_cache_control(messages),
-            "temperature": kwargs.get("temperature", self.config.temperature),
-            "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
-            "top_p": kwargs.get("top_p", self.config.top_p),
+            "temperature": self._sanitize_temperature(kwargs.get("temperature", self.config.temperature)),
             "stream": True,
         }
+
+        # max_tokens & top_p: omit for Kimi via LiteLLM proxy (Cline doesn't
+        # send them; reasoning tokens count against max_tokens causing abrupt stops).
+        _is_kimi = "kimi" in self.config.model_name.lower()
+        _is_proxy = "moonshot.ai" not in (self.config.base_url or "")
+        if not (_is_kimi and _is_proxy):
+            params["max_tokens"] = kwargs.get("max_tokens", self.config.max_tokens)
+            params["top_p"] = kwargs.get("top_p", self.config.top_p)
 
         # Add tools if provided
         if tools:
@@ -1202,6 +1280,16 @@ class OpenAIBackend(LLMBackend):
         # Add stream_options for usage tracking
         if getattr(self.config, 'stream_usage', True):
             params["stream_options"] = {"include_usage": True}
+
+        # Kimi K2.5 via LiteLLM proxy: disable parallel tool calls.
+        # Cline captures confirm this is required for reliable multi-turn.
+        if _is_kimi and _is_proxy:
+            params["parallel_tool_calls"] = False
+
+        logger.debug(
+            f"LLM call: model={params.get('model')} messages={len(params.get('messages', []))} "
+            f"tools={len(params.get('tools', []))} stream_id={sid}"
+        )
 
         stream = None
         try:
@@ -1223,7 +1311,7 @@ class OpenAIBackend(LLMBackend):
                             "cached_tokens": self._extract_cached_tokens(chunk.usage),
                         }
                         self.cache_tracker.record(chunk.usage)
-                        logger.info(f"[CACHE] prompt={chunk.usage.prompt_tokens} cached={usage_dict['cached_tokens'] or 0}")
+                        logger.debug(f"[CACHE] prompt={chunk.usage.prompt_tokens} cached={usage_dict['cached_tokens'] or 0}")
 
                     # Skip chunks with no choices
                     if not chunk.choices or len(chunk.choices) == 0:
@@ -1237,6 +1325,17 @@ class OpenAIBackend(LLMBackend):
                         yield ProviderDelta(
                             stream_id=sid,
                             text_delta=delta.content,
+                        )
+
+                    # Emit reasoning content as thinking_delta (for Kimi K2.5 and other reasoning models)
+                    # Pydantic v2 stores unknown fields in model_extra, NOT accessible via hasattr/getattr
+                    _extra = getattr(delta, 'model_extra', None) or {}
+                    reasoning_text = _extra.get('reasoning') or _extra.get('reasoning_content')
+
+                    if reasoning_text:
+                        yield ProviderDelta(
+                            stream_id=sid,
+                            thinking_delta=reasoning_text,
                         )
 
                     # Emit tool call deltas
@@ -1267,6 +1366,9 @@ class OpenAIBackend(LLMBackend):
                     await stream.close()
 
             # Emit final delta with finish_reason and usage
+            logger.debug(
+                f"Stream end: finish={finish_reason!r} usage={usage_dict} stream_id={sid}"
+            )
             yield ProviderDelta(
                 stream_id=sid,
                 finish_reason=finish_reason or "stop",
@@ -1276,6 +1378,9 @@ class OpenAIBackend(LLMBackend):
         except Exception as e:
             error_type = type(e).__name__
             error_msg = str(e).strip() or repr(e)
+            logger.error(
+                f"Stream error: {error_type}: {error_msg[:500]} stream_id={sid}"
+            )
             logger.exception(
                 "openai_async_provider_delta_error",
                 error_type=error_type,

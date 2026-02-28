@@ -68,6 +68,9 @@ class StreamingState:
     thinking_content: str = ""
     thinking_buffer: str = ""       # Buffer for detecting thinking tags
 
+    # Reasoning content (Kimi K2.5 etc.) - must be echoed back on iteration 2+
+    reasoning_content: str = ""
+
     # Tool call state
     tool_calls: List[ToolCall] = field(default_factory=list)
     tool_call_accumulators: Dict[int, ToolCallAccumulator] = field(default_factory=dict)
@@ -94,6 +97,7 @@ class StreamingState:
         self.in_thinking = False
         self.thinking_content = ""
         self.thinking_buffer = ""
+        self.reasoning_content = ""
         self.tool_calls = []
         self.tool_call_accumulators = {}
         self.segments = []

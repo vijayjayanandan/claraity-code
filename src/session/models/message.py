@@ -280,6 +280,9 @@ class MessageMeta:
     thinking: Optional[str] = None
     thinking_signature: Optional[str] = None
 
+    # Reasoning (Kimi K2.5 etc.) - echoed back in to_llm_dict() for iteration 2+
+    reasoning_content: Optional[str] = None
+
     # Tool Execution
     status: Optional[str] = None  # "success" | "error" | "timeout" | "cancelled"
     duration_ms: Optional[int] = None
@@ -332,6 +335,8 @@ class MessageMeta:
             result["thinking"] = self.thinking
         if self.thinking_signature is not None:
             result["thinking_signature"] = self.thinking_signature
+        if self.reasoning_content is not None:
+            result["reasoning_content"] = self.reasoning_content
         if self.status is not None:
             result["status"] = self.status
         if self.duration_ms is not None:
@@ -385,6 +390,7 @@ class MessageMeta:
             segments=segments,
             thinking=data.get("thinking"),
             thinking_signature=data.get("thinking_signature"),
+            reasoning_content=data.get("reasoning_content"),
             status=data.get("status"),
             duration_ms=data.get("duration_ms"),
             exit_code=data.get("exit_code"),
@@ -464,6 +470,9 @@ class Message:
 
         if self.tool_call_id is not None:
             result["tool_call_id"] = self.tool_call_id
+
+        if self.role == "assistant" and self.meta and self.meta.reasoning_content:
+            result["reasoning_content"] = self.meta.reasoning_content
 
         return result
 

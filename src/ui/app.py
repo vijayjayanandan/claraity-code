@@ -2093,6 +2093,28 @@ class CodingAgentApp(App):
         elif isinstance(event, StreamStart):
             await self._flush_file_read_notes(conversation)
 
+        # ThinkingStart — create widget and start thinking block
+        elif isinstance(event, ThinkingStart):
+            if not self._current_message:
+                self._current_message = AssistantMessage()
+                await conversation.mount(self._current_message)
+            try:
+                await self._current_message.set_loading(False)
+            except Exception:
+                pass
+            self._current_thinking = self._current_message.start_thinking()
+
+        # ThinkingDelta — append to current thinking block
+        elif isinstance(event, ThinkingDelta):
+            if self._current_thinking:
+                self._current_thinking.append(event.content)
+
+        # ThinkingEnd — finalize thinking block
+        elif isinstance(event, ThinkingEnd):
+            if self._current_thinking:
+                self._current_thinking.finalize(event.token_count)
+                self._current_thinking = None
+
         # TextDelta — feed incremental text to segment buffer for live rendering
         elif isinstance(event, TextDelta):
             if not self._current_message:

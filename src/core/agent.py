@@ -627,6 +627,10 @@ class CodingAgent(AgentInterface):
         self.tool_executor.register_tool(self._web_search_tool)
         self.tool_executor.register_tool(self._web_fetch_tool)
 
+        # Clarify tool (interactive questions handled by SpecialToolHandlers)
+        from src.tools.clarify_tool import ClarifyTool
+        self.tool_executor.register_tool(ClarifyTool())
+
         # Plan mode tools (Claude Code-style planning workflow)
         # Note: These tools need plan_mode_state and session_id set
         # They are registered here but the state is passed during execution
@@ -1039,6 +1043,7 @@ class CodingAgent(AgentInterface):
         from typing import AsyncIterator, Optional, List
         from src.core.events import (
             UIEvent, StreamStart, StreamEnd, TextDelta,
+            ThinkingStart, ThinkingDelta, ThinkingEnd,
             PausePromptStart, PausePromptEnd, ContextUpdated, ContextCompacting, ContextCompacted,
             FileReadEvent,
         )
@@ -1253,13 +1258,25 @@ class CodingAgent(AgentInterface):
                     # 3. Process ProviderDelta objects through MemoryManager
                     finalized_message = None
                     last_usage = None
+                    _thinking_started = False
 
                     async for delta in llm_stream:
                         # Feed delta to MemoryManager (uses StreamingPipeline internally)
                         finalized_message = self.memory.process_provider_delta(delta)
 
+                        # Yield thinking deltas to TUI (Kimi K2.5 reasoning, etc.)
+                        if delta.thinking_delta:
+                            if not _thinking_started:
+                                yield ThinkingStart()
+                                _thinking_started = True
+                            yield ThinkingDelta(content=delta.thinking_delta)
+
                         # Yield text deltas to TUI for incremental rendering
                         if delta.text_delta:
+                            # End thinking block when content starts
+                            if _thinking_started:
+                                yield ThinkingEnd()
+                                _thinking_started = False
                             yield TextDelta(content=delta.text_delta)
 
                         # Track usage for context update
@@ -1270,12 +1287,23 @@ class CodingAgent(AgentInterface):
                         if ui.check_interrupted():
                             break
 
+                    # Close any open thinking block
+                    if _thinking_started:
+                        yield ThinkingEnd()
+                        _thinking_started = False
+
                     # 4. Extract tool_calls and response_content from finalized message
                     if finalized_message and finalized_message.tool_calls:
                         tool_calls = finalized_message.tool_calls
 
                     # Derive response_content from pipeline (single source of truth)
                     response_content = (finalized_message.content or "") if finalized_message else self.memory.get_partial_text()
+
+                    response_reasoning = (
+                        finalized_message.meta.reasoning_content
+                        if finalized_message and finalized_message.meta
+                        else None
+                    )
 
                     # Emit context usage update with real token count from LLM
                     if (last_usage and last_usage.get("input_tokens") is not None
@@ -1514,7 +1542,9 @@ class CodingAgent(AgentInterface):
                         if self.memory.message_store:
                             self.memory.message_store.update_tool_state(
                                 call_id,
-                                CoreToolStatus.SKIPPED
+                                CoreToolStatus.SKIPPED,
+                                tool_name=tc.function.name,
+                                extra_metadata={"arguments": tool_args},
                             )
 
                         tool_messages.append({
@@ -1530,7 +1560,9 @@ class CodingAgent(AgentInterface):
                             self.memory.message_store.update_tool_state(
                                 call_id,
                                 CoreToolStatus.ERROR,
-                                error=gate_result.message
+                                error=gate_result.message,
+                                tool_name=tc.function.name,
+                                extra_metadata={"arguments": tool_args},
                             )
 
                         gated_output = self._gating.format_gate_response(gate_result.gate_response)
@@ -1566,7 +1598,12 @@ class CodingAgent(AgentInterface):
                     if self.memory.message_store:
                         self.memory.message_store.update_tool_state(
                             call_id,
-                            CoreToolStatus.PENDING
+                            CoreToolStatus.PENDING,
+                            tool_name=tc.function.name,
+                            extra_metadata={
+                                "arguments": tool_args,
+                                "requires_approval": requires_approval,
+                            },
                         )
 
                     # Handle approval if required
@@ -2137,7 +2174,7 @@ class CodingAgent(AgentInterface):
                     # Add assistant message + tool_results to context for history
                     from src.core.stream_phases import build_assistant_context_message
                     current_context.append(
-                        build_assistant_context_message(response_content, tool_calls)
+                        build_assistant_context_message(response_content, tool_calls, response_reasoning)
                     )
                     current_context.extend(tool_messages)
 
@@ -2146,7 +2183,7 @@ class CodingAgent(AgentInterface):
                 # Add assistant's response with tool calls to context
                 from src.core.stream_phases import build_assistant_context_message
                 current_context.append(
-                    build_assistant_context_message(response_content, tool_calls)
+                    build_assistant_context_message(response_content, tool_calls, response_reasoning)
                 )
 
                 # Add tool results to context
