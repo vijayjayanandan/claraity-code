@@ -191,6 +191,7 @@ class CodingAgent(AgentInterface):
         embedding_api_key: Optional[str] = None,
         embedding_api_key_env: str = "EMBEDDING_API_KEY",
         embedding_base_url: Optional[str] = None,
+        thinking_budget: Optional[int] = None,
         load_file_memories: bool = True,
         permission_mode: str = "normal",
         hook_manager: Optional['HookManager'] = None,
@@ -244,6 +245,7 @@ class CodingAgent(AgentInterface):
             temperature=temperature if temperature is not None else float(os.getenv("LLM_TEMPERATURE", "0.2")),
             max_tokens=max_tokens if max_tokens is not None else int(os.getenv("LLM_MAX_TOKENS", "16384")),
             top_p=top_p if top_p is not None else float(os.getenv("LLM_TOP_P", "0.95")),
+            thinking_budget=thinking_budget,
         )
 
         if backend == "ollama":
@@ -1249,10 +1251,14 @@ class CodingAgent(AgentInterface):
                     )
 
                     # 2. Get LLM stream - yields ProviderDelta objects
+                    _llm_kwargs = {}
+                    if self.llm.config.thinking_budget:
+                        _llm_kwargs["thinking_budget"] = self.llm.config.thinking_budget
                     llm_stream = self.llm.generate_provider_deltas_async(
                         messages=current_context,
                         tools=self._get_tools(),
-                        tool_choice="auto"
+                        tool_choice="auto",
+                        **_llm_kwargs,
                     )
 
                     # 3. Process ProviderDelta objects through MemoryManager
@@ -2469,6 +2475,14 @@ class CodingAgent(AgentInterface):
             Permission mode string (plan/normal/auto)
         """
         return self.permission_manager.get_mode().value
+
+    def set_auto_approve_categories(self, categories: Dict[str, bool]) -> Dict[str, bool]:
+        """Set granular auto-approve categories. Returns confirmed state."""
+        return self._gating.set_auto_approve_categories(categories)
+
+    def get_auto_approve_categories(self) -> Dict[str, bool]:
+        """Get current auto-approve category state."""
+        return self._gating.get_auto_approve_categories()
 
     def get_permission_mode_description(self) -> str:
         """Get description of current permission mode.
