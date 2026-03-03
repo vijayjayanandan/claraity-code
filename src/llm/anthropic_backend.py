@@ -116,7 +116,11 @@ class AnthropicBackend(LLMBackend):
             "timeout": timeout,
         }
         if config.base_url:
-            client_kwargs["base_url"] = config.base_url
+            # Strip /v1 suffix — Anthropic SDK adds its own /v1/messages path
+            base = config.base_url.rstrip("/")
+            if base.endswith("/v1"):
+                base = base[:-3]
+            client_kwargs["base_url"] = base
 
         # Sync client
         self.client = Anthropic(**client_kwargs)
@@ -256,7 +260,43 @@ class AnthropicBackend(LLMBackend):
                 if isinstance(content, str):
                     translated.append({"role": "user", "content": content})
                 elif isinstance(content, list):
-                    translated.append({"role": "user", "content": content})
+                    # Convert OpenAI multimodal format to Anthropic format
+                    anthropic_blocks = []
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "image_url":
+                            # Convert OpenAI image_url -> Anthropic image block
+                            image_info = block.get("image_url", {})
+                            url = image_info.get("url", "")
+                            # Parse data URL: data:<media_type>;base64,<data>
+                            if url.startswith("data:") and ";base64," in url:
+                                header, b64_data = url.split(";base64,", 1)
+                                media_type = header.replace("data:", "")
+                                anthropic_blocks.append({
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": media_type,
+                                        "data": b64_data,
+                                    },
+                                })
+                            else:
+                                # URL-based image (not data URL) - use url source
+                                anthropic_blocks.append({
+                                    "type": "image",
+                                    "source": {
+                                        "type": "url",
+                                        "url": url,
+                                    },
+                                })
+                        elif isinstance(block, dict) and block.get("type") == "text":
+                            anthropic_blocks.append({
+                                "type": "text",
+                                "text": block.get("text", ""),
+                            })
+                        elif isinstance(block, dict):
+                            # Pass through other block types (e.g. already in Anthropic format)
+                            anthropic_blocks.append(block)
+                    translated.append({"role": "user", "content": anthropic_blocks})
                 else:
                     translated.append({"role": "user", "content": str(content or "")})
                 continue
@@ -507,7 +547,8 @@ class AnthropicBackend(LLMBackend):
             "messages": api_messages,
             "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
             "temperature": kwargs.get("temperature", self.config.temperature),
-            "top_p": kwargs.get("top_p", self.config.top_p),
+            # Note: top_p omitted — Claude rejects temperature + top_p together.
+            # Temperature takes precedence since it's always configured.
         }
         if system_param:
             params["system"] = system_param
@@ -579,7 +620,8 @@ class AnthropicBackend(LLMBackend):
             "messages": api_messages,
             "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
             "temperature": kwargs.get("temperature", self.config.temperature),
-            "top_p": kwargs.get("top_p", self.config.top_p),
+            # Note: top_p omitted — Claude rejects temperature + top_p together.
+            # Temperature takes precedence since it's always configured.
             "stream": True,
         }
         if system_param:
@@ -644,7 +686,8 @@ class AnthropicBackend(LLMBackend):
             "messages": api_messages,
             "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
             "temperature": kwargs.get("temperature", self.config.temperature),
-            "top_p": kwargs.get("top_p", self.config.top_p),
+            # Note: top_p omitted — Claude rejects temperature + top_p together.
+            # Temperature takes precedence since it's always configured.
             "tools": self._convert_tools(tools),
             "tool_choice": self._convert_tool_choice(tool_choice),
         }
@@ -657,7 +700,7 @@ class AnthropicBackend(LLMBackend):
             params["thinking"] = {"type": "enabled", "budget_tokens": thinking_budget}
             # Anthropic requires temperature=1 and no top_p with extended thinking
             params["temperature"] = 1
-            params.pop("top_p", None)
+            # top_p already omitted from params
 
         def api_call():
             return self.client.messages.create(**params)
@@ -742,7 +785,8 @@ class AnthropicBackend(LLMBackend):
             "messages": api_messages,
             "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
             "temperature": kwargs.get("temperature", self.config.temperature),
-            "top_p": kwargs.get("top_p", self.config.top_p),
+            # Note: top_p omitted — Claude rejects temperature + top_p together.
+            # Temperature takes precedence since it's always configured.
             "tools": self._convert_tools(tools),
             "tool_choice": self._convert_tool_choice(tool_choice),
         }
@@ -754,7 +798,7 @@ class AnthropicBackend(LLMBackend):
         if thinking_budget:
             params["thinking"] = {"type": "enabled", "budget_tokens": thinking_budget}
             params["temperature"] = 1
-            params.pop("top_p", None)
+            # top_p already omitted from params
 
         try:
             # Accumulators
@@ -908,7 +952,8 @@ class AnthropicBackend(LLMBackend):
             "messages": api_messages,
             "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
             "temperature": kwargs.get("temperature", self.config.temperature),
-            "top_p": kwargs.get("top_p", self.config.top_p),
+            # Note: top_p omitted — Claude rejects temperature + top_p together.
+            # Temperature takes precedence since it's always configured.
             "tools": self._convert_tools(tools),
             "tool_choice": self._convert_tool_choice(tool_choice),
         }
@@ -919,7 +964,7 @@ class AnthropicBackend(LLMBackend):
         if thinking_budget:
             params["thinking"] = {"type": "enabled", "budget_tokens": thinking_budget}
             params["temperature"] = 1
-            params.pop("top_p", None)
+            # top_p already omitted from params
 
         try:
             tool_calls_acc: Dict[int, Dict[str, Any]] = {}
@@ -1090,7 +1135,8 @@ class AnthropicBackend(LLMBackend):
             "messages": api_messages,
             "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
             "temperature": kwargs.get("temperature", self.config.temperature),
-            "top_p": kwargs.get("top_p", self.config.top_p),
+            # Note: top_p omitted — Claude rejects temperature + top_p together.
+            # Temperature takes precedence since it's always configured.
         }
         if system_param:
             params["system"] = system_param
@@ -1102,7 +1148,7 @@ class AnthropicBackend(LLMBackend):
         if thinking_budget:
             params["thinking"] = {"type": "enabled", "budget_tokens": thinking_budget}
             params["temperature"] = 1
-            params.pop("top_p", None)
+            # top_p already omitted from params
 
         try:
             # Track tool call ordinal (not content block index) - sync
@@ -1223,7 +1269,8 @@ class AnthropicBackend(LLMBackend):
             "messages": api_messages,
             "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
             "temperature": kwargs.get("temperature", self.config.temperature),
-            "top_p": kwargs.get("top_p", self.config.top_p),
+            # Note: top_p omitted — Claude rejects temperature + top_p together.
+            # Temperature takes precedence since it's always configured.
         }
         if system_param:
             params["system"] = system_param
@@ -1235,7 +1282,7 @@ class AnthropicBackend(LLMBackend):
         if thinking_budget:
             params["thinking"] = {"type": "enabled", "budget_tokens": thinking_budget}
             params["temperature"] = 1
-            params.pop("top_p", None)
+            # top_p already omitted from params
 
         try:
             tool_call_ordinal = 0

@@ -269,6 +269,103 @@ class TestTranslateMessages:
         system, msgs = mock_anthropic._translate_messages(messages)
         assert system == "Be helpful."
 
+    def test_image_url_converted_to_anthropic_format(self, mock_anthropic):
+        """OpenAI image_url blocks should be converted to Anthropic image blocks."""
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "What is in this image?"},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": "data:image/png;base64,iVBORw0KGgoAAAANS"
+                        },
+                    },
+                ],
+            },
+        ]
+        system, msgs = mock_anthropic._translate_messages(messages)
+        assert len(msgs) == 1
+        content = msgs[0]["content"]
+        assert len(content) == 2
+        # Text block preserved
+        assert content[0]["type"] == "text"
+        assert content[0]["text"] == "What is in this image?"
+        # image_url converted to Anthropic image block
+        assert content[1]["type"] == "image"
+        assert content[1]["source"]["type"] == "base64"
+        assert content[1]["source"]["media_type"] == "image/png"
+        assert content[1]["source"]["data"] == "iVBORw0KGgoAAAANS"
+
+    def test_image_url_jpeg_converted(self, mock_anthropic):
+        """JPEG image_url should preserve correct media_type."""
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": "data:image/jpeg;base64,/9j/4AAQ"
+                        },
+                    },
+                ],
+            },
+        ]
+        _, msgs = mock_anthropic._translate_messages(messages)
+        img_block = msgs[0]["content"][0]
+        assert img_block["type"] == "image"
+        assert img_block["source"]["media_type"] == "image/jpeg"
+        assert img_block["source"]["data"] == "/9j/4AAQ"
+
+    def test_text_block_extra_fields_stripped(self, mock_anthropic):
+        """Text blocks with extra filename/mime fields should be sanitized."""
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Check this file"},
+                    {
+                        "type": "text",
+                        "text": "--- BEGIN FILE: config.py ---\nDEBUG=True\n--- END FILE ---",
+                        "filename": "config.py",
+                        "mime": "text/x-python",
+                    },
+                ],
+            },
+        ]
+        _, msgs = mock_anthropic._translate_messages(messages)
+        content = msgs[0]["content"]
+        assert len(content) == 2
+        # Both blocks should only have 'type' and 'text' - no extra fields
+        for block in content:
+            assert set(block.keys()) == {"type", "text"}
+        assert "filename" not in content[1]
+        assert "mime" not in content[1]
+
+    def test_image_block_extra_fields_stripped(self, mock_anthropic):
+        """Image blocks with extra filename/mime fields should be sanitized."""
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "data:image/png;base64,abc123"},
+                        "filename": "screenshot.png",
+                        "mime": "image/png",
+                    },
+                ],
+            },
+        ]
+        _, msgs = mock_anthropic._translate_messages(messages)
+        img_block = msgs[0]["content"][0]
+        assert img_block["type"] == "image"
+        assert "filename" not in img_block
+        assert "mime" not in img_block
+        assert img_block["source"]["data"] == "abc123"
+
 
 # ============================================================================
 # Tool Conversion Tests
