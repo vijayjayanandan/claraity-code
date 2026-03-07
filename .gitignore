@@ -44,9 +44,7 @@ venv.bak/
 .env.*.local
 
 # Data & Cache
-data/embeddings/*
-data/sessions/*
-data/cache/*
+data/
 *.db
 *.sqlite
 *.sqlite3
@@ -84,12 +82,10 @@ models/
 *.temp
 .temp/
 tmp/
-greet.py
-fix_tests.py
+nul
 
-# Node.js (React UI)
+# Node.js
 node_modules/
-clarity-ui/node_modules/
 
 # Test Results
 memory_test_results.json
@@ -104,27 +100,105 @@ Thumbs.db
 # Claude Code temporary files
 tmpclaude-*
 .pytest_report.json
-=24.1.0
-=3.0.0
-nul
 
-# Screenshots (keep in separate documentation if needed)
+# Screenshots / images (keep in docs/ if needed)
 *.png
 
 # Validation results (generated)
 validation-results/
 
-# Live test workspaces (generated)
+# Generated test workspaces
 live-*-logs/
 live-*-workspace/
 test-*-logs/
 test-*-workspace/
 
-# Temporary test files
-ai_test_error.txt
-spec_output.txt
-timeout_behavior_fix.txt
-code_review_large_test.md
-
 # Checkpoints (session data)
 .checkpoints/
+
+# ClarAIty agent workspace (runtime data)
+.clarity/
+
+# VS Code extension build output
+claraity-vscode/out/
+
+# Stray pip artifacts
+/=*
+
+# Office / binary docs
+*.doc
+*.docx
+~$*
+
+# -------------------------------------------------------
+# Root-level scratch files (NOT part of the project)
+# -------------------------------------------------------
+
+# Root test/debug/poc scripts
+/test_*.py
+/poc_*.py
+/demo_example.py
+/demo_test.py
+/demo_tools_example.py
+/tool_demo_example.py
+/example_code.py
+/cline_cache_proxy.py
+/proxy_intercept.py
+/proxy_captures/
+/test_project/
+
+# Root one-off utility scripts
+/add_cross_layer_relationships.py
+/add_remaining_relationships.py
+/create_embedded_viz.py
+/create_flow_viz.py
+/debug_layer_connections.py
+/export_flow_data.py
+/plan_react_ui_simple.py
+/prepare_unified_data.py
+/verify_relationships.py
+
+# Root scratch text/data files
+/*.txt
+/*.json
+!package.json
+!package-lock.json
+/flow-viz-embedded.html
+/app.py.txt
+/message.py.txt
+
+# Root scratch shell/bat scripts
+/kickstart_testing.sh
+/runpod-setup.sh
+/setup-auto-startup.sh
+/startup.sh
+
+# -------------------------------------------------------
+# Root-level session/progress markdown (ephemeral notes)
+# -------------------------------------------------------
+/SESSION_*.md
+/NEXT_SESSION_*.md
+/START_HERE.md
+/PROGRESS_SUMMARY.md
+/PROJECT_STATUS.md
+/FINAL_STATUS.md
+/RCA_COMPLETE.md
+/ANALYSIS_CURRENT_STATE.md
+/CLARAITY_IMPLEMENTATION_PLAN.md
+/CLAUDE_BACKUP_*.md
+/ENHANCED_PROMPTS_TEST_RESULTS.md
+/PRODUCTION_MEMORY_TEST_RESULTS.md
+/MEMORY_TEST_ANALYSIS.md
+/RUNPOD_TEST_RESULTS.md
+/VALIDATION_BACKEND_UPDATE.md
+/REACT_UI_PLAN.md
+/HISTORICAL_SESSIONS.md
+/HOOKS_ARCHITECTURE_INPROCESS.md
+/HOOKS_DECISION_ANALYSIS.md
+/HOOKS_DESIGN_REVIEW.md
+/IMPLEMENTATION_PLAN_NEXT_SESSION.md
+/SESSION_SUMMARY.md
+
+# Examples dir: ignore generated logs
+examples/*.log
+examples/__pycache__/

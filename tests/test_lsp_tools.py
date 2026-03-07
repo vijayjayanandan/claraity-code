@@ -383,9 +383,10 @@ class TestGetSymbolContextTool:
         assert formatted[1]["file"] == "/tests/test_auth.py"
 
     @pytest.mark.asyncio
-    async def test_read_implementation(self, tmp_path):
+    async def test_read_implementation(self, tmp_path, monkeypatch):
         """Test reading function implementation."""
         tool = GetSymbolContextTool()
+        monkeypatch.chdir(tmp_path)
 
         # Create test file
         test_file = tmp_path / "test.py"
@@ -613,22 +614,20 @@ class TestLSPSecurityFixes:
         tool.cleanup()  # Should succeed silently
 
     @pytest.mark.asyncio
-    async def test_read_implementation_validates_path(self, tmp_path):
+    async def test_read_implementation_validates_path(self, tmp_path, monkeypatch):
         """Test that _read_implementation validates file paths for security."""
         tool = GetSymbolContextTool()
 
-        # Create a test file in workspace
+        # Create a test file in workspace and set cwd so path validation passes
         test_file = tmp_path / "test.py"
         test_file.write_text("def test(): pass")
+        monkeypatch.chdir(tmp_path)
 
-        # Valid path should work (allow_files_outside_workspace=True)
+        # Valid path within workspace should work
         result = await tool._read_implementation(str(test_file), 0)
         assert "def test()" in result["code"]
 
         # Path traversal attempt should be blocked by validate_path_security
-        # Note: Since allow_files_outside_workspace=True in current implementation,
-        # this test verifies that path validation is being called
-        # In production, extremely dangerous paths like /etc/passwd are still blocked
         from src.tools.search_tools import validate_path_security
 
         # Verify validate_path_security blocks obvious attacks

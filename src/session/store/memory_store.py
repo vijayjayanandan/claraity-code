@@ -541,6 +541,15 @@ class MessageStore:
                     meta["tool_name"] = tool_name
                 self._tool_metadata[tool_call_id] = meta
 
+            # Cap tool state history to prevent unbounded growth
+            MAX_TOOL_STATE_ENTRIES = 1000
+            if len(self._tool_state) > MAX_TOOL_STATE_ENTRIES:
+                # Remove oldest entries (keep most recent)
+                oldest_keys = list(self._tool_state.keys())[:-MAX_TOOL_STATE_ENTRIES]
+                for key in oldest_keys:
+                    del self._tool_state[key]
+                    self._tool_metadata.pop(key, None)
+
             if not self._is_bulk_loading:
                 metadata = dict(extra_metadata) if extra_metadata else {}
                 if tool_name:

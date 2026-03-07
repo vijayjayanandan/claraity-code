@@ -25,18 +25,8 @@ class TestE2ESessionPersistence:
         shutil.rmtree(tmpdir)
 
     @pytest.fixture
-    def memory_manager(self, temp_dir, monkeypatch):
+    def memory_manager(self, temp_dir):
         """Create MemoryManager with temporary directory."""
-        # Disable semantic memory to avoid ChromaDB conflicts
-        def mock_semantic_init(self, **kwargs):
-            self.collection = None
-            self.persist_directory = kwargs.get('persist_directory')
-
-        monkeypatch.setattr(
-            "src.memory.semantic_memory.SemanticMemory.__init__",
-            mock_semantic_init
-        )
-
         return MemoryManager(
             total_context_tokens=4096,
             persist_directory=str(temp_dir),
@@ -456,17 +446,8 @@ class TestSessionPersistenceIntegration:
         shutil.rmtree(tmpdir)
 
     @pytest.fixture
-    def memory_manager(self, temp_dir, monkeypatch):
+    def memory_manager(self, temp_dir):
         """Create MemoryManager with temporary directory."""
-        def mock_semantic_init(self, **kwargs):
-            self.collection = None
-            self.persist_directory = kwargs.get('persist_directory')
-
-        monkeypatch.setattr(
-            "src.memory.semantic_memory.SemanticMemory.__init__",
-            mock_semantic_init
-        )
-
         return MemoryManager(
             persist_directory=str(temp_dir),
             load_file_memories=False,

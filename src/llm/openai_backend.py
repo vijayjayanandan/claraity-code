@@ -1120,6 +1120,28 @@ class OpenAIBackend(LLMBackend):
         if _is_kimi and _is_proxy:
             params["parallel_tool_calls"] = False
 
+        # Extended thinking (Claude via LiteLLM proxy, etc.)
+        thinking_budget = kwargs.get("thinking_budget")
+        if thinking_budget:
+            max_tok = params.get("max_tokens", self.config.max_tokens)
+            # Guard: budget_tokens must be < max_tokens (Anthropic/Bedrock requirement).
+            # Proxies may cap max_tokens to the model's actual limit, so clamp budget.
+            if thinking_budget >= max_tok:
+                clamped = max(max_tok - 1024, max_tok // 2)
+                logger.warning(
+                    "thinking_budget_clamped",
+                    original=thinking_budget,
+                    clamped=clamped,
+                    max_tokens=max_tok,
+                    model=params.get("model"),
+                )
+                thinking_budget = clamped
+            params["extra_body"] = {
+                "thinking": {"type": "enabled", "budget_tokens": thinking_budget}
+            }
+            params["temperature"] = 1
+            params.pop("top_p", None)
+
         stream = None
         try:
             stream = self.client.chat.completions.create(**params)
@@ -1286,6 +1308,28 @@ class OpenAIBackend(LLMBackend):
         if _is_kimi and _is_proxy:
             params["parallel_tool_calls"] = False
 
+        # Extended thinking (Claude via LiteLLM proxy, etc.)
+        thinking_budget = kwargs.get("thinking_budget")
+        if thinking_budget:
+            max_tok = params.get("max_tokens", self.config.max_tokens)
+            # Guard: budget_tokens must be < max_tokens (Anthropic/Bedrock requirement).
+            # Proxies may cap max_tokens to the model's actual limit, so clamp budget.
+            if thinking_budget >= max_tok:
+                clamped = max(max_tok - 1024, max_tok // 2)
+                logger.warning(
+                    "thinking_budget_clamped",
+                    original=thinking_budget,
+                    clamped=clamped,
+                    max_tokens=max_tok,
+                    model=params.get("model"),
+                )
+                thinking_budget = clamped
+            params["extra_body"] = {
+                "thinking": {"type": "enabled", "budget_tokens": thinking_budget}
+            }
+            params["temperature"] = 1
+            params.pop("top_p", None)
+
         logger.debug(
             f"LLM call: model={params.get('model')} messages={len(params.get('messages', []))} "
             f"tools={len(params.get('tools', []))} stream_id={sid}"
@@ -1413,8 +1457,8 @@ class OpenAIBackend(LLMBackend):
             True if backend is ready
         """
         try:
-            # Try to list models as a health check
-            self.client.models.list()
+            # Try to list models as a health check (10s timeout)
+            self.client.models.list(timeout=10.0)
             return True
         except Exception as e:
             logger.error(f"Backend availability check failed: {type(e).__name__}: {str(e)}")
@@ -1428,7 +1472,7 @@ class OpenAIBackend(LLMBackend):
             List of model names
         """
         try:
-            models_response = self.client.models.list()
+            models_response = self.client.models.list(timeout=10.0)
             return [model.id for model in models_response.data]
         except Exception:
             # If listing fails, return empty list

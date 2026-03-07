@@ -4,8 +4,10 @@
 import os
 import sys
 
-# Set the API key
-os.environ['DASHSCOPE_API_KEY'] = 'sk-4e4a13fc4efb48408e22eb9feb40a03d'
+# Require the API key from environment
+if not os.getenv('DASHSCOPE_API_KEY'):
+    print("ERROR: Set DASHSCOPE_API_KEY environment variable first")
+    sys.exit(1)
 
 # Import and run the validation runner
 from src.validation.runner import main

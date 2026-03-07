@@ -60,6 +60,9 @@ from .widgets.plan_approval_widget import PlanApprovalWidget
 from .widgets.subagent_card import SubAgentCard
 from .autocomplete import FileAutocomplete
 from .clipboard_handler import ClipboardHandler
+from .segment_renderer import SegmentRenderer
+from .store_renderer import StoreRenderer
+from .subagent_coordinator import SubagentCoordinator
 
 if TYPE_CHECKING:
     from ..core.agent import CodingAgent  # For type hints
@@ -92,167 +95,14 @@ class ConversationContainer(ScrollableContainer):
 
 
 # =============================================================================
-# USER-FRIENDLY ERROR HANDLING
+# USER-FRIENDLY ERROR HANDLING (extracted to error_helpers.py)
 # =============================================================================
-
-def _classify_error(e: Exception) -> tuple[str, str]:
-    """
-    Classify an exception into a user-friendly message.
-
-    Industry standard approach:
-    - Show friendly, actionable messages to users
-    - Log technical details for debugging
-    - Provide error reference ID for support
-
-    Args:
-        e: The exception to classify
-
-    Returns:
-        Tuple of (user_friendly_message, error_category)
-    """
-    error_str = str(e).lower()
-    error_type = type(e).__name__.lower()
-
-    # Timeout errors
-    if any(x in error_str or x in error_type for x in ['timeout', 'timed out', 'deadline']):
-        return (
-            "Request timed out. The server took too long to respond. Please try again.",
-            "timeout"
-        )
-
-    # Rate limiting
-    if any(x in error_str for x in ['rate limit', 'rate_limit', 'too many requests', '429']):
-        return (
-            "Too many requests. Please wait a moment and try again.",
-            "rate_limit"
-        )
-
-    # Authentication errors
-    if any(x in error_str for x in ['authentication', 'unauthorized', 'invalid api key', '401', '403']):
-        return (
-            "Authentication failed. Please check your API key configuration.",
-            "auth"
-        )
-
-    # Model/API service errors (like the LiteLLM "repeating chunk" error)
-    if any(x in error_str for x in [
-        'internal', 'server error', '500', '502', '503', '504',
-        'repeating', 'service unavailable', 'overloaded', 'capacity'
-    ]):
-        return (
-            "The AI service encountered a temporary issue. Please try again.",
-            "service"
-        )
-
-    # Network/Connection errors
-    if any(x in error_str or x in error_type for x in [
-        'connection', 'network', 'dns', 'resolve', 'refused',
-        'reset', 'broken pipe', 'eof', 'ssl', 'certificate'
-    ]):
-        return (
-            "Connection error. Please check your network and try again.",
-            "network"
-        )
-
-    # Context/Token limit errors
-    if any(x in error_str for x in ['context', 'token', 'too long', 'maximum']):
-        return (
-            "The conversation is too long. Please start a new conversation or clear history.",
-            "context"
-        )
-
-    # Invalid request errors
-    if any(x in error_str for x in ['invalid', 'malformed', 'bad request', '400']):
-        return (
-            "Invalid request. Please try rephrasing your message.",
-            "invalid"
-        )
-
-    # Default fallback - generic message
-    return (
-        "An unexpected error occurred. Please try again.",
-        "unexpected"
-    )
-
-
-def _generate_error_reference() -> str:
-    """Generate a short error reference ID for user support."""
-    import uuid
-    return uuid.uuid4().hex[:8]
-
-
-def _extract_user_content_text(content: Any) -> str:
-    """
-    Extract displayable text from user message content.
-    
-    Handles both simple string content and multimodal content (list).
-    For multimodal content, extracts text parts and adds placeholders for attachments.
-    
-    Args:
-        content: Message content (string or list of content parts)
-        
-    Returns:
-        String representation suitable for display
-    """
-    if isinstance(content, str):
-        return content
-    
-    if not isinstance(content, list):
-        return str(content) if content is not None else ""
-    
-    parts = []
-    for item in content:
-        if not isinstance(item, dict):
-            continue
-            
-        item_type = item.get("type", "")
-        
-        if item_type == "text":
-            # Extract text content
-            text = item.get("text", "")
-            if text:
-                parts.append(text)
-                
-        elif item_type == "image_url":
-            # Show image placeholder
-            image_url = item.get("image_url", {})
-            url = image_url.get("url", "") if isinstance(image_url, dict) else str(image_url)
-            
-            # Extract filename from data URL if present
-            if url.startswith("data:image/"):
-                # Format: data:image/png;base64,<data>
-                parts.append("[IMAGE]")
-            else:
-                parts.append(f"[IMAGE: {url}]")
-                
-        elif item_type == "file":
-            # Show file placeholder (if we add file support)
-            filename = item.get("filename", "unknown")
-            parts.append(f"[FILE: {filename}]")
-    
-    return "\n".join(parts) if parts else ""
-
-
-def _format_user_error(e: Exception, include_reference: bool = True) -> str:
-    """
-    Format an exception as a user-friendly error message.
-
-    Args:
-        e: The exception
-        include_reference: Whether to include an error reference ID
-
-    Returns:
-        User-friendly error message
-    """
-    user_msg, category = _classify_error(e)
-
-    if include_reference:
-        ref_id = _generate_error_reference()
-        # Log the mapping for debugging
-        logger.info(f"Error reference {ref_id}: {type(e).__name__}: {e}")
-        return f"{user_msg} (ref: {ref_id})"
-
-    return user_msg
+from .error_helpers import (
+    _classify_error,
+    _generate_error_reference,
+    _extract_user_content_text,
+    _format_user_error,
+)
 
 
 class ChatInput(TextArea):
@@ -872,17 +722,40 @@ class CodingAgentApp(App):
         self._segment_flush_interval_sec: float = 0.5  # Flush after 0.5s (Fix #4: faster feedback)
         self._segment_flush_running: bool = False  # Prevent overlapping flushes (Fix #4)
 
-        # Subagent visibility: registry for live subagent stores
+        # Subagent visibility: registry + coordinator (extracted Phase 5)
         self._subagent_registry: Optional["SubagentRegistry"] = subagent_registry
-        self._subagent_subscriptions: dict[str, dict] = {}  # subagent_id -> subscription info
-        self._pending_subagent_mounts: dict[str, dict] = {}  # parent_tool_call_id -> pending data
-        self._buffered_subagent_notifications: dict[str, list] = {}  # subagent_id -> buffered notifications
-        self._unsubscribe_registry_reg: Optional[Callable[[], None]] = None
-        self._unsubscribe_registry_unreg: Optional[Callable[[], None]] = None
-        self._unsubscribe_registry_notif: Optional[Callable[[], None]] = None
+        self._subagent_coordinator = SubagentCoordinator(
+            tool_cards=self._tool_cards,
+            mount_callback=self.call_later,
+        )
+        # Backward-compat aliases (used by on_unmount, action_interrupt, etc.)
+        self._subagent_subscriptions = self._subagent_coordinator.subscriptions
 
         # Setup mode: when agent=None, TUI shows config wizard on mount
         self._pending_llm_config = None  # Set by cli.py before app.run()
+
+        # Segment renderer (extracted from app.py - Phase 2)
+        self._segment_renderer = SegmentRenderer(
+            tool_cards=self._tool_cards,
+            message_store=self._message_store,
+            silent_tools=SILENT_TOOLS,
+            is_replaying_fn=lambda: self._is_replaying,
+            on_tool_card_created=self._on_tool_card_created,
+        )
+
+        # Store renderer (extracted from app.py - Phase 3)
+        self._store_renderer = StoreRenderer(
+            segment_renderer=self._segment_renderer,
+            tool_cards=self._tool_cards,
+            message_store=self._message_store,
+            store_message_widgets=self._store_message_widgets,
+            store_rendered_segment_idx=self._store_rendered_segment_idx,
+            silent_tools=SILENT_TOOLS,
+            on_clarify_request=self._on_clarify_request,
+            on_plan_approval=self.mount_plan_approval,
+            on_tool_card_created=self._on_tool_card_created,
+            scroll_to_bottom=self._scroll_to_bottom,
+        )
 
     def _create_agent_stream_handler(
         self,
@@ -1045,31 +918,17 @@ class CodingAgentApp(App):
                 or os.environ.get(config.api_key_env, "")
             )
 
-            agent = CodingAgent(
-                model_name=config.model,
-                backend=config.backend_type,
-                base_url=config.base_url,
-                context_window=config.context_window,
-                temperature=config.temperature,
-                max_tokens=config.max_tokens,
-                top_p=config.top_p,
+            agent = CodingAgent.from_config(
+                config,
                 api_key=api_key,
-                api_key_env=config.api_key_env,
+                session_id=self._session_id,
+                message_store=self._message_store,
             )
-
-            # Apply subagent LLM overrides
-            if config.subagents and hasattr(agent, 'subagent_manager'):
-                agent.subagent_manager.config_loader.apply_llm_overrides(config)
 
             # Wire agent into the app
             self.agent = agent
             self.model_name = agent.model_name
             self.stream_handler = self._create_agent_stream_handler(agent)
-
-            # Connect agent to existing store and session
-            if self._message_store and self._session_id:
-                agent.set_session_id(self._session_id, is_new_session=True)
-                agent.memory.set_message_store(self._message_store, self._session_id)
 
             # Wire render meta registry
             self.set_render_meta_registry(agent.memory.render_meta)
@@ -1151,18 +1010,8 @@ class CodingAgentApp(App):
             except RuntimeError:
                 pass  # No running loop
 
-        # Cleanup subagent registry subscriptions
-        if self._unsubscribe_registry_reg:
-            self._unsubscribe_registry_reg()
-        if self._unsubscribe_registry_unreg:
-            self._unsubscribe_registry_unreg()
-        if self._unsubscribe_registry_notif:
-            self._unsubscribe_registry_notif()
-
-        # Cleanup subagent store subscriptions
-        for sub_id, sub_info in self._subagent_subscriptions.items():
-            if sub_info.get("unsubscribe"):
-                sub_info["unsubscribe"]()
+        # Cleanup subagent coordinator (registry + store subscriptions)
+        self._subagent_coordinator.cleanup()
 
         # Log cache summary (avoid full agent.shutdown() during event loop teardown)
         if self.agent and hasattr(self.agent, 'llm') and hasattr(self.agent.llm, 'log_cache_summary'):
@@ -1172,79 +1021,41 @@ class CodingAgentApp(App):
         if self.agent and self.agent._mcp_manager.has_connections:
             self.agent._mcp_manager.shutdown_sync()
 
-    def _setup_subagent_registry(self) -> None:
-        """Set up subagent registry for live visibility.
+    # ---- Subagent lifecycle (delegated to SubagentCoordinator - Phase 5) ----
 
-        Creates the registry if not provided externally, then:
-        1. Subscribes to registration/unregistration events
-        2. Wires the registry to the delegation tool on the agent
-        """
-        # Create registry if not provided externally
+    def _setup_subagent_registry(self) -> None:
+        """Set up subagent registry for live visibility."""
         if self._subagent_registry is None and self.agent:
             from .subagent_registry import SubagentRegistry
             self._subagent_registry = SubagentRegistry(app=self)
             logger.info("Created SubagentRegistry for TUI visibility")
 
-        # Subscribe to registry events
         if self._subagent_registry:
-            self._unsubscribe_registry_reg = self._subagent_registry.subscribe_on_registered(
-                self._on_subagent_registered
+            self._subagent_coordinator.setup_registry(
+                registry=self._subagent_registry,
+                agent=self.agent,
+                ui_protocol=self.ui_protocol,
+                pause_callback=self._on_subagent_pause_requested,
             )
-            self._unsubscribe_registry_unreg = self._subagent_registry.subscribe_on_unregistered(
-                self._on_subagent_unregistered
-            )
-            # Subscribe to store notifications via registry (no lost notifications)
-            self._unsubscribe_registry_notif = self._subagent_registry.subscribe_on_notification(
-                self._handle_subagent_notification
-            )
-            logger.info("Subscribed to SubagentRegistry events")
-
-            # Wire registry to delegation tool on agent
-            if self.agent:
-                delegation_tool = self.agent.tool_executor.tools.get("delegate_to_subagent")
-                if delegation_tool and hasattr(delegation_tool, "set_registry"):
-                    delegation_tool.set_registry(self._subagent_registry)
-                    delegation_tool.set_ui_protocol(self.ui_protocol)
-                    self.ui_protocol.set_pause_requested_callback(
-                        self._on_subagent_pause_requested
-                    )
-                    logger.info("Wired SubagentRegistry, UIProtocol, and pause callback to delegation tool")
-                else:
-                    logger.warning(
-                        "delegate_to_subagent tool not found or missing set_registry - "
-                        f"tools: {list(self.agent.tool_executor.tools.keys())}"
-                    )
 
     async def _on_subagent_pause_requested(
-        self,
-        reason: str,
-        reason_code: str,
-        pending_todos: Optional[list],
-        stats: Optional[dict],
+        self, reason: str, reason_code: str,
+        pending_todos: Optional[list], stats: Optional[dict],
     ) -> None:
-        """Mount PausePromptWidget when a subagent requests a pause.
-
-        Called by UIProtocol.request_pause() via the registered callback.
-        After this returns, UIProtocol.wait_for_pause_response() waits for the
-        user's decision. The existing on_pause_response_message() handler
-        removes the widget and submits the PauseResult.
-        """
+        """Mount PausePromptWidget when a subagent requests a pause."""
         try:
             conversation = self._conversation or self.query_one("#conversation", ConversationContainer)
         except NoMatches:
             logger.warning("No conversation container found for subagent pause widget")
             return
 
-        # Guard: remove any existing pause widget to prevent orphaned DOM nodes
         if self._pause_widget:
             self._pause_widget.remove()
             self._pause_widget = None
 
         widget = PausePromptWidget(
-            reason=reason,
-            reason_code=reason_code,
-            pending_todos=pending_todos or [],
-            stats=stats or {},
+            reason=reason, reason_code=reason_code,
+            pending_todos=pending_todos or [], stats=stats or {},
         )
         self._pause_widget = widget
         await conversation.mount(widget)
@@ -1258,185 +1069,9 @@ class CodingAgentApp(App):
         except Exception as e:
             self.log.error(f"Failed to focus input: {e}")
 
-    # -------------------------------------------------------------------------
-    # Subagent Visibility
-    # -------------------------------------------------------------------------
-
-    def _on_subagent_registered(
-        self,
-        subagent_id: str,
-        store: "MessageStore",
-        transcript_path: Path,
-        parent_tool_call_id: str,
-        model_name: str = "",
-        subagent_name: str = "",
-    ) -> None:
-        """Called on UI loop when subagent is registered.
-
-        Subscribes to the subagent's store for live updates and tries to mount
-        a SubAgentCard inside the parent ToolCard.
-
-        Args:
-            subagent_id: Unique ID of the subagent session
-            store: The subagent's MessageStore instance (may be None for subprocess mode)
-            transcript_path: Path to the subagent's JSONL transcript
-            parent_tool_call_id: Tool call ID of the spawning delegation call
-            model_name: LLM model name used by this subagent
-            subagent_name: Subagent type/name (e.g., "knowledge-builder", "planner")
-        """
-        logger.info(
-            f"TUI: Subagent registered: {subagent_id}, "
-            f"parent_tool_call_id={parent_tool_call_id}, model={model_name}, "
-            f"mode={'subprocess' if store is None else 'in-process'}"
-        )
-
-        # NOTE: Store subscription is handled by the registry (immediate, no lost
-        # notifications). For subprocess mode, store is None and notifications
-        # arrive via push_notification() instead of store subscription.
-        self._subagent_subscriptions[subagent_id] = {
-            "card": None,  # Will be set when mounted
-            "transcript_path": transcript_path,
-            "parent_tool_call_id": parent_tool_call_id,
-            "store": store,  # May be None for subprocess mode
-            "model_name": model_name,
-            "subagent_name": subagent_name,
-        }
-
-        # Try to mount card into parent ToolCard
-        self._try_mount_subagent_card(subagent_id, transcript_path, parent_tool_call_id, model_name, subagent_name)
-
-    def _on_subagent_unregistered(self, subagent_id: str) -> None:
-        """Called on UI loop when subagent completes.
-
-        Cleans up store subscription and marks the SubAgentCard as completed.
-
-        Args:
-            subagent_id: The subagent session ID that completed
-        """
-        logger.debug(f"TUI: Subagent unregistered: {subagent_id}")
-
-        sub = self._subagent_subscriptions.pop(subagent_id, None)
-        if sub:
-            # NOTE: Store unsubscription is handled by the registry in unregister().
-            # Mark card as completed (don't remove - user may want to see final state)
-            if sub.get("card"):
-                sub["card"].mark_completed()
-
-    def _try_mount_subagent_card(
-        self,
-        subagent_id: str,
-        transcript_path: Path,
-        parent_tool_call_id: str,
-        model_name: str = "",
-        subagent_name: str = "",
-    ) -> None:
-        """Mount SubAgentCard, or queue for retry if parent ToolCard doesn't exist yet.
-
-        Args:
-            subagent_id: Unique ID of the subagent session
-            transcript_path: Path to the subagent's JSONL transcript
-            parent_tool_call_id: Tool call ID of the spawning delegation call
-            model_name: LLM model name used by this subagent
-        """
-        parent_tool_card = self._tool_cards.get(parent_tool_call_id)
-
-        if parent_tool_card:
-            # Parent card exists - create card with deferred hydration.
-            # Store and buffered notifications are passed to the constructor
-            # so the card can hydrate in on_mount() AFTER compose() builds
-            # the DOM tree (section bodies must exist before tools can mount).
-            store = self._subagent_subscriptions.get(subagent_id, {}).get("store")
-            buffered = self._buffered_subagent_notifications.pop(subagent_id, [])
-
-            card = SubAgentCard(
-                subagent_id=subagent_id,
-                transcript_path=transcript_path,
-                store=store,
-                buffered_notifications=buffered,
-                model_name=model_name,
-                subagent_name=subagent_name,
-                id=f"subagent-{subagent_id}"
-            )
-
-            # Set card reference so live notifications go directly to it
-            if subagent_id in self._subagent_subscriptions:
-                self._subagent_subscriptions[subagent_id]["card"] = card
-
-            # Mount the card inside the parent ToolCard
-            self.call_later(parent_tool_card.mount, card)
-
-            logger.info(
-                f"TUI: Mounted SubAgentCard {subagent_id} "
-                f"inside ToolCard {parent_tool_call_id}"
-            )
-        else:
-            # Parent card not created yet - queue for retry
-            self._pending_subagent_mounts[parent_tool_call_id] = {
-                "subagent_id": subagent_id,
-                "transcript_path": transcript_path,
-                "model_name": model_name,
-                "subagent_name": subagent_name,
-            }
-            logger.info(
-                f"TUI: Queued SubAgentCard {subagent_id} "
-                f"for pending mount (parent {parent_tool_call_id} not found). "
-                f"Available tool_cards: {list(self._tool_cards.keys())}"
-            )
-
     def _on_tool_card_created(self, tool_call_id: str, tool_card: ToolCard) -> None:
-        """Called when a ToolCard is created. Check for pending subagent mounts.
-
-        Args:
-            tool_call_id: The tool call ID of the created ToolCard
-            tool_card: The created ToolCard instance
-        """
-        pending = self._pending_subagent_mounts.pop(tool_call_id, None)
-        if pending:
-            self._try_mount_subagent_card(
-                pending["subagent_id"],
-                pending["transcript_path"],
-                tool_call_id,
-                pending.get("model_name", ""),
-            )
-
-    def _handle_subagent_notification(
-        self,
-        subagent_id: str,
-        notification: "StoreNotification"
-    ) -> None:
-        """Update SubAgentCard from store notification.
-
-        Bridges sync callback (from call_from_thread) to async handler,
-        since SubAgentCard.update_from_notification is now async (it mounts
-        AssistantMessage and ToolCard widgets).
-
-        Args:
-            subagent_id: The subagent session ID
-            notification: StoreNotification from the subagent's MessageStore
-        """
-        self.call_later(
-            self._async_handle_subagent_notification,
-            subagent_id,
-            notification,
-        )
-
-    async def _async_handle_subagent_notification(
-        self,
-        subagent_id: str,
-        notification: "StoreNotification"
-    ) -> None:
-        """Async handler for subagent store notifications."""
-        sub = self._subagent_subscriptions.get(subagent_id)
-        if sub and sub.get("card"):
-            await sub["card"].update_from_notification(notification)
-        else:
-            # Buffer notification -- cap at 500 to prevent unbounded growth
-            buf = self._buffered_subagent_notifications.setdefault(subagent_id, [])
-            if len(buf) < 500:
-                buf.append(notification)
-            logger.debug(
-                f"TUI: Buffered notification for {subagent_id} (total={len(buf)})"
-            )
+        """Delegate to SubagentCoordinator.on_tool_card_created()."""
+        self._subagent_coordinator.on_tool_card_created(tool_call_id, tool_card)
 
     # -------------------------------------------------------------------------
     # Input Handling
@@ -1578,47 +1213,23 @@ class CodingAgentApp(App):
         self._focus_input()
 
     # -------------------------------------------------------------------------
-    # Slash Commands
+    # Slash Commands (routing extracted to SlashCommandDispatcher - Phase 4)
     # -------------------------------------------------------------------------
 
-    async def _handle_slash_command(self, command: str) -> bool:
-        """
-        Handle slash commands like /resume.
+    def _build_slash_dispatcher(self):
+        """Build the slash command dispatcher with current handler references."""
+        from .slash_commands import SlashCommandDispatcher
 
-        Args:
-            command: The slash command (e.g., "/resume")
-
-        Returns:
-            True if command was handled, False otherwise
-        """
-        cmd = command.lower().strip()
-
-        if cmd == "/resume":
-            await self._show_session_picker()
-            return True
-
-        if cmd == "/config-llm":
+        async def _do_configure_llm():
             self.action_configure_llm()
-            return True
 
-        if cmd == "/config-jira":
+        async def _do_configure_jira():
             self.action_configure_jira()
-            return True
 
-        if cmd == "/connect-jira" or cmd.startswith("/connect-jira "):
-            # Extract optional profile name: /connect-jira corporate
-            parts = command.strip().split(maxsplit=1)
-            profile = parts[1].strip() if len(parts) > 1 else None
-            self.run_worker(
-                self._connect_jira(profile=profile), exclusive=False, group="jira"
-            )
-            return True
-
-        if cmd == "/disconnect-jira":
+        async def _do_disconnect_jira():
             self.run_worker(self._disconnect_jira(), exclusive=False, group="jira")
-            return True
 
-        if cmd == "/director-reset":
+        async def _do_director_reset():
             if self.agent:
                 self.agent.director_adapter.reset()
             self.notify("Director mode reset")
@@ -1627,10 +1238,33 @@ class CodingAgentApp(App):
                 status_bar.clear_director_phase()
             except Exception:
                 pass
-            return True
 
-        # Unknown command - let it pass through to agent
-        return False
+        async def _do_connect_jira(command: str):
+            parts = command.strip().split(maxsplit=1)
+            profile = parts[1].strip() if len(parts) > 1 else None
+            self.run_worker(
+                self._connect_jira(profile=profile), exclusive=False, group="jira"
+            )
+
+        return SlashCommandDispatcher(
+            commands={
+                "/new": self._reset_session,
+                "/resume": self._show_session_picker,
+                "/config-llm": _do_configure_llm,
+                "/config-jira": _do_configure_jira,
+                "/disconnect-jira": _do_disconnect_jira,
+                "/director-reset": _do_director_reset,
+            },
+            prefix_commands={
+                "/connect-jira": _do_connect_jira,
+            },
+        )
+
+    async def _handle_slash_command(self, command: str) -> bool:
+        """Route slash commands via the dispatcher."""
+        if not hasattr(self, '_slash_dispatcher') or self._slash_dispatcher is None:
+            self._slash_dispatcher = self._build_slash_dispatcher()
+        return await self._slash_dispatcher.dispatch(command)
 
     async def _connect_jira(self, profile: str = None) -> None:
         """Connect to Jira via mcp-atlassian MCP server.
@@ -1846,6 +1480,64 @@ class CodingAgentApp(App):
             await conversation.remove_children()
         except NoMatches:
             pass
+
+    async def _reset_session(self) -> None:
+        """Start a fresh chat session (New Chat / /new command).
+
+        Preserves agent configuration while clearing all conversation state.
+        """
+        import uuid as _uuid
+        from datetime import datetime
+        from pathlib import Path
+        from src.session.store.memory_store import MessageStore
+        from src.session.persistence.writer import SessionWriter
+
+        if not self.agent:
+            self.notify("No agent available", severity="error")
+            return
+
+        try:
+            # 1. Close current writer
+            if self._session_writer:
+                await self._close_session_writer()
+
+            # 2. Clear conversation UI
+            await self._clear_conversation()
+
+            # 3. Unbind current store
+            self.unbind_store()
+
+            # 4. Generate new session ID and path
+            new_session_id = (
+                f"session-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+                f"-{_uuid.uuid4().hex[:8]}"
+            )
+            session_dir = Path(".clarity/sessions") / new_session_id
+            jsonl_path = session_dir / "session.jsonl"
+
+            # 5. Reset core agent state
+            self.agent.reset_session(new_session_id)
+
+            # 6. Create new store + writer
+            new_store = MessageStore()
+            self.agent.memory.set_message_store(new_store, new_session_id)
+
+            writer = SessionWriter(file_path=jsonl_path)
+
+            # 7. Rebind store and writer
+            self.bind_store(new_store, session_id=new_session_id)
+            self._session_writer = writer
+            await self._open_session_writer()
+
+            # 8. Clear todo panel
+            self._on_todos_updated([])
+
+            self.notify("New session started", severity="information")
+            logger.info(f"TUI session reset to {new_session_id}")
+
+        except Exception as e:
+            logger.error(f"Failed to reset session: {e}")
+            self.notify(f"Failed to start new session: {e}", severity="error")
 
     # -------------------------------------------------------------------------
     # Streaming
@@ -2418,12 +2110,8 @@ class CodingAgentApp(App):
     # -------------------------------------------------------------------------
 
     def _find_subagent_tool_card(self, call_id: str):
-        """Search active SubAgentCards for a tool card with the given call_id."""
-        for sub_info in self._subagent_subscriptions.values():
-            sa_card = sub_info.get("card")
-            if sa_card and call_id in sa_card._tool_cards:
-                return sa_card._tool_cards[call_id]
-        return None
+        """Delegate to SubagentCoordinator.find_subagent_tool_card()."""
+        return self._subagent_coordinator.find_subagent_tool_card(call_id)
 
     def on_approval_response_message(self, message: ApprovalResponseMessage) -> None:
         """Handle approval response from ToolApprovalOptions."""
@@ -2936,6 +2624,10 @@ class CodingAgentApp(App):
             flush_on_boundary=True  # Update store at each content boundary
         )
 
+        # Keep extracted renderers' store references in sync
+        self._segment_renderer.set_message_store(store)
+        self._store_renderer.set_message_store(store)
+
         self._subscribe_to_store()
         logger.info(f"TUI bound to MessageStore with store-driven rendering (session={self._session_id})")
 
@@ -3040,222 +2732,35 @@ class CodingAgentApp(App):
             case StoreEvent.TOOL_STATE_UPDATED:
                 await self._on_store_tool_state_updated(notification)
 
+    # ---- Store message rendering (delegated to StoreRenderer - Phase 3) ----
+
     async def _render_store_message(
         self,
         message: "Message",
         conversation: ScrollableContainer,
         bulk_load: bool = False
     ) -> None:
-        """Render a single message from the store into the conversation.
+        """Delegate to StoreRenderer.render_store_message().
 
-        This is the SINGLE rendering path for all store-driven messages.
-        Both live notifications and bulk load (session replay) use this method
-        to ensure consistent rendering behavior.
-
-        Args:
-            message: The message to render
-            conversation: The conversation container to mount widgets into
-            bulk_load: If True, applies bulk load optimizations:
-                - defer_tool_mount=True (mount tool diffs lazily)
-                - use_store_hydration=True (hydrate tool results from store)
-                - Renders tool_calls in fallback path (no segments)
-                - Finalizes assistant widgets immediately
-                - Skips per-message auto-scroll
+        Handles compact_boundary's live-streaming widget reset locally
+        (since it writes to self._current_message etc.), then delegates
+        all rendering to the extracted StoreRenderer.
         """
-        if not message:
-            return
+        # compact_boundary needs to reset live-streaming refs on self
+        if (message and message.is_system and message.meta
+                and message.meta.event_type == "compact_boundary"):
+            self._current_message = None
+            self._current_code = None
+            self._current_thinking = None
 
-        # Track by stream_id for updates
-        stream_id = message.meta.stream_id if message.meta else None
-
-        # Create appropriate widget based on role
-        if message.is_user:
-            # Adopt pre-mounted widget (mounted immediately on submit)
-            if not bulk_load and self._pre_mounted_user_widget is not None:
-                widget = self._pre_mounted_user_widget
-                self._pre_mounted_user_widget = None
-                if stream_id:
-                    self._store_message_widgets[stream_id] = widget
-                return  # Already mounted, skip
-            # Pass raw content and UUID for clickable image support
-            message_uuid = message.meta.uuid if message.meta else ""
-            widget = UserMessage(content=message.content or "", message_uuid=message_uuid)
-        elif message.is_assistant:
-            if not bulk_load:
-                # Check if widget already exists for this stream_id
-                if stream_id and stream_id in self._store_message_widgets:
-                    return  # Widget already exists
-
-                # Live stream in progress — register widget, render tool cards only.
-                # Text already rendered by live streaming; tool cards come from segments.
-                if self._current_message is not None:
-                    if stream_id:
-                        self._store_message_widgets[stream_id] = self._current_message
-                    segments = message.meta.segments if message.meta and message.meta.segments else []
-                    if segments:
-                        await self._render_tool_segments_only(self._current_message, message, segments)
-                    return
-
-            # Skip assistant messages with no text and only silent tool calls
-            # (e.g. task_create/task_update only — nothing visible to render)
-            if not message.content:
-                tool_calls = message.tool_calls or []
-                if tool_calls and all(tc.function.name in SILENT_TOOLS for tc in tool_calls):
-                    return
-
-            widget = AssistantMessage()
-        elif message.is_tool:
-            # Tool result message - update the corresponding ToolCard
-            await self._apply_tool_result_to_card(message)
-            return  # No new widget needed, ToolCard updated in place
-        elif message.is_system:
-            event_type = message.meta.event_type if message.meta else None
-            if event_type == "compact_boundary":
-                # Compaction just happened — clear all old widgets from conversation.
-                # The compact summary + subsequent messages will mount naturally
-                # via the next MESSAGE_ADDED notifications.
-                for child in list(conversation.children):
-                    child.remove()
-                self._store_message_widgets.clear()
-                self._tool_cards.clear()
-                # Reset live-streaming widget references (now detached from DOM)
-                self._current_message = None
-                self._current_code = None
-                self._current_thinking = None
-                logger.info("compact_boundary: cleared pre-compaction widgets")
-            elif event_type == "clarify_request":
-                await self._on_clarify_request(message, conversation)
-            elif event_type == "plan_submitted":
-                # Mount plan approval widget only if not already resolved.
-                # Same pattern as clarify: check if tool result exists in store.
-                # During replay, the tool result is already persisted so we skip.
-                extra = message.meta.extra if message.meta else {}
-                plan_hash = extra.get("plan_hash") if extra else None
-                call_id = extra.get("call_id") if extra else None
-                if plan_hash:
-                    # Check if tool already has a result (already approved/rejected)
-                    if call_id and self._message_store:
-                        tool_result = self._message_store.get_tool_result(call_id)
-                        if tool_result:
-                            logger.info(f"[PLAN] Skipping approval mount - tool result exists for call_id={call_id}")
-                        else:
-                            await self.mount_plan_approval(
-                                plan_hash=plan_hash,
-                                excerpt=extra.get("excerpt", ""),
-                                truncated=extra.get("truncated", False),
-                                plan_path=extra.get("plan_path"),
-                            )
-                    else:
-                        await self.mount_plan_approval(
-                            plan_hash=plan_hash,
-                            excerpt=extra.get("excerpt", ""),
-                            truncated=extra.get("truncated", False),
-                            plan_path=extra.get("plan_path"),
-                        )
-            elif event_type == "director_plan_submitted":
-                # Director plan approval - reuse PlanApprovalWidget
-                # Same replay guard as plan_submitted: skip if tool result exists
-                extra = message.meta.extra if message.meta else {}
-                plan_hash = extra.get("plan_hash") if extra else None
-                call_id = extra.get("call_id") if extra else None
-                if plan_hash:
-                    if call_id and self._message_store:
-                        tool_result = self._message_store.get_tool_result(call_id)
-                        if tool_result:
-                            logger.info(f"[DIRECTOR] Skipping approval mount - tool result exists for call_id={call_id}")
-                        else:
-                            await self.mount_plan_approval(
-                                plan_hash=plan_hash,
-                                excerpt=extra.get("excerpt", ""),
-                                truncated=extra.get("truncated", False),
-                            )
-                    else:
-                        await self.mount_plan_approval(
-                            plan_hash=plan_hash,
-                            excerpt=extra.get("excerpt", ""),
-                            truncated=extra.get("truncated", False),
-                        )
-            elif event_type == "director_phase_changed":
-                # Update status bar director phase badge
-                extra = message.meta.extra if message.meta else {}
-                new_phase = extra.get("phase", "") if extra else ""
-                try:
-                    status_bar = self.query_one("#status", StatusBar)
-                    if new_phase:
-                        status_bar.set_director_phase(new_phase)
-                    else:
-                        status_bar.clear_director_phase()
-                except Exception:
-                    pass
-            elif event_type == "permission_mode_changed":
-                # Update status bar mode from MessageStore's current_mode property
-                # This ensures UI and agent always see the same mode (single source of truth)
-                if self._message_store:
-                    new_mode = self._message_store.current_mode
-                else:
-                    # Fallback: extract from event if no store (shouldn't happen)
-                    extra = message.meta.extra if message.meta else {}
-                    new_mode = extra.get("new_mode", "normal") if extra else "normal"
-                try:
-                    status_bar = self.query_one("#status", StatusBar)
-                    status_bar.set_mode(new_mode)
-                except NoMatches:
-                    pass
-            # System messages - skip rendering
-            return
-        else:
-            # Unknown message type - skip
-            return
-
-        if stream_id:
-            self._store_message_widgets[stream_id] = widget
-
-        await conversation.mount(widget)
-
-        # Render content for assistant messages using segments for correct interleaving
-        if message.is_assistant:
-            segments = message.meta.segments if message.meta and message.meta.segments else []
-
-            if segments:
-                try:
-                    rendered = await self._render_segments(
-                        widget, message, segments,
-                        defer_tool_mount=bulk_load,
-                        use_store_hydration=bulk_load
-                    )
-                except Exception as e:
-                    logger.error(
-                        f"_render_segments failed: {type(e).__name__}: {e}",
-                        exc_info=True
-                    )
-                    rendered = 0
-                # Track segment index for future updates (live path only)
-                if not bulk_load and stream_id:
-                    self._store_rendered_segment_idx[stream_id] = rendered
-            else:
-                # Fallback: no segments, render content if present
-                if message.content:
-                    await widget.add_text(message.content)
-                # Bulk load: also render tool calls in fallback path
-                if bulk_load and message.tool_calls:
-                    import json
-                    for tc in message.tool_calls:
-                        if tc.function.name in SILENT_TOOLS:
-                            continue
-                        args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-                        card = widget.add_tool_card(tc.id, tc.function.name, args, requires_approval=False)
-                        card.set_defer_diff_mount(True)
-                        self._tool_cards[tc.id] = card
-                        self._on_tool_card_created(tc.id, card)
-                        self._hydrate_tool_card_from_store(card, tc.id)
-
-            # Bulk load: finalize widget immediately (replay shows final state)
-            if bulk_load:
-                widget.finalize()
-
-        # Auto-scroll only during live rendering (not replay)
-        if not bulk_load and not self._is_replaying:
-            self._scroll_to_bottom(conversation)
+        self._pre_mounted_user_widget = await self._store_renderer.render_store_message(
+            message, conversation,
+            bulk_load=bulk_load,
+            current_message=self._current_message,
+            pre_mounted_user_widget=self._pre_mounted_user_widget,
+            is_replaying=self._is_replaying,
+            status_bar=self._status_bar,
+        )
 
     async def _on_store_message_added(
         self,
@@ -3377,6 +2882,8 @@ class CodingAgentApp(App):
             # Cleanup segment index tracking for this stream
             self._store_rendered_segment_idx.pop(stream_id, None)
 
+    # ---- Segment rendering (delegated to SegmentRenderer - Phase 2) ----
+
     async def _render_segments(
         self,
         widget: "AssistantMessage",
@@ -3387,93 +2894,15 @@ class CodingAgentApp(App):
         defer_tool_mount: bool = False,
         use_store_hydration: bool = False
     ) -> int:
-        """
-        Render segments to a message widget.
-
-        This is the unified segment rendering helper that consolidates duplicate
-        logic from _on_store_message_added, _flush_store_updates,
-        _on_store_message_finalized, and _on_store_bulk_load_complete.
-
-        Args:
-            widget: Target AssistantMessage widget
-            message: Message containing tool_calls for reference
-            segments: List of segments to render
-            start_idx: Start rendering from this index (for incremental updates)
-            skip_existing_cards: Skip tool cards that already exist in _tool_cards
-            defer_tool_mount: Defer DiffWidget mounting (for bulk load)
-            use_store_hydration: Use _hydrate_tool_card_from_store() for results
-
-        Returns:
-            Number of segments rendered
-        """
-        import json
-        from src.session.models.message import (
-            TextSegment, ToolCallSegment, CodeBlockSegment,
-            ToolCallRefSegment, ThinkingSegment
+        """Delegate to SegmentRenderer.render_segments()."""
+        return await self._segment_renderer.render_segments(
+            widget, message, segments,
+            start_idx=start_idx,
+            skip_existing_cards=skip_existing_cards,
+            defer_tool_mount=defer_tool_mount,
+            use_store_hydration=use_store_hydration,
+            hydrate_fn=self._hydrate_tool_card_from_store if use_store_hydration else None,
         )
-
-        rendered = 0
-        for segment in segments[start_idx:]:
-            if isinstance(segment, TextSegment):
-                if segment.content and segment.content.strip():
-                    await widget.add_text(segment.content)
-            elif isinstance(segment, CodeBlockSegment):
-                widget.start_code_block(segment.language)
-                widget.append_code(segment.content)
-                widget.end_code_block()
-            elif isinstance(segment, ThinkingSegment):
-                if segment.content and segment.content.strip():
-                    widget.start_thinking()
-                    widget.append_thinking(segment.content)
-                    widget.end_thinking()
-            elif isinstance(segment, ToolCallRefSegment):
-                # Reference by ID (stable)
-                tc = self._get_tool_call_by_id(message, segment.tool_call_id)
-                if tc:
-                    if tc.function.name in SILENT_TOOLS:
-                        rendered += 1
-                        continue
-                    if skip_existing_cards and tc.id in self._tool_cards:
-                        rendered += 1
-                        continue
-                    args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-                    card = widget.add_tool_card(tc.id, tc.function.name, args, requires_approval=False)
-                    if defer_tool_mount:
-                        card.set_defer_diff_mount(True)
-                    self._tool_cards[tc.id] = card
-                    self._on_tool_card_created(tc.id, card)
-                    if use_store_hydration:
-                        self._hydrate_tool_card_from_store(card, tc.id)
-                    elif not self._is_replaying and self._message_store:
-                        # Query store for current status (handles race condition)
-                        tool_state = self._message_store.get_tool_state(tc.id)
-                        if tool_state and tool_state.status == CoreToolStatus.AWAITING_APPROVAL:
-                            card.status = ToolStatus.AWAITING_APPROVAL
-            elif isinstance(segment, ToolCallSegment):
-                # Legacy: reference by index (deprecated)
-                tc = self._get_tool_call_safe(message, segment.tool_call_index, "render_segments")
-                if tc:
-                    if tc.function.name in SILENT_TOOLS:
-                        rendered += 1
-                        continue
-                    if skip_existing_cards and tc.id in self._tool_cards:
-                        rendered += 1
-                        continue
-                    args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-                    card = widget.add_tool_card(tc.id, tc.function.name, args, requires_approval=False)
-                    if defer_tool_mount:
-                        card.set_defer_diff_mount(True)
-                    self._tool_cards[tc.id] = card
-                    self._on_tool_card_created(tc.id, card)
-                    if use_store_hydration:
-                        self._hydrate_tool_card_from_store(card, tc.id)
-                    elif not self._is_replaying and self._message_store:
-                        # Query store for current status (handles race condition)
-                        tool_state = self._message_store.get_tool_state(tc.id)
-                        if tool_state and tool_state.status == CoreToolStatus.AWAITING_APPROVAL:
-                            card.status = ToolStatus.AWAITING_APPROVAL
-            rendered += 1
-        return rendered
 
     async def _render_tool_segments_only(
         self,
@@ -3481,157 +2910,20 @@ class CodingAgentApp(App):
         message: "Message",
         segments: list
     ) -> None:
-        """Render only tool call segments from a finalized message.
+        """Delegate to SegmentRenderer.render_tool_segments_only()."""
+        await self._segment_renderer.render_tool_segments_only(widget, message, segments)
 
-        Called when text was already streamed incrementally via TextDelta.
-        Skips TextSegment and CodeBlockSegment (already rendered).
-        """
-        import json
-        from src.session.models.message import (
-            ToolCallSegment, ToolCallRefSegment
-        )
+    def _get_tool_call_safe(self, message, tc_idx, context=""):
+        """Delegate to SegmentRenderer.get_tool_call_safe()."""
+        return self._segment_renderer.get_tool_call_safe(message, tc_idx, context)
 
-        for segment in segments:
-            if isinstance(segment, ToolCallRefSegment):
-                tc = self._get_tool_call_by_id(message, segment.tool_call_id)
-                if tc and tc.function.name not in SILENT_TOOLS:
-                    if tc.id not in self._tool_cards:
-                        args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-                        card = widget.add_tool_card(tc.id, tc.function.name, args, requires_approval=False)
-                        self._tool_cards[tc.id] = card
-                        self._on_tool_card_created(tc.id, card)
-                        if self._message_store:
-                            tool_state = self._message_store.get_tool_state(tc.id)
-                            if tool_state and tool_state.status == CoreToolStatus.AWAITING_APPROVAL:
-                                card.status = ToolStatus.AWAITING_APPROVAL
-            elif isinstance(segment, ToolCallSegment):
-                tc = self._get_tool_call_safe(message, segment.tool_call_index, "streaming_dedup")
-                if tc and tc.function.name not in SILENT_TOOLS:
-                    if tc.id not in self._tool_cards:
-                        args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-                        card = widget.add_tool_card(tc.id, tc.function.name, args, requires_approval=False)
-                        self._tool_cards[tc.id] = card
-                        self._on_tool_card_created(tc.id, card)
-                        if self._message_store:
-                            tool_state = self._message_store.get_tool_state(tc.id)
-                            if tool_state and tool_state.status == CoreToolStatus.AWAITING_APPROVAL:
-                                card.status = ToolStatus.AWAITING_APPROVAL
-
-    def _get_tool_call_safe(
-        self,
-        message: "Message",
-        tc_idx: int,
-        context: str = ""
-    ) -> Optional[Any]:
-        """
-        Safely get a tool call by index with bounds checking and logging.
-
-        Fix 5: Validates tool_call_index is within bounds and logs warning
-        if the segment references an invalid index.
-
-        Args:
-            message: Message containing tool_calls
-            tc_idx: The tool_call_index from the segment
-            context: Context string for logging (e.g., "bulk_load", "streaming")
-
-        Returns:
-            ToolCall if valid, None if out of bounds or missing
-        """
-        if not message.tool_calls:
-            logger.warning(
-                f"Segment references tool_call_index={tc_idx} but message has no tool_calls. "
-                f"Context: {context}, message_uuid={message.uuid if hasattr(message, 'uuid') else 'unknown'}"
-            )
-            return None
-
-        if tc_idx >= len(message.tool_calls):
-            logger.warning(
-                f"Segment tool_call_index={tc_idx} out of bounds (message has {len(message.tool_calls)} tool_calls). "
-                f"Context: {context}, message_uuid={message.uuid if hasattr(message, 'uuid') else 'unknown'}"
-            )
-            return None
-
-        return message.tool_calls[tc_idx]
-
-    def _get_tool_call_by_id(
-        self,
-        message: "Message",
-        tool_call_id: str,
-        context: str = ""
-    ) -> Optional[Any]:
-        """
-        Get a tool call by ID (stable reference).
-
-        This is the preferred method for ToolCallRefSegment which references
-        tool calls by their stable ID rather than index.
-
-        Args:
-            message: Message containing tool_calls
-            tool_call_id: The tool_call_id from the segment
-            context: Context string for logging
-
-        Returns:
-            ToolCall if found, None if not found
-        """
-        if not message.tool_calls:
-            logger.warning(
-                f"Segment references tool_call_id={tool_call_id} but message has no tool_calls. "
-                f"Context: {context}, message_uuid={message.uuid if hasattr(message, 'uuid') else 'unknown'}"
-            )
-            return None
-
-        for tc in message.tool_calls:
-            if tc.id == tool_call_id:
-                return tc
-
-        logger.warning(
-            f"No tool call found with id={tool_call_id}. "
-            f"Context: {context}, message_uuid={message.uuid if hasattr(message, 'uuid') else 'unknown'}"
-        )
-        return None
+    def _get_tool_call_by_id(self, message, tool_call_id, context=""):
+        """Delegate to SegmentRenderer.get_tool_call_by_id()."""
+        return self._segment_renderer.get_tool_call_by_id(message, tool_call_id, context)
 
     async def _apply_tool_result_to_card(self, message: "Message") -> None:
-        """
-        Apply a tool result message to its corresponding ToolCard.
-
-        When a tool result (role="tool") is added to the store, this method
-        finds the ToolCard created for that tool_call_id and updates it with
-        the result content and status.
-
-        Args:
-            message: Tool result message with tool_call_id and meta.status
-        """
-        if not message.tool_call_id:
-            logger.warning("Tool result message missing tool_call_id, cannot update ToolCard")
-            return
-
-        tool_call_id = message.tool_call_id
-
-        # Find the ToolCard for this tool_call_id
-        card = self._tool_cards.get(tool_call_id)
-        if not card:
-            # This can happen during bulk load if tool result arrives before assistant message
-            # Or if the assistant message wasn't rendered yet
-            logger.debug(f"No ToolCard found for tool_call_id={tool_call_id}, skipping result update")
-            return
-
-        # Extract status and duration from meta
-        status = message.meta.status if message.meta else None
-        duration_ms = message.meta.duration_ms if message.meta else None
-        content = message.content or ""
-
-        # Update ToolCard based on status
-        if status == "success":
-            card.set_result(content, duration_ms=duration_ms)
-        elif status in ("error", "timeout", "cancelled"):
-            error_msg = content if content else f"Tool execution {status}"
-            card.set_error(error_msg)
-        else:
-            # Unknown or missing status - treat as success if we have content
-            if content:
-                card.set_result(content, duration_ms=duration_ms)
-            else:
-                logger.warning(f"Tool result for {tool_call_id} has no status and no content")
+        """Delegate to StoreRenderer.apply_tool_result_to_card()."""
+        await self._store_renderer.apply_tool_result_to_card(message)
 
     async def _on_store_bulk_load_complete(
         self,
@@ -3735,68 +3027,8 @@ class CodingAgentApp(App):
             card.set_error(tool_state.error)
 
     def _hydrate_tool_card_from_store(self, card: "ToolCard", tool_call_id: str) -> None:
-        """
-        Hydrate a ToolCard with result and approval data from the MessageStore.
-
-        This is the single source of truth for tool result hydration during
-        session resume. Used by both segment-based and fallback rendering paths.
-
-        Handles (in order):
-        1. Approval decisions: If user approved/rejected before execution
-        2. Success: Sets result content and duration
-        3. Error/Timeout: Sets error message
-        4. Missing result: Shows "Interrupted" label (not PENDING or SUCCESS)
-
-        Args:
-            card: The ToolCard widget to hydrate
-            tool_call_id: The tool_call_id to look up in the store
-        """
-        if not self._message_store:
-            card.status = ToolStatus.PENDING
-            return
-
-        # First check for approval decision (Fix 2: Approval persistence)
-        approval_msg = self._message_store.get_tool_approval(tool_call_id)
-        has_approval = False
-        if approval_msg and approval_msg.meta and approval_msg.meta.extra:
-            extra = approval_msg.meta.extra
-            approved = extra.get("approved", False)
-            has_approval = True
-            # Note: We set approval status but continue to check for result
-            # because execution may have happened after approval
-
-        result_msg = self._message_store.get_tool_result(tool_call_id)
-
-        if result_msg:
-            # We have a result - extract status, content, duration
-            result_content = result_msg.get_text_content() if hasattr(result_msg, 'get_text_content') else (result_msg.content or "")
-            status = result_msg.meta.status if result_msg.meta else None
-            duration = result_msg.meta.duration_ms if result_msg.meta else None
-
-            if status in ("success", None):  # None defaults to success for backward compat
-                card.set_result(result_content, duration_ms=duration)
-            elif status in ("error", "timeout", "cancelled"):
-                card.set_error(result_content or f"Tool {status}")
-            else:
-                # Unknown status - treat as success with content
-                card.set_result(result_content, duration_ms=duration)
-        elif has_approval:
-            # We have approval but no result - tool was approved/rejected but not executed
-            if approved:
-                card.status = ToolStatus.APPROVED
-                card.result_preview = "(Approved but not executed)"
-            else:
-                card.status = ToolStatus.REJECTED
-                feedback = approval_msg.meta.extra.get("feedback") if approval_msg.meta.extra else None
-                if feedback:
-                    card.result_preview = f"(Rejected: {feedback[:50]})"
-                else:
-                    card.result_preview = "(Rejected by user)"
-        else:
-            # Tweak 3: No result found - clearly indicate interrupted state
-            # Don't use PENDING (implies running) or SUCCESS (implies completed)
-            card.status = ToolStatus.CANCELLED  # Use CANCELLED as "interrupted" indicator
-            card.result_preview = "(Interrupted - no recorded result)"
+        """Delegate to StoreRenderer.hydrate_tool_card_from_store()."""
+        self._store_renderer.hydrate_tool_card_from_store(card, tool_call_id)
 
     def _persist_tool_approval(
         self,

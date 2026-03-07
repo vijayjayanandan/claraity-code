@@ -1,8 +1,7 @@
 """Subagent delegation tool for LLM tool calling interface.
 
-Supports two execution modes:
-- Sync (CLI): execute() - uses in-process SubAgent via SubAgentManager
-- Async (TUI): execute_async() - launches subprocess, reads JSON-line events
+Uses async execution (TUI): execute_async() launches subprocess, reads JSON-line events.
+The sync execute() exists only to satisfy the abstract base class.
 """
 
 import asyncio
@@ -28,6 +27,9 @@ logger = get_logger("tools.delegation")
 # project also has a src/ package (e.g., target's src/llm/ shadowing ours).
 _AGENT_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
 
+# Maximum nesting depth for delegations (prevents infinite recursion)
+MAX_DELEGATION_DEPTH = 2
+
 
 class DelegateToSubagentTool(Tool):
     """Tool for delegating tasks to specialized subagents.
@@ -36,8 +38,7 @@ class DelegateToSubagentTool(Tool):
     test writing, or documentation. Subagents operate with independent context
     windows, preventing pollution of the main conversation.
 
-    In TUI mode, uses execute_async() to launch a subprocess so the event loop
-    stays unblocked. In CLI mode, uses execute() with in-process SubAgent.
+    Uses execute_async() to launch a subprocess so the event loop stays unblocked.
     """
 
     def __init__(self, subagent_manager: 'SubAgentManager'):
@@ -107,99 +108,14 @@ Benefits:
 
 Use this tool proactively when appropriate!"""
 
-    # =========================================================================
-    # Sync execution (CLI mode - in-process)
-    # =========================================================================
-
-    def execute(self, subagent: str, task: str, **kwargs: Any) -> ToolResult:
-        """Execute subagent delegation synchronously (CLI mode).
-
-        Args:
-            subagent: Name of the subagent to use (e.g., 'code-reviewer')
-            task: Clear description of the task to delegate
-            **kwargs: Additional arguments (_tool_call_id injected by agent)
-
-        Returns:
-            ToolResult with subagent output or error
-        """
-        parent_tool_call_id = kwargs.pop('_tool_call_id', '')
-        logger.info(f"Tool: Delegating to subagent '{subagent}': {task[:100]}...")
-
-        # Validate inputs
-        validation_error = self._validate_inputs(subagent, task)
-        if validation_error:
-            return validation_error
-
-        # Get subagent instance (so we can register before execute)
-        subagent_instance = self.subagent_manager.get_subagent(subagent.strip())
-        if not subagent_instance:
-            available = self.subagent_manager.get_available_subagents()
-            return ToolResult(
-                tool_name=self.name,
-                status=ToolStatus.ERROR,
-                output=None,
-                error=f"Subagent '{subagent}' not found. Available: {', '.join(available)}"
-            )
-
-        # Inject approval settings from parent agent
-        main_agent = self.subagent_manager.main_agent
-        permission_mode = "normal"
-        if hasattr(main_agent, 'permission_manager') and main_agent.permission_manager:
-            permission_mode = main_agent.permission_manager.get_mode().value
-
-        if permission_mode != "auto":
-            def _cli_approval_callback(tool_name, tool_args, tool_call_id):
-                approved = main_agent._prompt_tool_approval(tool_name, tool_args)
-                return (approved, None)
-            subagent_instance._permission_mode = permission_mode
-            subagent_instance._approval_callback = _cli_approval_callback
-
-            def _cli_pause_callback(reason, reason_code, stats):
-                print(f"\n[PAUSED] Subagent '{subagent}': {reason}")
-                print(f"  Stats: {stats.get('iterations', '?')} iterations, "
-                      f"{stats.get('elapsed_s', '?')}s elapsed, "
-                      f"{stats.get('tool_calls', '?')} tool calls")
-                response = input("Continue? [y/N]: ").strip().lower()
-                return (response in ('y', 'yes'), None)
-            subagent_instance._pause_callback = _cli_pause_callback
-
-        # Register with TUI registry for live visibility
-        registered = False
-        if self._registry and parent_tool_call_id:
-            try:
-                info = subagent_instance.get_session_info()
-                model_name = subagent_instance.llm.config.model_name
-                self._registry.register(
-                    subagent_id=info.subagent_id,
-                    store=info.store,
-                    transcript_path=info.transcript_path,
-                    parent_tool_call_id=parent_tool_call_id,
-                    instance=subagent_instance,
-                    model_name=model_name,
-                )
-                registered = True
-                logger.info(
-                    f"Registered subagent {info.subagent_id} "
-                    f"with parent tool_call_id={parent_tool_call_id}"
-                )
-            except Exception as e:
-                logger.error(f"Failed to register subagent with TUI: {e}")
-
-        # Execute the task
-        try:
-            result = subagent_instance.execute(
-                task_description=task.strip(),
-            )
-        finally:
-            # Unregister from TUI when done
-            if registered:
-                try:
-                    info = subagent_instance.get_session_info()
-                    self._registry.unregister(info.subagent_id)
-                except Exception as e:
-                    logger.error(f"Failed to unregister subagent: {e}")
-
-        return self._build_tool_result(subagent, result)
+    def execute(self, **kwargs: Any) -> ToolResult:
+        """Sync stub — delegation always runs via execute_async()."""
+        return ToolResult(
+            tool_name=self.name,
+            status=ToolStatus.ERROR,
+            output=None,
+            error="delegate_to_subagent requires async execution (TUI mode).",
+        )
 
     # =========================================================================
     # Async execution (TUI mode - subprocess)
@@ -227,6 +143,16 @@ Use this tool proactively when appropriate!"""
 
         parent_tool_call_id = kwargs.pop('_tool_call_id', '')
         logger.info(f"Tool [async]: Delegating to subagent '{subagent}': {task[:100]}...")
+
+        # Check delegation depth limit (prevents infinite recursion)
+        current_depth = getattr(self, '_delegation_depth', 0)
+        if current_depth >= MAX_DELEGATION_DEPTH:
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.ERROR,
+                output=None,
+                error=f"Delegation depth limit ({MAX_DELEGATION_DEPTH}) exceeded. Cannot delegate further.",
+            )
 
         # Validate inputs
         validation_error = self._validate_inputs(subagent, task)
@@ -268,9 +194,8 @@ Use this tool proactively when appropriate!"""
         permission_mode = "normal"
         if hasattr(main_agent, 'permission_manager') and main_agent.permission_manager:
             permission_mode = main_agent.permission_manager.get_mode().value
-        auto_approve_tools = []
-        if self._ui_protocol:
-            auto_approve_tools = list(self._ui_protocol._auto_approve)
+        # Don't forward parent's auto-approve to subagents (principle of least privilege)
+        auto_approve_tools = []  # Subagents start with no auto-approvals
 
         subprocess_input = SubprocessInput(
             config=asdict(config),
@@ -283,6 +208,7 @@ Use this tool proactively when appropriate!"""
             transcript_path=transcript_path,
             permission_mode=permission_mode,
             auto_approve_tools=auto_approve_tools,
+            delegation_depth=current_depth + 1,
         )
 
         # Launch subprocess
@@ -328,6 +254,20 @@ Use this tool proactively when appropriate!"""
 
         try:
             async for line in process.stdout:
+                # Check for interrupt between lines — allows the Stop button
+                # to terminate the subagent without waiting for it to finish
+                if self._ui_protocol and self._ui_protocol.check_interrupted():
+                    logger.info("Tool [async]: Interrupt detected — terminating subagent subprocess")
+                    if process.returncode is None:
+                        process.terminate()
+                    result = ToolResult(
+                        tool_name=self.name,
+                        status=ToolStatus.ERROR,
+                        output=None,
+                        error="Subagent interrupted by user",
+                    )
+                    break
+
                 line_str = line.decode('utf-8').strip()
                 if not line_str:
                     continue
@@ -352,6 +292,7 @@ Use this tool proactively when appropriate!"""
                             parent_tool_call_id=parent_tool_call_id,
                             instance=process,  # asyncio.Process for cancel
                             model_name=model_name,
+                            subagent_name=subagent,  # Pass subagent type (knowledge-builder, planner, etc.)
                         )
 
                 elif event_type == IPCEventType.NOTIFICATION:
@@ -521,6 +462,13 @@ Use this tool proactively when appropriate!"""
         clarify_result = {"cancelled": True}
 
         if self._ui_protocol:
+            # Send clarify form to client (WebSocket only -- TUI uses SubAgentCard)
+            if hasattr(self._ui_protocol, 'send_clarify_request'):
+                await self._ui_protocol.send_clarify_request(
+                    call_id=request.tool_call_id,
+                    questions=request.questions,
+                    context=request.context,
+                )
             result = await self._ui_protocol.wait_for_clarify_response(
                 request.tool_call_id, timeout=None
             )

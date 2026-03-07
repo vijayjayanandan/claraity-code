@@ -1,0 +1,99 @@
+{
+  "name": "claraity-vscode",
+  "displayName": "ClarAIty",
+  "description": "AI Coding Agent - VS Code Integration",
+  "version": "0.1.0",
+  "publisher": "claraity",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Chat"
+  ],
+  "activationEvents": [
+    "onView:claraity.chatView"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "claraity",
+          "title": "ClarAIty",
+          "icon": "$(sparkle)"
+        }
+      ]
+    },
+    "views": {
+      "claraity": [
+        {
+          "type": "webview",
+          "id": "claraity.chatView",
+          "name": "Chat"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "claraity.newChat",
+        "title": "ClarAIty: New Chat"
+      },
+      {
+        "command": "claraity.interrupt",
+        "title": "ClarAIty: Interrupt"
+      }
+    ],
+    "configuration": {
+      "title": "ClarAIty",
+      "properties": {
+        "claraity.pythonPath": {
+          "type": "string",
+          "default": "python",
+          "description": "Path to Python interpreter"
+        },
+        "claraity.serverAutoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start the Python server on activation"
+        },
+        "claraity.serverUrl": {
+          "type": "string",
+          "default": "ws://localhost:9120/ws",
+          "description": "WebSocket server URL (used when serverAutoStart is false)"
+        },
+        "claraity.autoConnect": {
+          "type": "boolean",
+          "default": true,
+          "description": "Connect automatically on extension activation (used when serverAutoStart is false)"
+        },
+        "claraity.autoInstallAgent": {
+          "type": "boolean",
+          "default": true,
+          "description": "Prompt to install or upgrade the claraity-code package when not found or outdated"
+        },
+        "claraity.devMode": {
+          "type": "string",
+          "enum": ["auto", "always", "never"],
+          "default": "auto",
+          "description": "Server launch mode. 'auto' detects source vs installed, 'always' forces source mode, 'never' skips source detection"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "build:webview": "cd webview-ui && npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "ws": "^8.19.0"
+  }
+}

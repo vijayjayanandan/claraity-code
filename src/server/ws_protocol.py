@@ -19,12 +19,12 @@ CONCURRENCY MODEL:
 """
 
 import asyncio
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from aiohttp import web, WSMsgType
 
-from src.core.protocol import UIProtocol
-from src.core.events import UIEvent
+from src.core.protocol import UIProtocol, PauseResult
+from src.core.events import UIEvent, PausePromptStart
 from src.session.store.memory_store import MessageStore, StoreNotification
 from src.server.serializers import (
     serialize_event,
@@ -59,6 +59,14 @@ class WebSocketProtocol(UIProtocol):
         self._send_lock = asyncio.Lock()
         self._loop = asyncio.get_event_loop()
         self._unsubscribe: Optional[Callable[[], None]] = None
+        self._on_new_session: Optional[Callable[[], Any]] = None
+
+    async def _safe_background_send(self, coro) -> None:
+        """Run a coroutine in the background with error logging."""
+        try:
+            await coro
+        except Exception as e:
+            logger.warning(f"[WS] Background send failed: {e}")
 
     # -----------------------------------------------------------------
     # Dual Subscription Setup
@@ -74,7 +82,7 @@ class WebSocketProtocol(UIProtocol):
         def on_notification(notification: StoreNotification) -> None:
             self._loop.call_soon_threadsafe(
                 asyncio.ensure_future,
-                self._send_store_notification(notification),
+                self._safe_background_send(self._send_store_notification(notification)),
             )
 
         self._unsubscribe = self._store.subscribe(on_notification)
@@ -93,10 +101,10 @@ class WebSocketProtocol(UIProtocol):
 
     def notify_todos_updated(self, todos: list) -> None:
         """Send todo list to WebSocket client."""
-        asyncio.ensure_future(self._send_json({
+        asyncio.ensure_future(self._safe_background_send(self._send_json({
             "type": "todos_updated",
             "todos": todos,
-        }))
+        })))
 
     # -----------------------------------------------------------------
     # Sending (Agent -> Client)
@@ -153,6 +161,46 @@ class WebSocketProtocol(UIProtocol):
             logger.warning(f"[WS] Send error: {e}")
 
     # -----------------------------------------------------------------
+    # Subagent Interactive Overrides
+    # -----------------------------------------------------------------
+
+    async def request_pause(self, reason, reason_code, stats,
+                            pending_todos=None):
+        """Override base to send PausePromptStart directly over WebSocket.
+
+        The base implementation calls ``_on_pause_requested`` callback (which
+        is None in the server context) then waits. Here we serialize a
+        ``PausePromptStart`` event so the VS Code client shows its pause
+        widget, then await the user's response via the existing future.
+        """
+        event = PausePromptStart(
+            reason=reason,
+            reason_code=reason_code,
+            pending_todos=pending_todos or [],
+            stats=stats,
+        )
+        await self.send_event(event)
+        return await self.wait_for_pause_response()
+
+    async def send_clarify_request(self, call_id, questions, context):
+        """Send clarify form data to WebSocket client.
+
+        Called by the delegation tool when a subagent emits a clarify
+        APPROVAL_REQUEST.  The TUI uses SubAgentCard for this; the server
+        needs an explicit JSON message so the VS Code sidebar can render
+        the clarify form.
+        """
+        await self._send_json({
+            "type": "interactive",
+            "event": "clarify_request",
+            "data": {
+                "call_id": call_id,
+                "questions": questions or [],
+                "context": context,
+            },
+        })
+
+    # -----------------------------------------------------------------
     # Receiving (Client -> Agent)
     # -----------------------------------------------------------------
 
@@ -173,10 +221,28 @@ class WebSocketProtocol(UIProtocol):
                         # Chat messages go to a separate queue for the server
                         # to pick up and feed to agent.stream_response()
                         content = data.get("content", "")
+                        if len(content) > 100_000:
+                            await self._send_json({
+                                "type": "error",
+                                "error_type": "message_too_large",
+                                "user_message": "Message too large. Maximum 100,000 characters.",
+                                "recoverable": True,
+                            })
+                            continue
                         if content.strip():
                             await self._chat_queue.put(content)
                     elif msg_type == "set_mode":
                         mode = data.get("mode", "")
+                        VALID_MODES = {"plan", "normal", "auto"}
+                        if mode not in VALID_MODES:
+                            logger.warning(f"[WS] Invalid mode rejected: {mode!r}")
+                            await self._send_json({
+                                "type": "error",
+                                "error_type": "invalid_mode",
+                                "user_message": f"Invalid mode: {mode}. Valid modes: {', '.join(sorted(VALID_MODES))}",
+                                "recoverable": True,
+                            })
+                            continue
                         if mode and self._agent:
                             try:
                                 self._agent.set_permission_mode(mode)
@@ -227,6 +293,10 @@ class WebSocketProtocol(UIProtocol):
                             None, list_models_from_request, data
                         )
                         await self._send_json(response)
+
+                    elif msg_type == "new_session":
+                        if self._on_new_session:
+                            await self._on_new_session()
 
                     else:
                         # All other messages are UserActions

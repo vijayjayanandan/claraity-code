@@ -564,7 +564,10 @@ class GetSymbolContextTool(Tool):
         """Read function/class implementation."""
         try:
             # Validate path for security (prevent path traversal)
-            validated_path = validate_path_security(file_path, allow_files_outside_workspace=True)
+            # Note: LSP symbols may reference installed packages, but we enforce
+            # workspace boundary for safety. If users need cross-workspace LSP,
+            # they should use read_file directly with appropriate approval.
+            validated_path = validate_path_security(file_path, allow_files_outside_workspace=False)
 
             with open(validated_path, 'r', encoding='utf-8') as f:
                 lines = f.readlines()

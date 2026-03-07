@@ -19,6 +19,8 @@ from typing import Union, Optional, Callable, TYPE_CHECKING
 from dataclasses import dataclass
 
 from src.observability import get_logger
+from src.security import redact_dict, redact_secrets
+from src.security.file_permissions import secure_file
 
 if TYPE_CHECKING:
     from ..models.message import Message, FileHistorySnapshot
@@ -307,9 +309,16 @@ class SessionWriter:
                     # Create parent directory on first write
                     self._file_path.parent.mkdir(parents=True, exist_ok=True)
                     self._file = open(self._file_path, 'a', encoding='utf-8')
+                    # Set restrictive permissions on the session file (600 on POSIX)
+                    secure_file(self._file_path)
                     logger.info(f"SessionWriter file created on first write: {self._file_path}")
                 
-                line = json.dumps(data, ensure_ascii=False)
+                # Redact secrets before persistence
+                safe_data = redact_dict(data)
+                if "content" in safe_data and isinstance(safe_data["content"], str):
+                    safe_data["content"] = redact_secrets(safe_data["content"])
+
+                line = json.dumps(safe_data, ensure_ascii=False)
                 self._file.write(line + '\n')
 
                 self._total_writes += 1
@@ -386,9 +395,16 @@ async def append_to_session(
         path.parent.mkdir(parents=True, exist_ok=True)
 
         if isinstance(message, dict):
-            line = json.dumps(message, ensure_ascii=False)
+            raw_data = message
         else:
-            line = json.dumps(message.to_dict(), ensure_ascii=False)
+            raw_data = message.to_dict()
+
+        # Redact secrets before persistence
+        safe_data = redact_dict(raw_data)
+        if "content" in safe_data and isinstance(safe_data["content"], str):
+            safe_data["content"] = redact_secrets(safe_data["content"])
+
+        line = json.dumps(safe_data, ensure_ascii=False)
 
         with open(path, 'a', encoding='utf-8') as f:
             f.write(line + '\n')

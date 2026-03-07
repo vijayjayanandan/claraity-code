@@ -2,7 +2,6 @@
 
 # Existing prompt_toolkit-based UI (to be replaced)
 from .formatters import ToolOutputFormatter, format_tool_call
-from .chat_interface import ChatTUI, run_tui_chat
 
 # New Textual-based UI (Session 1: Foundation)
 from .events import (
@@ -44,7 +43,7 @@ from .app import CodingAgentApp, ChatInput, run_app
 
 __all__ = [
     # Existing (prompt_toolkit)
-    "ToolOutputFormatter", "format_tool_call", "ChatTUI", "run_tui_chat",
+    "ToolOutputFormatter", "format_tool_call",
     # Events
     "ToolStatus",
     "StreamStart", "StreamEnd",

@@ -103,8 +103,12 @@ def is_agent_internal_write(tool_name: str, tool_args: Dict[str, Any]) -> bool:
     Check if a tool call is an agent-internal file operation.
 
     Writes targeting .clarity/ (plan files, sessions, logs) are internal
-    to the agent's operation — like MemoryManager writing session JSONL.
+    to the agent's operation -- like MemoryManager writing session JSONL.
     These bypass approval in all permission modes.
+
+    SECURITY: Uses resolved paths to prevent path traversal bypass.
+    Only allows writes to safe subdirectories (sessions, plans, logs).
+    Config files (.clarity/config.yaml) always require approval.
 
     Args:
         tool_name: Name of the tool being called
@@ -120,12 +124,22 @@ def is_agent_internal_write(tool_name: str, tool_args: Dict[str, Any]) -> bool:
     if not target:
         return False
 
-    # Normalize to forward slashes for cross-platform comparison
-    normalized = str(target).replace("\\", "/")
-    return (
-        f"/{AGENT_WORKSPACE_DIR}/" in normalized
-        or normalized.startswith(f"{AGENT_WORKSPACE_DIR}/")
-    )
+    try:
+        # Resolve to absolute path to prevent traversal tricks
+        resolved = Path(target).resolve()
+        clarity_dir = (Path.cwd() / AGENT_WORKSPACE_DIR).resolve()
+
+        # Must be under .clarity/ directory
+        if not resolved.is_relative_to(clarity_dir):
+            return False
+
+        # Only allow writes to safe subdirectories (not config.yaml)
+        relative = resolved.relative_to(clarity_dir)
+        SAFE_SUBDIRS = {"sessions", "plans", "logs", "transcripts"}
+        first_part = relative.parts[0] if relative.parts else ""
+        return first_part in SAFE_SUBDIRS
+    except (ValueError, OSError):
+        return False
 
 
 class PlanModeState:

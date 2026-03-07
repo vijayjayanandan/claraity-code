@@ -39,6 +39,9 @@ class LLMConfig(BaseModel):
     top_k: int = Field(default_factory=lambda: int(os.getenv("LLM_TOP_K", "40")))
     repeat_penalty: float = Field(default_factory=lambda: float(os.getenv("LLM_REPEAT_PENALTY", "1.1")))
 
+    # Extended thinking (Claude, etc.)
+    thinking_budget: Optional[int] = None  # Token budget for thinking blocks
+
     # Context settings
     context_window: int
     num_ctx: Optional[int] = None  # Override context window
@@ -176,6 +179,7 @@ class ProviderDelta(BaseModel):
     text_delta: Optional[str] = None            # Raw text chunk
     tool_call_delta: Optional[ToolCallDelta] = None  # Incremental tool call
     thinking_delta: Optional[str] = None        # Native thinking (if provider supports)
+    thinking_signature: Optional[str] = None    # Thinking block signature (Anthropic)
     finish_reason: Optional[str] = None         # "stop", "tool_calls", etc.
     usage: Optional[Dict[str, Any]] = None      # Token counts as dict (on finish)
 

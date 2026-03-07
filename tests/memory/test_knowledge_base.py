@@ -6,15 +6,6 @@ from unittest.mock import patch, MagicMock
 from src.memory.memory_manager import MemoryManager
 
 
-# Mock SemanticMemory to avoid needing real embedding API credentials
-@pytest.fixture(autouse=True)
-def mock_semantic_memory():
-    """Patch SemanticMemory for all tests in this module."""
-    with patch("src.memory.memory_manager.SemanticMemory") as mock_cls:
-        mock_cls.return_value = MagicMock()
-        yield mock_cls
-
-
 _MM_KWARGS = {"load_file_memories": False}
 
 

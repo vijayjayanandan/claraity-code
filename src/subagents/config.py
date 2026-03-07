@@ -422,8 +422,10 @@ class SubAgentConfigLoader:
                 EXPLORE_PROMPT,
                 PLANNER_PROMPT,
                 GENERAL_PURPOSE_PROMPT,
+                KNOWLEDGE_BUILDER_PROMPT,
                 EXPLORE_TOOLS,
                 PLANNER_TOOLS,
+                KNOWLEDGE_BUILDER_TOOLS,
             )
 
             # Define subagent configurations
@@ -464,6 +466,18 @@ class SubAgentConfigLoader:
                     'name': 'general-purpose',
                     'description': 'Versatile agent with full tool access for multi-step research and implementation tasks',
                     'prompt': GENERAL_PURPOSE_PROMPT,
+                },
+                {
+                    'name': 'knowledge-builder',
+                    'description': (
+                        'Codebase analyst that autonomously explores the project and generates '
+                        'structured markdown knowledge base files in .clarity/knowledge/. '
+                        'Delegate with a SHORT task like "Build knowledge base for this project" '
+                        'or "Update architecture.md". Do NOT specify file contents, structure, '
+                        'or filenames -- the subagent discovers these on its own.'
+                    ),
+                    'prompt': KNOWLEDGE_BUILDER_PROMPT,
+                    'tools': KNOWLEDGE_BUILDER_TOOLS,
                 },
             ]
 

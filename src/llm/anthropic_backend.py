@@ -697,6 +697,17 @@ class AnthropicBackend(LLMBackend):
         # Extended thinking support
         thinking_budget = kwargs.get("thinking_budget")
         if thinking_budget:
+            max_tok = params.get("max_tokens", self.config.max_tokens)
+            if thinking_budget >= max_tok:
+                clamped = max(max_tok - 1024, max_tok // 2)
+                logger.warning(
+                    "thinking_budget_clamped",
+                    original=thinking_budget,
+                    clamped=clamped,
+                    max_tokens=max_tok,
+                    model=params.get("model"),
+                )
+                thinking_budget = clamped
             params["thinking"] = {"type": "enabled", "budget_tokens": thinking_budget}
             # Anthropic requires temperature=1 and no top_p with extended thinking
             params["temperature"] = 1
@@ -796,6 +807,17 @@ class AnthropicBackend(LLMBackend):
         # Extended thinking support
         thinking_budget = kwargs.get("thinking_budget")
         if thinking_budget:
+            max_tok = params.get("max_tokens", self.config.max_tokens)
+            if thinking_budget >= max_tok:
+                clamped = max(max_tok - 1024, max_tok // 2)
+                logger.warning(
+                    "thinking_budget_clamped",
+                    original=thinking_budget,
+                    clamped=clamped,
+                    max_tokens=max_tok,
+                    model=params.get("model"),
+                )
+                thinking_budget = clamped
             params["thinking"] = {"type": "enabled", "budget_tokens": thinking_budget}
             params["temperature"] = 1
             # top_p already omitted from params
@@ -962,6 +984,17 @@ class AnthropicBackend(LLMBackend):
 
         thinking_budget = kwargs.get("thinking_budget")
         if thinking_budget:
+            max_tok = params.get("max_tokens", self.config.max_tokens)
+            if thinking_budget >= max_tok:
+                clamped = max(max_tok - 1024, max_tok // 2)
+                logger.warning(
+                    "thinking_budget_clamped",
+                    original=thinking_budget,
+                    clamped=clamped,
+                    max_tokens=max_tok,
+                    model=params.get("model"),
+                )
+                thinking_budget = clamped
             params["thinking"] = {"type": "enabled", "budget_tokens": thinking_budget}
             params["temperature"] = 1
             # top_p already omitted from params
@@ -1146,6 +1179,18 @@ class AnthropicBackend(LLMBackend):
 
         thinking_budget = kwargs.get("thinking_budget")
         if thinking_budget:
+            max_tok = params.get("max_tokens", self.config.max_tokens)
+            # Guard: budget_tokens must be < max_tokens (Anthropic/Bedrock requirement)
+            if thinking_budget >= max_tok:
+                clamped = max(max_tok - 1024, max_tok // 2)
+                logger.warning(
+                    "thinking_budget_clamped",
+                    original=thinking_budget,
+                    clamped=clamped,
+                    max_tokens=max_tok,
+                    model=params.get("model"),
+                )
+                thinking_budget = clamped
             params["thinking"] = {"type": "enabled", "budget_tokens": thinking_budget}
             params["temperature"] = 1
             # top_p already omitted from params
@@ -1228,11 +1273,20 @@ class AnthropicBackend(LLMBackend):
                         f"cached={usage_dict.get('cached_tokens', 0)}"
                     )
 
+            # Extract thinking signature from final message for round-tripping
+            thinking_signature = None
+            if final_message and hasattr(final_message, 'content'):
+                for block in final_message.content:
+                    if getattr(block, 'type', '') == 'thinking':
+                        thinking_signature = getattr(block, 'signature', None)
+                        break
+
             # Emit final delta with finish_reason and usage
             yield ProviderDelta(
                 stream_id=sid,
                 finish_reason=self._map_stop_reason(finish_reason),
                 usage=usage_dict,
+                thinking_signature=thinking_signature,
             )
 
         except Exception as e:
@@ -1280,6 +1334,18 @@ class AnthropicBackend(LLMBackend):
 
         thinking_budget = kwargs.get("thinking_budget")
         if thinking_budget:
+            max_tok = params.get("max_tokens", self.config.max_tokens)
+            # Guard: budget_tokens must be < max_tokens (Anthropic/Bedrock requirement)
+            if thinking_budget >= max_tok:
+                clamped = max(max_tok - 1024, max_tok // 2)
+                logger.warning(
+                    "thinking_budget_clamped",
+                    original=thinking_budget,
+                    clamped=clamped,
+                    max_tokens=max_tok,
+                    model=params.get("model"),
+                )
+                thinking_budget = clamped
             params["thinking"] = {"type": "enabled", "budget_tokens": thinking_budget}
             params["temperature"] = 1
             # top_p already omitted from params
@@ -1358,10 +1424,19 @@ class AnthropicBackend(LLMBackend):
                         f"cached={usage_dict.get('cached_tokens', 0)}"
                     )
 
+            # Extract thinking signature from final message for round-tripping
+            thinking_signature = None
+            if final_message and hasattr(final_message, 'content'):
+                for block in final_message.content:
+                    if getattr(block, 'type', '') == 'thinking':
+                        thinking_signature = getattr(block, 'signature', None)
+                        break
+
             yield ProviderDelta(
                 stream_id=sid,
                 finish_reason=self._map_stop_reason(finish_reason),
                 usage=usage_dict,
+                thinking_signature=thinking_signature,
             )
 
         except Exception as e:

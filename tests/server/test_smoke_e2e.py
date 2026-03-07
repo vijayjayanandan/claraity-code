@@ -13,12 +13,19 @@ Skip with: pytest -m "not e2e" to skip this test.
 """
 
 import asyncio
-import os
+import json
 import pytest
 import aiohttp
 
 from src.server.app import AgentServer
 from src.llm.config_loader import load_llm_config
+
+
+async def _send_auth(ws, token: str) -> dict:
+    """Send auth handshake and return the session_info response."""
+    await ws.send_json({"type": "auth", "token": token})
+    msg = await asyncio.wait_for(ws.receive_json(), timeout=5.0)
+    return msg
 
 
 @pytest.mark.integration
@@ -34,9 +41,6 @@ async def test_server_health_check():
         "api_key": config.api_key,
         "api_key_env": config.api_key_env,
         "permission_mode": "auto",
-        # Reuse LLM API key for embeddings if no dedicated key is set
-        "embedding_api_key": os.environ.get("EMBEDDING_API_KEY", config.api_key),
-        "embedding_base_url": os.environ.get("EMBEDDING_BASE_URL", config.base_url),
     }
 
     server = AgentServer(
@@ -52,7 +56,8 @@ async def test_server_health_check():
                 assert resp.status == 200
                 data = await resp.json()
                 assert data["status"] == "ok"
-                assert data["session_id"] is not None
+                # session_id intentionally removed from health for security (S22)
+                assert "session_id" not in data
                 assert data["has_active_connection"] is False
     finally:
         await server.stop()
@@ -71,9 +76,6 @@ async def test_websocket_session_info():
         "api_key": config.api_key,
         "api_key_env": config.api_key_env,
         "permission_mode": "auto",
-        # Reuse LLM API key for embeddings if no dedicated key is set
-        "embedding_api_key": os.environ.get("EMBEDDING_API_KEY", config.api_key),
-        "embedding_base_url": os.environ.get("EMBEDDING_BASE_URL", config.base_url),
     }
 
     server = AgentServer(
@@ -84,10 +86,11 @@ async def test_websocket_session_info():
 
     await server.start()
     try:
+        token = server._auth_token
         async with aiohttp.ClientSession() as session:
             async with session.ws_connect("http://127.0.0.1:9122/ws") as ws:
-                # Should receive session_info as first message
-                msg = await asyncio.wait_for(ws.receive_json(), timeout=5.0)
+                # Send auth handshake, receive session_info as response
+                msg = await _send_auth(ws, token)
                 assert msg["type"] == "session_info"
                 assert "session_id" in msg
                 assert msg["model_name"] == config.model
@@ -111,9 +114,6 @@ async def test_websocket_chat_roundtrip():
         "api_key": config.api_key,
         "api_key_env": config.api_key_env,
         "permission_mode": "auto",
-        # Reuse LLM API key for embeddings if no dedicated key is set
-        "embedding_api_key": os.environ.get("EMBEDDING_API_KEY", config.api_key),
-        "embedding_base_url": os.environ.get("EMBEDDING_BASE_URL", config.base_url),
     }
 
     server = AgentServer(
@@ -126,8 +126,8 @@ async def test_websocket_chat_roundtrip():
     try:
         async with aiohttp.ClientSession() as session:
             async with session.ws_connect("http://127.0.0.1:9123/ws") as ws:
-                # Receive session_info
-                msg = await asyncio.wait_for(ws.receive_json(), timeout=5.0)
+                # Auth handshake -> session_info
+                msg = await _send_auth(ws, server._auth_token)
                 assert msg["type"] == "session_info"
 
                 # Send a simple chat message
@@ -182,8 +182,6 @@ async def test_websocket_auto_approve_roundtrip():
         "api_key": config.api_key,
         "api_key_env": config.api_key_env,
         "permission_mode": "auto",
-        "embedding_api_key": os.environ.get("EMBEDDING_API_KEY", config.api_key),
-        "embedding_base_url": os.environ.get("EMBEDDING_BASE_URL", config.base_url),
     }
 
     server = AgentServer(
@@ -196,8 +194,8 @@ async def test_websocket_auto_approve_roundtrip():
     try:
         async with aiohttp.ClientSession() as session:
             async with session.ws_connect("http://127.0.0.1:9124/ws") as ws:
-                # Receive session_info (includes default categories)
-                msg = await asyncio.wait_for(ws.receive_json(), timeout=5.0)
+                # Auth handshake -> session_info (includes default categories)
+                msg = await _send_auth(ws, server._auth_token)
                 assert msg["type"] == "session_info"
                 assert msg["auto_approve_categories"] == {
                     "browser": False, "edit": False, "execute": False,

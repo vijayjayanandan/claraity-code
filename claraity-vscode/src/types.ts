@@ -2,16 +2,16 @@
  * Wire protocol types for ClarAIty VS Code extension.
  *
  * These match the JSON messages defined in VSCODE_INTEGRATION_DESIGN.md Section 4.
+ *
+ * PARITY RULE: The ServerMessage discriminated union must cover every event type
+ * emitted by serializers.py, ws_protocol.py, and subagent_bridge.py. When you add
+ * a new event type on the Python side, add it here too — TypeScript will then error
+ * in any switch/case that doesn't handle it (with exhaustive checking).
  */
 
 // ============================================================================
-// Server -> Client (WebSocket JSON)
+// Server -> Client (WebSocket JSON) — Discriminated Union
 // ============================================================================
-
-export interface ServerMessage {
-    type: string;
-    [key: string]: any;
-}
 
 // Tool execution lifecycle states (canonical: src/core/tool_status.py)
 export type ToolStatus =
@@ -26,12 +26,14 @@ export type ToolStatus =
     | 'cancelled'
     | 'skipped';
 
-// Store notification data types
+// ── Data shapes ──
+
 export interface ToolStateData {
     call_id: string;
     tool_name?: string;
     status: ToolStatus;
     arguments?: Record<string, any>;
+    args_summary?: string;
     requires_approval?: boolean;
     result?: any;
     error?: string | null;
@@ -49,6 +51,76 @@ export interface MessageData {
     content: string;
     stream_id?: string;
 }
+
+export interface MessageFinalizedData {
+    stream_id: string;
+}
+
+// ── Store events (type: 'store') ──
+
+export type StoreEvent =
+    | { type: 'store'; event: 'tool_state_updated'; data: ToolStateData; subagent_id?: string }
+    | { type: 'store'; event: 'message_added'; data: MessageData; subagent_id?: string }
+    | { type: 'store'; event: 'message_updated'; data: MessageData; subagent_id?: string }
+    | { type: 'store'; event: 'message_finalized'; data: MessageFinalizedData; subagent_id?: string };
+
+// ── Streaming events ──
+
+export type StreamEvent =
+    | { type: 'stream_start' }
+    | { type: 'stream_end'; tool_calls?: number; elapsed_s?: number; iterations?: number }
+    | { type: 'text_delta'; content: string }
+    | { type: 'code_block_start'; language?: string }
+    | { type: 'code_block_delta'; content: string }
+    | { type: 'code_block_end' }
+    | { type: 'thinking_start' }
+    | { type: 'thinking_delta'; content: string }
+    | { type: 'thinking_end' }
+    | { type: 'file_read'; file_path: string; content?: string }
+    | { type: 'context_updated'; used: number; limit: number }
+    | { type: 'context_compacting' }
+    | { type: 'context_compacted'; old_tokens: number; new_tokens: number };
+
+// ── Interactive events ──
+
+export type InteractiveEvent =
+    | { type: 'interactive'; event: 'clarify_request'; data: { uuid: string; call_id: string; questions: any[]; context?: string } }
+    | { type: 'interactive'; event: 'plan_submitted'; data: { uuid: string; call_id: string; plan_hash: string; excerpt: string; truncated: boolean; plan_path?: string } }
+    | { type: 'interactive'; event: 'director_plan_submitted'; data: { uuid: string; call_id: string; plan_hash: string; excerpt: string; truncated: boolean; plan_path?: string } }
+    | { type: 'interactive'; event: 'permission_mode_changed'; data: { uuid?: string; old_mode?: string; new_mode: string } };
+
+// ── Pause events ──
+
+export type PauseEvent =
+    | { type: 'pause_prompt_start'; reason: string; reason_code: string; stats: Record<string, any>; pending_todos?: string[] }
+    | { type: 'pause_prompt_end'; continue_work: boolean; feedback?: string | null };
+
+// ── Subagent lifecycle events ──
+
+export type SubagentEvent =
+    | { type: 'subagent'; event: 'registered'; data: { subagent_id: string; parent_tool_call_id: string; model_name: string; subagent_name: string; transcript_path: string } }
+    | { type: 'subagent'; event: 'unregistered'; data: { subagent_id: string } };
+
+// ── Misc server events ──
+
+export type MiscEvent =
+    | { type: 'session_info'; session_id: string; model_name: string; permission_mode: string; working_directory: string; auto_approve_categories?: Record<string, boolean> }
+    | { type: 'error'; error_type: string; user_message: string; recoverable: boolean }
+    | { type: 'todos_updated'; todos: any[] }
+    | { type: 'config_loaded'; [key: string]: any }
+    | { type: 'models_list'; [key: string]: any }
+    | { type: 'config_saved'; [key: string]: any }
+    | { type: 'auto_approve_changed'; categories: Record<string, boolean> };
+
+// ── Union of all server messages ──
+
+export type ServerMessage =
+    | StoreEvent
+    | StreamEvent
+    | InteractiveEvent
+    | PauseEvent
+    | SubagentEvent
+    | MiscEvent;
 
 // ============================================================================
 // Client -> Server (WebSocket JSON)
@@ -124,6 +196,10 @@ export interface GetAutoApprovePayload {
     type: 'get_auto_approve';
 }
 
+export interface NewSessionPayload {
+    type: 'new_session';
+}
+
 export type ClientMessage =
     | ChatMessagePayload
     | ApprovalResultPayload
@@ -136,7 +212,8 @@ export type ClientMessage =
     | SaveConfigPayload
     | ListModelsPayload
     | SetAutoApprovePayload
-    | GetAutoApprovePayload;
+    | GetAutoApprovePayload
+    | NewSessionPayload;
 
 // ============================================================================
 // Extension <-> WebView postMessage types
@@ -163,4 +240,25 @@ export type WebViewMessage =
     | { type: 'saveConfig'; config: Record<string, any> }
     | { type: 'listModels'; backend: string; base_url: string; api_key: string }
     | { type: 'setAutoApprove'; categories: { edit?: boolean; execute?: boolean; browser?: boolean } }
-    | { type: 'getAutoApprove' };
+    | { type: 'getAutoApprove' }
+    | { type: 'newSession' };
+
+// ============================================================================
+// Exhaustive check helper — use in default case of switch statements
+// ============================================================================
+
+/**
+ * Use in the default case of a switch to ensure all union members are handled.
+ * TypeScript will error if a case is missing.
+ *
+ * Example:
+ *   switch (event.type) {
+ *     case 'stream_start': ...; break;
+ *     case 'text_delta': ...; break;
+ *     // ... all cases ...
+ *     default: assertNever(event);
+ *   }
+ */
+export function assertNever(x: never): never {
+    throw new Error(`Unhandled discriminated union member: ${JSON.stringify(x)}`);
+}

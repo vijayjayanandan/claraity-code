@@ -287,7 +287,6 @@ try:
         base_url=os.environ.get("LLM_HOST"),  # From .env: LLM_HOST
         api_key=api_key,
         permission_mode="auto",
-        enable_clarity=False  # Disable ClarAIty in validation mode
     )
 
     # Task prompt
@@ -307,9 +306,13 @@ IMPORTANT:
     # Execute task
     start_time = datetime.now()
 
-    # Note: We're calling the agent synchronously
-    # The agent will use its workflow system for complex tasks
-    response = agent.execute_task(prompt)
+    # NOTE: execute_task() was removed in the CLI-mode consolidation.
+    # This validation script needs rewriting to use stream_response() (async).
+    raise NotImplementedError(
+        "Validation orchestrator requires async rewrite. "
+        "The sync execute_task() API has been removed."
+    )
+    response = None  # unreachable — kept for reference
 
     duration = (datetime.now() - start_time).total_seconds()
 

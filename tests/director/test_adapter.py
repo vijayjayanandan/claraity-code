@@ -99,6 +99,62 @@ class TestGatingInUnderstandPhase:
         assert adapter_in_understand.gate_tool("delegate_to_subagent") == DirectorGateDecision.DENY
 
 
+class TestGatingInPlanPhase:
+    """PLAN phase: read-only + delegation + checkpoint. No direct writes."""
+
+    @pytest.fixture
+    def adapter_in_plan(self):
+        from src.director.adapter import DirectorAdapter
+        adapter = DirectorAdapter()
+        adapter.start("Add authentication")
+        context = ContextDocument(task_description="Add auth")
+        adapter.complete_understand(context)
+        return adapter
+
+    def test_allows_read_file(self, adapter_in_plan):
+        from src.director.adapter import DirectorGateDecision
+        assert adapter_in_plan.gate_tool("read_file") == DirectorGateDecision.ALLOW
+
+    def test_allows_search_code(self, adapter_in_plan):
+        from src.director.adapter import DirectorGateDecision
+        assert adapter_in_plan.gate_tool("search_code") == DirectorGateDecision.ALLOW
+
+    def test_allows_delegation(self, adapter_in_plan):
+        """PLAN phase should allow delegating to planner subagent."""
+        from src.director.adapter import DirectorGateDecision
+        assert adapter_in_plan.gate_tool("delegate_to_subagent") == DirectorGateDecision.ALLOW
+
+    def test_allows_checkpoint_tool(self, adapter_in_plan):
+        from src.director.adapter import DirectorGateDecision
+        assert adapter_in_plan.gate_tool("director_complete_plan") == DirectorGateDecision.ALLOW
+
+    def test_allows_write_file_for_plan_docs(self, adapter_in_plan):
+        """write_file allowed only for .clarity/plans/ paths."""
+        from src.director.adapter import DirectorGateDecision
+        result = adapter_in_plan.gate_tool(
+            "write_file",
+            {"file_path": ".clarity/plans/director_plan.md"}
+        )
+        assert result == DirectorGateDecision.ALLOW
+
+    def test_denies_write_file_for_other_paths(self, adapter_in_plan):
+        """write_file denied for non-plan paths."""
+        from src.director.adapter import DirectorGateDecision
+        result = adapter_in_plan.gate_tool(
+            "write_file",
+            {"file_path": "src/main.py"}
+        )
+        assert result == DirectorGateDecision.DENY
+
+    def test_denies_edit_file(self, adapter_in_plan):
+        from src.director.adapter import DirectorGateDecision
+        assert adapter_in_plan.gate_tool("edit_file") == DirectorGateDecision.DENY
+
+    def test_denies_run_command(self, adapter_in_plan):
+        from src.director.adapter import DirectorGateDecision
+        assert adapter_in_plan.gate_tool("run_command") == DirectorGateDecision.DENY
+
+
 class TestGatingInExecutePhase:
     """EXECUTE phase: all tools available."""
 

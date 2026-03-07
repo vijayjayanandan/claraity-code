@@ -24,6 +24,7 @@ import uuid
 from src.observability import get_logger
 from src.core.events import ToolStatus
 from src.core.cancel_token import CancelToken, CancelledException
+from src.core.tool_metadata import build_tool_metadata
 from .sync_writer import SyncJSONLWriter
 
 if TYPE_CHECKING:
@@ -734,6 +735,14 @@ class SubAgent:
         If the user says Continue, counters reset and the loop continues.
         If the user says Stop (or no callback), _generate_summary() is called.
 
+        PARITY NOTE: Tool state updates here (update_tool_state calls) must
+        use build_tool_metadata() from src.core.tool_metadata — the same
+        helper used by agent.py. The VS Code serializer (serializers.py)
+        expects identical metadata keys from both paths, especially
+        "arguments" for file path display in tool cards. If you add new
+        metadata keys in agent.py, update build_tool_metadata() so both
+        paths stay in sync.
+
         Args:
             context: LLM context (messages)
             max_iterations: Maximum iterations per pause window
@@ -901,7 +910,8 @@ class SubAgent:
                     import json as _json
                     self._message_store.update_tool_state(
                         tool_call_id=tool_call_id, status=ToolStatus.AWAITING_APPROVAL,
-                        tool_name=tool_name, extra_metadata={"args_summary": args_summary},
+                        tool_name=tool_name,
+                        extra_metadata=build_tool_metadata(tool_name, tool_args, args_summary),
                     )
                     _, clarify_result = self._approval_callback(tool_name, tool_args, tool_call_id)
                     result_dict = clarify_result if isinstance(clarify_result, dict) else {}
@@ -921,7 +931,7 @@ class SubAgent:
                         tool_call_id=tool_call_id,
                         status=ToolStatus.AWAITING_APPROVAL,
                         tool_name=tool_name,
-                        extra_metadata={"args_summary": args_summary},
+                        extra_metadata=build_tool_metadata(tool_name, tool_args, args_summary, requires_approval=True),
                     )
 
                     if self._approval_callback:
@@ -973,7 +983,7 @@ class SubAgent:
                     tool_call_id=tool_call_id,
                     status=ToolStatus.RUNNING,
                     tool_name=tool_name,
-                    extra_metadata={"args_summary": args_summary},
+                    extra_metadata=build_tool_metadata(tool_name, tool_args, args_summary),
                 )
 
                 try:

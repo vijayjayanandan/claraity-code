@@ -22,6 +22,10 @@ from typing import Dict, Any, Optional, List
 
 from .base import Tool, ToolResult, ToolStatus
 from .search_tools import validate_path_security
+from src.tools.command_safety import check_command_safety, clamp_timeout
+from src.observability import get_logger
+
+logger = get_logger("tools.file_operations")
 
 
 class FileOperationTool(Tool):
@@ -394,11 +398,25 @@ class ListDirectoryTool(FileOperationTool):
             # Sort entries: directories first, then files, both alphabetically
             entries.sort(key=lambda x: (x["type"] == "file", x["name"].lower()))
 
+            # Format as human-readable text so str() in downstream
+            # consumers (agent, subagent, VS Code serializer) is a no-op
+            output_lines = []
+            for e in entries:
+                if e["type"] == "directory":
+                    output_lines.append(f"[dir]  {e['name']}/")
+                else:
+                    size_str = f" ({e['size']} bytes)" if e["size"] is not None else ""
+                    output_lines.append(f"[file] {e['name']}{size_str}")
+
             return ToolResult(
                 tool_name=self.name,
                 status=ToolStatus.SUCCESS,
-                output=entries,
-                metadata={"directory_path": str(path), "entry_count": len(entries)}
+                output="\n".join(output_lines),
+                metadata={
+                    "directory_path": str(path),
+                    "entry_count": len(entries),
+                    "entries": entries,
+                }
             )
 
         except Exception as e:
@@ -624,6 +642,24 @@ class RunCommandTool(Tool):
                     error="Command cannot be empty"
                 )
 
+            # --- COMMAND SAFETY CHECK ---
+            is_safe, safety_reason = check_command_safety(command)
+            if not is_safe:
+                return ToolResult(
+                    tool_name=self.name,
+                    status=ToolStatus.ERROR,
+                    output=None,
+                    error=(
+                        f"[BLOCKED] Command rejected by safety controls: {safety_reason}\n"
+                        "This command matches a pattern that could cause irreversible damage "
+                        "or data exfiltration. If this command is legitimately needed, the user "
+                        "must run it manually in their terminal."
+                    )
+                )
+
+            # --- CLAMP TIMEOUT ---
+            timeout = clamp_timeout(timeout)
+
             # Validate working directory if provided
             cwd = None
             if working_directory:
@@ -685,6 +721,9 @@ class RunCommandTool(Tool):
                 output_parts.append(f"STDERR:\n{result.stderr}")
 
             output = "\n\n".join(output_parts) if output_parts else "(no output)"
+
+            # Audit log the execution
+            logger.info(f"[COMMAND_AUDIT] Executed: {command[:200]}, exit_code={result.returncode}, timeout={timeout}s")
 
             # Determine success based on exit code
             if result.returncode == 0:

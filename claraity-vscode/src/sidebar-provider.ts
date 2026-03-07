@@ -217,6 +217,10 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             case 'getAutoApprove':
                 this.connection.send({ type: 'get_auto_approve' } as any);
                 break;
+
+            case 'newSession':
+                this.connection.send({ type: 'new_session' });
+                break;
         }
     }
 
@@ -713,6 +717,48 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
         .btn-reject {
             background: var(--vscode-button-secondaryBackground);
             color: var(--vscode-button-secondaryForeground);
+        }
+
+        /* ── Subagent containers (nested inside delegation cards) ── */
+        .subagent-details {
+            border-top: 1px solid var(--vscode-panel-border);
+        }
+        .subagent-details summary {
+            padding: 4px 10px;
+            font-size: 11px;
+            color: var(--vscode-descriptionForeground);
+            cursor: pointer;
+            user-select: none;
+        }
+        .subagent-details summary:hover {
+            color: var(--vscode-foreground);
+        }
+        /* When no <summary> is present, hide the default disclosure marker */
+        .subagent-details:not(:has(summary)) {
+            list-style: none;
+        }
+        .subagent-details:not(:has(summary))::-webkit-details-marker {
+            display: none;
+        }
+        .subagent-details .subagent-body {
+            border-top: 1px solid var(--vscode-panel-border);
+        }
+        .subagent-details .subagent-body .tool-card {
+            margin: 4px 6px;
+            font-size: 11px;
+        }
+        .subagent-text {
+            padding: 4px 10px;
+            font-size: 11px;
+            color: var(--vscode-descriptionForeground);
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        .subagent-text.user {
+            color: var(--vscode-textLink-foreground);
+            font-style: italic;
         }
 
         /* ── Interactive widgets (shared) ── */
@@ -1218,6 +1264,7 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             <button id="mode-plan-btn">Plan</button>
             <button id="mode-act-btn" class="active">Act</button>
         </div>
+        <span id="new-chat-btn" title="New Chat" style="cursor:pointer;font-size:14px;opacity:0.7;user-select:none;margin-left:6px;">+</span>
         <span id="config-gear" title="LLM Configuration">\u2699</span>
     </div>
     <div id="config-panel">
@@ -1328,6 +1375,8 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
         let userScrolledUp = false;       // Auto-scroll lock
         const toolCards = {};             // call_id -> DOM element
         const toolMeta = {};              // call_id -> { name, arguments } (cached from first update)
+        const subagentContainers = {};    // subagent_id -> { details, body, summary, toolCount }
+        const subagentParents = {};       // subagent_id -> parent_tool_call_id
 
         // Tool icon mapping
         const TOOL_ICONS = {
@@ -1340,6 +1389,7 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             clarify: 'Q',
             plan: 'P',
             delegate_task: 'T',
+            delegate_to_subagent: 'SA',
         };
 
         // ── DOM refs ──
@@ -1366,6 +1416,12 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
         const aaBrowser = document.getElementById('aa-browser');
 
         let currentMode = 'normal';
+        let currentSessionId = null;
+
+        // ── New Chat button ──
+        document.getElementById('new-chat-btn').addEventListener('click', () => {
+            vscode.postMessage({ type: 'newSession' });
+        });
 
         // ── Auto-scroll ──
         chatHistory.addEventListener('scroll', () => {
@@ -1378,6 +1434,14 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                 chatHistory.scrollTop = chatHistory.scrollHeight;
             }
         }
+
+        // ── Interrupt stream (Escape key) ──
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && isStreaming) {
+                e.preventDefault();
+                vscode.postMessage({ type: 'interrupt' });
+            }
+        });
 
         // ── Send message ──
         function sendMessage() {
@@ -1720,7 +1784,7 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
         }
 
         // ── Tool cards ──
-        function updateToolCard(data) {
+        function updateToolCard(data, subagentId) {
             // Cache metadata from the first update that carries it
             if (!toolMeta[data.call_id]) {
                 toolMeta[data.call_id] = {};
@@ -1746,15 +1810,22 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                     '  <span class="tool-badge"></span>',
                     '</div>',
                 ].join('');
-                currentAssistantDiv.appendChild(card);
                 toolCards[data.call_id] = card;
 
-                // Create fresh content div after the card so subsequent
-                // text renders below it (same as TUI's segment reset)
-                currentContentDiv = document.createElement('div');
-                currentContentDiv.className = 'content';
-                currentAssistantDiv.appendChild(currentContentDiv);
-                markdownBuffer = '';
+                // Route into subagent container or main assistant div
+                const saInfo = subagentId && subagentContainers[subagentId];
+                if (saInfo) {
+                    saInfo.body.appendChild(card);
+                    saInfo.toolCount++;
+                } else {
+                    currentAssistantDiv.appendChild(card);
+                    // Create fresh content div after the card so subsequent
+                    // text renders below it (same as TUI's segment reset)
+                    currentContentDiv = document.createElement('div');
+                    currentContentDiv.className = 'content';
+                    currentAssistantDiv.appendChild(currentContentDiv);
+                    markdownBuffer = '';
+                }
             }
 
             // Header — use cached name (survives across status updates)
@@ -1765,7 +1836,10 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
 
             const toolName = meta.name || data.tool_name || 'tool';
             icon.textContent = TOOL_ICONS[toolName] || 'T';
-            name.textContent = toolName;
+            // Don't overwrite name for delegation cards — subagent:registered sets the real name+model
+            if (toolName !== 'delegate_to_subagent' || !name.textContent || name.textContent === toolName) {
+                name.textContent = toolName;
+            }
             badge.textContent = data.status;
             badge.className = 'tool-badge ' + data.status;
 
@@ -1773,8 +1847,10 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                 duration.textContent = data.duration_ms + 'ms';
             }
 
-            // Args row — use cached arguments
-            const primaryArg = getPrimaryArg(toolName, meta.arguments || data.arguments);
+            // Args row — use cached arguments (skip for delegation — shown in header via subagent:registered)
+            const primaryArg = toolName === 'delegate_to_subagent'
+                ? ''
+                : getPrimaryArg(toolName, meta.arguments || data.arguments);
             let argsRow = card.querySelector('.tool-args');
             if (primaryArg && !argsRow) {
                 argsRow = document.createElement('div');
@@ -2258,6 +2334,31 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             }
 
             else if (msg.type === 'sessionInfo') {
+                // If session ID changed, clear the chat UI (new session)
+                if (currentSessionId && msg.sessionId !== currentSessionId) {
+                    chatHistory.innerHTML = '';
+                    currentAssistantDiv = null;
+                    currentContentDiv = null;
+                    currentCodeElement = null;
+                    currentThinkingBlock = null;
+                    markdownBuffer = '';
+                    isStreaming = false;
+                    sendBtn.disabled = false;
+                    sendBtn.textContent = 'Send';
+                    sendBtn.style.background = '';
+                    sendBtn.onclick = sendMessage;
+                    // Clear tool state caches
+                    for (const key of Object.keys(toolCards)) delete toolCards[key];
+                    for (const key of Object.keys(toolMeta)) delete toolMeta[key];
+                    // Clear subagent state
+                    for (const key of Object.keys(subagentContainers)) delete subagentContainers[key];
+                    for (const key of Object.keys(subagentParents)) delete subagentParents[key];
+                    // Clear todo panel
+                    updateTodos([]);
+                    // Reset context bar
+                    contextBar.style.display = 'none';
+                }
+                currentSessionId = msg.sessionId;
                 modelName.textContent = msg.model;
                 updateModeDisplay(msg.permissionMode);
                 updateAutoApproveDisplay(msg.autoApproveCategories);
@@ -2270,8 +2371,9 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                     case 'stream_start':
                         isStreaming = true;
                         userScrolledUp = false;
-                        sendBtn.disabled = true;
+                        sendBtn.disabled = false;
                         sendBtn.textContent = 'Stop';
+                        sendBtn.style.background = 'var(--vscode-testing-iconFailed)';
                         sendBtn.onclick = () => vscode.postMessage({ type: 'interrupt' });
                         startAssistantMessage();
                         break;
@@ -2313,6 +2415,7 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                         isStreaming = false;
                         sendBtn.disabled = false;
                         sendBtn.textContent = 'Send';
+                        sendBtn.style.background = '';
                         sendBtn.onclick = sendMessage;
                         currentAssistantDiv = null;
                         currentContentDiv = null;
@@ -2346,8 +2449,91 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                         break;
 
                     case 'store':
+                        // Exhaustive handling of all store event types
+                        // (see StoreEvent in types.ts — keep in sync)
                         if (payload.event === 'tool_state_updated' && payload.data) {
-                            updateToolCard(payload.data);
+                            updateToolCard(payload.data, payload.subagent_id);
+                        } else if (payload.event === 'message_added' && payload.data) {
+                            if (payload.subagent_id) {
+                                // Subagent text (assistant responses, initial task)
+                                const saInfo = subagentContainers[payload.subagent_id];
+                                const text = payload.data.content;
+                                if (saInfo && text) {
+                                    const role = payload.data.role || 'assistant';
+                                    const msgId = 'sa-msg-' + (payload.data.uuid || '');
+                                    let msgEl = saInfo.body.querySelector('[data-sa-msg="' + msgId + '"]');
+                                    if (!msgEl) {
+                                        msgEl = document.createElement('div');
+                                        msgEl.className = 'subagent-text ' + role;
+                                        msgEl.setAttribute('data-sa-msg', msgId);
+                                        saInfo.body.appendChild(msgEl);
+                                    }
+                                    msgEl.textContent = text;
+                                    scrollToBottom();
+                                }
+                            }
+                            // Parent message_added: handled by stream events (text_delta etc.)
+                        } else if (payload.event === 'message_updated' && payload.data) {
+                            if (payload.subagent_id) {
+                                const saInfo = subagentContainers[payload.subagent_id];
+                                const text = payload.data.content;
+                                if (saInfo && text) {
+                                    const msgId = 'sa-msg-' + (payload.data.uuid || '');
+                                    const msgEl = saInfo.body.querySelector('[data-sa-msg="' + msgId + '"]');
+                                    if (msgEl) { msgEl.textContent = text; }
+                                }
+                            }
+                        } else if (payload.event === 'message_finalized') {
+                            // Stream finalization — no action needed (stream_end handles UI)
+                        } else {
+                            console.warn('[ClarAIty] Unhandled store event:', payload.event);
+                        }
+                        break;
+
+                    case 'subagent':
+                        if (payload.event === 'registered' && payload.data) {
+                            const d = payload.data;
+                            subagentParents[d.subagent_id] = d.parent_tool_call_id;
+
+                            const parentCard = toolCards[d.parent_tool_call_id];
+                            if (parentCard) {
+                                // Merge subagent identity into the parent tool card header
+                                const nameEl = parentCard.querySelector('.tool-name');
+                                if (nameEl) {
+                                    nameEl.textContent = d.subagent_name + (d.model_name ? ' (' + d.model_name + ')' : '');
+                                }
+                                const iconEl = parentCard.querySelector('.tool-icon');
+                                if (iconEl) iconEl.textContent = 'SA';
+
+                                // Collapsible body for child tool cards (no summary — header IS the label)
+                                const details = document.createElement('details');
+                                details.className = 'subagent-details';
+                                details.open = true;
+
+                                const body = document.createElement('div');
+                                body.className = 'subagent-body';
+                                details.appendChild(body);
+
+                                parentCard.appendChild(details);
+                                subagentContainers[d.subagent_id] = { details, body, summary: null, toolCount: 0 };
+                            }
+                        } else if (payload.event === 'unregistered' && payload.data) {
+                            const info = subagentContainers[payload.data.subagent_id];
+                            if (info) {
+                                info.details.open = false;
+                                // Update parent tool card header with final tool count
+                                const parentId = subagentParents[payload.data.subagent_id];
+                                const parentCard = parentId && toolCards[parentId];
+                                if (parentCard) {
+                                    const nameEl = parentCard.querySelector('.tool-name');
+                                    if (nameEl) {
+                                        const currentName = nameEl.textContent.replace(/ \| \d+ tools$/, '');
+                                        nameEl.textContent = currentName + ' | ' + info.toolCount + ' tools';
+                                    }
+                                }
+                            }
+                            delete subagentContainers[payload.data.subagent_id];
+                            delete subagentParents[payload.data.subagent_id];
                         }
                         break;
 
@@ -2499,7 +2685,7 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             const cfg = data.config || {};
             cfgBackend.value = cfg.backend_type || 'openai';
             cfgBaseUrl.value = cfg.base_url || '';
-            cfgApiKey.value = '';  // Never pre-fill
+            cfgApiKey.value = cfg.api_key || '';
             cfgKeyIndicator.textContent = cfg.has_api_key ? '(key stored)' : '(not set)';
             cfgModel.value = cfg.model || '';
             cfgTemperature.value = cfg.temperature != null ? cfg.temperature : 0.2;

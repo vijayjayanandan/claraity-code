@@ -30,9 +30,9 @@ if TYPE_CHECKING:
 logger = get_logger("ui.subagent_registry")
 
 # Type aliases for callback signatures
-# (subagent_id, store, transcript_path, parent_tool_call_id, model_name)
+# (subagent_id, store, transcript_path, parent_tool_call_id, model_name, subagent_name)
 # store may be None in subprocess mode
-RegisteredCallback = Callable[[str, Optional["MessageStore"], Path, str, str], None]
+RegisteredCallback = Callable[[str, Optional["MessageStore"], Path, str, str, str], None]
 UnregisteredCallback = Callable[[str], None]
 NotificationCallback = Callable[[str, "StoreNotification"], None]
 
@@ -79,7 +79,7 @@ class SubagentRegistry:
 
         Args:
             callback: Called with (subagent_id, store, transcript_path,
-                      parent_tool_call_id, model_name) when a subagent registers.
+                      parent_tool_call_id, model_name, subagent_name) when a subagent registers.
                       store may be None for subprocess-based subagents.
 
         Returns:
@@ -139,6 +139,7 @@ class SubagentRegistry:
         parent_tool_call_id: str,
         instance: Any = None,
         model_name: str = "",
+        subagent_name: str = "",
     ) -> None:
         """Register a running subagent for TUI visibility.
 
@@ -149,6 +150,7 @@ class SubagentRegistry:
             parent_tool_call_id: Tool call ID of the delegation call
             instance: SubAgent instance (in-process) or asyncio.Process (subprocess)
             model_name: LLM model name used by this subagent
+            subagent_name: Subagent type/name (e.g., "knowledge-builder", "planner")
         """
         is_subprocess = (store is None)
 
@@ -166,7 +168,7 @@ class SubagentRegistry:
 
         logger.info(
             f"Registered subagent {subagent_id} "
-            f"(parent_tool_call_id={parent_tool_call_id}, model={model_name}, "
+            f"(name={subagent_name}, parent_tool_call_id={parent_tool_call_id}, model={model_name}, "
             f"mode={'subprocess' if is_subprocess else 'in-process'})"
         )
 
@@ -178,12 +180,12 @@ class SubagentRegistry:
             # Subprocess: caller is already on event loop, dispatch directly
             for callback in callbacks:
                 try:
-                    callback(subagent_id, store, transcript_path, parent_tool_call_id, model_name)
+                    callback(subagent_id, store, transcript_path, parent_tool_call_id, model_name, subagent_name)
                 except Exception as e:
                     logger.error(f"Error in registered callback: {e}")
         else:
             # In-process: use call_from_thread to get onto event loop
-            self._dispatch_registered(subagent_id, store, transcript_path, parent_tool_call_id, model_name)
+            self._dispatch_registered(subagent_id, store, transcript_path, parent_tool_call_id, model_name, subagent_name)
 
     def unregister(self, subagent_id: str) -> None:
         """Unregister a completed subagent.
@@ -294,6 +296,7 @@ class SubagentRegistry:
         transcript_path: Path,
         parent_tool_call_id: str,
         model_name: str = "",
+        subagent_name: str = "",
     ) -> None:
         """Dispatch registration event to subscribers (in-process mode)."""
         with self._lock:
@@ -302,10 +305,10 @@ class SubagentRegistry:
             try:
                 if self._app and hasattr(self._app, 'call_from_thread'):
                     self._app.call_from_thread(
-                        callback, subagent_id, store, transcript_path, parent_tool_call_id, model_name
+                        callback, subagent_id, store, transcript_path, parent_tool_call_id, model_name, subagent_name
                     )
                 else:
-                    callback(subagent_id, store, transcript_path, parent_tool_call_id, model_name)
+                    callback(subagent_id, store, transcript_path, parent_tool_call_id, model_name, subagent_name)
             except Exception as e:
                 logger.error(f"Error in registered callback: {e}")
 

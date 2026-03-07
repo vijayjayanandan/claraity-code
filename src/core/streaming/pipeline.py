@@ -121,6 +121,10 @@ class StreamingPipeline:
         if delta.usage:
             self._state.usage = TokenUsage.from_dict(delta.usage) if isinstance(delta.usage, dict) else delta.usage
 
+        # Capture thinking signature (Anthropic sends on final delta)
+        if delta.thinking_signature:
+            self._state.thinking_signature = delta.thinking_signature
+
         # Finalize on finish_reason
         if delta.finish_reason:
             return self._finalize_message(delta.finish_reason)
@@ -338,8 +342,11 @@ class StreamingPipeline:
 
         # Accumulate thinking content
         self._state.thinking_content += text
-        # Also accumulate as reasoning_content for echo-back (Kimi K2.5 etc.)
-        self._state.reasoning_content += text
+        # Only accumulate reasoning_content for models that need echo-back
+        # (Kimi K2.5, Moonshot). Claude uses thinking + thinking_signature.
+        model_lower = (self._state.model or "").lower()
+        if "kimi" in model_lower or "moonshot" in model_lower:
+            self._state.reasoning_content += text
 
     # =========================================================================
     # Tool Call Processing
@@ -480,6 +487,7 @@ class StreamingPipeline:
                 usage=state.usage,
                 segments=list(state.segments) if state.segments else None,
                 thinking=state.thinking_content or None,
+                thinking_signature=state.thinking_signature or None,
                 reasoning_content=state.reasoning_content or None,
                 provider=state.provider,
                 model=state.model,

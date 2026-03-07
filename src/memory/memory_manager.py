@@ -11,7 +11,6 @@ logger = get_logger("memory")
 
 from .working_memory import WorkingMemory
 from .episodic_memory import EpisodicMemory
-from .semantic_memory import SemanticMemory
 from .file_loader import MemoryFileLoader
 from .observation_store import (
     ObservationStore,
@@ -50,11 +49,6 @@ class MemoryManager:
         working_memory_tokens: int = 2000,
         episodic_memory_tokens: int = 1000,
         system_prompt_tokens: int = 300,
-        embedding_model: Optional[str] = None,
-        embedding_api_key: Optional[str] = None,
-        embedding_api_key_env: str = "EMBEDDING_API_KEY",
-        embedding_base_url: Optional[str] = None,
-        embedding_dimension: Optional[int] = None,
         persist_directory: str = "./data",
         load_file_memories: bool = True,
         starting_directory: Optional[Path] = None,
@@ -67,11 +61,6 @@ class MemoryManager:
             working_memory_tokens: Tokens allocated to working memory
             episodic_memory_tokens: Tokens allocated to episodic memory
             system_prompt_tokens: Tokens reserved for system prompt
-            embedding_model: Embedding model for semantic memory (from .env EMBEDDING_MODEL)
-            embedding_api_key: API key for embedding service (optional)
-            embedding_api_key_env: Environment variable for embedding API key (default: EMBEDDING_API_KEY)
-            embedding_base_url: Base URL for embedding API (from .env EMBEDDING_BASE_URL)
-            embedding_dimension: Dimension of embeddings (from .env EMBEDDING_DIMENSION)
             persist_directory: Directory for persistence
             load_file_memories: Whether to load hierarchical file memories on init
             starting_directory: Starting directory for file memory search (default: cwd)
@@ -85,15 +74,6 @@ class MemoryManager:
         self.episodic_memory = EpisodicMemory(
             max_tokens=episodic_memory_tokens,
             compression_threshold=0.8,
-        )
-
-        self.semantic_memory = SemanticMemory(
-            persist_directory=f"{persist_directory}/embeddings",
-            embedding_model=embedding_model,
-            api_key=embedding_api_key,
-            api_key_env=embedding_api_key_env,
-            base_url=embedding_base_url,
-            embedding_dimension=embedding_dimension,
         )
 
         # Initialize file-based memory loader
@@ -735,16 +715,12 @@ class MemoryManager:
 
     def add_code_context(self, code_context: CodeContext) -> None:
         """
-        Add code context to both working and semantic memory.
+        Add code context to working memory.
 
         Args:
             code_context: CodeContext to add
         """
-        # Add to working memory
         self.working_memory.add_code_context(code_context)
-
-        # Also store in semantic memory for long-term retrieval
-        self.semantic_memory.add_code_context(code_context, importance_score=0.6)
 
     def set_task_context(self, task_context: TaskContext) -> None:
         """
@@ -755,44 +731,10 @@ class MemoryManager:
         """
         self.working_memory.set_task_context(task_context)
 
-    def retrieve_relevant_context(
-        self, query: str, n_results: int = 5
-    ) -> List[Tuple[str, float, Dict[str, Any]]]:
-        """
-        Retrieve relevant context from semantic memory.
-
-        Args:
-            query: Search query
-            n_results: Number of results
-
-        Returns:
-            List of (content, similarity, metadata) tuples
-        """
-        return self.semantic_memory.search(query=query, n_results=n_results)
-
-    def retrieve_similar_code(
-        self, query: str, language: Optional[str] = None, n_results: int = 3
-    ) -> List[Tuple[str, float, Dict[str, Any]]]:
-        """
-        Retrieve similar code from semantic memory.
-
-        Args:
-            query: Search query
-            language: Optional language filter
-            n_results: Number of results
-
-        Returns:
-            List of matching code contexts
-        """
-        return self.semantic_memory.search_code(
-            query=query, language=language, n_results=n_results
-        )
-
     def get_context_for_llm(
         self,
         system_prompt: str,
         include_episodic: bool = True,
-        include_semantic_query: Optional[str] = None,
         include_file_memories: bool = True,
         max_context_messages: Optional[int] = None,
     ) -> List[Dict[str, str]]:
@@ -808,7 +750,6 @@ class MemoryManager:
         Args:
             system_prompt: System prompt to include
             include_episodic: Whether to include episodic memory summary
-            include_semantic_query: Optional query to retrieve from semantic memory
             include_file_memories: Whether to include file-based memories (default: True)
             max_context_messages: Optional limit on conversation messages
 
@@ -844,23 +785,7 @@ class MemoryManager:
                     }
                 )
 
-        # 4. Semantic memory retrieval (if query provided)
-        if include_semantic_query:
-            semantic_results = self.retrieve_relevant_context(
-                include_semantic_query, n_results=3
-            )
-            if semantic_results:
-                relevant_info = "\n\n".join(
-                    [f"- {content} (relevance: {score:.2f})" for content, score, _ in semantic_results]
-                )
-                context.append(
-                    {
-                        "role": "system",
-                        "content": f"Relevant context from knowledge base:\n{relevant_info}",
-                    }
-                )
-
-        # 5. Conversation history
+        # 4. Conversation history
         # Option A: Use MessageStore if configured (single source of truth)
         if self._message_store is not None:
             # Get LLM-ready context from MessageStore
@@ -910,24 +835,6 @@ class MemoryManager:
             - working_tokens
             - episodic_tokens,
         }
-
-    def store_solution(
-        self, problem: str, solution: str, metadata: Optional[Dict] = None
-    ) -> str:
-        """
-        Store a problem-solution pair in semantic memory.
-
-        Args:
-            problem: Problem description
-            solution: Solution
-            metadata: Optional metadata
-
-        Returns:
-            ID of stored solution
-        """
-        return self.semantic_memory.add_solution(
-            problem=problem, solution=solution, metadata=metadata
-        )
 
     def search_history(
         self, query: str, max_results: int = 3
@@ -1142,7 +1049,6 @@ class MemoryManager:
                 "summary": self.working_memory.get_summary(),
             },
             "episodic_memory": self.episodic_memory.get_statistics(),
-            "semantic_memory": self.semantic_memory.get_statistics(),
             "token_budget": self.get_token_budget(),
         }
 
@@ -1158,7 +1064,6 @@ class MemoryManager:
         """Clear all memory layers and ephemeral state."""
         self.working_memory.clear()
         self.episodic_memory.clear()
-        self.semantic_memory.clear()
         # Clear ephemeral session state
         self._render_meta.clear()
         if self._message_store:
@@ -1336,6 +1241,74 @@ class MemoryManager:
 
         return created_path
 
+    @staticmethod
+    def _fix_orphaned_tool_calls(context: list) -> list:
+        """
+        Fix tool_call/tool_result pairing for API compliance.
+
+        Scans messages for tool_use blocks without matching tool_result and
+        inserts synthetic results. Returns a new list (does NOT persist changes
+        -- this is only used for the summarization LLM call).
+        """
+        # Collect tool_call ids from assistant messages
+        tool_call_ids = {}  # id -> (name, index_in_context)
+        for i, msg in enumerate(context):
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                for tc in msg["tool_calls"]:
+                    tc_id = tc.get("id")
+                    if tc_id:
+                        tc_name = tc.get("function", {}).get("name", "unknown")
+                        tool_call_ids[tc_id] = (tc_name, i)
+
+        # Collect existing tool_results
+        existing_results = {}
+        for msg in context:
+            if msg.get("role") == "tool":
+                tc_id = msg.get("tool_call_id")
+                if tc_id:
+                    existing_results[tc_id] = msg
+
+        orphaned = set(tool_call_ids.keys()) - set(existing_results.keys())
+
+        if orphaned:
+            logger.info(
+                "compact_fixing_orphaned_tool_calls",
+                orphan_count=len(orphaned),
+                orphan_ids=list(orphaned),
+            )
+
+            # Create synthetics for orphans
+            for tc_id in orphaned:
+                tc_name, _ = tool_call_ids[tc_id]
+                existing_results[tc_id] = {
+                    "role": "tool",
+                    "tool_call_id": tc_id,
+                    "name": tc_name,
+                    "content": "Tool execution was interrupted.",
+                }
+
+        # No tool_calls at all — nothing to fix
+        if not tool_call_ids:
+            return context
+
+        # Rebuild context with tool_results in correct positions
+        # (always reorder, not just when orphans exist — misplaced
+        # tool_results also cause API errors)
+        result = []
+        placed = set()
+        for msg in context:
+            if msg.get("role") == "tool":
+                continue  # re-insert in correct position below
+            result.append(msg)
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                for tc in msg["tool_calls"]:
+                    tc_id = tc.get("id")
+                    if tc_id and tc_id in existing_results and tc_id not in placed:
+                        result.append(existing_results[tc_id])
+                        placed.add(tc_id)
+
+        return result
+
     async def compact_conversation_async(
         self,
         current_input_tokens: int,
@@ -1357,6 +1330,12 @@ class MemoryManager:
             return 0
 
         evicted_count = len(context_dicts)
+
+        # Fix orphaned tool_calls before sending to summarization LLM.
+        # The main agent runs _fix_orphaned_tool_calls on every LLM call,
+        # but the compaction path was missing this — causing API errors when
+        # the conversation has interrupted tool_use blocks (e.g., Ctrl+C).
+        context_dicts = self._fix_orphaned_tool_calls(context_dicts)
 
         from src.memory.compaction import PrioritizedSummarizer
 

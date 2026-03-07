@@ -474,6 +474,11 @@ class Message:
         if self.role == "assistant" and self.meta and self.meta.reasoning_content:
             result["reasoning_content"] = self.meta.reasoning_content
 
+        if (self.role == "assistant" and self.meta
+                and self.meta.thinking and self.meta.thinking_signature):
+            result["thinking"] = self.meta.thinking
+            result["thinking_signature"] = self.meta.thinking_signature
+
         return result
 
     @classmethod

@@ -245,7 +245,12 @@ Output the summary in clean markdown format."""
     # ==================== Section Extractors ====================
 
     def _extract_goal_section(self, messages: List[Dict[str, Any]]) -> Optional[SummarySection]:
-        """Extract goal and key decisions."""
+        """Extract goal and key decisions.
+
+        Captures the first user message as the goal, and extracts FULL
+        decision sentences from assistant messages (not just post-trigger
+        fragments).
+        """
         # Find first user message as initial goal
         goal = None
         for msg in messages:
@@ -258,27 +263,37 @@ Output the summary in clean markdown format."""
         if not goal:
             return None
 
-        # Extract decisions from assistant messages
+        # Extract full decision sentences from assistant messages.
+        # Patterns capture the ENTIRE sentence containing the trigger phrase,
+        # not just the text after it (which produced useless fragments).
         decisions = []
-        decision_patterns = [
-            r"(?:I'll|I will|Let's|We should|I'm going to)\s+(.+?)(?:\.|$)",
-            r"(?:decided to|choosing|using)\s+(.+?)(?:\.|$)",
-        ]
+        # Match a full sentence that contains a decision trigger
+        decision_pattern = re.compile(
+            r"([^.!?\n]*?"                       # sentence start
+            r"(?:I'll|I will|Let's|We should|I'm going to|"
+            r"decided to|choosing|using|we chose|I chose|"
+            r"the plan is to|going with|opting for)"
+            r"[^.!?\n]{10,})"                    # at least 10 more chars (skip "I'll do" noise)
+            r"[.!?]",                            # sentence-ending punctuation
+            re.IGNORECASE,
+        )
 
         for msg in messages:
             if msg.get("role") == "assistant":
                 content = self._normalize_content(msg.get("content", ""))
-                for pattern in decision_patterns:
-                    matches = re.findall(pattern, content, re.IGNORECASE)
-                    decisions.extend(matches[:2])  # Limit per message
+                matches = decision_pattern.findall(content)
+                for match in matches[:2]:  # Limit per message
+                    cleaned = match.strip()
+                    if len(cleaned) >= 20:  # Skip trivially short matches
+                        decisions.append(cleaned)
 
         # Build section
         content = f"## Goal and Key Decisions\n\n**Goal:** {goal}"
         if decisions:
-            unique_decisions = list(dict.fromkeys(decisions))[:5]  # Dedupe, limit to 5
+            unique_decisions = list(dict.fromkeys(decisions))[:5]
             content += "\n\n**Key Decisions:**\n"
             for d in unique_decisions:
-                content += f"- {d.strip()[:150]}\n"
+                content += f"- {d[:200]}\n"
 
         return SummarySection(
             name="goal_and_decisions",
@@ -327,33 +342,81 @@ Output the summary in clean markdown format."""
             token_count=token_count
         )
 
+    # Languages that contain actual executable/functional code worth preserving.
+    # Diagram formats (mermaid, plantuml) and data formats (json, yaml, csv, xml)
+    # are noise for continuation purposes.
+    _CODE_LANGUAGES = {
+        "python", "py", "javascript", "js", "typescript", "ts", "tsx", "jsx",
+        "bash", "sh", "shell", "zsh", "powershell", "ps1",
+        "rust", "go", "java", "kotlin", "c", "cpp", "csharp", "cs",
+        "ruby", "rb", "php", "swift", "scala", "lua", "perl",
+        "sql", "html", "css", "scss", "sass",
+        "dockerfile", "makefile", "toml", "ini", "cfg",
+    }
+
+    _SKIP_LANGUAGES = {
+        "mermaid", "plantuml", "dot", "graphviz",
+        "text", "txt", "output", "log", "console",
+        "json", "yaml", "yml", "xml", "csv",
+    }
+
     def _extract_code_section(
         self,
         messages: List[Dict[str, Any]],
         budget: int
     ) -> Optional[SummarySection]:
-        """Extract code snippets from messages."""
+        """Extract code snippets from messages.
+
+        Filters out diagram formats (mermaid, plantuml) and plain text/data
+        blocks that waste token budget without helping continuation.
+        """
         code_blocks = []
 
-        # Pattern for markdown code blocks
         code_pattern = re.compile(r'```(\w*)\n(.*?)```', re.DOTALL)
 
         for msg in messages:
             content = self._normalize_content(msg.get("content", ""))
             matches = code_pattern.findall(content)
             for lang, code in matches:
-                if len(code.strip()) > 20:  # Ignore trivial snippets
-                    code_blocks.append((lang or "python", code.strip()))
+                lang_lower = lang.lower() if lang else ""
+
+                # Skip known non-code formats
+                if lang_lower in self._SKIP_LANGUAGES:
+                    continue
+
+                # If language is specified, it must be a recognized code language.
+                # If unspecified (bare ```), accept it only if the content looks
+                # like code (contains common code patterns).
+                if lang_lower and lang_lower not in self._CODE_LANGUAGES:
+                    continue
+
+                stripped = code.strip()
+                if len(stripped) < 20:
+                    continue
+
+                # For bare code blocks, do a quick heuristic check
+                if not lang_lower:
+                    code_indicators = ["def ", "class ", "import ", "from ",
+                                       "function ", "const ", "let ", "var ",
+                                       "return ", "if ", "for ", "while ",
+                                       "= ", "=> ", "->"]
+                    if not any(ind in stripped for ind in code_indicators):
+                        continue
+                    lang_lower = "python"  # default label
+
+                code_blocks.append((lang_lower, stripped))
 
         if not code_blocks:
             return None
 
-        # Build section with top code blocks
+        # Build section with top code blocks (prefer later blocks = more recent)
+        # Take last 5 rather than first 5, since recent code is more relevant
+        selected = code_blocks[-5:]
+
         content = "## Code Snippets\n\n"
         current_tokens = self.count_tokens(content)
 
-        for lang, code in code_blocks[:5]:  # Limit to 5 snippets
-            # Truncate long code blocks
+        for lang, code in selected:
             if len(code) > 500:
                 code = code[:500] + "\n# ... truncated ..."
 
@@ -374,35 +437,72 @@ Output the summary in clean markdown format."""
             token_count=current_tokens
         )
 
+    # Patterns that indicate actual errors/failures being discussed, not
+    # generic prose that happens to contain the word "error" or "fix".
+    # Each pattern must match within a single sentence.
+    _ERROR_PATTERNS = [
+        re.compile(p, re.IGNORECASE) for p in [
+            # Explicit error reports — require specific verb + error noun
+            r"(?:got|getting|seeing|encountered|hit|threw|raised|throws|raises)\s+(?:an?\s+)?(?:error|exception|traceback)",
+            # "error:" or "exception:" (error message format)
+            r"(?:error|exception|traceback|failure)\s*:",
+            r"(?:failed|fails|failing)\s+(?:with|because|due to|to\s+\w)",
+            r"(?:crash|crashed|crashing|broken|broke)\s+(?:when|while|because|due|the|on|in|at|with)",
+            # Explicit fix reports — require the fix to describe an action
+            r"(?:fixed|fixing)\s+(?:by|the|this|it|a\b)",
+            r"(?:the\s+fix\s+(?:was|is))",
+            r"(?:resolved|resolving)\s+(?:by|the|this|it)",
+            r"(?:the\s+)?(?:problem|issue|bug)\s+(?:was|is|turned out)",
+            # Stack traces / Python exception types
+            r"(?:TypeError|ValueError|KeyError|ImportError|AttributeError|NameError|SyntaxError|RuntimeError|FileNotFoundError|ModuleNotFoundError)",
+            # HTTP error status codes
+            r"(?:404|500|503|403|401)\s+(?:error|response|status)",
+        ]
+    ]
+
     def _extract_error_section(
         self,
         messages: List[Dict[str, Any]],
         budget: int
     ) -> Optional[SummarySection]:
-        """Extract error mentions and fixes."""
+        """Extract error mentions and fixes.
+
+        Uses specific patterns to avoid false positives from generic prose
+        that merely contains words like 'error', 'fix', or 'issue'.
+        """
         errors = []
-        error_keywords = ["error", "failed", "wrong", "incorrect", "bug", "fix", "issue", "problem"]
 
         for msg in messages:
             content = self._normalize_content(msg.get("content", ""))
-            content_lower = content.lower()
+            if not content:
+                continue
 
-            if any(kw in content_lower for kw in error_keywords):
-                # Extract relevant sentences
-                sentences = re.split(r'(?<=[.!?])\s+', content)
-                for sentence in sentences:
-                    if any(kw in sentence.lower() for kw in error_keywords):
-                        errors.append(sentence[:250])
-                        if len(errors) >= 5:
+            sentences = re.split(r'(?<=[.!?\n])\s+', content)
+            for sentence in sentences:
+                if any(p.search(sentence) for p in self._ERROR_PATTERNS):
+                    cleaned = sentence.strip()
+                    if 15 < len(cleaned) <= 300:
+                        errors.append(cleaned[:250])
+                        if len(errors) >= 8:
                             break
-            if len(errors) >= 5:
+            if len(errors) >= 8:
                 break
 
         if not errors:
             return None
 
+        # Deduplicate similar errors (keep first occurrence)
+        seen = set()
+        unique_errors = []
+        for err in errors:
+            # Normalize for dedup: lowercase first 50 chars
+            key = err[:50].lower()
+            if key not in seen:
+                seen.add(key)
+                unique_errors.append(err)
+
         content = "## Errors and Fixes\n\n"
-        for error in errors:
+        for error in unique_errors[:5]:
             content += f"- {error}\n"
 
         return SummarySection(
@@ -484,22 +584,51 @@ Output the summary in clean markdown format."""
         messages: List[Dict[str, Any]],
         budget: int
     ) -> Optional[SummarySection]:
-        """Extract current state from recent messages."""
-        # Get last assistant message
+        """Extract current state from recent messages.
+
+        Takes the last few complete sentences from the last assistant message
+        instead of a blind character slice that often cuts mid-sentence.
+        Also checks the last user message for pending requests.
+        """
         last_assistant = None
+        last_user = None
+
         for msg in reversed(messages):
-            if msg.get("role") == "assistant":
+            role = msg.get("role")
+            if role == "assistant" and last_assistant is None:
                 last_assistant = self._normalize_content(msg.get("content", ""))
+            elif role == "user" and last_user is None:
+                last_user = self._normalize_content(msg.get("content", ""))
+            if last_assistant is not None and last_user is not None:
                 break
 
-        if not last_assistant:
+        if not last_assistant and not last_user:
             return None
 
-        # Truncate if needed
-        if len(last_assistant) > 400:
-            last_assistant = "..." + last_assistant[-400:]
+        parts = []
 
-        content = f"## Current State\n\n{last_assistant}"
+        # Extract last complete sentences from assistant message
+        if last_assistant:
+            # Split into sentences and take the last few that fit in budget
+            sentences = re.split(r'(?<=[.!?])\s+', last_assistant.strip())
+            # Filter out empty/trivial sentences
+            sentences = [s for s in sentences if len(s.strip()) > 10]
+            if sentences:
+                # Take last 3-5 sentences (most recent context)
+                tail_sentences = sentences[-5:]
+                assistant_state = " ".join(tail_sentences)
+                if len(assistant_state) > 500:
+                    # Still too long — take fewer sentences
+                    tail_sentences = sentences[-3:]
+                    assistant_state = " ".join(tail_sentences)
+                parts.append(f"**Last action:** {assistant_state}")
+
+        # Include the last user message to show what's pending
+        if last_user:
+            user_preview = last_user[:200] + "..." if len(last_user) > 200 else last_user
+            parts.append(f"**Last user request:** {user_preview}")
+
+        content = "## Current State\n\n" + "\n\n".join(parts)
 
         return SummarySection(
             name="current_state",

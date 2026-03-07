@@ -88,9 +88,7 @@ def _create_tool_executor(tools_allowlist=None):
         ReadFileTool, WriteFileTool, EditFileTool,
         AppendToFileTool, ListDirectoryTool, RunCommandTool,
     )
-    from src.tools.code_search import SearchCodeTool, AnalyzeCodeTool
     from src.tools.search_tools import GrepTool, GlobTool
-    from src.tools.git_operations import GitStatusTool, GitDiffTool, GitCommitTool
     from src.tools.lsp_tools import GetFileOutlineTool, GetSymbolContextTool
     from src.tools.knowledge_tools import KBDetectChangesTool, KBUpdateManifestTool
     from src.tools.clarify_tool import ClarifyTool
@@ -104,14 +102,9 @@ def _create_tool_executor(tools_allowlist=None):
         EditFileTool(),
         AppendToFileTool(),
         ListDirectoryTool(),
-        SearchCodeTool(),
-        AnalyzeCodeTool(),
         GrepTool(),
         GlobTool(),
         RunCommandTool(),
-        GitStatusTool(),
-        GitDiffTool(),
-        GitCommitTool(),
         GetFileOutlineTool(),
         GetSymbolContextTool(),
         KBDetectChangesTool(),

@@ -325,9 +325,6 @@ class TestAgentPlanModeIntegration:
             context_window=8000,
             working_directory=str(tmp_path),
             api_key="test-key",
-            embedding_model="text-embedding-3-small",
-            embedding_base_url="https://api.openai.com/v1",
-            embedding_api_key="test-key",
         )
 
         # Verify plan_mode_state exists and is properly initialized
@@ -346,9 +343,6 @@ class TestAgentPlanModeIntegration:
             context_window=8000,
             working_directory=str(tmp_path),
             api_key="test-key",
-            embedding_model="text-embedding-3-small",
-            embedding_base_url="https://api.openai.com/v1",
-            embedding_api_key="test-key",
         )
 
         # Verify plan mode tools are registered
@@ -368,9 +362,6 @@ class TestAgentPlanModeIntegration:
             context_window=8000,
             working_directory=str(tmp_path),
             api_key="test-key",
-            embedding_model="text-embedding-3-small",
-            embedding_base_url="https://api.openai.com/v1",
-            embedding_api_key="test-key",
         )
 
         # Initially not in plan mode
@@ -400,9 +391,6 @@ class TestAgentPlanModeIntegration:
             context_window=8000,
             working_directory=str(tmp_path),
             api_key="test-key",
-            embedding_model="text-embedding-3-small",
-            embedding_base_url="https://api.openai.com/v1",
-            embedding_api_key="test-key",
         )
 
         # In normal mode, write_file is allowed

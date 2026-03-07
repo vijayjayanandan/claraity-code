@@ -137,6 +137,45 @@ class UIProtocol:
             )
     """
 
+    # =========================================================================
+    # STATE LIFECYCLE
+    #
+    # _interrupted (asyncio.Event):
+    #   Set by:    InterruptSignal (user clicks Stop/Ctrl+C)
+    #   Cleared:   reset() (new conversation turn) or clear_interrupt()
+    #              (user clicks Continue on a pause prompt)
+    #   Checked:   agent.stream_response() between iterations & during streaming
+    #   Checked:   delegation.execute_async() between subprocess stdout lines
+    #   NOTE: If you handle a Continue after interrupt, you MUST call
+    #         clear_interrupt() or the next iteration will re-trigger pause.
+    #
+    # _pending_approvals (dict[call_id -> PendingApproval]):
+    #   Set by:    wait_for_approval() — creates future
+    #   Resolved:  submit_action(ApprovalResult) — sets future result
+    #   Cancelled: submit_action(InterruptSignal) — cancels all pending
+    #   Cleared:   reset() — cancels all pending, clears dict
+    #
+    # _pending_pause (Future[PauseResult] | None):
+    #   Set by:    wait_for_pause_response() — creates future
+    #   Resolved:  submit_action(PauseResult) — sets future result
+    #   Cleared:   wait_for_pause_response() finally block, or reset()
+    #   NOTE: Only one pause can be active at a time.
+    #
+    # _pending_clarify (dict[call_id -> Future[ClarifyResult]]):
+    #   Set by:    wait_for_clarify_response() — creates future
+    #   Resolved:  submit_action(ClarifyResult) — sets future result
+    #   Cleared:   wait_for_clarify_response() finally block, or reset()
+    #
+    # _pending_plan_approval (dict[plan_hash -> Future[PlanApprovalResult]]):
+    #   Set by:    wait_for_plan_approval() — creates future
+    #   Resolved:  submit_action(PlanApprovalResult) — sets future result
+    #   Cleared:   wait_for_plan_approval() finally block, or reset()
+    #
+    # _auto_approve (set[str]):
+    #   Added to:  submit_action(ApprovalResult) when auto_approve_future=True
+    #   Cleared:   reset() — clears set
+    # =========================================================================
+
     def __init__(self):
         # Queue for UI -> Agent actions
         self._action_queue: asyncio.Queue[UserAction] = asyncio.Queue()
@@ -156,7 +195,7 @@ class UIProtocol:
         # Auto-approve rules (tool_name -> True)
         self._auto_approve: set[str] = set()
 
-        # Interrupt flag
+        # Interrupt flag (see STATE LIFECYCLE above)
         self._interrupted = asyncio.Event()
 
         # Callback for todo updates (Agent -> UI)
@@ -366,6 +405,10 @@ class UIProtocol:
     def check_interrupted(self) -> bool:
         """Check if user has requested interruption."""
         return self._interrupted.is_set()
+
+    def clear_interrupt(self) -> None:
+        """Clear the interrupt flag (e.g. after user clicks Continue on a pause prompt)."""
+        self._interrupted.clear()
 
     async def wait_for_interrupt(self) -> None:
         """Wait until interrupted. Use with asyncio.wait() for cancellation."""

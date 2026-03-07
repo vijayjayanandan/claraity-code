@@ -62,30 +62,25 @@ def chat_mode(
         from src.observability.logging_config import configure_logging, install_asyncio_handler
         configure_logging(mode="tui", log_level=log_level)
 
-        # Initialize MessageStore and SessionWriter for persistence
         from src.session.store.memory_store import MessageStore
         from src.session.persistence.writer import SessionWriter
         import uuid
         from datetime import datetime
 
-        # Prepare session path (directory will be created on first message write)
-        session_id = f"session-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
+        if agent:
+            # Full mode: agent already has session_id + message_store from from_config()
+            session_id = agent.session_id
+            store = agent.message_store
+        else:
+            # Setup mode: create session scaffolding for TUI (agent will be wired later)
+            session_id = f"session-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
+            store = MessageStore()
+
+        # Prepare session writer (directory created on first write, not now)
         sessions_dir = Path(".clarity/sessions")
         session_dir = sessions_dir / session_id
-        # DO NOT create directory yet - SessionWriter will create it on first write
         jsonl_path = session_dir / "session.jsonl"
-
-        # Initialize store (writer will be opened by app in its event loop)
-        store = MessageStore()
         writer = SessionWriter(file_path=jsonl_path)
-
-        if agent:
-            # Full mode: agent is ready
-            # Set session ID on agent for plan mode and other session-scoped features
-            agent.set_session_id(session_id, is_new_session=True)
-
-            # Link MemoryManager to MessageStore for unified data flow
-            agent.memory.set_message_store(store, session_id)
 
         # Create and run Textual app (agent=None triggers setup mode)
         app = CodingAgentApp(
@@ -157,31 +152,6 @@ def main() -> None:
         help="Environment variable name for API key (default: OPENAI_API_KEY)"
     )
 
-    # Embedding configuration
-    parser.add_argument(
-        "--embedding-model",
-        default=os.environ.get("EMBEDDING_MODEL"),
-        help="Embedding model name (from .env: EMBEDDING_MODEL)"
-    )
-
-    parser.add_argument(
-        "--embedding-api-key",
-        default=None,
-        help="API key for embedding service (optional, uses env var if not provided)"
-    )
-
-    parser.add_argument(
-        "--embedding-api-key-env",
-        default=os.environ.get("EMBEDDING_API_KEY_ENV", "EMBEDDING_API_KEY"),
-        help="Environment variable name for embedding API key (default: EMBEDDING_API_KEY)"
-    )
-
-    parser.add_argument(
-        "--embedding-base-url",
-        default=os.environ.get("EMBEDDING_BASE_URL"),
-        help="Embedding API base URL (from .env: EMBEDDING_BASE_URL)"
-    )
-
     # LLM generation parameters
     parser.add_argument(
         "--temperature",
@@ -224,6 +194,12 @@ def main() -> None:
     # Unified config: YAML file + env vars + CLI args (layered)
     # ---------------------------------------------------------------
     from src.llm.config_loader import load_llm_config, resolve_llm_config
+
+    # Secure the .clarity workspace directory permissions at startup
+    from src.security.file_permissions import secure_clarity_workspace
+    clarity_dir = Path(".clarity")
+    if clarity_dir.exists():
+        secure_clarity_workspace(clarity_dir)
 
     llm_config = load_llm_config()
 
@@ -276,26 +252,11 @@ def main() -> None:
     resolved_api_key = args.api_key or llm_config.api_key
 
     try:
-        agent = CodingAgent(
-            model_name=llm_config.model,
-            backend=llm_config.backend_type,
-            base_url=llm_config.base_url,
-            context_window=llm_config.context_window,
-            temperature=llm_config.temperature,
-            max_tokens=llm_config.max_tokens,
-            top_p=llm_config.top_p,
+        agent = CodingAgent.from_config(
+            llm_config,
             api_key=resolved_api_key,
-            api_key_env=llm_config.api_key_env,
-            embedding_model=args.embedding_model,
-            embedding_api_key=args.embedding_api_key,
-            embedding_api_key_env=args.embedding_api_key_env,
-            embedding_base_url=args.embedding_base_url,
             permission_mode=args.permission,
         )
-
-        # Apply subagent LLM overrides from config.yaml
-        if llm_config.subagents and hasattr(agent, 'subagent_manager'):
-            agent.subagent_manager.config_loader.apply_llm_overrides(llm_config)
 
         # Check if backend is available
         if not agent.llm.is_available():

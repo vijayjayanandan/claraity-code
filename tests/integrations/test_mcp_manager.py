@@ -361,8 +361,6 @@ class TestGetToolsNoDuplicates:
             base_url="http://localhost:1234",
             api_key="sk-test",
             context_window=8000,
-            embedding_api_key="sk-test",
-            embedding_base_url="http://localhost:1234",
             load_file_memories=False,
         )
 
@@ -407,8 +405,6 @@ class TestGetToolsNoDuplicates:
             base_url="http://localhost:1234",
             api_key="sk-test",
             context_window=8000,
-            embedding_api_key="sk-test",
-            embedding_base_url="http://localhost:1234",
             load_file_memories=False,
         )
 

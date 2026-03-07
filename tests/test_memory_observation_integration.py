@@ -1,6 +1,5 @@
 """Tests for MemoryManager + ObservationStore integration (Phase 2)."""
 
-import os
 import tempfile
 import pytest
 import chromadb.api.shared_system_client
@@ -34,8 +33,6 @@ class TestMemoryManagerObservationIntegration:
             episodic_memory_tokens=20000,
             persist_directory=temp_dir,
             load_file_memories=False,
-            embedding_api_key=os.getenv("EMBEDDING_API_KEY", os.getenv("DASHSCOPE_API_KEY", "sk-test-placeholder")),
-            embedding_base_url=os.getenv("EMBEDDING_BASE_URL", "http://localhost:8000"),
         )
 
     def test_turn_id_increments_on_user_message(self, memory_manager):
@@ -183,8 +180,6 @@ class TestObservationStoreFeatureFlag:
         mm = MemoryManager(
             persist_directory=temp_dir,
             load_file_memories=False,
-            embedding_api_key=os.getenv("EMBEDDING_API_KEY", os.getenv("DASHSCOPE_API_KEY", "sk-test-placeholder")),
-            embedding_base_url=os.getenv("EMBEDDING_BASE_URL", "http://localhost:8000"),
         )
 
         assert mm.observation_store is not None
@@ -205,8 +200,6 @@ class TestTurnIdPersistence:
         mm = MemoryManager(
             persist_directory=temp_dir,
             load_file_memories=False,
-            embedding_api_key=os.getenv("EMBEDDING_API_KEY", os.getenv("DASHSCOPE_API_KEY", "sk-test-placeholder")),
-            embedding_base_url=os.getenv("EMBEDDING_BASE_URL", "http://localhost:8000"),
         )
 
         # Turn 1

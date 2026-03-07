@@ -27,7 +27,10 @@ from typing import Dict, Optional
 # CONSTANTS
 # =============================================================================
 
-DEFAULT_CONFIG_PATH = ".clarity/config.yaml"
+SYSTEM_CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".claraity")
+SYSTEM_CONFIG_PATH = os.path.join(SYSTEM_CONFIG_DIR, "config.yaml")
+
+DEFAULT_CONFIG_PATH = SYSTEM_CONFIG_PATH
 
 VALID_BACKEND_TYPES = {"openai", "ollama", "vllm", "localai", "llamacpp", "anthropic"}
 
@@ -75,6 +78,7 @@ class LLMConfigData:
     temperature: float = 0.2
     max_tokens: int = 16384
     top_p: float = 0.95
+    thinking_budget: Optional[int] = None  # Extended thinking token budget (Claude, etc.)
     subagents: Dict[str, SubAgentLLMOverride] = field(default_factory=dict)
 
 
@@ -209,6 +213,7 @@ def load_llm_config(config_path: str = DEFAULT_CONFIG_PATH) -> LLMConfigData:
         ("temperature", "temperature", float),
         ("max_tokens", "max_tokens", int),
         ("top_p", "top_p", float),
+        ("thinking_budget", "thinking_budget", int),
     ]:
         if key in llm_data:
             try:
@@ -311,6 +316,10 @@ def save_llm_config(
         "max_tokens": config.max_tokens,
         "top_p": config.top_p,
     }
+
+    # Only write thinking_budget if set
+    if config.thinking_budget is not None:
+        llm_section["thinking_budget"] = config.thinking_budget
 
     # api_key is saved via credential_store.py (keyring > config.yaml fallback)
     # It is NOT written here to avoid double-writing
@@ -424,6 +433,7 @@ def _apply_overrides(
         ("temperature", "temperature", float),
         ("max_tokens", "max_tokens", int),
         ("top_p", "top_p", float),
+        ("thinking_budget", "thinking_budget", int),
     ]:
         val = overrides.get(key)
         if val is not None:

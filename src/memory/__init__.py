@@ -11,7 +11,6 @@ from .models import (
 )
 from .working_memory import WorkingMemory
 from .episodic_memory import EpisodicMemory
-from .semantic_memory import SemanticMemory
 from .memory_manager import MemoryManager
 from .observation_store import (
     ObservationStore,
@@ -35,7 +34,6 @@ __all__ = [
     # Memory components
     "WorkingMemory",
     "EpisodicMemory",
-    "SemanticMemory",
     "MemoryManager",
     # Observation store (Phase 2)
     "ObservationStore",

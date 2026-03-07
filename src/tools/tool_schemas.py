@@ -156,42 +156,6 @@ RUN_COMMAND_TOOL = ToolDefinition(
 )
 
 
-# Code Search & Analysis Tools
-
-SEARCH_CODE_TOOL = ToolDefinition(
-    name="search_code",
-    description="Search for code patterns using semantic and keyword search. Returns relevant code snippets.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "description": "Search query (e.g., 'function that handles user auth', 'error handling')"
-            },
-            "file_pattern": {
-                "type": "string",
-                "description": "Optional file pattern to filter results (e.g., '*.py', 'src/**/*.ts')"
-            }
-        },
-        "required": ["query"]
-    }
-)
-
-ANALYZE_CODE_TOOL = ToolDefinition(
-    name="analyze_code",
-    description="Analyze code structure (classes, functions, imports) using AST parsing. NOTE: Only use AFTER read_file if you need structured metadata. For understanding a file, read_file alone is usually sufficient.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "file_path": {
-                "type": "string",
-                "description": "Path to the file to analyze"
-            }
-        },
-        "required": ["file_path"]
-    }
-)
-
 # Enhanced Search Tools (ripgrep-like capabilities)
 
 GREP_TOOL = ToolDefinition(
@@ -326,53 +290,6 @@ GET_SYMBOL_CONTEXT_TOOL = ToolDefinition(
 )
 
 
-# Git Operations Tools
-
-GIT_STATUS_TOOL = ToolDefinition(
-    name="git_status",
-    description="Get git status - shows modified, staged, and untracked files",
-    parameters={
-        "type": "object",
-        "properties": {},
-        "required": []
-    }
-)
-
-GIT_DIFF_TOOL = ToolDefinition(
-    name="git_diff",
-    description="View git diff summary. Returns --stat summary by default (file names + change counts). Use file_path to get the full diff for a specific file.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "staged": {
-                "type": "boolean",
-                "description": "If true, show diff of staged changes. If false, show unstaged changes."
-            },
-            "file_path": {
-                "type": "string",
-                "description": "Specific file to get the full diff for. Omit to get a stat summary of all changes."
-            }
-        },
-        "required": []
-    }
-)
-
-GIT_COMMIT_TOOL = ToolDefinition(
-    name="git_commit",
-    description="Create a git commit with the specified message",
-    parameters={
-        "type": "object",
-        "properties": {
-            "message": {
-                "type": "string",
-                "description": "Commit message describing the changes"
-            }
-        },
-        "required": ["message"]
-    }
-)
-
-
 # Delegation Tool
 
 DELEGATE_TO_SUBAGENT_TOOL = ToolDefinition(
@@ -418,409 +335,6 @@ CREATE_CHECKPOINT_TOOL = ToolDefinition(
     }
 )
 
-
-# ClarAIty Architecture Query Tools
-
-QUERY_COMPONENT_TOOL = ToolDefinition(
-    name="query_component",
-    description="Query detailed information about a specific architectural component. Returns component details, design decisions, code artifacts, and relationships.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "component_id": {
-                "type": "string",
-                "description": "Component ID to query (e.g., 'CODING_AGENT', 'OBSERVABILITY_LAYER', 'CLARITY_INTEGRATION')"
-            }
-        },
-        "required": ["component_id"]
-    }
-)
-
-QUERY_DEPENDENCIES_TOOL = ToolDefinition(
-    name="query_dependencies",
-    description="Query component dependencies and relationships. Returns both incoming (who uses this component) and outgoing (what this component depends on) relationships.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "component_id": {
-                "type": "string",
-                "description": "Component ID to query relationships for"
-            }
-        },
-        "required": ["component_id"]
-    }
-)
-
-QUERY_DECISIONS_TOOL = ToolDefinition(
-    name="query_decisions",
-    description="Query design decisions for a component or globally. Returns decisions with rationale, alternatives considered, and trade-offs.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "component_id": {
-                "type": "string",
-                "description": "Component ID to query decisions for. If not provided, returns all decisions."
-            }
-        },
-        "required": []
-    }
-)
-
-QUERY_FLOWS_TOOL = ToolDefinition(
-    name="query_flows",
-    description="Query execution flows in the system. Returns flow details with steps, triggers, and component involvement.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "flow_id": {
-                "type": "string",
-                "description": "Flow ID to query. If not provided, returns all flows."
-            }
-        },
-        "required": []
-    }
-)
-
-QUERY_ARCHITECTURE_SUMMARY_TOOL = ToolDefinition(
-    name="query_architecture_summary",
-    description="Query architecture overview organized by layer. Returns component counts, status breakdown, and progress for each layer.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "layer": {
-                "type": "string",
-                "description": "Optional layer filter (core, execution, tools, llm, memory, rag, etc.)"
-            }
-        },
-        "required": []
-    }
-)
-
-SEARCH_COMPONENTS_TOOL = ToolDefinition(
-    name="search_components",
-    description="Search components by keyword in name, purpose, or business value. Useful for discovering relevant components.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "description": "Search query (e.g., 'testing', 'memory', 'error handling')"
-            }
-        },
-        "required": ["query"]
-    }
-)
-
-CLARITY_SETUP_TOOL = ToolDefinition(
-    name="clarity_setup",
-    description="Initialize ClarAIty database by scanning the current project codebase. Use when ClarAIty DB doesn't exist or needs updating. Analyzes Python files to extract components, relationships, and architecture.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "rescan": {
-                "type": "boolean",
-                "description": "If true, force full rescan even if database exists. Use when codebase has changed significantly."
-            }
-        },
-        "required": []
-    }
-)
-
-GET_NEXT_TASK_TOOL = ToolDefinition(
-    name="get_next_task",
-    description="Get the next planned component to work on (prioritizes Phase 0 components). Returns component details, dependencies, and action to take. Use at the start of every session.",
-    parameters={
-        "type": "object",
-        "properties": {},
-        "required": []
-    }
-)
-
-UPDATE_COMPONENT_STATUS_TOOL = ToolDefinition(
-    name="update_component_status",
-    description="Update the status of a component (planned → in_progress → completed). Use when starting work (in_progress) and when finishing (completed). Returns phase progress percentage.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "component_id": {
-                "type": "string",
-                "description": "Component ID to update (e.g., 'LLM_FAILURE_HANDLER', 'AGENT_INTERFACE')"
-            },
-            "new_status": {
-                "type": "string",
-                "description": "New status: 'planned', 'in_progress', or 'completed'",
-                "enum": ["planned", "in_progress", "completed"]
-            }
-        },
-        "required": ["component_id", "new_status"]
-    }
-)
-
-ADD_ARTIFACT_TOOL = ToolDefinition(
-    name="add_artifact",
-    description="Track a file created or modified for a component. Auto-detects artifact type and language from file extension. Use after creating/modifying files.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "component_id": {
-                "type": "string",
-                "description": "Component ID this artifact belongs to"
-            },
-            "file_path": {
-                "type": "string",
-                "description": "Path to the file (relative or absolute)"
-            },
-            "description": {
-                "type": "string",
-                "description": "Optional description of what this file does. If not provided, uses filename."
-            }
-        },
-        "required": ["component_id", "file_path"]
-    }
-)
-
-GET_IMPLEMENTATION_SPEC_TOOL = ToolDefinition(
-    name="get_implementation_spec",
-    description="Get detailed implementation specification for a component. Returns method signatures with parameters, acceptance criteria (definition of done), implementation patterns, and code examples. Use for complex components to get complete implementation guidance.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "component_id": {
-                "type": "string",
-                "description": "Component ID to get implementation spec for (e.g., 'LLM_FAILURE_HANDLER', 'AGENT_INTERFACE')"
-            }
-        },
-        "required": ["component_id"]
-    }
-)
-
-ADD_METHOD_TOOL = ToolDefinition(
-    name="add_method",
-    description="Add a method signature to a component's implementation spec. Use to document methods that need to be implemented.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "component_id": {
-                "type": "string",
-                "description": "Component ID to add method to"
-            },
-            "method_name": {
-                "type": "string",
-                "description": "Method name (e.g., 'call_llm', 'handle_timeout')"
-            },
-            "signature": {
-                "type": "string",
-                "description": "Full method signature (e.g., 'call_llm(self, messages: List[Dict], **kwargs) -> str')"
-            },
-            "description": {
-                "type": "string",
-                "description": "Description of what the method does"
-            },
-            "parameters": {
-                "type": "array",
-                "description": "Optional list of parameter objects with name, type, description, required, default",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "name": {"type": "string"},
-                        "type": {"type": "string"},
-                        "description": {"type": "string"},
-                        "required": {"type": "boolean"},
-                        "default": {"type": "string"}
-                    }
-                }
-            },
-            "return_type": {
-                "type": "string",
-                "description": "Optional return type annotation"
-            },
-            "raises": {
-                "type": "array",
-                "description": "Optional list of exception names this method can raise",
-                "items": {
-                    "type": "string"
-                }
-            },
-            "example_usage": {
-                "type": "string",
-                "description": "Optional usage example"
-            }
-        },
-        "required": ["component_id", "method_name", "signature", "description"]
-    }
-)
-
-ADD_ACCEPTANCE_CRITERION_TOOL = ToolDefinition(
-    name="add_acceptance_criterion",
-    description="Add an acceptance criterion to a component (definition of done). Use to specify test coverage, integration requirements, performance targets, etc.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "component_id": {
-                "type": "string",
-                "description": "Component ID to add criterion to"
-            },
-            "criteria_type": {
-                "type": "string",
-                "description": "Type of criterion (e.g., 'test_coverage', 'integration', 'performance', 'breaking_changes')"
-            },
-            "description": {
-                "type": "string",
-                "description": "Description of the criterion"
-            },
-            "target_value": {
-                "type": "string",
-                "description": "Optional target value (e.g., '90%', '< 100ms', '0 breaking changes')"
-            },
-            "validation_method": {
-                "type": "string",
-                "description": "Optional validation method (e.g., 'pytest --cov', 'Manual verification')"
-            },
-            "priority": {
-                "type": "string",
-                "description": "Priority: 'required', 'recommended', or 'optional' (default: required)",
-                "enum": ["required", "recommended", "optional"]
-            }
-        },
-        "required": ["component_id", "criteria_type", "description"]
-    }
-)
-
-UPDATE_METHOD_TOOL = ToolDefinition(
-    name="update_method",
-    description="Update an existing method specification. Use to refine signatures, parameters, or examples based on implementation learnings.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "component_id": {
-                "type": "string",
-                "description": "Component ID containing the method"
-            },
-            "method_name": {
-                "type": "string",
-                "description": "Method name to update (must exist)"
-            },
-            "signature": {
-                "type": "string",
-                "description": "Optional: New method signature"
-            },
-            "description": {
-                "type": "string",
-                "description": "Optional: New description"
-            },
-            "parameters": {
-                "type": "array",
-                "description": "Optional: New parameter list",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "name": {"type": "string"},
-                        "type": {"type": "string"},
-                        "description": {"type": "string"},
-                        "required": {"type": "boolean"},
-                        "default": {"type": "string"}
-                    }
-                }
-            },
-            "return_type": {
-                "type": "string",
-                "description": "Optional: New return type"
-            },
-            "raises": {
-                "type": "array",
-                "description": "Optional: New exception list",
-                "items": {
-                    "type": "string"
-                }
-            },
-            "example_usage": {
-                "type": "string",
-                "description": "Optional: New usage example"
-            }
-        },
-        "required": ["component_id", "method_name"]
-    }
-)
-
-UPDATE_ACCEPTANCE_CRITERION_TOOL = ToolDefinition(
-    name="update_acceptance_criterion",
-    description="Update an existing acceptance criterion. Use to adjust targets, validation methods, or priorities based on implementation learnings.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "component_id": {
-                "type": "string",
-                "description": "Component ID containing the criterion"
-            },
-            "criteria_type": {
-                "type": "string",
-                "description": "Criterion type to update (e.g., 'test_coverage', 'integration')"
-            },
-            "description": {
-                "type": "string",
-                "description": "Optional: New description"
-            },
-            "target_value": {
-                "type": "string",
-                "description": "Optional: New target value (e.g., '95%', '< 50ms')"
-            },
-            "validation_method": {
-                "type": "string",
-                "description": "Optional: New validation method"
-            },
-            "priority": {
-                "type": "string",
-                "description": "Optional: New priority (required/recommended/optional)",
-                "enum": ["required", "recommended", "optional"]
-            },
-            "status": {
-                "type": "string",
-                "description": "Optional: New status (pending/met/not_met)",
-                "enum": ["pending", "met", "not_met"]
-            }
-        },
-        "required": ["component_id", "criteria_type"]
-    }
-)
-
-UPDATE_IMPLEMENTATION_PATTERN_TOOL = ToolDefinition(
-    name="update_implementation_pattern",
-    description="Update an existing implementation pattern. Use to refine code examples, add antipatterns, or update references based on implementation learnings.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "component_id": {
-                "type": "string",
-                "description": "Component ID containing the pattern"
-            },
-            "pattern_name": {
-                "type": "string",
-                "description": "Pattern name to update (must exist)"
-            },
-            "pattern_type": {
-                "type": "string",
-                "description": "Optional: New pattern type (e.g., 'workflow', 'error_handling')"
-            },
-            "description": {
-                "type": "string",
-                "description": "Optional: New description (why use this pattern)"
-            },
-            "code_example": {
-                "type": "string",
-                "description": "Optional: New code example"
-            },
-            "antipatterns": {
-                "type": "string",
-                "description": "Optional: New antipatterns (what NOT to do)"
-            },
-            "reference_links": {
-                "type": "string",
-                "description": "Optional: New reference links"
-            }
-        },
-        "required": ["component_id", "pattern_name"]
-    }
-)
 
 # Testing & Validation Tools
 
@@ -1151,36 +665,14 @@ ALL_TOOLS = [
     APPEND_TO_FILE_TOOL,
     LIST_DIRECTORY_TOOL,
     RUN_COMMAND_TOOL,
-    SEARCH_CODE_TOOL,
-    ANALYZE_CODE_TOOL,
     GREP_TOOL,
     GLOB_TOOL,
     GET_FILE_OUTLINE_TOOL,
     GET_SYMBOL_CONTEXT_TOOL,
-    GIT_STATUS_TOOL,
-    GIT_DIFF_TOOL,
-    GIT_COMMIT_TOOL,
     DELEGATE_TO_SUBAGENT_TOOL,
     # TODO_WRITE_TOOL removed - replaced by task_create/task_update/task_list/task_get
     # (registered dynamically via tool_executor, not listed here)
     CREATE_CHECKPOINT_TOOL,
-    # Clarity tools removed from LLM context - migrating to markdown knowledge base
-    # QUERY_COMPONENT_TOOL,
-    # QUERY_DEPENDENCIES_TOOL,
-    # QUERY_DECISIONS_TOOL,
-    # QUERY_FLOWS_TOOL,
-    # QUERY_ARCHITECTURE_SUMMARY_TOOL,
-    # SEARCH_COMPONENTS_TOOL,
-    # CLARITY_SETUP_TOOL,
-    # GET_NEXT_TASK_TOOL,
-    # UPDATE_COMPONENT_STATUS_TOOL,
-    # ADD_ARTIFACT_TOOL,
-    # GET_IMPLEMENTATION_SPEC_TOOL,
-    # ADD_METHOD_TOOL,
-    # ADD_ACCEPTANCE_CRITERION_TOOL,
-    # UPDATE_METHOD_TOOL,
-    # UPDATE_ACCEPTANCE_CRITERION_TOOL,
-    # UPDATE_IMPLEMENTATION_PATTERN_TOOL,
     RUN_TESTS_TOOL,
     DETECT_TEST_FRAMEWORK_TOOL,
     WEB_SEARCH_TOOL,
@@ -1213,18 +705,10 @@ FILE_TOOLS = [
 ]
 
 CODE_TOOLS = [
-    SEARCH_CODE_TOOL,
-    ANALYZE_CODE_TOOL,
     GREP_TOOL,
     GLOB_TOOL,
     GET_FILE_OUTLINE_TOOL,
     GET_SYMBOL_CONTEXT_TOOL,
-]
-
-GIT_TOOLS = [
-    GIT_STATUS_TOOL,
-    GIT_DIFF_TOOL,
-    GIT_COMMIT_TOOL,
 ]
 
 EXECUTION_TOOLS = [
@@ -1234,25 +718,6 @@ EXECUTION_TOOLS = [
 TESTING_TOOLS = [
     RUN_TESTS_TOOL,
     DETECT_TEST_FRAMEWORK_TOOL,
-]
-
-CLARITY_TOOLS = [
-    QUERY_COMPONENT_TOOL,
-    QUERY_DEPENDENCIES_TOOL,
-    QUERY_DECISIONS_TOOL,
-    QUERY_FLOWS_TOOL,
-    QUERY_ARCHITECTURE_SUMMARY_TOOL,
-    SEARCH_COMPONENTS_TOOL,
-    CLARITY_SETUP_TOOL,
-    GET_NEXT_TASK_TOOL,
-    UPDATE_COMPONENT_STATUS_TOOL,
-    ADD_ARTIFACT_TOOL,
-    GET_IMPLEMENTATION_SPEC_TOOL,
-    ADD_METHOD_TOOL,
-    ADD_ACCEPTANCE_CRITERION_TOOL,
-    UPDATE_METHOD_TOOL,
-    UPDATE_ACCEPTANCE_CRITERION_TOOL,
-    UPDATE_IMPLEMENTATION_PATTERN_TOOL,
 ]
 
 
@@ -1298,26 +763,12 @@ __all__ = [
     "APPEND_TO_FILE_TOOL",
     "LIST_DIRECTORY_TOOL",
     "RUN_COMMAND_TOOL",
-    "SEARCH_CODE_TOOL",
-    "ANALYZE_CODE_TOOL",
-    "GIT_STATUS_TOOL",
-    "GIT_DIFF_TOOL",
-    "GIT_COMMIT_TOOL",
     "DELEGATE_TO_SUBAGENT_TOOL",
     "CREATE_CHECKPOINT_TOOL",
-    "QUERY_COMPONENT_TOOL",
-    "QUERY_DEPENDENCIES_TOOL",
-    "QUERY_DECISIONS_TOOL",
-    "QUERY_FLOWS_TOOL",
-    "QUERY_ARCHITECTURE_SUMMARY_TOOL",
-    "SEARCH_COMPONENTS_TOOL",
-    "CLARITY_SETUP_TOOL",
     "ALL_TOOLS",
     "FILE_TOOLS",
     "CODE_TOOLS",
-    "GIT_TOOLS",
     "EXECUTION_TOOLS",
-    "CLARITY_TOOLS",
     "CLARIFY_TOOL",
     "ENTER_PLAN_MODE_TOOL",
     "EXIT_PLAN_MODE_TOOL",

@@ -252,6 +252,13 @@ class ConfigLLMScreen(ModalScreen[Optional[LLMConfigData]]):
                 id="context-window",
             )
 
+            yield Static("Thinking Budget:", classes="field-label")
+            yield Input(
+                value=str(self._config.thinking_budget or ""),
+                placeholder="e.g. 10000 (blank to disable)",
+                id="thinking-budget",
+            )
+
             # Buttons
             with Horizontal(id="btn-row"):
                 yield Button("Save", id="btn-save", variant="primary")
@@ -442,6 +449,14 @@ class ConfigLLMScreen(ModalScreen[Optional[LLMConfigData]]):
         except (ValueError, TypeError):
             context_window = 131072
 
+        thinking_budget = None
+        try:
+            tb_val = self.query_one("#thinking-budget", Input).value.strip()
+            if tb_val:
+                thinking_budget = int(tb_val)
+        except (ValueError, TypeError):
+            thinking_budget = None
+
         # Subagent overrides (always read from inputs)
         subagents: dict[str, SubAgentLLMOverride] = {}
         for sa_name in self._subagent_names:
@@ -463,6 +478,7 @@ class ConfigLLMScreen(ModalScreen[Optional[LLMConfigData]]):
             temperature=temperature,
             max_tokens=max_tokens,
             top_p=self._config.top_p,  # Keep existing top_p
+            thinking_budget=thinking_budget,
             subagents=subagents,
         )
 

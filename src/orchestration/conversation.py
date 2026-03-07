@@ -82,19 +82,14 @@ class ConversationSession:
 
         # Send to agent and capture response
         try:
-            import os
-
-            # CRITICAL: Change to agent's working directory so tools create files in the right place
-            # (Similar to how validation framework sets cwd in subprocess)
-            old_cwd = os.getcwd()
-            os.chdir(self.working_directory)
-
-            try:
-                # Execute task with agent (returns AgentResponse object)
-                agent_response_obj = self.agent.execute_task(content, stream=True)
-            finally:
-                # Restore original working directory
-                os.chdir(old_cwd)
+            # NOTE: The sync execute_task() API was removed in the CLI-mode
+            # consolidation.  This module needs an async rewrite to use
+            # agent.stream_response() before it can work again.
+            raise NotImplementedError(
+                "ConversationSession.send_message() requires async rewrite. "
+                "The sync execute_task() API has been removed. "
+                "Use agent.stream_response() (async) instead."
+            )
 
             # Extract files generated from tool execution history
             files_generated = self._extract_files_from_history()

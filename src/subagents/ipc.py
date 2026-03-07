@@ -52,6 +52,7 @@ class SubprocessInput:
     transcript_path: str = ""
     permission_mode: str = "normal"
     auto_approve_tools: List[str] = field(default_factory=list)
+    delegation_depth: int = 0
 
     def __repr__(self) -> str:
         """Redact api_key from repr to prevent leakage in tracebacks/logs."""

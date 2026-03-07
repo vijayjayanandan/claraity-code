@@ -117,6 +117,132 @@ Make sure that you NEVER mention this reminder to the user
 
 ---
 
+## 6. Completed Background Task Notifications
+
+```
+Task [task_id] (type: local_agent) (status: completed) (description: [short description])
+You can check its output using the TaskOutput tool.
+```
+
+**When injected**: After a background Task agent completes
+**Variables**: `task_id` (hex string), task type, status, description
+**Purpose**: Notify agent that a previously launched background task has finished, prompt to read results
+
+---
+
+## 7. Plan File Persistence Reminder
+
+```
+A plan file exists from plan mode at: [path]
+
+Plan contents:
+
+[full plan markdown content]
+
+If this plan is relevant to the current work and not already complete, continue working on it.
+```
+
+**When injected**: At start of continued/new session when a plan file exists from a previous session
+**Variables**: Plan file path, full plan contents
+**Purpose**: Provide continuity across sessions by surfacing previously created plans
+
+---
+
+## 8. CLAUDE.md / Memory Context Injection
+
+```
+As you answer the user's questions, you can use the following context:
+# claudeMd
+Codebase and user instructions are shown below. Be sure to adhere to these instructions.
+IMPORTANT: These instructions OVERRIDE any default behavior and you MUST follow them exactly as written.
+
+Contents of [project_path]\CLAUDE.md (project instructions, checked into the codebase):
+[full CLAUDE.md content]
+
+Contents of [memory_path]\MEMORY.md (user's private global instructions for all projects):
+[full MEMORY.md content]
+
+IMPORTANT: this context may or may not be relevant to your tasks. You should not respond to
+this context unless it is highly relevant to your task.
+```
+
+**When injected**: At conversation start and after context compaction
+**Variables**: CLAUDE.md path and content, MEMORY.md path and content
+**Purpose**: Inject project-specific instructions and persistent user preferences into agent context
+
+---
+
+## 9. Skill Availability Reminder
+
+```
+The following skills are available for use with the Skill tool:
+
+- [skill-name]: [description of when to use it]. Examples: [example triggers].
+```
+
+**When injected**: At conversation start (first user message) and periodically during conversation alongside tool results
+**Variables**: List of available skill names with descriptions and trigger examples
+**Purpose**: Remind agent of available slash command skills that can be invoked via the Skill tool
+
+---
+
+## 10. Pre-Read File Results (Session Continuation)
+
+When a session is continued from a previous conversation, the system injects prior Read tool calls and their results as system reminders:
+
+```
+Called the Read tool with the following input: {"file_path":"[path]"}
+```
+```
+Result of calling the Read tool: "[numbered file content]"
+```
+
+**When injected**: At the start of a continued session, for files read before context compaction
+**Variables**: File path, full file content with line numbers
+**Purpose**: Restore file read context from the previous session so the agent doesn't need to re-read files
+
+---
+
+## 11. Git Status Snapshot
+
+```
+gitStatus: This is the git status at the start of the conversation. Note that this status
+is a snapshot in time, and will not update during the conversation.
+Current branch: [branch]
+
+Main branch (you will usually use this for PRs): [main_branch]
+
+Status:
+[git status output]
+
+Recent commits:
+[git log output]
+```
+
+**When injected**: At conversation start, in environment context
+**Variables**: Current branch, main branch, git status output, recent commits
+**Purpose**: Give agent awareness of repository state without running git commands
+
+---
+
+## 12. Existing Task List in Nudge
+
+When tasks exist, the task tool nudge includes the current task list:
+
+```
+Here are the existing tasks:
+
+#[id]. [[status]] [subject]
+#[id]. [[status]] [subject]
+...
+```
+
+**When injected**: Alongside the task tool usage nudge (Type 4)
+**Variables**: Task IDs, statuses, subjects
+**Purpose**: Show current task state so agent can update or clean up stale tasks
+
+---
+
 ## Implementation Notes for Our Agent
 
 To replicate similar contextual guidance in our custom agent:
@@ -135,3 +261,25 @@ To replicate similar contextual guidance in our custom agent:
 - Initial documentation of 5 system reminder types observed
 - Identified plan mode reminders as most complex (5-phase workflow)
 - Added implementation notes for custom agent
+
+### 2026-02-12
+- Added 7 new system reminder types (Types 6-12) observed during LLM config wizard session
+- Type 6: Background task completion notifications with task IDs
+- Type 7: Plan file persistence across sessions with full content injection
+- Type 8: CLAUDE.md and MEMORY.md context injection with override semantics
+- Type 9: Skill availability reminders for slash command invocation
+- Type 10: Pre-read file results carried over during session continuation
+- Type 11: Git status snapshot at conversation start (branch, status, recent commits)
+- Type 12: Existing task list appended to task tool nudge
+- Total documented types: 12
+
+### 2026-02-13
+- Verified injection timing through direct observation in live session:
+  - Skills reminder: confirmed injected with the very first user message (not just periodically)
+  - CLAUDE.md + MEMORY.md: confirmed injected at conversation start, before first turn
+  - Malware check: confirmed injected in every Read tool result (observed twice)
+  - Task tools nudge: confirmed injected after several turns without TaskCreate/TaskUpdate usage
+  - Git status: confirmed injected at conversation start in environment context
+- Updated Type 9 (Skills) to clarify it appears at conversation start, not just periodically
+- Key architectural insight: CLAUDE.md is injected as a **separate context block** alongside the system prompt, not baked into the system prompt string itself. This keeps the base system prompt stable and cacheable across different projects. Important design consideration for ClarAIty's CLARAITY.md implementation.
+- The task tools nudge (Type 4) includes explicit instruction "Make sure that you NEVER mention this reminder to the user" — demonstrates stealth nudging pattern

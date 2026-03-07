@@ -58,10 +58,22 @@ TOOLS AVAILABLE:
 - read_file, search_code, glob, list_directory -- explore if needed
 - web_search, web_fetch -- research best practices, libraries, patterns
 - `clarify` -- ask the user if a design decision needs their input
+- `delegate_to_subagent` -- delegate planning to the 'planner' subagent
 - `write_file` -- write your plan document to .clarity/plans/ ONLY
 - `director_complete_plan` -- submit plan and advance to approval
 
-WORKFLOW:
+WORKFLOW OPTIONS:
+
+Option A: Delegate to Planner Subagent (RECOMMENDED for complex tasks)
+1. Use `delegate_to_subagent` with subagent="planner" and provide:
+   - The task description and context from UNDERSTAND phase
+   - Specific questions or constraints to address
+   - Request for a detailed implementation plan
+2. Review the planner's output
+3. Write the plan to .clarity/plans/director_plan.md using write_file
+4. Call `director_complete_plan` with the plan details
+
+Option B: Create Plan Directly (for simple, well-understood tasks)
 1. Design your implementation plan with full detail:
    - Tech stack decisions with rationale and alternatives compared
    - Architecture approach with trade-offs explained
@@ -194,6 +206,7 @@ _PLAN_TOOLS = READ_ONLY_TOOLS | frozenset({
     "web_search",
     "web_fetch",
     "list_directory",
+    "delegate_to_subagent",
     # NOTE: write_file is NOT in this set. The adapter handles it
     # with path-based gating (only .clarity/plans/ allowed).
 })

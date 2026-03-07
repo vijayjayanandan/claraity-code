@@ -67,6 +67,7 @@ class StreamingState:
     in_thinking: bool = False
     thinking_content: str = ""
     thinking_buffer: str = ""       # Buffer for detecting thinking tags
+    thinking_signature: str = ""    # Anthropic thinking block signature
 
     # Reasoning content (Kimi K2.5 etc.) - must be echoed back on iteration 2+
     reasoning_content: str = ""
@@ -97,6 +98,7 @@ class StreamingState:
         self.in_thinking = False
         self.thinking_content = ""
         self.thinking_buffer = ""
+        self.thinking_signature = ""
         self.reasoning_content = ""
         self.tool_calls = []
         self.tool_call_accumulators = {}

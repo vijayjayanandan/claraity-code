@@ -68,6 +68,13 @@ class TestPhasePromptsContent:
         prompt = PHASE_PROMPTS[DirectorPhase.PLAN].lower()
         assert "slice" in prompt
 
+    def test_plan_prompt_mentions_planner_subagent(self):
+        """PLAN prompt should mention the option to delegate to planner."""
+        from src.director.prompts import PHASE_PROMPTS
+        prompt = PHASE_PROMPTS[DirectorPhase.PLAN].lower()
+        assert "planner" in prompt
+        assert "delegate" in prompt
+
     def test_execute_prompt_mentions_checkpoint_tool(self):
         from src.director.prompts import PHASE_PROMPTS
         prompt = PHASE_PROMPTS[DirectorPhase.EXECUTE]
@@ -221,6 +228,11 @@ class TestPhaseAllowedTools:
     def test_plan_allows_director_checkpoint(self):
         from src.director.prompts import PHASE_ALLOWED_TOOLS
         assert "director_complete_plan" in PHASE_ALLOWED_TOOLS[DirectorPhase.PLAN]
+
+    def test_plan_allows_delegation(self):
+        """PLAN phase should allow delegating to planner subagent."""
+        from src.director.prompts import PHASE_ALLOWED_TOOLS
+        assert "delegate_to_subagent" in PHASE_ALLOWED_TOOLS[DirectorPhase.PLAN]
 
     def test_execute_allows_write_file(self):
         from src.director.prompts import PHASE_ALLOWED_TOOLS
