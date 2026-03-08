@@ -10,7 +10,7 @@ tree-sitter-languages>=1.10.2
 
 # LSP Integration (Code Intelligence)
 multilspy>=0.1.0  # Microsoft's LSP client library
-jedi-language-server==0.41.3  # Python LSP server (required by multilspy)
+jedi-language-server==0.46.0  # Python LSP server (required by multilspy)
 
 # NOTE: On Windows, jedi-language-server.exe must be in PATH
 # Location: C:\Users\<username>\AppData\Roaming\Python\Python3X\Scripts
