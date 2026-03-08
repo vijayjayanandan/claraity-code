@@ -165,6 +165,7 @@ class StdioTransport(McpTransport):
         self._connected = False
         self._request_id = 0
         self._send_lock: Optional[asyncio.Lock] = None  # created at connect time
+        self._stderr_task: Optional[asyncio.Task] = None  # drains stderr to prevent deadlock
 
     async def connect(self, config: McpServerConfig, auth_headers: Dict[str, str]) -> None:
         import os
@@ -175,6 +176,8 @@ class StdioTransport(McpTransport):
 
         # Pass auth via environment (not command-line args which appear in `ps`)
         env = os.environ.copy()
+        if config.extra_env:
+            env.update(config.extra_env)
         if auth_headers:
             env["MCP_AUTH_HEADERS"] = json.dumps(auth_headers)
 
@@ -201,7 +204,24 @@ class StdioTransport(McpTransport):
 
         self._send_lock = asyncio.Lock()
         self._connected = True
+
+        # Drain stderr in background to prevent pipe buffer deadlock.
+        # MCP servers may write logs/progress to stderr continuously.
+        # If the 64KB OS pipe buffer fills, the subprocess blocks on
+        # stderr write and can no longer respond on stdout.
+        self._stderr_task = asyncio.ensure_future(self._drain_stderr())
+
         logger.info("stdio_transport_connected", command=config.command)
+
+    async def _drain_stderr(self) -> None:
+        """Read and discard stderr to prevent pipe buffer deadlock."""
+        try:
+            while self._process and self._process.stderr:
+                chunk = await self._process.stderr.read(4096)
+                if not chunk:
+                    break
+        except (asyncio.CancelledError, Exception):
+            pass
 
     async def send(self, method: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         if not self._process or not self._process.stdin or not self._process.stdout:
@@ -255,6 +275,11 @@ class StdioTransport(McpTransport):
             await self._process.stdin.drain()
 
     async def disconnect(self) -> None:
+        # Cancel stderr drain task first
+        if self._stderr_task and not self._stderr_task.done():
+            self._stderr_task.cancel()
+            self._stderr_task = None
+
         if self._process:
             # Close pipes before terminating to avoid ResourceWarning
             # on Windows (_ProactorBasePipeTransport.__del__)
@@ -286,6 +311,10 @@ class StdioTransport(McpTransport):
         - _ProactorBasePipeTransport._closing = True, _sock = None -> skips
           both close() and the ResourceWarning in __del__
         """
+        if self._stderr_task and not self._stderr_task.done():
+            self._stderr_task.cancel()
+            self._stderr_task = None
+
         if self._process:
             # -- Neutralize asyncio transport internals --
             # Access the underlying BaseSubprocessTransport via the

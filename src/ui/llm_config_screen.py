@@ -43,6 +43,7 @@ logger = get_logger("ui.llm_config_screen")
 # Backend choices for the Select widget
 BACKEND_CHOICES = [
     ("openai", "openai"),
+    ("anthropic", "anthropic"),
     ("ollama", "ollama"),
 ]
 
@@ -152,7 +153,13 @@ class ConfigLLMScreen(ModalScreen[Optional[LLMConfigData]]):
         self._fetched_models: List[str] = []
         # Hardcoded fallback ensures subagents always show
         self._subagent_names: List[str] = subagent_names or [
-            "code-reviewer", "test-writer", "doc-writer",
+            "code-reviewer",
+            "test-writer",
+            "doc-writer",
+            "code-writer",
+            "explore",
+            "planner",
+            "general-purpose",
         ]
 
     def compose(self) -> ComposeResult:
@@ -245,6 +252,13 @@ class ConfigLLMScreen(ModalScreen[Optional[LLMConfigData]]):
                 id="context-window",
             )
 
+            yield Static("Thinking Budget:", classes="field-label")
+            yield Input(
+                value=str(self._config.thinking_budget or ""),
+                placeholder="e.g. 10000 (blank to disable)",
+                id="thinking-budget",
+            )
+
             # Buttons
             with Horizontal(id="btn-row"):
                 yield Button("Save", id="btn-save", variant="primary")
@@ -283,6 +297,8 @@ class ConfigLLMScreen(ModalScreen[Optional[LLMConfigData]]):
             if current in known_defaults:
                 if backend == "ollama":
                     url_input.value = "http://localhost:11434"
+                elif backend == "anthropic":
+                    url_input.value = ""  # SDK defaults to api.anthropic.com
                 else:
                     url_input.value = "http://localhost:8000/v1"
 
@@ -321,7 +337,7 @@ class ConfigLLMScreen(ModalScreen[Optional[LLMConfigData]]):
         base_url = self.query_one("#base-url", Input).value.strip()
         api_key = self.query_one("#api-key", Input).value.strip()
 
-        if not base_url:
+        if not base_url and backend not in ("anthropic",):
             status.update("[red]Set API URL first[/red]")
             return
 
@@ -365,7 +381,7 @@ class ConfigLLMScreen(ModalScreen[Optional[LLMConfigData]]):
         Reuses existing backend classes for the actual API call.
 
         Args:
-            backend: Backend type ("openai" or "ollama")
+            backend: Backend type ("openai", "anthropic", or "ollama")
             base_url: API endpoint URL
             api_key: Actual API key (not an env var name)
         """
@@ -385,6 +401,10 @@ class ConfigLLMScreen(ModalScreen[Optional[LLMConfigData]]):
             )
             ollama = OllamaBackend(config)
             return ollama.list_models()
+        elif backend == "anthropic":
+            from src.llm.anthropic_backend import KNOWN_CLAUDE_MODELS
+
+            return list(KNOWN_CLAUDE_MODELS)
         else:
             from src.llm.openai_backend import OpenAIBackend
 
@@ -429,6 +449,14 @@ class ConfigLLMScreen(ModalScreen[Optional[LLMConfigData]]):
         except (ValueError, TypeError):
             context_window = 131072
 
+        thinking_budget = None
+        try:
+            tb_val = self.query_one("#thinking-budget", Input).value.strip()
+            if tb_val:
+                thinking_budget = int(tb_val)
+        except (ValueError, TypeError):
+            thinking_budget = None
+
         # Subagent overrides (always read from inputs)
         subagents: dict[str, SubAgentLLMOverride] = {}
         for sa_name in self._subagent_names:
@@ -450,6 +478,7 @@ class ConfigLLMScreen(ModalScreen[Optional[LLMConfigData]]):
             temperature=temperature,
             max_tokens=max_tokens,
             top_p=self._config.top_p,  # Keep existing top_p
+            thinking_budget=thinking_budget,
             subagents=subagents,
         )
 

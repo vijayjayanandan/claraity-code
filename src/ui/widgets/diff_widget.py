@@ -60,7 +60,7 @@ class DiffWidget(Static):
         height: auto;
         margin: 0;
         padding: 0;
-        background: #1a1a1a;
+        background: #000000;
     }
     """
 
@@ -71,6 +71,7 @@ class DiffWidget(Static):
         old_content: Optional[str] = None,
         max_lines: int = 30,
         context_lines: int = 3,
+        start_line: int = 1,
         **kwargs
     ):
         """
@@ -82,6 +83,7 @@ class DiffWidget(Static):
             old_content: Original content (None for new files)
             max_lines: Maximum lines to display before truncation
             context_lines: Number of context lines around changes
+            start_line: Line offset for snippet diffs (1-based)
             **kwargs: Additional arguments for Static
         """
         super().__init__(**kwargs)
@@ -90,6 +92,7 @@ class DiffWidget(Static):
         self.old_content = old_content
         self.max_lines = max_lines
         self.context_lines = context_lines
+        self.start_line = start_line
 
         # Pre-compute diff lines for rendering
         self._diff_lines: List[DiffLine] = []
@@ -140,13 +143,15 @@ class DiffWidget(Static):
         new_num = 0
 
         # Parse hunk headers to get starting line numbers
+        # Apply start_line offset for snippet diffs (e.g. edit_file)
+        offset = self.start_line - 1
         for line in diff:
             if line.startswith('@@'):
                 # Parse @@ -start,count +start,count @@
                 match = re.match(r'@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@', line)
                 if match:
-                    old_num = int(match.group(1)) - 1  # -1 because we increment before use
-                    new_num = int(match.group(2)) - 1
+                    old_num = int(match.group(1)) - 1 + offset
+                    new_num = int(match.group(2)) - 1 + offset
                 continue
             elif line.startswith('---') or line.startswith('+++'):
                 continue
@@ -199,14 +204,12 @@ class DiffWidget(Static):
         if self.old_content is None:
             # New file - green accent
             result.append("  ", style="")
-            result.append(" + ", style="bold #1e1e1e on #73c991")
-            result.append(f" {filename} ", style="bold #73c991")
+            result.append(f"{filename} ", style="bold #73c991")
             result.append("(new file)\n", style="dim #6e7681")
         else:
             # Edit file - yellow/orange accent
             result.append("  ", style="")
-            result.append(" ~ ", style="bold #1e1e1e on #cca700")
-            result.append(f" {filename} ", style="bold #cca700")
+            result.append(f"{filename} ", style="bold #cca700")
             result.append("(modified)\n", style="dim #6e7681")
 
         # Statistics header - subtle styling

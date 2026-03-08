@@ -101,8 +101,10 @@ class FileReferenceParser:
     # Regex pattern for matching file references
     # Matches: @filename.ext, @path/to/file.ext, @./relative.py, @/absolute/path.py
     # Also supports line ranges: @file.py:10-20, @file.py:50
+    # On Windows, supports drive letters: @C:\path\to\file.py
     FILE_REFERENCE_PATTERN = re.compile(
-        r'@([A-Za-z0-9_./\-]+(?:\.[A-Za-z0-9]+)?(?::\d+(?:-\d+)?)?)'
+        r'@([A-Za-z]:[\\\/][A-Za-z0-9_.\\\/\-]+(?:\.[A-Za-z0-9]+)?(?::\d+(?:-\d+)?)?'
+        r'|[A-Za-z0-9_./\-]+(?:\.[A-Za-z0-9]+)?(?::\d+(?:-\d+)?)?)'
     )
 
     def __init__(self, base_dir: Optional[Path] = None, max_file_size: int = 100_000):
@@ -135,7 +137,10 @@ class FileReferenceParser:
             line_start = None
             line_end = None
 
-            if ':' in file_spec:
+            # Check for line range suffix - but skip Windows drive letter colons
+            # Windows paths like C:\path\file.py have a colon after drive letter
+            # We only treat colons as line range separators when followed by digits
+            if re.search(r':(\d+(?:-\d+)?)$', file_spec):
                 file_path, line_spec = file_spec.rsplit(':', 1)
                 try:
                     if '-' in line_spec:

@@ -87,7 +87,7 @@ class TranscriptLogger:
     Thread-safe, handles truncation and redaction automatically.
 
     Usage:
-        logger = TranscriptLogger(session_id="abc123", base_dir=Path(".opencodeagent"))
+        logger = TranscriptLogger(session_id="abc123", base_dir=Path(".clarity"))
 
         # Log events
         logger.log_user_message("Hello, help me fix this bug")
@@ -118,6 +118,12 @@ class TranscriptLogger:
             max_content_chars: Max chars before truncation (default 20000)
             redact_secrets: Whether to redact detected secrets (default True)
         """
+        import re as _re
+
+        # Validate session_id to prevent path traversal
+        if not _re.match(r'^[0-9a-f\-]{1,36}$', session_id):
+            raise ValueError(f"Invalid session ID format: {session_id!r}")
+
         self.session_id = session_id
         self.base_dir = Path(base_dir)
         self.max_content_chars = max_content_chars
@@ -127,7 +133,7 @@ class TranscriptLogger:
         self.transcript_dir = self.base_dir / "transcripts"
         self.transcript_dir.mkdir(parents=True, exist_ok=True)
 
-        # Transcript file path
+        # Transcript file path (session_id validated above)
         self.transcript_path = self.transcript_dir / f"{session_id}.jsonl"
 
         # Sequence counter and lock for thread safety

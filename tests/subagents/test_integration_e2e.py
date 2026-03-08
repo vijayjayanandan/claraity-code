@@ -11,7 +11,7 @@ from src.llm import LLMBackendType, LLMResponse
 @pytest.fixture
 def temp_agent_configs(tmp_path):
     """Create temporary agent configuration files."""
-    agents_dir = tmp_path / ".claude" / "agents"
+    agents_dir = tmp_path / ".clarity" / "agents"
     agents_dir.mkdir(parents=True)
 
     # Code reviewer agent
@@ -97,7 +97,8 @@ class TestEndToEndWorkflow:
         # Discover subagents
         configs = manager.discover_subagents()
 
-        assert len(configs) == 2
+        # Built-in subagents (code-reviewer, test-writer, doc-writer) are always loaded
+        assert len(configs) >= 2
         assert "code-reviewer" in configs
         assert "test-writer" in configs
 
@@ -209,9 +210,9 @@ class TestEndToEndWorkflow:
             working_directory=temp_agent_configs
         )
 
-        # Initial discovery
+        # Initial discovery (includes built-in subagents)
         configs1 = manager.discover_subagents()
-        assert len(configs1) == 2
+        assert len(configs1) >= 2
 
         # Create a cached instance
         with patch('src.subagents.manager.SubAgent') as MockSubAgent:
@@ -224,7 +225,7 @@ class TestEndToEndWorkflow:
             # Reload - should clear cache
             configs2 = manager.reload_subagents()
 
-            assert len(configs2) == 2
+            assert len(configs2) >= 2
             assert len(manager.subagent_instances) == 0  # Cache cleared
 
 
@@ -364,7 +365,7 @@ class TestStatistics:
             stats = manager.get_statistics()
 
             assert stats['total_delegations'] == 3
-            assert stats['subagents_available'] == 2
+            assert stats['subagents_available'] >= 2
             assert stats['subagents_used'] == 2
             assert stats['delegation_by_subagent']['code-reviewer'] == 2
             assert stats['delegation_by_subagent']['test-writer'] == 1

@@ -156,22 +156,38 @@ class TestLoadLLMConfig:
         config = load_llm_config(str(path))
         assert config.model == ""
 
-    @patch("src.llm.credential_store.save_api_key", return_value=True)
     @patch("src.llm.credential_store.load_api_key", return_value="")
-    def test_api_key_migrated_from_yaml_to_keyring(self, mock_load, mock_save, config_dir):
+    def test_api_key_migrated_from_yaml_to_keyring(self, mock_load, config_dir):
         """api_key in config.yaml should be migrated to keyring and removed from YAML."""
+        mock_kr = MagicMock()
         path = config_dir / "config.yaml"
         path.write_text(
             "llm:\n  api_key: test-secret-key-123\n  model: gpt-4o\n",
             encoding="utf-8",
         )
-        load_llm_config(str(path))
-        # Should have called save_api_key to migrate
-        mock_save.assert_called_once_with("test-secret-key-123")
+        with patch("src.llm.credential_store._get_keyring", return_value=mock_kr):
+            load_llm_config(str(path))
+        # Should have called keyring to migrate
+        mock_kr.set_password.assert_called_once_with("claraity", "api_key", "test-secret-key-123")
         # api_key should be removed from the YAML file
         import yaml
         reloaded_yaml = yaml.safe_load(path.read_text(encoding="utf-8"))
         assert "api_key" not in reloaded_yaml.get("llm", {})
+
+    @patch("src.llm.credential_store.load_api_key", return_value="")
+    def test_api_key_stays_in_yaml_without_keyring(self, mock_load, config_dir):
+        """api_key should stay in config.yaml when keyring is unavailable."""
+        path = config_dir / "config.yaml"
+        path.write_text(
+            "llm:\n  api_key: test-secret-key-123\n  model: gpt-4o\n",
+            encoding="utf-8",
+        )
+        with patch("src.llm.credential_store._get_keyring", return_value=None):
+            load_llm_config(str(path))
+        # api_key should remain in the YAML file
+        import yaml
+        reloaded_yaml = yaml.safe_load(path.read_text(encoding="utf-8"))
+        assert reloaded_yaml["llm"]["api_key"] == "test-secret-key-123"
 
     @patch("src.llm.credential_store.save_api_key", return_value=True)
     @patch("src.llm.credential_store.load_api_key", return_value="my-secret-key")

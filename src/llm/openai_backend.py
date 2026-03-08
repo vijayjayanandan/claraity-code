@@ -48,7 +48,9 @@ from .base import (
 )
 # Use Session Model ToolCall as the canonical type
 from src.session.models.message import ToolCall, ToolCallFunction
+from src.session.models.base import generate_tool_call_id
 from .failure_handler import LLMFailureHandler
+from .cache_tracker import CacheTracker
 
 
 class OpenAIBackend(LLMBackend):
@@ -121,6 +123,118 @@ class OpenAIBackend(LLMBackend):
         # Initialize failure handler for robust error handling
         self.failure_handler = LLMFailureHandler(logger_instance=logger)
 
+        # Prompt cache metrics tracker (accumulates across session)
+        self.cache_tracker = CacheTracker()
+
+    def log_cache_summary(self) -> None:
+        """Log the session-level cache summary to the application log."""
+        summary = self.cache_tracker.summary()
+        if summary["total_calls"] > 0:
+            logger.info(self.cache_tracker.format_summary())
+
+    @staticmethod
+    def _extract_cached_tokens(usage) -> Optional[int]:
+        """Extract cached prompt tokens from usage object (returns None if unavailable)."""
+        if not usage:
+            return None
+        details = getattr(usage, 'prompt_tokens_details', None)
+        if details:
+            val = getattr(details, 'cached_tokens', None)
+            if val is not None and val > 0:
+                return val
+        return None
+
+    def _is_anthropic_model(self) -> bool:
+        """Check if the configured model is an Anthropic (Claude) model."""
+        return "claude" in self.config.model_name.lower()
+
+    @staticmethod
+    def _sanitize_temperature(temperature: float) -> float:
+        """Coerce temperature=1.0 to int(1) for API compatibility.
+
+        Some providers (Kimi K2.5, reasoning models) require temperature=1
+        exactly and reject 1.0 in the JSON payload. Python float 1.0
+        serializes as ``1.0`` while int 1 serializes as ``1``.
+        """
+        if temperature == 1.0:
+            return 1  # int serializes as JSON ``1``
+        return temperature
+
+    @staticmethod
+    def _add_cache_control_to_message(message: Dict[str, Any]) -> Dict[str, Any]:
+        """Add cache_control breakpoint to a message's content.
+
+        For role="tool" messages: adds cache_control as a top-level field on
+        the message dict, keeping content as a plain string. LiteLLM's
+        convert_to_anthropic_tool_result() reads message["cache_control"]
+        and propagates it onto the Anthropic tool_result content block.
+        Converting content to a block array breaks the litellm translation
+        and causes Vertex AI to reject the request.
+
+        For other roles: converts plain string content to content blocks
+        format with cache_control embedded, which Anthropic requires for
+        prompt caching. If content is already in blocks format, adds
+        cache_control to the last block.
+        """
+        msg = message.copy()
+        content = msg.get("content")
+
+        if content is None:
+            # Tool-call-only assistant messages have no content
+            return msg
+
+        # Tool result messages: cache_control goes as a sibling field, not
+        # inside content blocks. See litellm convert_to_anthropic_tool_result().
+        if msg.get("role") == "tool":
+            msg["cache_control"] = {"type": "ephemeral"}
+            return msg
+
+        if isinstance(content, str):
+            msg["content"] = [
+                {
+                    "type": "text",
+                    "text": content,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
+        elif isinstance(content, list) and len(content) > 0:
+            last_block = content[-1].copy()
+            last_block["cache_control"] = {"type": "ephemeral"}
+            msg["content"] = content[:-1] + [last_block]
+
+        return msg
+
+    def _apply_cache_control(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Apply Anthropic prompt caching breakpoints to messages.
+
+        BP1: First system message (static across session).
+             Covers tools + system in the cache prefix (order: tools -> system -> messages).
+        BP2: Last message with content (caches entire conversation incrementally).
+             Matches Anthropic's recommended pattern: "mark the final block of the
+             final message with cache_control so the conversation can be incrementally
+             cached."
+
+        For non-Anthropic models, returns messages unchanged.
+        """
+        if not self._is_anthropic_model() or len(messages) < 2:
+            return messages
+
+        result = [m for m in messages]
+
+        # BP1: First system message
+        if result[0].get("role") == "system":
+            result[0] = self._add_cache_control_to_message(result[0])
+
+        # BP2: Walk backwards from last message to find one with content
+        # (skips tool-call-only assistant messages with content=None)
+        if len(result) >= 2:
+            for i in range(len(result) - 1, 0, -1):
+                if result[i].get("content") is not None:
+                    result[i] = self._add_cache_control_to_message(result[i])
+                    break
+
+        return result
+
     def generate(
         self,
         messages: List[Dict[str, str]],
@@ -141,8 +255,8 @@ class OpenAIBackend(LLMBackend):
         # Merge config parameters with kwargs
         params = {
             "model": self.config.model_name,
-            "messages": messages,
-            "temperature": kwargs.get("temperature", self.config.temperature),
+            "messages": self._apply_cache_control(messages),
+            "temperature": self._sanitize_temperature(kwargs.get("temperature", self.config.temperature)),
             "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
             "top_p": kwargs.get("top_p", self.config.top_p),
             "stream": False,
@@ -167,6 +281,11 @@ class OpenAIBackend(LLMBackend):
             if content:
                 self.failure_handler.validate_response(content)
 
+            # Track cache metrics
+            self.cache_tracker.record(response.usage)
+            cached = self._extract_cached_tokens(response.usage)
+            logger.debug(f"[CACHE] prompt={response.usage.prompt_tokens if response.usage else 0} cached={cached or 0}")
+
             # Build LLMResponse
             return LLMResponse(
                 content=content,
@@ -175,6 +294,7 @@ class OpenAIBackend(LLMBackend):
                 prompt_tokens=response.usage.prompt_tokens if response.usage else None,
                 completion_tokens=response.usage.completion_tokens if response.usage else None,
                 total_tokens=response.usage.total_tokens if response.usage else None,
+                cached_tokens=cached,
                 raw_response={
                     "id": response.id,
                     "created": response.created,
@@ -204,17 +324,27 @@ class OpenAIBackend(LLMBackend):
         # Merge config parameters with kwargs
         params = {
             "model": self.config.model_name,
-            "messages": messages,
-            "temperature": kwargs.get("temperature", self.config.temperature),
+            "messages": self._apply_cache_control(messages),
+            "temperature": self._sanitize_temperature(kwargs.get("temperature", self.config.temperature)),
             "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
             "top_p": kwargs.get("top_p", self.config.top_p),
             "stream": True,
         }
 
+        # Request usage in stream for cache tracking
+        if self.config.stream_usage:
+            params["stream_options"] = {"include_usage": True}
+
         try:
             stream = self.client.chat.completions.create(**params)
 
             for chunk in stream:
+                # Capture usage from any chunk that has it
+                if hasattr(chunk, 'usage') and chunk.usage:
+                    cached_tokens = self._extract_cached_tokens(chunk.usage)
+                    self.cache_tracker.record(chunk.usage)
+                    logger.debug(f"[CACHE] prompt={chunk.usage.prompt_tokens} cached={cached_tokens or 0}")
+
                 if chunk.choices and len(chunk.choices) > 0:
                     delta = chunk.choices[0].delta
                     content = delta.content if delta.content else ""
@@ -224,7 +354,7 @@ class OpenAIBackend(LLMBackend):
                         content=content,
                         done=finish_reason is not None,
                         model=chunk.model,
-                        finish_reason=finish_reason
+                        finish_reason=finish_reason,
                     )
 
         except Exception as e:
@@ -335,8 +465,8 @@ class OpenAIBackend(LLMBackend):
         # Build parameters for API call
         params = {
             "model": self.config.model_name,
-            "messages": messages,
-            "temperature": kwargs.get("temperature", self.config.temperature),
+            "messages": self._apply_cache_control(messages),
+            "temperature": self._sanitize_temperature(kwargs.get("temperature", self.config.temperature)),
             "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
             "top_p": kwargs.get("top_p", self.config.top_p),
             "tools": tools_json,
@@ -364,6 +494,10 @@ class OpenAIBackend(LLMBackend):
             if content:
                 self.failure_handler.validate_response(content)
 
+            # Track cache metrics
+            self.cache_tracker.record(response.usage)
+            logger.debug(f"[CACHE] prompt={response.usage.prompt_tokens if response.usage else 0} cached={self._extract_cached_tokens(response.usage) or 0}")
+
             # Detect truncation
             truncation_info = {"truncated": False}
             if finish_reason == "length":
@@ -389,12 +523,12 @@ class OpenAIBackend(LLMBackend):
                     args_json = json.dumps(parsed_args) if isinstance(parsed_args, dict) else str(parsed_args)
 
                     tool_calls.append(
-                        ToolCall(
-                            id=tc.id,
+                        ToolCall.from_provider(
+                            provider_id=tc.id,
                             function=ToolCallFunction(
                                 name=tc.function.name,
                                 arguments=args_json
-                            )
+                            ),
                         )
                     )
 
@@ -406,6 +540,7 @@ class OpenAIBackend(LLMBackend):
                 prompt_tokens=response.usage.prompt_tokens if response.usage else None,
                 completion_tokens=response.usage.completion_tokens if response.usage else None,
                 total_tokens=response.usage.total_tokens if response.usage else None,
+                cached_tokens=self._extract_cached_tokens(response.usage),
                 tool_calls=tool_calls,
                 raw_response={
                     "id": response.id,
@@ -476,8 +611,8 @@ class OpenAIBackend(LLMBackend):
         # Build parameters for API call
         params = {
             "model": self.config.model_name,
-            "messages": messages,
-            "temperature": kwargs.get("temperature", self.config.temperature),
+            "messages": self._apply_cache_control(messages),
+            "temperature": self._sanitize_temperature(kwargs.get("temperature", self.config.temperature)),
             "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
             "top_p": kwargs.get("top_p", self.config.top_p),
             "tools": tools_json,
@@ -502,6 +637,7 @@ class OpenAIBackend(LLMBackend):
             prompt_tokens = None
             completion_tokens = None
             total_tokens = None
+            cached_tokens = None
 
             try:
                 for chunk in stream:
@@ -510,6 +646,9 @@ class OpenAIBackend(LLMBackend):
                         prompt_tokens = chunk.usage.prompt_tokens
                         completion_tokens = chunk.usage.completion_tokens
                         total_tokens = chunk.usage.total_tokens
+                        cached_tokens = self._extract_cached_tokens(chunk.usage)
+                        self.cache_tracker.record(chunk.usage)
+                        logger.debug(f"[CACHE] prompt={prompt_tokens} cached={cached_tokens or 0}")
 
                     # Skip chunks with no choices (e.g., usage-only chunks)
                     if not chunk.choices or len(chunk.choices) == 0:
@@ -529,6 +668,25 @@ class OpenAIBackend(LLMBackend):
                                 finish_reason=None
                             ),
                             None  # No tool calls yet during streaming
+                        )
+
+                    # Yield reasoning content chunks (for Kimi K2.5 and other reasoning models)
+                    # Handle both direct Moonshot API (reasoning_content) and LiteLLM proxy (reasoning)
+                    reasoning_text = None
+                    if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
+                        reasoning_text = delta.reasoning_content
+                    elif hasattr(delta, 'reasoning') and delta.reasoning:
+                        reasoning_text = delta.reasoning
+                    
+                    if reasoning_text:
+                        yield (
+                            StreamChunk(
+                                content=reasoning_text,
+                                done=False,
+                                model=model_name,
+                                finish_reason=None
+                            ),
+                            None
                         )
 
                     # Accumulate tool call deltas
@@ -561,7 +719,7 @@ class OpenAIBackend(LLMBackend):
                 if stream is not None and hasattr(stream, 'close'):
                     stream.close()
 
-            # Stream complete - parse accumulated tool calls
+            # Stream complete - parse accumulated tool calls (sync)
             tool_calls = None
             if tool_calls_accumulator:
                 tool_calls = []
@@ -577,12 +735,12 @@ class OpenAIBackend(LLMBackend):
                     args_json = json.dumps(parsed_args) if isinstance(parsed_args, dict) else str(parsed_args)
 
                     tool_calls.append(
-                        ToolCall(
-                            id=tc_data["id"],
+                        ToolCall.from_provider(
+                            provider_id=tc_data["id"],
                             function=ToolCallFunction(
                                 name=tc_data["name"],
                                 arguments=args_json
-                            )
+                            ),
                         )
                     )
 
@@ -596,6 +754,7 @@ class OpenAIBackend(LLMBackend):
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
                     total_tokens=total_tokens,
+                    cached_tokens=cached_tokens,
                 ),
                 tool_calls
             )
@@ -697,8 +856,8 @@ class OpenAIBackend(LLMBackend):
         # Build parameters for API call
         params = {
             "model": self.config.model_name,
-            "messages": messages,
-            "temperature": kwargs.get("temperature", self.config.temperature),
+            "messages": self._apply_cache_control(messages),
+            "temperature": self._sanitize_temperature(kwargs.get("temperature", self.config.temperature)),
             "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
             "top_p": kwargs.get("top_p", self.config.top_p),
             "tools": tools_json,
@@ -724,6 +883,7 @@ class OpenAIBackend(LLMBackend):
             prompt_tokens = None
             completion_tokens = None
             total_tokens = None
+            cached_tokens = None
 
             try:
                 async for chunk in stream:
@@ -732,6 +892,9 @@ class OpenAIBackend(LLMBackend):
                         prompt_tokens = chunk.usage.prompt_tokens
                         completion_tokens = chunk.usage.completion_tokens
                         total_tokens = chunk.usage.total_tokens
+                        cached_tokens = self._extract_cached_tokens(chunk.usage)
+                        self.cache_tracker.record(chunk.usage)
+                        logger.debug(f"[CACHE] prompt={prompt_tokens} cached={cached_tokens or 0}")
 
                     # Skip chunks with no choices (e.g., usage-only chunks)
                     if not chunk.choices or len(chunk.choices) == 0:
@@ -751,6 +914,25 @@ class OpenAIBackend(LLMBackend):
                                 finish_reason=None
                             ),
                             None  # No tool calls yet during streaming
+                        )
+
+                    # Yield reasoning content chunks (for Kimi K2.5 and other reasoning models)
+                    # Handle both direct Moonshot API (reasoning_content) and LiteLLM proxy (reasoning)
+                    reasoning_text = None
+                    if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
+                        reasoning_text = delta.reasoning_content
+                    elif hasattr(delta, 'reasoning') and delta.reasoning:
+                        reasoning_text = delta.reasoning
+                    
+                    if reasoning_text:
+                        yield (
+                            StreamChunk(
+                                content=reasoning_text,
+                                done=False,
+                                model=model_name,
+                                finish_reason=None
+                            ),
+                            None
                         )
 
                     # Accumulate tool call deltas
@@ -783,7 +965,7 @@ class OpenAIBackend(LLMBackend):
                 if stream is not None and hasattr(stream, 'close'):
                     await stream.close()
 
-            # Stream complete - parse accumulated tool calls
+            # Stream complete - parse accumulated tool calls (async)
             tool_calls = None
             if tool_calls_accumulator:
                 tool_calls = []
@@ -799,12 +981,12 @@ class OpenAIBackend(LLMBackend):
                     args_json = json.dumps(parsed_args) if isinstance(parsed_args, dict) else str(parsed_args)
 
                     tool_calls.append(
-                        ToolCall(
-                            id=tc_data["id"],
+                        ToolCall.from_provider(
+                            provider_id=tc_data["id"],
                             function=ToolCallFunction(
                                 name=tc_data["name"],
                                 arguments=args_json
-                            )
+                            ),
                         )
                     )
 
@@ -818,6 +1000,7 @@ class OpenAIBackend(LLMBackend):
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
                     total_tokens=total_tokens,
+                    cached_tokens=cached_tokens,
                 ),
                 tool_calls
             )
@@ -900,12 +1083,18 @@ class OpenAIBackend(LLMBackend):
         # Build parameters
         params = {
             "model": self.config.model_name,
-            "messages": messages,
-            "temperature": kwargs.get("temperature", self.config.temperature),
-            "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
-            "top_p": kwargs.get("top_p", self.config.top_p),
+            "messages": self._apply_cache_control(messages),
+            "temperature": self._sanitize_temperature(kwargs.get("temperature", self.config.temperature)),
             "stream": True,
         }
+
+        # max_tokens & top_p: omit for Kimi via LiteLLM proxy (Cline doesn't
+        # send them; reasoning tokens count against max_tokens causing abrupt stops).
+        _is_kimi = "kimi" in self.config.model_name.lower()
+        _is_proxy = "moonshot.ai" not in (self.config.base_url or "")
+        if not (_is_kimi and _is_proxy):
+            params["max_tokens"] = kwargs.get("max_tokens", self.config.max_tokens)
+            params["top_p"] = kwargs.get("top_p", self.config.top_p)
 
         # Add tools if provided
         if tools:
@@ -926,6 +1115,33 @@ class OpenAIBackend(LLMBackend):
         if getattr(self.config, 'stream_usage', True):
             params["stream_options"] = {"include_usage": True}
 
+        # Kimi K2.5 via LiteLLM proxy: disable parallel tool calls.
+        # Cline captures confirm this is required for reliable multi-turn.
+        if _is_kimi and _is_proxy:
+            params["parallel_tool_calls"] = False
+
+        # Extended thinking (Claude via LiteLLM proxy, etc.)
+        thinking_budget = kwargs.get("thinking_budget")
+        if thinking_budget:
+            max_tok = params.get("max_tokens", self.config.max_tokens)
+            # Guard: budget_tokens must be < max_tokens (Anthropic/Bedrock requirement).
+            # Proxies may cap max_tokens to the model's actual limit, so clamp budget.
+            if thinking_budget >= max_tok:
+                clamped = max(max_tok - 1024, max_tok // 2)
+                logger.warning(
+                    "thinking_budget_clamped",
+                    original=thinking_budget,
+                    clamped=clamped,
+                    max_tokens=max_tok,
+                    model=params.get("model"),
+                )
+                thinking_budget = clamped
+            params["extra_body"] = {
+                "thinking": {"type": "enabled", "budget_tokens": thinking_budget}
+            }
+            params["temperature"] = 1
+            params.pop("top_p", None)
+
         stream = None
         try:
             stream = self.client.chat.completions.create(**params)
@@ -943,7 +1159,10 @@ class OpenAIBackend(LLMBackend):
                         usage_dict = {
                             "input_tokens": chunk.usage.prompt_tokens,
                             "output_tokens": chunk.usage.completion_tokens,
+                            "cached_tokens": self._extract_cached_tokens(chunk.usage),
                         }
+                        self.cache_tracker.record(chunk.usage)
+                        logger.debug(f"[CACHE] prompt={chunk.usage.prompt_tokens} cached={usage_dict['cached_tokens'] or 0}")
 
                     # Skip chunks with no choices
                     if not chunk.choices or len(chunk.choices) == 0:
@@ -959,23 +1178,35 @@ class OpenAIBackend(LLMBackend):
                             text_delta=delta.content,
                         )
 
+                    # Emit reasoning content as thinking_delta (for Kimi K2.5 and other reasoning models)
+                    # Pydantic v2 stores unknown fields in model_extra, NOT accessible via hasattr/getattr
+                    _extra = getattr(delta, 'model_extra', None) or {}
+                    reasoning_text = _extra.get('reasoning') or _extra.get('reasoning_content')
+
+                    if reasoning_text:
+                        yield ProviderDelta(
+                            stream_id=sid,
+                            thinking_delta=reasoning_text,
+                        )
+
                     # Emit tool call deltas
                     if delta.tool_calls:
                         for tc_delta in delta.tool_calls:
                             idx = tc_delta.index
 
                             # Track ID and name for this index
+                            # Generate canonical ID on first delta for each tool call
                             if tc_delta.id:
-                                tool_call_ids[idx] = tc_delta.id
+                                tool_call_ids[idx] = generate_tool_call_id()
                             if tc_delta.function and tc_delta.function.name:
                                 tool_call_names[idx] = tc_delta.function.name
 
-                            # Emit tool call delta
+                            # Emit tool call delta with canonical ID
                             yield ProviderDelta(
                                 stream_id=sid,
                                 tool_call_delta=ToolCallDelta(
                                     index=idx,
-                                    id=tc_delta.id if tc_delta.id else None,
+                                    id=tool_call_ids.get(idx) if tc_delta.id else None,
                                     name=tc_delta.function.name if tc_delta.function and tc_delta.function.name else None,
                                     arguments_delta=tc_delta.function.arguments if tc_delta.function and tc_delta.function.arguments else "",
                                 ),
@@ -1040,12 +1271,18 @@ class OpenAIBackend(LLMBackend):
         # Build parameters
         params = {
             "model": self.config.model_name,
-            "messages": messages,
-            "temperature": kwargs.get("temperature", self.config.temperature),
-            "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
-            "top_p": kwargs.get("top_p", self.config.top_p),
+            "messages": self._apply_cache_control(messages),
+            "temperature": self._sanitize_temperature(kwargs.get("temperature", self.config.temperature)),
             "stream": True,
         }
+
+        # max_tokens & top_p: omit for Kimi via LiteLLM proxy (Cline doesn't
+        # send them; reasoning tokens count against max_tokens causing abrupt stops).
+        _is_kimi = "kimi" in self.config.model_name.lower()
+        _is_proxy = "moonshot.ai" not in (self.config.base_url or "")
+        if not (_is_kimi and _is_proxy):
+            params["max_tokens"] = kwargs.get("max_tokens", self.config.max_tokens)
+            params["top_p"] = kwargs.get("top_p", self.config.top_p)
 
         # Add tools if provided
         if tools:
@@ -1066,6 +1303,38 @@ class OpenAIBackend(LLMBackend):
         if getattr(self.config, 'stream_usage', True):
             params["stream_options"] = {"include_usage": True}
 
+        # Kimi K2.5 via LiteLLM proxy: disable parallel tool calls.
+        # Cline captures confirm this is required for reliable multi-turn.
+        if _is_kimi and _is_proxy:
+            params["parallel_tool_calls"] = False
+
+        # Extended thinking (Claude via LiteLLM proxy, etc.)
+        thinking_budget = kwargs.get("thinking_budget")
+        if thinking_budget:
+            max_tok = params.get("max_tokens", self.config.max_tokens)
+            # Guard: budget_tokens must be < max_tokens (Anthropic/Bedrock requirement).
+            # Proxies may cap max_tokens to the model's actual limit, so clamp budget.
+            if thinking_budget >= max_tok:
+                clamped = max(max_tok - 1024, max_tok // 2)
+                logger.warning(
+                    "thinking_budget_clamped",
+                    original=thinking_budget,
+                    clamped=clamped,
+                    max_tokens=max_tok,
+                    model=params.get("model"),
+                )
+                thinking_budget = clamped
+            params["extra_body"] = {
+                "thinking": {"type": "enabled", "budget_tokens": thinking_budget}
+            }
+            params["temperature"] = 1
+            params.pop("top_p", None)
+
+        logger.debug(
+            f"LLM call: model={params.get('model')} messages={len(params.get('messages', []))} "
+            f"tools={len(params.get('tools', []))} stream_id={sid}"
+        )
+
         stream = None
         try:
             stream = await self.async_client.chat.completions.create(**params)
@@ -1083,7 +1352,10 @@ class OpenAIBackend(LLMBackend):
                         usage_dict = {
                             "input_tokens": chunk.usage.prompt_tokens,
                             "output_tokens": chunk.usage.completion_tokens,
+                            "cached_tokens": self._extract_cached_tokens(chunk.usage),
                         }
+                        self.cache_tracker.record(chunk.usage)
+                        logger.debug(f"[CACHE] prompt={chunk.usage.prompt_tokens} cached={usage_dict['cached_tokens'] or 0}")
 
                     # Skip chunks with no choices
                     if not chunk.choices or len(chunk.choices) == 0:
@@ -1099,23 +1371,35 @@ class OpenAIBackend(LLMBackend):
                             text_delta=delta.content,
                         )
 
+                    # Emit reasoning content as thinking_delta (for Kimi K2.5 and other reasoning models)
+                    # Pydantic v2 stores unknown fields in model_extra, NOT accessible via hasattr/getattr
+                    _extra = getattr(delta, 'model_extra', None) or {}
+                    reasoning_text = _extra.get('reasoning') or _extra.get('reasoning_content')
+
+                    if reasoning_text:
+                        yield ProviderDelta(
+                            stream_id=sid,
+                            thinking_delta=reasoning_text,
+                        )
+
                     # Emit tool call deltas
                     if delta.tool_calls:
                         for tc_delta in delta.tool_calls:
                             idx = tc_delta.index
 
                             # Track ID and name for this index
+                            # Generate canonical ID on first delta for each tool call
                             if tc_delta.id:
-                                tool_call_ids[idx] = tc_delta.id
+                                tool_call_ids[idx] = generate_tool_call_id()
                             if tc_delta.function and tc_delta.function.name:
                                 tool_call_names[idx] = tc_delta.function.name
 
-                            # Emit tool call delta
+                            # Emit tool call delta with canonical ID
                             yield ProviderDelta(
                                 stream_id=sid,
                                 tool_call_delta=ToolCallDelta(
                                     index=idx,
-                                    id=tc_delta.id if tc_delta.id else None,
+                                    id=tool_call_ids.get(idx) if tc_delta.id else None,
                                     name=tc_delta.function.name if tc_delta.function and tc_delta.function.name else None,
                                     arguments_delta=tc_delta.function.arguments if tc_delta.function and tc_delta.function.arguments else "",
                                 ),
@@ -1126,6 +1410,9 @@ class OpenAIBackend(LLMBackend):
                     await stream.close()
 
             # Emit final delta with finish_reason and usage
+            logger.debug(
+                f"Stream end: finish={finish_reason!r} usage={usage_dict} stream_id={sid}"
+            )
             yield ProviderDelta(
                 stream_id=sid,
                 finish_reason=finish_reason or "stop",
@@ -1135,6 +1422,9 @@ class OpenAIBackend(LLMBackend):
         except Exception as e:
             error_type = type(e).__name__
             error_msg = str(e).strip() or repr(e)
+            logger.error(
+                f"Stream error: {error_type}: {error_msg[:500]} stream_id={sid}"
+            )
             logger.exception(
                 "openai_async_provider_delta_error",
                 error_type=error_type,
@@ -1167,13 +1457,10 @@ class OpenAIBackend(LLMBackend):
             True if backend is ready
         """
         try:
-            # Try to list models as a health check
-            self.client.models.list()
+            # Try to list models as a health check (10s timeout)
+            self.client.models.list(timeout=10.0)
             return True
         except Exception as e:
-            # DEBUG: Log what went wrong
-            import logging
-            logger = logging.getLogger(__name__)
             logger.error(f"Backend availability check failed: {type(e).__name__}: {str(e)}")
             return False
 
@@ -1185,7 +1472,7 @@ class OpenAIBackend(LLMBackend):
             List of model names
         """
         try:
-            models_response = self.client.models.list()
+            models_response = self.client.models.list(timeout=10.0)
             return [model.id for model in models_response.data]
         except Exception:
             # If listing fails, return empty list

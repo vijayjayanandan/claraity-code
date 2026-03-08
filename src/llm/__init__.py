@@ -13,6 +13,12 @@ from .ollama_backend import OllamaBackend
 from .openai_backend import OpenAIBackend
 from .model_config import ModelConfig, get_model_config
 
+# Lazy import: AnthropicBackend requires `anthropic` SDK (optional dependency)
+try:
+    from .anthropic_backend import AnthropicBackend
+except ImportError:
+    AnthropicBackend = None  # type: ignore[assignment,misc]
+
 __all__ = [
     "LLMBackend",
     "LLMBackendType",
@@ -23,6 +29,7 @@ __all__ = [
     "ToolParameter",
     "OllamaBackend",
     "OpenAIBackend",
+    "AnthropicBackend",
     "ModelConfig",
     "get_model_config",
 ]

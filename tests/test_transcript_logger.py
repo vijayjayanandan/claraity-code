@@ -36,7 +36,7 @@ def temp_dir():
 def logger(temp_dir):
     """Create a TranscriptLogger for testing."""
     return TranscriptLogger(
-        session_id="test-session-123",
+        session_id="a1b2c3d4-e5f6-7890-abcd-ef1234567890",
         base_dir=temp_dir
     )
 
@@ -46,7 +46,7 @@ class TestBasicLogging:
 
     def test_creates_transcript_directory(self, temp_dir):
         """Transcript directory should be created on init."""
-        logger = TranscriptLogger(session_id="test", base_dir=temp_dir)
+        logger = TranscriptLogger(session_id="a1b2c3d4-0000-0000-0000-000000000001", base_dir=temp_dir)
         assert (temp_dir / "transcripts").exists()
 
     def test_creates_transcript_file_on_first_log(self, logger):
@@ -72,7 +72,7 @@ class TestBasicLogging:
         event = logger.log("test_event", {"key": "value"})
 
         assert event.v == 1
-        assert event.session_id == "test-session-123"
+        assert event.session_id == "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
         assert event.seq == 1
         assert event.ts.endswith("Z")
         assert event.event == "test_event"
@@ -169,7 +169,7 @@ class TestTruncation:
     def test_large_content_is_truncated(self, temp_dir):
         """Content over limit should be truncated."""
         logger = TranscriptLogger(
-            session_id="test",
+            session_id="a1b2c3d4-0000-0000-0000-000000000001",
             base_dir=temp_dir,
             max_content_chars=100  # Low limit for testing
         )
@@ -188,7 +188,7 @@ class TestTruncation:
     def test_truncation_preserves_head_and_tail(self, temp_dir):
         """Truncation should keep head and tail of content."""
         logger = TranscriptLogger(
-            session_id="test",
+            session_id="a1b2c3d4-0000-0000-0000-000000000001",
             base_dir=temp_dir,
             max_content_chars=100
         )
@@ -240,7 +240,7 @@ class TestSecretRedaction:
     def test_redaction_can_be_disabled(self, temp_dir):
         """Redaction should be disableable."""
         logger = TranscriptLogger(
-            session_id="test",
+            session_id="a1b2c3d4-0000-0000-0000-000000000001",
             base_dir=temp_dir,
             redact_secrets=False
         )
@@ -281,13 +281,13 @@ class TestSequenceContinuity:
     def test_sequence_continues_on_resume(self, temp_dir):
         """Sequence should continue from last number on resume."""
         # First session
-        logger1 = TranscriptLogger(session_id="test", base_dir=temp_dir)
+        logger1 = TranscriptLogger(session_id="a1b2c3d4-0000-0000-0000-000000000001", base_dir=temp_dir)
         logger1.log("event1", {})
         logger1.log("event2", {})
         logger1.log("event3", {})
 
         # Resume session
-        logger2 = TranscriptLogger(session_id="test", base_dir=temp_dir)
+        logger2 = TranscriptLogger(session_id="a1b2c3d4-0000-0000-0000-000000000001", base_dir=temp_dir)
         event = logger2.log("event4", {})
 
         assert event.seq == 4
@@ -359,7 +359,7 @@ class TestQueryMethods:
 
         stats = logger.get_stats()
 
-        assert stats["session_id"] == "test-session-123"
+        assert stats["session_id"] == "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
         assert stats["event_count"] == 3
         assert stats["events_by_type"]["user_message"] == 1
         assert stats["events_by_type"]["assistant_message"] == 1
@@ -424,7 +424,7 @@ class TestTranscriptEvent:
         """to_json should produce valid JSON."""
         event = TranscriptEvent(
             v=1,
-            session_id="test",
+            session_id="a1b2c3d4-0000-0000-0000-000000000001",
             seq=1,
             ts="2026-01-16T12:00:00.000Z",
             event="test_event",
@@ -435,7 +435,7 @@ class TestTranscriptEvent:
         parsed = json.loads(json_str)
 
         assert parsed["v"] == 1
-        assert parsed["session_id"] == "test"
+        assert parsed["session_id"] == "a1b2c3d4-0000-0000-0000-000000000001"
         assert parsed["seq"] == 1
         assert parsed["data"]["key"] == "value"
 
@@ -443,7 +443,7 @@ class TestTranscriptEvent:
         """to_json should exclude None values."""
         event = TranscriptEvent(
             v=1,
-            session_id="test",
+            session_id="a1b2c3d4-0000-0000-0000-000000000001",
             seq=1,
             ts="2026-01-16T12:00:00.000Z",
             event="test_event",

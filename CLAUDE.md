@@ -3,10 +3,7 @@
 ## QUICK START
 
 ```bash
-# Run TUI mode (primary interface)
-python -m src.cli --tui
-
-# Run CLI mode (simple chat)
+# Run TUI (only interface)
 python -m src.cli
 
 # Run tests
@@ -22,63 +19,77 @@ python -m src.observability.log_query --tail 50
 
 ```
 src/
-├── cli.py                  # Entry point: main() at line 1484
-├── core/agent.py           # CodingAgent (4200 lines) - see cheat sheet below
-├── ui/app.py               # AgentApp (3300 lines) - see cheat sheet below
+├── cli.py                      # Entry point: TUI launcher (~335 lines)
+├── core/
+│   ├── agent.py                # CodingAgent facade (~2,617 lines) - see cheat sheet below
+│   ├── tool_loop_state.py      # ToolLoopState dataclass (86 lines) - loop iteration state
+│   ├── tool_gating.py          # ToolGatingService (289 lines) - tool gating checks
+│   ├── special_tool_handlers.py # SpecialToolHandlers (417 lines) - clarify/plan/director approval
+│   ├── stream_phases.py        # Helper functions (154 lines) - context/constraint/results builders
+│   └── error_recovery.py       # Error recovery logic
+├── ui/app.py                   # AgentApp (3300 lines) - see cheat sheet below
 ├── memory/
-│   ├── memory_manager.py   # MemoryManager - SINGLE WRITER for persistence
-│   └── working_memory.py   # WorkingMemory - conversation context
+│   ├── memory_manager.py       # MemoryManager - SINGLE WRITER for persistence
+│   └── working_memory.py       # WorkingMemory - conversation context
 ├── session/store/
-│   └── memory_store.py     # MessageStore - in-memory + JSONL append
+│   └── memory_store.py         # MessageStore - in-memory + JSONL append
 ├── llm/
-│   ├── base.py             # LLMBackend abstract base
-│   └── openai_backend.py   # OpenAI/compatible API implementation
+│   ├── base.py                 # LLMBackend abstract base
+│   └── openai_backend.py       # OpenAI/compatible API implementation
 ├── tools/
-│   ├── file_operations.py  # read_file, write_file, edit_file, etc.
-│   └── tool_schemas.py     # Tool definitions for LLM
+│   ├── file_operations.py      # read_file, write_file, edit_file, etc.
+│   └── tool_schemas.py         # Tool definitions for LLM
 ├── observability/
-│   ├── logging_config.py   # Logging setup (all logs to JSONL, no console)
-│   └── transcript_logger.py # Session transcript writer
-└── prompts/system_prompts.py # System prompt templates
+│   ├── logging_config.py       # Logging setup (all logs to JSONL, no console)
+│   └── transcript_logger.py    # Session transcript writer
+└── prompts/system_prompts.py   # System prompt templates
 ```
+
+**See:** `docs/AGENT_DECOMPOSITION.md` for the full refactoring report.
 
 ---
 
 ## BIG FILE CHEAT SHEETS
 
-### agent.py (4200 lines) - CodingAgent
+### agent.py (~2,617 lines) - CodingAgent
 
 **Control Flow:**
 ```
-User Input → chat() or chat_async()
-    → _execute_with_tools() or _execute_with_tools_async()
-        → call_llm() → LLM returns tool_calls
-        → execute_tool() for each tool
-        → loop until no more tool_calls
-    → return final response
+User Input → stream_response() [async only]
+    → ToolGatingService.evaluate() — gating (repeat/plan/director/approval)
+    → SpecialToolHandlers — clarify, plan approval, director approval
+    → execute_tool() for normal tools
+    → stream_phases helpers — context/constraint/results builders
+    → loop until no more tool_calls
+    → yield StreamEnd
 ```
 
 **Key Methods (by line number):**
 | Line | Method | Purpose |
 |------|--------|---------|
-| 197 | `__init__` | Constructor - sets up tools, memory, LLM backend |
-| 583 | `_execute_with_tools` | SYNC tool loop - most modifications happen here |
-| 900 | `_execute_with_tools_async` | ASYNC tool loop - TUI uses this |
-| 1108 | `_fix_orphaned_tool_calls` | Removes tool_calls without matching results |
-| 1234 | `_prompt_tool_approval` | CLI approval prompt |
-| 1718 | `execute_task` | High-level task execution with planning |
-| 1868 | `chat` | SYNC chat interface - CLI uses this |
-| 2063 | `stream_response` | Streaming generator for responses |
-| 3344 | `chat_async` | ASYNC chat interface - TUI uses this |
-| 3478 | `execute_tool` | Single tool execution |
-| 3505 | `call_llm` | Raw LLM API call |
-| 3640 | `resume_session_from_jsonl` | Session resume logic |
+| 178 | `__init__` | Constructor - sets up tools, memory, LLM, gating, special handlers |
+| 569 | `_register_tools` | Register tool definitions for LLM |
+| 699 | `_fix_orphaned_tool_calls` | Removes tool_calls without matching results |
+| 1007 | `stream_response` | ASYNC streaming generator - sole entry point |
+| 2157 | `execute_tool` | Single tool execution |
+| 2184 | `call_llm` | Raw LLM API call |
+| 2307 | `resume_session_from_jsonl` | Session resume logic |
+| 2594 | `shutdown` | Cleanup on exit |
+
+**Extracted Modules (see `docs/AGENT_DECOMPOSITION.md` for details):**
+| Module | Purpose |
+|--------|---------|
+| `tool_gating.py` | 4-check gating (repeat, plan mode, director, approval) |
+| `special_tool_handlers.py` | Async handlers that pause for UI (clarify, plan approval, director approval) |
+| `stream_phases.py` | Helpers: context message, constraint injection, skipped results, pause stats |
+| `tool_loop_state.py` | Dataclass replacing 12+ local variables in stream_response |
 
 **Common Modifications:**
-- Tool approval logic: `_prompt_tool_approval` (line 1234)
-- Adding new tools: `_register_tools` (line 502)
+- Tool gating/approval: `src/core/tool_gating.py` (ToolGatingService)
+- Adding new tools: `_register_tools` (line 569)
 - Context building: Look for `messages` list construction before `call_llm`
-- Streaming behavior: `stream_response` (line 2063)
+- Streaming behavior: `stream_response` (line 1007)
+- Special tool handling: `src/core/special_tool_handlers.py`
 
 ---
 
@@ -122,7 +133,10 @@ Store updates → _handle_store_notification() → UI refresh
 
 | Class | File | Purpose |
 |-------|------|---------|
-| `CodingAgent` | `src/core/agent.py` | Main agent loop - processes user input, calls LLM, executes tools |
+| `CodingAgent` | `src/core/agent.py` | Main agent facade - delegates to gating, handlers, phases |
+| `ToolGatingService` | `src/core/tool_gating.py` | Tool gating: repeat/plan/director/approval checks |
+| `SpecialToolHandlers` | `src/core/special_tool_handlers.py` | Async UI-pausing handlers: clarify, plan approval, director |
+| `ToolLoopState` | `src/core/tool_loop_state.py` | Dataclass carrying loop state through iterations |
 | `MemoryManager` | `src/memory/memory_manager.py` | Orchestrates persistence - ONLY component that writes to store |
 | `MessageStore` | `src/session/store/memory_store.py` | In-memory message storage + JSONL file append |
 | `StoreAdapter` | `src/ui/store_adapter.py` | READ-ONLY - bridges MessageStore to TUI (never writes) |
@@ -181,6 +195,25 @@ Never add write methods to StoreAdapter. MemoryManager is the single writer.
 
 5. **Stream finalization:** Assistant messages start as streaming placeholders, then get finalized with `finalize_message()`. Don't assume content is complete until finalized.
 
+6. **Agent/Subagent parity:** Both `agent.py` and `subagent.py` emit tool state updates via `update_tool_state()`. The VS Code serializer (`serializers.py`) and webview expect identical metadata keys from both. Use `build_tool_metadata()` from `src/core/tool_metadata.py` in both paths. If you add new metadata keys, update the shared builder.
+
+7. **Protocol interrupt lifecycle:** `_interrupted` must be cleared after "Continue" on a pause prompt (via `clear_interrupt()`). See STATE LIFECYCLE comment in `protocol.py`. Forgetting this causes the pause prompt to re-appear on every subsequent iteration.
+
+---
+
+## AGENT/SUBAGENT/VSCODE PARITY CHECKLIST
+
+When modifying tool state emission, store events, or protocol signals, verify all three consumers stay in sync:
+
+| What changed | Check agent.py | Check subagent.py | Check sidebar-provider.ts |
+|---|---|---|---|
+| New metadata key in `update_tool_state()` | Update `build_tool_metadata()` | Uses same builder | Update `updateToolCard()` |
+| New store event type (e.g. MESSAGE_FINALIZED) | Emits via MemoryManager | Emits via SubAgent's MessageStore | Handle in `case 'store':` |
+| New interactive event (clarify, plan, etc.) | Emits via protocol | May need IPC relay in delegation.py | Handle in `case 'interactive':` |
+| Protocol state change (_interrupted, etc.) | Check `stream_response()` | Check `delegation.execute_async()` | Check webview button handlers |
+
+**Key files in the data path:** `subagent.py` -> `runner.py` (IPC) -> `delegation.py` -> `subagent_bridge.py` -> `serializers.py` -> WebSocket -> `sidebar-provider.ts`
+
 ---
 
 ## SESSION PERSISTENCE
@@ -215,14 +248,19 @@ python test_agent_interface_live.py
 
 ---
 
-## PENDING REFACTOR
+## COMPLETED REFACTORS
 
-**See:** `docs/REFACTOR_PLAN.md` for detailed plan to reduce agent.py and app.py by ~1,000 lines.
+### 1. agent.py Decomposition
+**See:** `docs/AGENT_DECOMPOSITION.md` for full report.
+**Results:** 4 modules extracted (946 lines). 44 new tests. 0 regressions.
 
-**Top 3 priorities:**
-1. Split `stream_response()` (1280 lines → ~300)
-2. Extract segment rendering (4 copies → 1 helper)
-3. Split `_handle_event()` (325 lines → dispatcher + 14 handlers)
+### 2. CLI Mode Removal (async-only consolidation)
+Removed all sync execution paths (`chat()`, `_execute_with_tools()`, `execute_task()`, `_execute_direct()`, CLI entry points). Single async path via `stream_response()`. ~2,670 lines removed across agent.py, cli.py, cli_ui.py (deleted), delegation.py, clarify_tool.py, special_tool_handlers.py.
+
+**Remaining opportunities:**
+1. Rewrite `stream_response()` as ~180-line orchestrator (deferred - high risk due to async generator yields)
+2. Extract segment rendering in app.py (4 copies -> 1 helper)
+3. Split `_handle_event()` in app.py (325 lines -> dispatcher + 14 handlers)
 
 ---
 

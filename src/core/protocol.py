@@ -137,6 +137,45 @@ class UIProtocol:
             )
     """
 
+    # =========================================================================
+    # STATE LIFECYCLE
+    #
+    # _interrupted (asyncio.Event):
+    #   Set by:    InterruptSignal (user clicks Stop/Ctrl+C)
+    #   Cleared:   reset() (new conversation turn) or clear_interrupt()
+    #              (user clicks Continue on a pause prompt)
+    #   Checked:   agent.stream_response() between iterations & during streaming
+    #   Checked:   delegation.execute_async() between subprocess stdout lines
+    #   NOTE: If you handle a Continue after interrupt, you MUST call
+    #         clear_interrupt() or the next iteration will re-trigger pause.
+    #
+    # _pending_approvals (dict[call_id -> PendingApproval]):
+    #   Set by:    wait_for_approval() — creates future
+    #   Resolved:  submit_action(ApprovalResult) — sets future result
+    #   Cancelled: submit_action(InterruptSignal) — cancels all pending
+    #   Cleared:   reset() — cancels all pending, clears dict
+    #
+    # _pending_pause (Future[PauseResult] | None):
+    #   Set by:    wait_for_pause_response() — creates future
+    #   Resolved:  submit_action(PauseResult) — sets future result
+    #   Cleared:   wait_for_pause_response() finally block, or reset()
+    #   NOTE: Only one pause can be active at a time.
+    #
+    # _pending_clarify (dict[call_id -> Future[ClarifyResult]]):
+    #   Set by:    wait_for_clarify_response() — creates future
+    #   Resolved:  submit_action(ClarifyResult) — sets future result
+    #   Cleared:   wait_for_clarify_response() finally block, or reset()
+    #
+    # _pending_plan_approval (dict[plan_hash -> Future[PlanApprovalResult]]):
+    #   Set by:    wait_for_plan_approval() — creates future
+    #   Resolved:  submit_action(PlanApprovalResult) — sets future result
+    #   Cleared:   wait_for_plan_approval() finally block, or reset()
+    #
+    # _auto_approve (set[str]):
+    #   Added to:  submit_action(ApprovalResult) when auto_approve_future=True
+    #   Cleared:   reset() — clears set
+    # =========================================================================
+
     def __init__(self):
         # Queue for UI -> Agent actions
         self._action_queue: asyncio.Queue[UserAction] = asyncio.Queue()
@@ -156,11 +195,14 @@ class UIProtocol:
         # Auto-approve rules (tool_name -> True)
         self._auto_approve: set[str] = set()
 
-        # Interrupt flag
+        # Interrupt flag (see STATE LIFECYCLE above)
         self._interrupted = asyncio.Event()
 
         # Callback for todo updates (Agent -> UI)
         self._on_todos_updated: Optional[Callable[[List[Dict[str, Any]]], None]] = None
+
+        # Callback for pause requests (delegation tool -> UI)
+        self._on_pause_requested: Optional[Callable] = None
 
     # -------------------------------------------------------------------------
     # Agent-side methods
@@ -364,6 +406,10 @@ class UIProtocol:
         """Check if user has requested interruption."""
         return self._interrupted.is_set()
 
+    def clear_interrupt(self) -> None:
+        """Clear the interrupt flag (e.g. after user clicks Continue on a pause prompt)."""
+        self._interrupted.clear()
+
     async def wait_for_interrupt(self) -> None:
         """Wait until interrupted. Use with asyncio.wait() for cancellation."""
         await self._interrupted.wait()
@@ -486,6 +532,58 @@ class UIProtocol:
     def remove_auto_approve(self, tool_name: str) -> None:
         """Remove a tool from auto-approve list."""
         self._auto_approve.discard(tool_name)
+
+    # -------------------------------------------------------------------------
+    # Pause Requests (Delegation Tool -> UI)
+    # -------------------------------------------------------------------------
+
+    def set_pause_requested_callback(
+        self,
+        callback: Optional[Callable]
+    ) -> None:
+        """
+        Register a callback invoked when a subagent requests a pause.
+
+        The callback signature is:
+            async def on_pause(reason, reason_code, pending_todos, stats) -> None
+
+        It should mount the PausePromptWidget. The existing
+        wait_for_pause_response() is then used to await the user's decision.
+
+        Args:
+            callback: Async callable or None to unregister.
+        """
+        self._on_pause_requested = callback
+
+    async def request_pause(
+        self,
+        reason: str,
+        reason_code: str,
+        stats: Dict[str, Any],
+        pending_todos: Optional[List[Dict[str, Any]]] = None,
+    ) -> 'PauseResult':
+        """
+        Request a pause from the user (called by delegation tool).
+
+        1. Calls the registered callback to mount the PausePromptWidget
+        2. Awaits user's decision via wait_for_pause_response()
+
+        Args:
+            reason: Human-readable pause reason
+            reason_code: Machine-readable code (e.g., "iteration_limit")
+            stats: Dict with iteration/time stats for display
+            pending_todos: Optional list of pending todo items
+
+        Returns:
+            PauseResult with user's decision
+        """
+        if self._on_pause_requested is not None:
+            result = self._on_pause_requested(reason, reason_code, pending_todos, stats)
+            # Support both sync and async callbacks
+            if asyncio.iscoroutine(result):
+                await result
+
+        return await self.wait_for_pause_response()
 
     # -------------------------------------------------------------------------
     # Todo Updates (Agent -> UI)

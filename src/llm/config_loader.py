@@ -27,9 +27,12 @@ from typing import Dict, Optional
 # CONSTANTS
 # =============================================================================
 
-DEFAULT_CONFIG_PATH = ".clarity/config.yaml"
+SYSTEM_CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".claraity")
+SYSTEM_CONFIG_PATH = os.path.join(SYSTEM_CONFIG_DIR, "config.yaml")
 
-VALID_BACKEND_TYPES = {"openai", "ollama", "vllm", "localai", "llamacpp"}
+DEFAULT_CONFIG_PATH = SYSTEM_CONFIG_PATH
+
+VALID_BACKEND_TYPES = {"openai", "ollama", "vllm", "localai", "llamacpp", "anthropic"}
 
 
 # =============================================================================
@@ -75,6 +78,7 @@ class LLMConfigData:
     temperature: float = 0.2
     max_tokens: int = 16384
     top_p: float = 0.95
+    thinking_budget: Optional[int] = None  # Extended thinking token budget (Claude, etc.)
     subagents: Dict[str, SubAgentLLMOverride] = field(default_factory=dict)
 
 
@@ -102,19 +106,21 @@ def _validate_backend(backend: str, context: str) -> Optional[str]:
 def _migrate_api_key_to_keyring(api_key: str, config_path: str) -> None:
     """One-time migration: move api_key from YAML to OS credential store.
 
-    After saving to keyring, removes the api_key field from the YAML file
-    so secrets are no longer stored in plain text.
+    Only removes the api_key from YAML if keyring is available and the save
+    succeeds. If keyring is unavailable, the key stays in config.yaml (which
+    is the intended fallback storage).
     """
     try:
-        from src.llm.credential_store import save_api_key
-        if save_api_key(api_key):
-            _safe_stderr("Migrated api_key from config.yaml to OS credential store")
-            # Remove api_key from the YAML file
-            _remove_api_key_from_yaml(config_path)
-        else:
-            _safe_stderr("Could not migrate api_key to credential store, key remains in config.yaml")
+        from src.llm.credential_store import _get_keyring
+        kr = _get_keyring()
+        if kr is None:
+            # No keyring -- config.yaml IS the storage, don't remove it
+            return
+        kr.set_password("claraity", "api_key", api_key)
+        _safe_stderr("Migrated api_key from config.yaml to OS credential store")
+        _remove_api_key_from_yaml(config_path)
     except Exception as e:
-        _safe_stderr(f"api_key migration failed: {e}")
+        _safe_stderr(f"api_key migration to keyring failed, key remains in config.yaml: {e}")
 
 
 def _remove_api_key_from_yaml(config_path: str) -> None:
@@ -189,7 +195,7 @@ def load_llm_config(config_path: str = DEFAULT_CONFIG_PATH) -> LLMConfigData:
     if "base_url" in llm_data and llm_data["base_url"]:
         config.base_url = str(llm_data["base_url"])
 
-    # -- api_key: migrate from YAML to keyring if present (one-time) --
+    # -- api_key: if present in YAML and keyring is available, migrate --
     if "api_key" in llm_data and llm_data["api_key"]:
         _migrate_api_key_to_keyring(str(llm_data["api_key"]), config_path)
 
@@ -207,6 +213,7 @@ def load_llm_config(config_path: str = DEFAULT_CONFIG_PATH) -> LLMConfigData:
         ("temperature", "temperature", float),
         ("max_tokens", "max_tokens", int),
         ("top_p", "top_p", float),
+        ("thinking_budget", "thinking_budget", int),
     ]:
         if key in llm_data:
             try:
@@ -310,8 +317,12 @@ def save_llm_config(
         "top_p": config.top_p,
     }
 
-    # api_key is NEVER written to YAML -- it goes to the OS credential store
-    # (see credential_store.py)
+    # Only write thinking_budget if set
+    if config.thinking_budget is not None:
+        llm_section["thinking_budget"] = config.thinking_budget
+
+    # api_key is saved via credential_store.py (keyring > config.yaml fallback)
+    # It is NOT written here to avoid double-writing
 
     # Only write api_key_env if non-default
     if config.api_key_env and config.api_key_env != "OPENAI_API_KEY":
@@ -422,6 +433,7 @@ def _apply_overrides(
         ("temperature", "temperature", float),
         ("max_tokens", "max_tokens", int),
         ("top_p", "top_p", float),
+        ("thinking_budget", "thinking_budget", int),
     ]:
         val = overrides.get(key)
         if val is not None:

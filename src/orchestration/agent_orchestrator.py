@@ -117,7 +117,6 @@ class AgentOrchestrator:
             api_key=self.api_key,
             working_directory=str(workspace_abs),  # Use absolute path
             permission_mode="auto",  # No approval prompts for testing
-            enable_clarity=False  # Disable ClarAIty in test mode
         )
 
         # Initialize Long Running Controller for checkpoints

@@ -1,6 +1,6 @@
 """Live integration tests for session persistence with actual LLM calls.
 
-These tests make REAL API calls through the fuelIx proxy.
+These tests make REAL API calls through the configured LLM endpoint.
 They are skipped if required environment variables are not set.
 
 Run with: pytest tests/session/test_live_integration.py -v -s

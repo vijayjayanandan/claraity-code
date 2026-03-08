@@ -11,7 +11,7 @@
 
 Screen {
     layout: vertical;
-    background: $background;
+    background: #000000;
     layers: base autocomplete;
 }
 
@@ -23,12 +23,10 @@ Screen {
     height: 1fr;
     overflow-y: auto;
     padding: 1 1;
-    background: $surface;
-    border-bottom: solid $surface-darken-1;
+    background: #000000;
 }
 
 #conversation:focus {
-    border-bottom: solid $surface-darken-1;
 }
 
 /* =============================================================================
@@ -48,7 +46,7 @@ Screen {
 
 #input:focus {
     border: round $accent;
-    background: $surface;
+    background: #000000;
 }
 
 /* =============================================================================
@@ -61,7 +59,7 @@ Screen {
     max-height: 2;
     margin: 0 2;
     padding: 0 1;
-    background: $surface;
+    background: #000000;
     display: none;
 }
 
@@ -83,7 +81,7 @@ Screen {
     min-height: 0;
     max-height: 0;
     width: 100%;
-    background: $surface;
+    background: #000000;
     padding: 0 1;
     display: none;
     overflow: hidden;
@@ -107,10 +105,9 @@ Screen {
 #status {
     height: 2;
     min-height: 1;
-    background: #1a1a1a;
+    background: #000000;
     color: #6e7681;
     padding: 0 2;
-    border-top: solid #2a2a2a;
 }
 
 /* =============================================================================
@@ -209,13 +206,13 @@ InlineDiffWidget {
 ScrollableDiffContainer {
     max-height: 20;
     height: auto;
-    margin: 1 0 1 2;
+    margin: 0 0 0 2;
     padding: 0 1;
-    background: #1a1a1a;
-    border: round #333333;
+    background: #000000;
+    border: round #222222;
     scrollbar-size: 1 1;
-    scrollbar-color: #555555;
-    scrollbar-background: #1a1a1a;
+    scrollbar-color: #333333;
+    scrollbar-background: #000000;
 }
 
 ScrollableDiffContainer:focus {
@@ -298,7 +295,7 @@ ScrollableContainer {
     padding: 0;
     scrollbar-size: 1 1;
     scrollbar-color: #505050;
-    scrollbar-background: $surface;
+    scrollbar-background: #000000;
 }
 
 /* Legacy class-based scrollbar (fallback) */

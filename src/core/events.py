@@ -215,6 +215,16 @@ class ContextUpdated:
 
 
 @dataclass(frozen=True)
+class ContextCompacting:
+    """Compaction is about to start.
+
+    Emitted just before the LLM summarization call so the UI can show
+    a 'Compacting Conversation' indicator in the status bar.
+    """
+    tokens_before: int
+
+
+@dataclass(frozen=True)
 class ContextCompacted:
     """Context was compacted to free up space.
 
@@ -281,7 +291,7 @@ UIEvent = Union[
     ToolCallStart, ToolCallStatus, ToolCallResult,
     ThinkingStart, ThinkingDelta, ThinkingEnd,
     PausePromptStart, PausePromptEnd,
-    ContextUpdated, ContextCompacted,
+    ContextUpdated, ContextCompacting, ContextCompacted,
     FileReadEvent,
     ErrorEvent
 ]
@@ -295,7 +305,7 @@ __all__ = [
     'ToolCallStart', 'ToolCallStatus', 'ToolCallResult',
     'ThinkingStart', 'ThinkingDelta', 'ThinkingEnd',
     'PausePromptStart', 'PausePromptEnd',
-    'ContextUpdated', 'ContextCompacted',
+    'ContextUpdated', 'ContextCompacting', 'ContextCompacted',
     'FileReadEvent',
     'ErrorEvent',
     'UIEvent',

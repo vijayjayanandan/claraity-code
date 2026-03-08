@@ -1,21 +1,18 @@
-"""Jira connection state and configuration.
+"""Jira connection via mcp-atlassian MCP server (sooperset/mcp-atlassian).
 
-Thin module: manages connected state and config persistence.
+Supports multiple named profiles (e.g. "personal", "corporate").
+Each profile stores its Jira URL and username in a JSON config file.
+API tokens are stored securely in SecretStore (OS keychain / encrypted file).
 
-Auth uses Atlassian's Remote MCP Server at https://mcp.atlassian.com/v1/mcp
-with OAuth 2.1 via the `mcp-remote` npm proxy. The proxy handles the browser-
-based OAuth flow and caches tokens locally. No API tokens or SecretStore needed.
-
-Transport: stdio via `npx mcp-remote https://mcp.atlassian.com/v1/mcp`
-
-Config file: .clarity/integrations/jira.json (no secrets)
+Transport: stdio via `uvx mcp-atlassian`
+Config dir: .clarity/integrations/jira/<profile>.json  (no secrets)
+Secrets:    SecretStore key "jira_api_token_<profile>"
 """
 
 import json
 import logging
-import shutil
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from src.integrations.mcp.config import McpServerConfig
 
@@ -25,107 +22,209 @@ try:
 except ImportError:
     logger = logging.getLogger(__name__)
 
-# Atlassian Remote MCP Server (centralized, not per-instance)
-ATLASSIAN_MCP_URL = "https://mcp.atlassian.com/v1/mcp"
+# Config directory for all Jira profiles
+DEFAULT_CONFIG_DIR = Path(".clarity") / "integrations" / "jira"
 
-# Default config file location
-DEFAULT_CONFIG_PATH = Path(".clarity") / "integrations" / "jira.json"
+
+def _secret_key(profile: str) -> str:
+    """SecretStore key for a profile's API token."""
+    return f"jira_api_token_{profile}"
 
 
 class JiraConnection:
-    """Manages Jira integration state and configuration.
+    """Manages a single Jira profile connection via mcp-atlassian.
 
-    Auth is handled by the Atlassian Remote MCP Server's OAuth 2.1 flow,
-    proxied through `npx mcp-remote`. This class:
-    - Persists connection config (cloud URL, enabled flag) to disk
-    - Checks that npx/mcp-remote is available
-    - Builds McpServerConfig for the MCP client (stdio transport)
+    Config file (.clarity/integrations/jira/<profile>.json) holds:
+      - jira_url: Jira Cloud URL (e.g. "https://mycompany.atlassian.net")
+      - username: Atlassian account email
+      - enabled: whether the profile is active
+
+    API token is stored separately in SecretStore (never in the JSON file).
+
+    Usage:
+        conn = JiraConnection("corporate")
+        conn.configure(
+            jira_url="https://mycompany.atlassian.net",
+            username="user@mycompany.com",
+            api_token="ATATT3x...",
+        )
+        config = conn.get_mcp_config()  # -> McpServerConfig for StdioTransport
     """
 
-    def __init__(self, config_path: Optional[Path] = None):
-        self._config_path = config_path or DEFAULT_CONFIG_PATH
-        self._cloud_url: Optional[str] = None
+    def __init__(
+        self,
+        profile: str = "default",
+        config_dir: Optional[Path] = None,
+        secret_store=None,
+    ):
+        self._profile = profile
+        self._config_dir = config_dir or DEFAULT_CONFIG_DIR
+        self._config_path = self._config_dir / f"{profile}.json"
+        self._secret_store = secret_store
+        self._jira_url: Optional[str] = None
+        self._username: Optional[str] = None
         self._enabled: bool = False
         self._load_config()
 
+    def _get_secret_store(self):
+        """Lazy-load SecretStore (avoids import cost if never needed)."""
+        if self._secret_store is None:
+            from src.integrations.secrets import get_secret_store
+            self._secret_store = get_secret_store()
+        return self._secret_store
+
     def _load_config(self) -> None:
-        """Load config from disk (no secrets)."""
+        """Load profile config from disk (no secrets)."""
         if self._config_path.exists():
             try:
                 data = json.loads(self._config_path.read_text())
-                self._cloud_url = data.get("cloud_url")
+                self._jira_url = data.get("jira_url")
+                self._username = data.get("username")
                 self._enabled = data.get("enabled", False)
             except (json.JSONDecodeError, OSError):
-                logger.warning("jira_config_load_failed")
+                logger.warning("jira_config_load_failed", profile=self._profile)
 
     def _save_config(self) -> None:
-        """Persist config to disk (no secrets ever written here)."""
-        self._config_path.parent.mkdir(parents=True, exist_ok=True)
+        """Persist profile config to disk (no secrets ever written here)."""
+        self._config_dir.mkdir(parents=True, exist_ok=True)
         data = {
-            "cloud_url": self._cloud_url,
+            "jira_url": self._jira_url,
+            "username": self._username,
             "enabled": self._enabled,
         }
         self._config_path.write_text(json.dumps(data, indent=2))
 
     @property
-    def cloud_url(self) -> Optional[str]:
-        return self._cloud_url
+    def profile(self) -> str:
+        return self._profile
+
+    @property
+    def jira_url(self) -> Optional[str]:
+        return self._jira_url
+
+    @property
+    def username(self) -> Optional[str]:
+        return self._username
 
     @property
     def enabled(self) -> bool:
         return self._enabled
 
-    def configure(self, cloud_url: str) -> None:
-        """Set the Jira Cloud URL and enable the integration.
+    def configure(self, jira_url: str, username: str, api_token: str) -> None:
+        """Set Jira credentials and enable the profile.
 
         Args:
-            cloud_url: e.g. "https://mycompany.atlassian.net"
+            jira_url: e.g. "https://mycompany.atlassian.net"
+            username: Atlassian account email
+            api_token: API token from id.atlassian.com (stored in SecretStore)
         """
-        self._cloud_url = cloud_url.rstrip("/")
+        if not jira_url:
+            raise ValueError("jira_url is required")
+        if not username:
+            raise ValueError("username is required")
+        if not api_token:
+            raise ValueError("api_token is required")
+
+        self._jira_url = jira_url.rstrip("/")
+        self._username = username
         self._enabled = True
         self._save_config()
-        logger.info("jira_configured", cloud_url=self._cloud_url)
+
+        # Store token securely (never in the JSON file)
+        store = self._get_secret_store()
+        store.set(_secret_key(self._profile), api_token)
+
+        logger.info(
+            "jira_configured",
+            profile=self._profile,
+            jira_url=self._jira_url,
+        )
 
     def disable(self) -> None:
-        """Disable the Jira integration."""
+        """Disable the profile (keeps config on disk, token in SecretStore)."""
         self._enabled = False
         self._save_config()
-        logger.info("jira_disabled")
+        logger.info("jira_disabled", profile=self._profile)
 
-    def is_connected(self) -> bool:
-        """Check if Jira is configured and mcp-remote is available.
+    def has_api_token(self) -> bool:
+        """Check if an API token exists in SecretStore for this profile."""
+        store = self._get_secret_store()
+        return store.has(_secret_key(self._profile))
 
-        OAuth tokens are managed by mcp-remote (cached locally by the proxy).
-        We just need npx to be on PATH.
-        """
-        if not self._enabled or not self._cloud_url:
-            return False
-        return shutil.which("npx") is not None
+    def _get_api_token(self) -> Optional[str]:
+        """Retrieve API token from SecretStore."""
+        store = self._get_secret_store()
+        return store.get(_secret_key(self._profile))
+
+    def delete_api_token(self) -> None:
+        """Remove API token from SecretStore."""
+        store = self._get_secret_store()
+        store.delete(_secret_key(self._profile))
+
+    def is_configured(self) -> bool:
+        """Check if profile has all required fields including API token."""
+        return bool(
+            self._enabled
+            and self._jira_url
+            and self._username
+            and self.has_api_token()
+        )
 
     def get_mcp_config(self) -> McpServerConfig:
-        """Build McpServerConfig for the Atlassian Remote MCP Server.
-
-        Uses stdio transport via `npx mcp-remote` which handles:
-        - OAuth 2.1 browser-based auth flow
-        - Token caching and refresh
-        - MCP JSON-RPC framing over stdin/stdout
+        """Build McpServerConfig for mcp-atlassian stdio transport.
 
         Returns:
-            McpServerConfig ready for McpClient with StdioTransport.
+            McpServerConfig with command `uvx mcp-atlassian` and
+            JIRA_URL/JIRA_USERNAME/JIRA_API_TOKEN as extra_env.
+
+        Raises:
+            ValueError: If profile is not fully configured.
         """
-        if not self._cloud_url:
-            raise ValueError("Jira not configured: no cloud_url set")
+        if not self._jira_url:
+            raise ValueError(
+                f"Jira profile '{self._profile}' not configured: no jira_url"
+            )
+        if not self._username:
+            raise ValueError(
+                f"Jira profile '{self._profile}' not configured: no username"
+            )
+
+        api_token = self._get_api_token()
+        if not api_token:
+            raise ValueError(
+                f"Jira profile '{self._profile}' not configured: "
+                f"no API token in SecretStore (key: {_secret_key(self._profile)})"
+            )
 
         return McpServerConfig(
-            name="atlassian-rovo",
-            command=f"npx -y mcp-remote {ATLASSIAN_MCP_URL}",
-            tool_prefix="jira",
-            # No auth_secret_key needed - mcp-remote handles OAuth
+            name=f"mcp-atlassian-{self._profile}",
+            command="uvx mcp-atlassian",
+            tool_prefix="",  # mcp-atlassian already prefixes tools with jira_
             auth_secret_key="",
-            connect_timeout=60.0,   # First connect may trigger browser OAuth
+            extra_env={
+                "JIRA_URL": self._jira_url,
+                "JIRA_USERNAME": self._username,
+                "JIRA_API_TOKEN": api_token,
+            },
+            connect_timeout=30.0,
             invoke_timeout=60.0,
             discovery_timeout=30.0,
             max_result_chars=8192,
             max_result_items=50,
             cache_ttl_seconds=3600.0,
+        )
+
+    @classmethod
+    def list_profiles(cls, config_dir: Optional[Path] = None) -> List[str]:
+        """List all configured profile names.
+
+        Returns:
+            Sorted list of profile names (e.g. ["corporate", "personal"]).
+        """
+        d = config_dir or DEFAULT_CONFIG_DIR
+        if not d.exists():
+            return []
+        return sorted(
+            p.stem for p in d.glob("*.json")
+            if p.is_file()
         )

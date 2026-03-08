@@ -383,9 +383,10 @@ class TestGetSymbolContextTool:
         assert formatted[1]["file"] == "/tests/test_auth.py"
 
     @pytest.mark.asyncio
-    async def test_read_implementation(self, tmp_path):
+    async def test_read_implementation(self, tmp_path, monkeypatch):
         """Test reading function implementation."""
         tool = GetSymbolContextTool()
+        monkeypatch.chdir(tmp_path)
 
         # Create test file
         test_file = tmp_path / "test.py"
@@ -557,72 +558,50 @@ class TestLSPSecurityFixes:
             # Verify async method was called with correct args
             mock_async.assert_called_once_with("symbol_name", None, True, True)
 
-    def test_outline_tool_has_cleanup_methods(self):
-        """Test that GetFileOutlineTool has cleanup and __del__ methods."""
+    def test_outline_tool_has_cleanup_method(self):
+        """Test that GetFileOutlineTool has cleanup method."""
         tool = GetFileOutlineTool()
 
         # Verify cleanup method exists
         assert hasattr(tool, 'cleanup')
         assert callable(tool.cleanup)
 
-        # Verify __del__ method exists
-        assert hasattr(tool, '__del__')
-        assert callable(tool.__del__)
-
-        # Verify cleanup can be called without error
+        # Verify cleanup can be called without error (no-op since lsp_runtime owns lifecycle)
         tool.cleanup()  # Should not raise
 
-    def test_symbol_tool_has_cleanup_methods(self):
-        """Test that GetSymbolContextTool has cleanup and __del__ methods."""
+    def test_symbol_tool_has_cleanup_method(self):
+        """Test that GetSymbolContextTool has cleanup method."""
         tool = GetSymbolContextTool()
 
         # Verify cleanup method exists
         assert hasattr(tool, 'cleanup')
         assert callable(tool.cleanup)
 
-        # Verify __del__ method exists
-        assert hasattr(tool, '__del__')
-        assert callable(tool.__del__)
-
-        # Verify cleanup can be called without error
+        # Verify cleanup can be called without error (no-op since lsp_runtime owns lifecycle)
         tool.cleanup()  # Should not raise
 
-    def test_outline_tool_registers_cleanup_on_initialization(self):
-        """Test that GetFileOutlineTool registers cleanup with atexit."""
-        import atexit
-
+    def test_outline_tool_cleanup_is_noop(self):
+        """Test that GetFileOutlineTool cleanup is a no-op (lsp_runtime owns lifecycle)."""
         tool = GetFileOutlineTool()
 
-        # Mock LSP manager initialization
-        with patch.object(tool, 'lsp_manager', None):
-            with patch('atexit.register') as mock_atexit:
-                # Trigger LSP initialization
-                async def init():
-                    tool.lsp_manager = MagicMock()
-                    tool.lsp_manager.close_all_servers = MagicMock()
-                    if not tool._cleanup_registered:
-                        atexit.register(tool.cleanup)
-                        tool._cleanup_registered = True
+        # Even with an LSP manager set, cleanup should be a no-op
+        # because lsp_runtime.shutdown() handles server lifecycle
+        tool.lsp_manager = MagicMock()
+        tool.cleanup()  # Should not raise or close anything
 
-                import asyncio
-                asyncio.run(init())
-
-                # Verify atexit.register was called with cleanup
-                assert tool._cleanup_registered
-
-    def test_cleanup_closes_lsp_servers(self):
-        """Test that cleanup method closes LSP servers."""
+    def test_cleanup_does_not_close_shared_servers(self):
+        """Test that cleanup does not close shared LSP servers."""
         tool = GetFileOutlineTool()
 
         # Mock LSP manager
         tool.lsp_manager = MagicMock()
         tool.lsp_manager.close_all_servers = MagicMock()
 
-        # Call cleanup
+        # Call cleanup - should NOT close servers (runtime owns them)
         tool.cleanup()
 
-        # Verify close_all_servers was called
-        tool.lsp_manager.close_all_servers.assert_called_once()
+        # Verify close_all_servers was NOT called (runtime manages lifecycle)
+        tool.lsp_manager.close_all_servers.assert_not_called()
 
     def test_cleanup_handles_missing_lsp_manager(self):
         """Test that cleanup handles case where LSP manager is None."""
@@ -635,22 +614,20 @@ class TestLSPSecurityFixes:
         tool.cleanup()  # Should succeed silently
 
     @pytest.mark.asyncio
-    async def test_read_implementation_validates_path(self, tmp_path):
+    async def test_read_implementation_validates_path(self, tmp_path, monkeypatch):
         """Test that _read_implementation validates file paths for security."""
         tool = GetSymbolContextTool()
 
-        # Create a test file in workspace
+        # Create a test file in workspace and set cwd so path validation passes
         test_file = tmp_path / "test.py"
         test_file.write_text("def test(): pass")
+        monkeypatch.chdir(tmp_path)
 
-        # Valid path should work (allow_files_outside_workspace=True)
+        # Valid path within workspace should work
         result = await tool._read_implementation(str(test_file), 0)
         assert "def test()" in result["code"]
 
         # Path traversal attempt should be blocked by validate_path_security
-        # Note: Since allow_files_outside_workspace=True in current implementation,
-        # this test verifies that path validation is being called
-        # In production, extremely dangerous paths like /etc/passwd are still blocked
         from src.tools.search_tools import validate_path_security
 
         # Verify validate_path_security blocks obvious attacks
@@ -661,15 +638,10 @@ class TestLSPSecurityFixes:
             assert "[SECURITY]" in str(e)
             assert "Path traversal blocked" in str(e)
 
-    def test_del_calls_cleanup(self):
-        """Test that __del__ method calls cleanup."""
-        tool = GetFileOutlineTool()
+    def test_symbol_tool_cleanup_is_noop(self):
+        """Test that GetSymbolContextTool cleanup is a no-op (lsp_runtime owns lifecycle)."""
+        tool = GetSymbolContextTool()
 
-        # Mock cleanup
-        tool.cleanup = MagicMock()
-
-        # Call __del__
-        tool.__del__()
-
-        # Verify cleanup was called
-        tool.cleanup.assert_called_once()
+        # Even with an LSP manager set, cleanup should be a no-op
+        tool.lsp_manager = MagicMock()
+        tool.cleanup()  # Should not raise

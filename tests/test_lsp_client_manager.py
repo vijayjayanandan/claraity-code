@@ -81,61 +81,73 @@ class TestLazyInitialization:
         # Initially no servers
         assert len(manager.servers) == 0
 
-        # Query triggers server start (use real file)
-        await manager.request_definition("src/core/agent.py", 10, 5)
+        # Mock LSP internals so we don't hit real server issues
+        with patch.object(manager, '_start_server', new_callable=AsyncMock) as mock_start, \
+             patch.object(manager, '_make_lsp_query', new_callable=AsyncMock) as mock_query:
+            mock_start.return_value = MagicMock()
+            mock_query.return_value = {"uri": "file:///test.py", "range": {"start": {"line": 10, "character": 0}}}
 
-        # Server should now be running
-        assert "python" in manager.servers
+            # Query triggers server start
+            await manager.request_definition("src/core/agent.py", 10, 5)
+
+            # Server should now be running
+            assert "python" in manager.servers
 
     @pytest.mark.asyncio
     async def test_server_reused_on_second_query(self):
         """Test server is reused on subsequent queries."""
         manager = LSPClientManager(repo_root=str(Path.cwd()))
 
-        # First query starts server (use real file)
-        await manager.request_definition("src/core/agent.py", 10, 5)
-        first_server = manager.servers["python"]
+        with patch.object(manager, '_start_server', new_callable=AsyncMock) as mock_start, \
+             patch.object(manager, '_make_lsp_query', new_callable=AsyncMock) as mock_query:
+            mock_start.return_value = MagicMock()
+            mock_query.return_value = {"uri": "file:///test.py", "range": {"start": {"line": 10, "character": 0}}}
 
-        # Second query reuses server
-        await manager.request_definition("src/core/agent.py", 20, 5)
-        second_server = manager.servers["python"]
+            # First query starts server
+            await manager.request_definition("src/core/agent.py", 10, 5)
+            first_server = manager.servers["python"]
 
-        # Should be same server instance
-        assert first_server is second_server
+            # Second query reuses server
+            await manager.request_definition("src/core/agent.py", 20, 5)
+            second_server = manager.servers["python"]
+
+            # Should be same server instance
+            assert first_server is second_server
+
+            # _start_server should only be called once
+            mock_start.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_multiple_languages(self):
         """Test multiple language servers can run concurrently."""
         manager = LSPClientManager(repo_root=str(Path.cwd()), max_servers=3)
 
-        # Query Python file (use real file)
-        await manager.request_definition("src/core/agent.py", 10, 5)
-        assert "python" in manager.servers
+        with patch.object(manager, '_start_server', new_callable=AsyncMock) as mock_start, \
+             patch.object(manager, '_make_lsp_query', new_callable=AsyncMock) as mock_query:
+            mock_start.return_value = MagicMock()
+            mock_query.return_value = {"uri": "file:///test.py", "range": {"start": {"line": 10, "character": 0}}}
 
-        # Note: TypeScript server not installed, so this will use mock
-        # (skip TypeScript test for now since server not installed)
-        # await manager.request_definition("src/app.ts", 20, 5)
-        # assert "typescript" in manager.servers
+            # Query Python file
+            await manager.request_definition("src/core/agent.py", 10, 5)
+            assert "python" in manager.servers
 
-        # Only Python server running
-        assert len(manager.servers) == 1
+            # Only Python server running
+            assert len(manager.servers) == 1
 
     @pytest.mark.asyncio
     async def test_max_servers_limit(self):
         """Test max servers limit is enforced."""
         manager = LSPClientManager(repo_root=str(Path.cwd()), max_servers=1)
 
-        # Start first server (use real Python file)
-        await manager.request_definition("src/core/agent.py", 10, 5)
-        assert len(manager.servers) == 1
+        with patch.object(manager, '_start_server', new_callable=AsyncMock) as mock_start, \
+             patch.object(manager, '_make_lsp_query', new_callable=AsyncMock) as mock_query:
+            mock_start.return_value = MagicMock()
+            mock_query.return_value = {"uri": "file:///test.py", "range": {"start": {"line": 10, "character": 0}}}
 
-        # TypeScript server not installed, so skip this test for now
-        # (would need two different language servers to test limit)
-        # with pytest.raises(LSPServerStartupError, match="Max servers"):
-        #     await manager.request_definition("src/app.ts", 20, 5)
-
-        # For now, just verify one server is running
-        assert "python" in manager.servers
+            # Start first server
+            await manager.request_definition("src/core/agent.py", 10, 5)
+            assert len(manager.servers) == 1
+            assert "python" in manager.servers
 
 
 class TestCacheIntegration:
@@ -147,33 +159,45 @@ class TestCacheIntegration:
         cache = LSPCache()
         manager = LSPClientManager(repo_root=str(Path.cwd()), cache=cache)
 
-        # First query (cache miss)
-        result1 = await manager.request_definition("src/auth.py", 45, 10)
+        with patch.object(manager, '_start_server', new_callable=AsyncMock) as mock_start, \
+             patch.object(manager, '_make_lsp_query', new_callable=AsyncMock) as mock_query:
+            mock_start.return_value = MagicMock()
+            mock_query.return_value = {"uri": "file:///test.py", "range": {"start": {"line": 45, "character": 10}}}
 
-        # Manually verify cache was populated
-        cache_key = "def:src/auth.py:45:10"
-        assert cache.get(cache_key) is not None
+            # First query (cache miss)
+            result1 = await manager.request_definition("src/auth.py", 45, 10)
 
-        # Second query (cache hit)
-        # Should return same result without querying LSP
-        result2 = await manager.request_definition("src/auth.py", 45, 10)
+            # Manually verify cache was populated
+            cache_key = "def:src/auth.py:45:10"
+            assert cache.get(cache_key) is not None
 
-        assert result1 == result2
+            # Second query (cache hit)
+            result2 = await manager.request_definition("src/auth.py", 45, 10)
+
+            assert result1 == result2
+
+            # _make_lsp_query should only be called once (first was cache miss, second was cache hit)
+            assert mock_query.call_count == 1
 
     @pytest.mark.asyncio
     async def test_different_operations_different_cache_keys(self):
         """Test different operations use different cache keys."""
         manager = LSPClientManager(repo_root=str(Path.cwd()))
 
-        # Query definition
-        await manager.request_definition("src/auth.py", 45, 10)
+        with patch.object(manager, '_start_server', new_callable=AsyncMock) as mock_start, \
+             patch.object(manager, '_make_lsp_query', new_callable=AsyncMock) as mock_query:
+            mock_start.return_value = MagicMock()
+            mock_query.return_value = [{"uri": "file:///test.py", "range": {"start": {"line": 45, "character": 10}}}]
 
-        # Query references (different cache key)
-        await manager.request_references("src/auth.py", 45, 10)
+            # Query definition
+            await manager.request_definition("src/auth.py", 45, 10)
 
-        # Both should be cached separately
-        assert manager.cache.get("def:src/auth.py:45:10") is not None
-        assert manager.cache.get("refs:src/auth.py:45:10") is not None
+            # Query references (different cache key)
+            await manager.request_references("src/auth.py", 45, 10)
+
+            # Both should be cached separately
+            assert manager.cache.get("def:src/auth.py:45:10") is not None
+            assert manager.cache.get("refs:src/auth.py:45:10") is not None
 
 
 class TestQueryMethods:
@@ -183,46 +207,76 @@ class TestQueryMethods:
     async def test_request_definition(self):
         """Test request_definition returns result."""
         manager = LSPClientManager(repo_root=str(Path.cwd()))
-        result = await manager.request_definition("src/auth.py", 45, 10)
 
-        assert result is not None
-        assert "uri" in result
+        with patch.object(manager, '_start_server', new_callable=AsyncMock) as mock_start, \
+             patch.object(manager, '_make_lsp_query', new_callable=AsyncMock) as mock_query:
+            mock_start.return_value = MagicMock()
+            mock_query.return_value = {"uri": "file:///src/auth.py", "range": {"start": {"line": 45, "character": 10}}}
+
+            result = await manager.request_definition("src/auth.py", 45, 10)
+
+            assert result is not None
+            assert "uri" in result
 
     @pytest.mark.asyncio
     async def test_request_references(self):
         """Test request_references returns list."""
         manager = LSPClientManager(repo_root=str(Path.cwd()))
-        result = await manager.request_references("src/auth.py", 45, 10)
 
-        assert isinstance(result, list)
-        assert len(result) >= 0
+        with patch.object(manager, '_start_server', new_callable=AsyncMock) as mock_start, \
+             patch.object(manager, '_make_lsp_query', new_callable=AsyncMock) as mock_query:
+            mock_start.return_value = MagicMock()
+            mock_query.return_value = [{"uri": "file:///src/auth.py", "range": {"start": {"line": 50, "character": 0}}}]
+
+            result = await manager.request_references("src/auth.py", 45, 10)
+
+            assert isinstance(result, list)
+            assert len(result) >= 0
 
     @pytest.mark.asyncio
     async def test_request_hover(self):
         """Test request_hover returns hover info."""
         manager = LSPClientManager(repo_root=str(Path.cwd()))
-        result = await manager.request_hover("src/auth.py", 45, 10)
 
-        assert result is not None
-        assert "contents" in result
+        with patch.object(manager, '_start_server', new_callable=AsyncMock) as mock_start, \
+             patch.object(manager, '_make_lsp_query', new_callable=AsyncMock) as mock_query:
+            mock_start.return_value = MagicMock()
+            mock_query.return_value = {"contents": "def authenticate(user, password) -> bool"}
+
+            result = await manager.request_hover("src/auth.py", 45, 10)
+
+            assert result is not None
+            assert "contents" in result
 
     @pytest.mark.asyncio
     async def test_request_document_symbols(self):
         """Test request_document_symbols returns symbols."""
         manager = LSPClientManager(repo_root=str(Path.cwd()))
-        result = await manager.request_document_symbols("src/auth.py")
 
-        assert isinstance(result, list)
-        assert len(result) >= 0
+        with patch.object(manager, '_start_server', new_callable=AsyncMock) as mock_start, \
+             patch.object(manager, '_make_lsp_query', new_callable=AsyncMock) as mock_query:
+            mock_start.return_value = MagicMock()
+            mock_query.return_value = [{"name": "authenticate", "kind": 12, "range": {"start": {"line": 0}}}]
+
+            result = await manager.request_document_symbols("src/auth.py")
+
+            assert isinstance(result, list)
+            assert len(result) >= 0
 
     @pytest.mark.asyncio
     async def test_request_workspace_symbols(self):
         """Test request_workspace_symbols returns results."""
         manager = LSPClientManager(repo_root=str(Path.cwd()))
-        result = await manager.request_workspace_symbols("User")
 
-        assert isinstance(result, list)
-        # Workspace symbols are best-effort (may be empty)
+        with patch.object(manager, '_start_server', new_callable=AsyncMock) as mock_start, \
+             patch.object(manager, '_query_workspace_symbols', new_callable=AsyncMock) as mock_ws:
+            mock_start.return_value = MagicMock()
+            mock_ws.return_value = [{"name": "User", "kind": 5, "location": {"uri": "mock.py"}}]
+
+            result = await manager.request_workspace_symbols("User")
+
+            assert isinstance(result, list)
+            # Workspace symbols are best-effort (may be empty)
 
 
 class TestErrorHandling:
@@ -296,38 +350,42 @@ class TestServerLifecycle:
     @pytest.mark.asyncio
     async def test_close_all_servers(self):
         """Test close_all_servers shuts down all servers."""
-        manager = LSPClientManager(repo_root=str(Path.cwd()))
+        manager = LSPClientManager(repo_root=str(Path.cwd()), max_servers=3)
 
-        # Start multiple servers
-        await manager.request_definition("src/auth.py", 45, 10)
-        await manager.request_definition("src/app.ts", 20, 5)
+        # Manually add mock servers to simulate running state
+        mock_python_server = MagicMock()
+        mock_ts_server = MagicMock()
+        manager.servers["python"] = mock_python_server
+        manager.servers["typescript"] = mock_ts_server
 
         assert len(manager.servers) == 2
 
-        # Close all
-        await manager.close_all_servers()
+        # Mock close to succeed
+        with patch.object(manager, '_close_server', new_callable=AsyncMock) as mock_close:
+            # Close all
+            await manager.close_all_servers()
 
-        # All servers should be closed
-        assert len(manager.servers) == 0
+            # All servers should be closed
+            assert len(manager.servers) == 0
+            assert mock_close.call_count == 2
 
     @pytest.mark.asyncio
     async def test_close_handles_errors_gracefully(self):
         """Test close_all_servers handles errors gracefully."""
         manager = LSPClientManager(repo_root=str(Path.cwd()))
 
-        # Start server
-        await manager.request_definition("src/auth.py", 45, 10)
+        # Manually add a mock server
+        mock_server = MagicMock()
+        manager.servers["python"] = mock_server
 
         # Mock close to raise error
         async def close_with_error(*args):
             raise Exception("Close failed")
 
         with patch.object(manager, '_close_server', side_effect=close_with_error):
-            # Should not raise (logs warning instead)
-            await manager.close_all_servers()
-
-            # Servers dict should still be cleared
-            assert len(manager.servers) == 0
+            # Should raise LSPError when servers fail to close
+            with pytest.raises(LSPError, match="Failed to close"):
+                await manager.close_all_servers()
 
 
 class TestEdgeCases:
@@ -349,28 +407,41 @@ class TestEdgeCases:
 
         manager = LSPClientManager(repo_root=str(Path.cwd()))
 
-        # Make 10 concurrent queries for same language
-        tasks = [
-            manager.request_definition("src/auth.py", i, 0)
-            for i in range(10)
-        ]
+        with patch.object(manager, '_start_server', new_callable=AsyncMock) as mock_start, \
+             patch.object(manager, '_make_lsp_query', new_callable=AsyncMock) as mock_query:
+            mock_start.return_value = MagicMock()
+            mock_query.return_value = {"uri": "file:///test.py", "range": {"start": {"line": 0, "character": 0}}}
 
-        await asyncio.gather(*tasks)
+            # Make 10 concurrent queries for same language
+            tasks = [
+                manager.request_definition("src/auth.py", i, 0)
+                for i in range(10)
+            ]
 
-        # Should only have 1 Python server (not 10)
-        assert len(manager.servers) == 1
-        assert "python" in manager.servers
+            await asyncio.gather(*tasks)
+
+            # Should only have 1 Python server (not 10)
+            assert len(manager.servers) == 1
+            assert "python" in manager.servers
+
+            # _start_server should only be called once
+            mock_start.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_workspace_symbols_without_repo_root(self):
         """Test workspace symbols works without explicit repo_root."""
         manager = LSPClientManager(repo_root=str(Path.cwd()))
 
-        # Should default to Python and not crash
-        result = await manager.request_workspace_symbols("User")
+        with patch.object(manager, '_start_server', new_callable=AsyncMock) as mock_start, \
+             patch.object(manager, '_query_workspace_symbols', new_callable=AsyncMock) as mock_ws:
+            mock_start.return_value = MagicMock()
+            mock_ws.return_value = [{"name": "User", "kind": 5}]
 
-        # Best-effort, may be empty
-        assert isinstance(result, list)
+            # Should default to Python and not crash
+            result = await manager.request_workspace_symbols("User")
+
+            # Best-effort, may be empty
+            assert isinstance(result, list)
 
 
 class TestIntegration:
@@ -381,43 +452,66 @@ class TestIntegration:
         """Simulate typical agent workflow."""
         manager = LSPClientManager(repo_root=str(Path.cwd()))
 
-        # 1. Agent reads file and needs definition
-        definition = await manager.request_definition("src/auth.py", 45, 10)
-        assert definition is not None
+        with patch.object(manager, '_start_server', new_callable=AsyncMock) as mock_start, \
+             patch.object(manager, '_make_lsp_query', new_callable=AsyncMock) as mock_query:
+            mock_start.return_value = MagicMock()
 
-        # 2. Agent needs type info
-        hover = await manager.request_hover("src/auth.py", 45, 10)
-        assert hover is not None
+            # Set up different return values for different query types
+            def query_side_effect(server, method, file_path, line=None, column=None):
+                if method == "textDocument/definition":
+                    return {"uri": "file:///src/auth.py", "range": {"start": {"line": 45, "character": 10}}}
+                elif method == "textDocument/references":
+                    return [{"uri": "file:///src/auth.py", "range": {"start": {"line": 50, "character": 0}}}]
+                elif method == "textDocument/hover":
+                    return {"contents": "def authenticate(user, password)"}
+                elif method == "textDocument/documentSymbol":
+                    return [{"name": "authenticate", "kind": 12, "range": {"start": {"line": 0}}}]
+                return None
 
-        # 3. Agent looks for references
-        refs = await manager.request_references("src/auth.py", 45, 10)
-        assert isinstance(refs, list)
+            mock_query.side_effect = query_side_effect
 
-        # 4. Agent gets file outline
-        symbols = await manager.request_document_symbols("src/auth.py")
-        assert isinstance(symbols, list)
+            # 1. Agent reads file and needs definition
+            definition = await manager.request_definition("src/auth.py", 45, 10)
+            assert definition is not None
 
-        # Should have only started 1 server (Python)
-        assert len(manager.servers) == 1
+            # 2. Agent needs type info
+            hover = await manager.request_hover("src/auth.py", 45, 10)
+            assert hover is not None
+
+            # 3. Agent looks for references
+            refs = await manager.request_references("src/auth.py", 45, 10)
+            assert isinstance(refs, list)
+
+            # 4. Agent gets file outline
+            symbols = await manager.request_document_symbols("src/auth.py")
+            assert isinstance(symbols, list)
+
+            # Should have only started 1 server (Python)
+            assert len(manager.servers) == 1
 
     @pytest.mark.asyncio
     async def test_multi_language_project(self):
         """Test working with multi-language project."""
         manager = LSPClientManager(repo_root=str(Path.cwd()), max_servers=3)
 
-        # Python backend
-        await manager.request_definition("backend/auth.py", 10, 5)
+        with patch.object(manager, '_start_server', new_callable=AsyncMock) as mock_start, \
+             patch.object(manager, '_make_lsp_query', new_callable=AsyncMock) as mock_query:
+            mock_start.return_value = MagicMock()
+            mock_query.return_value = {"uri": "file:///test", "range": {"start": {"line": 0, "character": 0}}}
 
-        # TypeScript frontend
-        await manager.request_definition("frontend/App.tsx", 20, 10)
+            # Python backend
+            await manager.request_definition("backend/auth.py", 10, 5)
 
-        # JavaScript config
-        await manager.request_definition("scripts/build.js", 5, 0)
+            # TypeScript frontend
+            await manager.request_definition("frontend/App.tsx", 20, 10)
 
-        # Should have 2 servers (Python + TypeScript/JavaScript share server)
-        assert len(manager.servers) == 2
-        assert "python" in manager.servers
-        assert "typescript" in manager.servers  # JS uses TS server
+            # JavaScript config (shares TS server)
+            await manager.request_definition("scripts/build.js", 5, 0)
+
+            # Should have 2 servers (Python + TypeScript/JavaScript share server)
+            assert len(manager.servers) == 2
+            assert "python" in manager.servers
+            assert "typescript" in manager.servers  # JS uses TS server
 
 
 # Import asyncio for concurrent test

@@ -396,13 +396,23 @@ class TestListDirectoryTool:
         result = tool.execute(directory_path=str(tmp_path))
 
         assert result.status == ToolStatus.SUCCESS
-        assert isinstance(result.output, list)
-        assert len(result.output) == 3  # 2 files + 1 directory
+        assert isinstance(result.output, str)
 
-        # Check that directories come first
-        entries = result.output
+        # Directories listed first in formatted output
+        assert "[dir]  subdir/" in result.output
+        assert "[file] file1.txt" in result.output
+        assert "[file] file2.py" in result.output
+
+        # Structured data preserved in metadata
+        entries = result.metadata["entries"]
+        assert len(entries) == 3  # 2 files + 1 directory
         assert entries[0]["type"] == "directory"
         assert entries[0]["name"] == "subdir"
+
+        # Every entry should have an mtime field (ISO 8601 with timezone)
+        for entry in entries:
+            assert "mtime" in entry, f"Entry {entry['name']} missing mtime"
+            assert "T" in entry["mtime"], f"mtime should be ISO format: {entry['mtime']}"
 
     def test_list_empty_directory(self, tmp_path):
         """Test listing an empty directory."""
@@ -413,7 +423,7 @@ class TestListDirectoryTool:
         result = tool.execute(directory_path=str(empty_dir))
 
         assert result.status == ToolStatus.SUCCESS
-        assert result.output == []
+        assert result.output == ""
 
     def test_list_nonexistent_directory(self, tmp_path):
         """Test listing a non-existent directory."""

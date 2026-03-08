@@ -1,12 +1,21 @@
-"""In-memory task state for CRUD-based task tracking."""
+"""Task state with CRUD operations and optional file persistence."""
 
-import uuid
+import json
+from pathlib import Path
 from typing import List, Dict, Any, Optional
+
+from src.observability import get_logger
+
+logger = get_logger(__name__)
 
 
 class TaskState:
     """
-    Manages an in-memory list of tasks (todos) with CRUD operations.
+    Manages tasks (todos) with CRUD operations and optional JSON persistence.
+
+    When a persistence path is set via `set_persistence_path()`, every mutation
+    auto-saves the full task list to a JSON file (one file per session), similar
+    to how Claude Code persists todos to ~/.claude/todos/.
 
     Used by TaskCreateTool, TaskUpdateTool, TaskListTool, TaskGetTool
     and by CodingAgent for pause/resume state tracking.
@@ -19,12 +28,26 @@ class TaskState:
         self.last_stop_reason: Optional[str] = None
         self.error_budget_resume_count: int = 0
         self.successful_tools_since_resume: int = 0
+        self._persistence_path: Optional[Path] = None
 
     # -- CRUD operations --
 
     def create(self, subject: str, description: str = "",
                active_form: str = "", metadata: Optional[Dict] = None) -> Dict[str, Any]:
-        """Create a new task and return it."""
+        """Create a new task and return it.
+
+        Automatically clears completed tasks before creating the new one,
+        keeping the todo list tidy without needing a separate clear tool.
+        """
+        # Auto-cleanup: remove completed tasks before adding new work
+        completed_ids = [tid for tid, t in self._tasks.items()
+                         if t.get("status") == "completed"]
+        if completed_ids:
+            logger.debug("Auto-cleanup: removing %d completed task(s): %s",
+                         len(completed_ids), completed_ids)
+        for tid in completed_ids:
+            del self._tasks[tid]
+
         task_id = str(self._next_id)
         self._next_id += 1
         task = {
@@ -38,6 +61,7 @@ class TaskState:
             "metadata": metadata or {},
         }
         self._tasks[task_id] = task
+        self._save()
         return dict(task)
 
     def get(self, task_id: str) -> Optional[Dict[str, Any]]:
@@ -80,6 +104,7 @@ class TaskState:
         # Handle deletion
         if task.get("status") == "deleted":
             del self._tasks[task_id]
+            self._save()
             return {"id": task_id, "status": "deleted"}
 
         # When a task completes, remove it from other tasks' blockedBy lists
@@ -88,6 +113,7 @@ class TaskState:
                 if task_id in other.get("blockedBy", []):
                     other["blockedBy"].remove(task_id)
 
+        self._save()
         return dict(task)
 
     def list_all(self) -> List[Dict[str, Any]]:
@@ -139,3 +165,47 @@ class TaskState:
         self._next_id = max_id + 1
         self.current_task_id = current_id
         self.last_stop_reason = stop_reason
+
+    # -- File persistence --
+
+    def set_persistence_path(self, path: Path) -> None:
+        """
+        Set the JSON file path for auto-saving.
+
+        Called by agent.set_session_id() once the session directory is known.
+        If the file already exists, loads tasks from it.
+
+        Args:
+            path: Full path to the todos.json file
+                  e.g. .clarity/sessions/{session_id}/todos.json
+        """
+        self._persistence_path = path
+        if path.exists():
+            self._load()
+
+    def _save(self) -> None:
+        """Write the full task list to the JSON file (if persistence is enabled)."""
+        if self._persistence_path is None:
+            return
+        try:
+            self._persistence_path.parent.mkdir(parents=True, exist_ok=True)
+            data = self.list_all()
+            self._persistence_path.write_text(
+                json.dumps(data, indent=2), encoding="utf-8"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to save todos to {self._persistence_path}: {e}")
+
+    def _load(self) -> None:
+        """Load tasks from the JSON file into memory."""
+        if self._persistence_path is None or not self._persistence_path.exists():
+            return
+        try:
+            text = self._persistence_path.read_text(encoding="utf-8")
+            data = json.loads(text)
+            if isinstance(data, list) and data:
+                self.restore(data, current_id=self.current_task_id,
+                             stop_reason=self.last_stop_reason)
+                logger.info(f"Loaded {len(data)} tasks from {self._persistence_path}")
+        except Exception as e:
+            logger.warning(f"Failed to load todos from {self._persistence_path}: {e}")

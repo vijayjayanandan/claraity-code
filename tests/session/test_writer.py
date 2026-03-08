@@ -445,12 +445,10 @@ class TestErrorHandling:
             file_path = Path(tmpdir) / "test.jsonl"
             writer = SessionWriter(file_path, on_error=capture_error)
 
-            await writer.open()
-            await writer.close()
-
-            # Write after close should fail
+            # Write without calling open() should fail (writer not initialized)
             result = await writer.write_raw({"test": "data"})
             assert result.success == False
+            assert "not open" in result.error.lower()
 
     @pytest.mark.asyncio
     async def test_unicode_content(self):

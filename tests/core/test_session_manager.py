@@ -160,8 +160,8 @@ class TestSessionManager:
         """Test initialization with default location."""
         manager = SessionManager()
 
-        # Should create in .opencodeagent/sessions
-        expected_path = Path.cwd() / ".opencodeagent" / "sessions"
+        # Should create in .clarity/sessions
+        expected_path = Path.cwd() / ".clarity" / "sessions"
         assert manager.sessions_dir == expected_path
 
     # ==================== Save Session Tests ====================

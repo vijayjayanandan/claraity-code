@@ -5,9 +5,12 @@ from pathlib import Path
 from datetime import datetime
 import uuid
 
+from src.observability import get_logger
+
+logger = get_logger("memory")
+
 from .working_memory import WorkingMemory
 from .episodic_memory import EpisodicMemory
-from .semantic_memory import SemanticMemory
 from .file_loader import MemoryFileLoader
 from .observation_store import (
     ObservationStore,
@@ -31,7 +34,7 @@ if TYPE_CHECKING:
     from src.session.store.memory_store import MessageStore
     from src.session.models.message import Message as SessionMessage
     from src.core.streaming import StreamingPipeline
-    from src.llm.base import ProviderDelta
+    from src.llm.base import ProviderDelta, LLMBackend
 
 
 class MemoryManager:
@@ -46,11 +49,6 @@ class MemoryManager:
         working_memory_tokens: int = 2000,
         episodic_memory_tokens: int = 1000,
         system_prompt_tokens: int = 300,
-        embedding_model: Optional[str] = None,
-        embedding_api_key: Optional[str] = None,
-        embedding_api_key_env: str = "EMBEDDING_API_KEY",
-        embedding_base_url: Optional[str] = None,
-        embedding_dimension: Optional[int] = None,
         persist_directory: str = "./data",
         load_file_memories: bool = True,
         starting_directory: Optional[Path] = None,
@@ -63,11 +61,6 @@ class MemoryManager:
             working_memory_tokens: Tokens allocated to working memory
             episodic_memory_tokens: Tokens allocated to episodic memory
             system_prompt_tokens: Tokens reserved for system prompt
-            embedding_model: Embedding model for semantic memory (from .env EMBEDDING_MODEL)
-            embedding_api_key: API key for embedding service (optional)
-            embedding_api_key_env: Environment variable for embedding API key (default: EMBEDDING_API_KEY)
-            embedding_base_url: Base URL for embedding API (from .env EMBEDDING_BASE_URL)
-            embedding_dimension: Dimension of embeddings (from .env EMBEDDING_DIMENSION)
             persist_directory: Directory for persistence
             load_file_memories: Whether to load hierarchical file memories on init
             starting_directory: Starting directory for file memory search (default: cwd)
@@ -83,18 +76,15 @@ class MemoryManager:
             compression_threshold=0.8,
         )
 
-        self.semantic_memory = SemanticMemory(
-            persist_directory=f"{persist_directory}/embeddings",
-            embedding_model=embedding_model,
-            api_key=embedding_api_key,
-            api_key_env=embedding_api_key_env,
-            base_url=embedding_base_url,
-            embedding_dimension=embedding_dimension,
-        )
-
         # Initialize file-based memory loader
         self.file_loader = MemoryFileLoader()
         self.file_memory_content = ""
+
+        # Knowledge base cache
+        self._knowledge_core_content: Optional[str] = None
+
+        # Project root for knowledge base loading (avoids Path.cwd() dependency)
+        self._project_root: Path = Path(starting_directory).resolve() if starting_directory else Path.cwd()
 
         # Load file memories if requested
         if load_file_memories:
@@ -725,16 +715,12 @@ class MemoryManager:
 
     def add_code_context(self, code_context: CodeContext) -> None:
         """
-        Add code context to both working and semantic memory.
+        Add code context to working memory.
 
         Args:
             code_context: CodeContext to add
         """
-        # Add to working memory
         self.working_memory.add_code_context(code_context)
-
-        # Also store in semantic memory for long-term retrieval
-        self.semantic_memory.add_code_context(code_context, importance_score=0.6)
 
     def set_task_context(self, task_context: TaskContext) -> None:
         """
@@ -745,44 +731,10 @@ class MemoryManager:
         """
         self.working_memory.set_task_context(task_context)
 
-    def retrieve_relevant_context(
-        self, query: str, n_results: int = 5
-    ) -> List[Tuple[str, float, Dict[str, Any]]]:
-        """
-        Retrieve relevant context from semantic memory.
-
-        Args:
-            query: Search query
-            n_results: Number of results
-
-        Returns:
-            List of (content, similarity, metadata) tuples
-        """
-        return self.semantic_memory.search(query=query, n_results=n_results)
-
-    def retrieve_similar_code(
-        self, query: str, language: Optional[str] = None, n_results: int = 3
-    ) -> List[Tuple[str, float, Dict[str, Any]]]:
-        """
-        Retrieve similar code from semantic memory.
-
-        Args:
-            query: Search query
-            language: Optional language filter
-            n_results: Number of results
-
-        Returns:
-            List of matching code contexts
-        """
-        return self.semantic_memory.search_code(
-            query=query, language=language, n_results=n_results
-        )
-
     def get_context_for_llm(
         self,
         system_prompt: str,
         include_episodic: bool = True,
-        include_semantic_query: Optional[str] = None,
         include_file_memories: bool = True,
         max_context_messages: Optional[int] = None,
     ) -> List[Dict[str, str]]:
@@ -798,7 +750,6 @@ class MemoryManager:
         Args:
             system_prompt: System prompt to include
             include_episodic: Whether to include episodic memory summary
-            include_semantic_query: Optional query to retrieve from semantic memory
             include_file_memories: Whether to include file-based memories (default: True)
             max_context_messages: Optional limit on conversation messages
 
@@ -819,6 +770,9 @@ class MemoryManager:
                 }
             )
 
+        # 2b. Knowledge base is now injected by ContextBuilder directly
+        # into the system prompt (not as a separate system message).
+
         # 3. Episodic memory summary (if requested)
         # Skip if using MessageStore (it has its own compaction handling)
         if include_episodic and self._message_store is None and self.episodic_memory.conversation_turns:
@@ -831,23 +785,7 @@ class MemoryManager:
                     }
                 )
 
-        # 4. Semantic memory retrieval (if query provided)
-        if include_semantic_query:
-            semantic_results = self.retrieve_relevant_context(
-                include_semantic_query, n_results=3
-            )
-            if semantic_results:
-                relevant_info = "\n\n".join(
-                    [f"- {content} (relevance: {score:.2f})" for content, score, _ in semantic_results]
-                )
-                context.append(
-                    {
-                        "role": "system",
-                        "content": f"Relevant context from knowledge base:\n{relevant_info}",
-                    }
-                )
-
-        # 5. Conversation history
+        # 4. Conversation history
         # Option A: Use MessageStore if configured (single source of truth)
         if self._message_store is not None:
             # Get LLM-ready context from MessageStore
@@ -859,8 +797,6 @@ class MemoryManager:
             # Debug: Log tool messages being retrieved
             tool_msgs = [m for m in conversation_context if m.get("role") == "tool"]
             if tool_msgs:
-                from src.observability import get_logger
-                logger = get_logger("memory")
                 logger.warning(
                     f"[CONTEXT_BUILD] Retrieved {len(tool_msgs)} tool messages from MessageStore: "
                     f"{[m.get('tool_call_id') for m in tool_msgs]}"
@@ -899,24 +835,6 @@ class MemoryManager:
             - working_tokens
             - episodic_tokens,
         }
-
-    def store_solution(
-        self, problem: str, solution: str, metadata: Optional[Dict] = None
-    ) -> str:
-        """
-        Store a problem-solution pair in semantic memory.
-
-        Args:
-            problem: Problem description
-            solution: Solution
-            metadata: Optional metadata
-
-        Returns:
-            ID of stored solution
-        """
-        return self.semantic_memory.add_solution(
-            problem=problem, solution=solution, metadata=metadata
-        )
 
     def search_history(
         self, query: str, max_results: int = 3
@@ -1131,7 +1049,6 @@ class MemoryManager:
                 "summary": self.working_memory.get_summary(),
             },
             "episodic_memory": self.episodic_memory.get_statistics(),
-            "semantic_memory": self.semantic_memory.get_statistics(),
             "token_budget": self.get_token_budget(),
         }
 
@@ -1147,7 +1064,6 @@ class MemoryManager:
         """Clear all memory layers and ephemeral state."""
         self.working_memory.clear()
         self.episodic_memory.clear()
-        self.semantic_memory.clear()
         # Clear ephemeral session state
         self._render_meta.clear()
         if self._message_store:
@@ -1155,12 +1071,12 @@ class MemoryManager:
 
     def load_file_memories(self, starting_dir: Optional[Path] = None) -> str:
         """
-        Load hierarchical file memories from .opencodeagent/memory.md files.
+        Load hierarchical file memories from .clarity/memory.md files.
 
         Loads from:
-        1. Enterprise: /etc/opencodeagent/memory.md (Linux/Mac)
-        2. User: ~/.opencodeagent/memory.md
-        3. Project: .opencodeagent/memory.md (traverses upward from starting_dir)
+        1. Enterprise: /etc/clarity/memory.md (Linux/Mac)
+        2. User: ~/.clarity/memory.md
+        3. Project: .clarity/memory.md (traverses upward from starting_dir)
 
         Args:
             starting_dir: Directory to start search (default: cwd)
@@ -1189,6 +1105,84 @@ class MemoryManager:
         self.file_loader = MemoryFileLoader()
         return self.load_file_memories(starting_dir)
 
+    # Knowledge files loaded into agent context, in order.
+    # core.md is capped at 200 lines; decisions/lessons at 100 lines each.
+    # Others have no hard cap (written by knowledge-builder to be concise).
+    _KNOWLEDGE_FILES = [
+        "core.md",
+        "architecture.md",
+        "file-guide.md",
+        "conventions.md",
+        "decisions.md",
+        "lessons.md",
+    ]
+
+    _KNOWLEDGE_WARN_LINES = 200  # Log warning if any file exceeds this
+
+    def _load_knowledge_base(self, force_reload: bool = False) -> str:
+        """Load all knowledge base files into a single combined string.
+
+        Loads core.md, architecture.md, file-guide.md, conventions.md,
+        decisions.md, and lessons.md from .clarity/knowledge/ and combines
+        them with section separators. Logs a warning if any file exceeds
+        _KNOWLEDGE_WARN_LINES but does not truncate.
+
+        Args:
+            force_reload: If True, bypass cache and reload from disk
+
+        Returns:
+            Combined knowledge content or empty string if no files found
+        """
+        if not force_reload and self._knowledge_core_content is not None:
+            return self._knowledge_core_content
+
+        knowledge_dir = self._project_root / ".clarity" / "knowledge"
+
+        if not knowledge_dir.exists():
+            self._knowledge_core_content = ""
+            return ""
+
+        sections = []
+        for filename in self._KNOWLEDGE_FILES:
+            filepath = knowledge_dir / filename
+            if not filepath.exists():
+                continue
+
+            try:
+                content = filepath.read_text(encoding='utf-8')
+                if not content.strip():
+                    continue
+
+                line_count = content.count('\n') + 1
+                if line_count > self._KNOWLEDGE_WARN_LINES:
+                    logger.warning("Knowledge file exceeds recommended size",
+                                   file=filename, lines=line_count,
+                                   recommended=self._KNOWLEDGE_WARN_LINES)
+
+                sections.append(content)
+
+            except Exception as e:
+                logger.warning("Failed to load knowledge file", file=filename, error=str(e))
+                continue
+
+        combined = "\n\n---\n\n".join(sections) if sections else ""
+        self._knowledge_core_content = combined
+        return combined
+
+    def get_knowledge_base(self) -> str:
+        """Get combined knowledge base content (cached after first load)."""
+        return self._load_knowledge_base()
+
+    def reload_knowledge_base(self) -> str:
+        """Reload all knowledge base files (useful after editing).
+
+        Clears the cache and reloads from disk.
+
+        Returns:
+            Updated combined knowledge content
+        """
+        return self._load_knowledge_base(force_reload=True)
+
     def quick_add_memory(self, text: str, location: str = "project") -> Path:
         """
         Quick add memory to file (# syntax from user input).
@@ -1202,7 +1196,7 @@ class MemoryManager:
 
         Example:
             >>> manager.quick_add_memory("Always use 2-space indent", "project")
-            PosixPath('/path/to/project/.opencodeagent/memory.md')
+            PosixPath('/path/to/project/.clarity/memory.md')
 
             >>> # Reload to see the change
             >>> manager.reload_file_memories()
@@ -1217,7 +1211,7 @@ class MemoryManager:
         Initialize a new project memory file with template.
 
         Args:
-            path: Path to create file (default: ./.opencodeagent/memory.md)
+            path: Path to create file (default: ./.clarity/memory.md)
 
         Returns:
             Path to created file
@@ -1227,7 +1221,7 @@ class MemoryManager:
 
         Example:
             >>> manager.init_project_memory()
-            PosixPath('/path/to/project/.opencodeagent/memory.md')
+            PosixPath('/path/to/project/.clarity/memory.md')
 
             >>> # Reload to include the new template
             >>> manager.reload_file_memories()
@@ -1236,9 +1230,9 @@ class MemoryManager:
 
         # Auto-reload to include the new template
         # If custom path provided, reload from its parent's parent directory
-        # (to find the .opencodeagent directory)
+        # (to find the .clarity directory)
         if path:
-            # path is like: /some/dir/.opencodeagent/memory.md
+            # path is like: /some/dir/.clarity/memory.md
             # We want to search from /some/dir
             search_dir = created_path.parent.parent
             self.reload_file_memories(starting_dir=search_dir)
@@ -1247,70 +1241,183 @@ class MemoryManager:
 
         return created_path
 
-    def needs_compaction(self, threshold: float = 0.85) -> bool:
+    @staticmethod
+    def _fix_orphaned_tool_calls(context: list) -> list:
         """
-        Check if context usage exceeds threshold and compaction is needed.
+        Fix tool_call/tool_result pairing for API compliance.
 
-        Called by orchestrator to decide whether to trigger compaction with user notification.
-
-        Args:
-            threshold: Trigger compaction when usage exceeds this fraction (default: 85%)
-                       Must be between 0.0 and 1.0 (exclusive)
-
-        Returns:
-            True if compaction is recommended
+        Scans messages for tool_use blocks without matching tool_result and
+        inserts synthetic results. Returns a new list (does NOT persist changes
+        -- this is only used for the summarization LLM call).
         """
-        # Validate threshold bounds
-        if not 0.0 < threshold < 1.0:
-            raise ValueError(f"threshold must be between 0 and 1, got {threshold}")
+        # Collect tool_call ids from assistant messages
+        tool_call_ids = {}  # id -> (name, index_in_context)
+        for i, msg in enumerate(context):
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                for tc in msg["tool_calls"]:
+                    tc_id = tc.get("id")
+                    if tc_id:
+                        tc_name = tc.get("function", {}).get("name", "unknown")
+                        tool_call_ids[tc_id] = (tc_name, i)
 
-        current = (
-            self.working_memory.get_current_token_count()
-            + self.episodic_memory.current_token_count
-        )
-        available = self.total_context_tokens - self.system_prompt_tokens
+        # Collect existing tool_results
+        existing_results = {}
+        for msg in context:
+            if msg.get("role") == "tool":
+                tc_id = msg.get("tool_call_id")
+                if tc_id:
+                    existing_results[tc_id] = msg
 
-        # Guard against division by zero or negative available space
-        if available <= 0:
-            return False  # No usable space to manage, don't trigger compaction
+        orphaned = set(tool_call_ids.keys()) - set(existing_results.keys())
 
-        return current > (available * threshold)
-
-    def optimize_context(self, target_tokens: Optional[int] = None) -> int:
-        """
-        Optimize context to fit within target token budget.
-
-        Called by orchestrator when needs_compaction() returns True.
-
-        Args:
-            target_tokens: Target token count (uses total_context_tokens if not provided)
-
-        Returns:
-            Number of messages removed from working memory (for user notification)
-        """
-        target = target_tokens or (
-            self.total_context_tokens - self.system_prompt_tokens
-        )
-        current = (
-            self.working_memory.get_current_token_count()
-            + self.episodic_memory.current_token_count
-        )
-
-        messages_removed = 0
-
-        if current > target:
-            # First, compress episodic memory
-            self.episodic_memory._compress_old_turns()
-
-            # If still over, compact working memory
-            current = (
-                self.working_memory.get_current_token_count()
-                + self.episodic_memory.current_token_count
+        if orphaned:
+            logger.info(
+                "compact_fixing_orphaned_tool_calls",
+                orphan_count=len(orphaned),
+                orphan_ids=list(orphaned),
             )
-            if current > target:
-                messages_removed = self.working_memory.compact()
 
-        return messages_removed
+            # Create synthetics for orphans
+            for tc_id in orphaned:
+                tc_name, _ = tool_call_ids[tc_id]
+                existing_results[tc_id] = {
+                    "role": "tool",
+                    "tool_call_id": tc_id,
+                    "name": tc_name,
+                    "content": "Tool execution was interrupted.",
+                }
+
+        # No tool_calls at all — nothing to fix
+        if not tool_call_ids:
+            return context
+
+        # Rebuild context with tool_results in correct positions
+        # (always reorder, not just when orphans exist — misplaced
+        # tool_results also cause API errors)
+        result = []
+        placed = set()
+        for msg in context:
+            if msg.get("role") == "tool":
+                continue  # re-insert in correct position below
+            result.append(msg)
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                for tc in msg["tool_calls"]:
+                    tc_id = tc.get("id")
+                    if tc_id and tc_id in existing_results and tc_id not in placed:
+                        result.append(existing_results[tc_id])
+                        placed.add(tc_id)
+
+        return result
+
+    async def compact_conversation_async(
+        self,
+        current_input_tokens: int,
+        llm_backend: "LLMBackend",
+    ) -> int:
+        """
+        Compact conversation via LLM summarization (async, non-blocking).
+
+        Sends the actual structured conversation messages to the LLM with a
+        summarization system prompt — no serialization to text blob.
+        This avoids token inflation that caused the 378K prompt-too-long error.
+        """
+        if self._message_store is None:
+            logger.warning("compact_conversation_skipped: no MessageStore")
+            return 0
+
+        context_dicts = self._message_store.get_llm_context()
+        if len(context_dicts) <= 4:
+            return 0
+
+        evicted_count = len(context_dicts)
+
+        # Fix orphaned tool_calls before sending to summarization LLM.
+        # The main agent runs _fix_orphaned_tool_calls on every LLM call,
+        # but the compaction path was missing this — causing API errors when
+        # the conversation has interrupted tool_use blocks (e.g., Ctrl+C).
+        context_dicts = self._fix_orphaned_tool_calls(context_dicts)
+
+        from src.memory.compaction import PrioritizedSummarizer
+
+        token_budget = min(6000, current_input_tokens // 6)
+        summarizer = PrioritizedSummarizer(
+            token_budget=token_budget,
+            llm_caller=None,
+        )
+
+        # Build summarization messages: system prompt + actual conversation + instruction
+        # Key insight: send native structured messages instead of serializing to text.
+        # The conversation messages are already in the right format from get_llm_context().
+        summarize_system = {
+            "role": "system",
+            "content": (
+                "You are a summarization assistant. You will receive a conversation "
+                "between a user and an AI coding agent. Summarize it for continuation."
+            ),
+        }
+
+        summarize_instruction = {
+            "role": "user",
+            "content": (
+                "The conversation above is between a user and an AI coding agent. "
+                "Create a continuation summary with these sections IN ORDER OF IMPORTANCE:\n\n"
+                "## Goal and Key Decisions\n"
+                "What is the user trying to accomplish? What important decisions were made?\n\n"
+                "## All User Messages\n"
+                "Include ALL user messages in chronological order.\n\n"
+                "## Code Snippets\n"
+                "Include actual code that was written or discussed.\n\n"
+                "## Errors and Fixes\n"
+                "What went wrong and how was it fixed?\n\n"
+                "## Files Modified\n"
+                "Which files were created/modified and why?\n\n"
+                "## Current State\n"
+                "What was just completed? What's the logical next step?\n\n"
+                "IMPORTANT: Preserve user messages VERBATIM. Include actual code snippets. "
+                f"Target approximately {token_budget} tokens.\n\n"
+                "Output the summary in clean markdown format."
+            ),
+        }
+
+        messages = [summarize_system] + context_dicts + [summarize_instruction]
+
+        logger.info(
+            "compact_sending_native_messages",
+            conversation_messages=len(context_dicts),
+            total_messages=len(messages),
+        )
+
+        # Use the same async streaming path as normal TUI conversation
+        try:
+            summary_parts = []
+            async for delta in llm_backend.generate_provider_deltas_async(messages):
+                if delta.text_delta:
+                    summary_parts.append(delta.text_delta)
+            summary = "".join(summary_parts)
+
+            if not summary or summarizer.count_tokens(summary) > token_budget * 1.2:
+                logger.warning("compact_async: LLM summary empty or over budget, using fallback")
+                summary = summarizer._generate_deterministic_summary(context_dicts)
+        except Exception as e:
+            logger.error("compact_conversation_async_llm_failed", error=str(e))
+            try:
+                summary = summarizer._generate_deterministic_summary(context_dicts)
+            except Exception as e2:
+                logger.error("compact_conversation_async_fallback_failed", error=str(e2))
+                return 0
+
+        logger.info(
+            "compact_conversation_async",
+            evicted_count=evicted_count,
+            summary_length=len(summary),
+            input_tokens=current_input_tokens,
+        )
+
+        return self._message_store.compact(
+            summary_content=summary,
+            evicted_count=evicted_count,
+            pre_tokens=current_input_tokens,
+        )
 
     def set_value(self, key: str, value: Any) -> None:
         """

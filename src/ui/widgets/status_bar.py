@@ -83,6 +83,7 @@ class StatusBar(Static):
     spinner_frame = reactive(0)
     current_tool = reactive("")  # Name of currently executing tool
     current_mode = reactive("normal")  # Permission mode: plan, normal, auto
+    director_phase = reactive("")  # Director phase (empty = inactive)
     current_task_name = reactive("")  # activeForm of in_progress todo task
 
     # Context window tracking (values set by agent, not hardcoded)
@@ -132,12 +133,20 @@ class StatusBar(Static):
         # PERFORMANCE TEST: Return minimal content when idle
         # This tests if complex status bar rendering is causing performance issues
         if not self.is_streaming and not self.current_tool and not self.error_message and not self.info_message:
-            # Minimal idle state - just show mode if not normal
+            # Minimal idle state - show mode and director badges
+            result = Text()
             if self.current_mode == "plan":
-                return Text(" PLAN ", style="bold #1e1e1e on #cca700")
+                result.append(" PLAN ", style="bold #1e1e1e on #cca700")
             elif self.current_mode == "auto":
-                return Text(" AUTO ", style="bold #1e1e1e on #73c991")
-            return Text("")  # Empty when truly idle
+                result.append(" AUTO ", style="bold #1e1e1e on #73c991")
+            if self.director_phase:
+                if result.plain:
+                    result.append(" ", style="")
+                result.append(
+                    f" DIRECTOR: {self.director_phase} ",
+                    style="bold #1e1e1e on #b392f0",
+                )
+            return result if result.plain else Text("")
 
         result = Text()
 
@@ -195,6 +204,14 @@ class StatusBar(Static):
         elif self.current_mode == "auto":
             result.append(" ", style="")
             result.append(" AUTO ", style="bold #1e1e1e on #73c991")
+
+        # Director mode indicator
+        if self.director_phase:
+            result.append(" ", style="")
+            result.append(
+                f" DIRECTOR: {self.director_phase} ",
+                style="bold #1e1e1e on #b392f0",
+            )
 
         # Context window progress bar (right-aligned)
         if self.context_limit > 0:
@@ -468,6 +485,20 @@ class StatusBar(Static):
         """
         self.current_mode = mode
 
+    def set_director_phase(self, phase: str) -> None:
+        """
+        Update director mode phase display.
+
+        Args:
+            phase: Director phase name (e.g., "UNDERSTAND", "PLAN", "EXECUTE")
+                   or empty string to clear.
+        """
+        self.director_phase = phase
+
+    def clear_director_phase(self) -> None:
+        """Clear director phase indicator."""
+        self.director_phase = ""
+
     def set_tool(self, tool_name: str) -> None:
         """
         Set currently executing tool name.
@@ -506,6 +537,7 @@ class StatusBar(Static):
         self.countdown = 0
         self.spinner_frame = 0
         self.current_tool = ""
+        self.director_phase = ""
         self.current_task_name = ""
         self._stream_start_time = 0
         # Note: context_limit is NOT reset (set once at startup)

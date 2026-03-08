@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional, AsyncIterator, Iterator, TYPE_CHECKING
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from enum import Enum
 import os
 
@@ -21,10 +21,12 @@ class LLMBackendType(str, Enum):
     LOCALAI = "localai"
     LLAMACPP = "llamacpp"
     OPENAI = "openai"  # Generic OpenAI-compatible API
+    ANTHROPIC = "anthropic"  # Native Anthropic Messages API
 
 
 class LLMConfig(BaseModel):
     """Configuration for LLM backend. All values should come from .env file."""
+    model_config = ConfigDict(protected_namespaces=(), use_enum_values=True)
 
     backend_type: LLMBackendType
     model_name: str
@@ -36,6 +38,9 @@ class LLMConfig(BaseModel):
     top_p: float
     top_k: int = Field(default_factory=lambda: int(os.getenv("LLM_TOP_K", "40")))
     repeat_penalty: float = Field(default_factory=lambda: float(os.getenv("LLM_REPEAT_PENALTY", "1.1")))
+
+    # Extended thinking (Claude, etc.)
+    thinking_budget: Optional[int] = None  # Token budget for thinking blocks
 
     # Context settings
     context_window: int
@@ -53,9 +58,6 @@ class LLMConfig(BaseModel):
 
     # Timeout
     timeout: float = Field(default_factory=lambda: float(os.getenv("REQUEST_TIMEOUT", "300")))
-
-    class Config:
-        use_enum_values = True
 
 
 class ToolParameter(BaseModel):
@@ -115,6 +117,7 @@ class LLMResponse(BaseModel):
     prompt_tokens: Optional[int] = None
     completion_tokens: Optional[int] = None
     total_tokens: Optional[int] = None
+    cached_tokens: Optional[int] = None  # Prompt tokens served from cache
 
     # Timing
     eval_duration: Optional[float] = None  # seconds
@@ -138,6 +141,7 @@ class StreamChunk(BaseModel):
     prompt_tokens: Optional[int] = None
     completion_tokens: Optional[int] = None
     total_tokens: Optional[int] = None
+    cached_tokens: Optional[int] = None  # Prompt tokens served from cache
 
 
 # =============================================================================
@@ -175,6 +179,7 @@ class ProviderDelta(BaseModel):
     text_delta: Optional[str] = None            # Raw text chunk
     tool_call_delta: Optional[ToolCallDelta] = None  # Incremental tool call
     thinking_delta: Optional[str] = None        # Native thinking (if provider supports)
+    thinking_signature: Optional[str] = None    # Thinking block signature (Anthropic)
     finish_reason: Optional[str] = None         # "stop", "tool_calls", etc.
     usage: Optional[Dict[str, Any]] = None      # Token counts as dict (on finish)
 

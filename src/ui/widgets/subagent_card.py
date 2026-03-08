@@ -75,10 +75,11 @@ class _SubagentHeader(Static):
     }
     """
 
-    def __init__(self, subagent_id: str, model_name: str = "", **kwargs):
+    def __init__(self, subagent_id: str, model_name: str = "", subagent_name: str = "", **kwargs):
         super().__init__(**kwargs)
         self._subagent_id = subagent_id
         self._model_name = model_name
+        self._subagent_name = subagent_name
         self._status = "running"
         self._tool_count = 0
         self._duration_ms: Optional[int] = None
@@ -111,8 +112,13 @@ class _SubagentHeader(Static):
         t.append(" ", style="")
         t.append(f" {icon} ", style=f"bold {fg} on {bg}")
         t.append(" ", style="")
-        t.append("Subagent ", style="#9cdcfe")
-        t.append(self._subagent_id[:12], style="bold #e0e0e0")
+        # Show subagent name (e.g., "knowledge-builder") if available, otherwise fall back to ID
+        if self._subagent_name:
+            t.append(self._subagent_name, style="bold #e0e0e0")
+            t.append(f" ({self._subagent_id[:8]})", style="#6e7681")
+        else:
+            t.append("Subagent ", style="#9cdcfe")
+            t.append(self._subagent_id[:12], style="bold #e0e0e0")
 
         if self._model_name:
             t.append(f" ({self._model_name})", style="#b5cea8")
@@ -198,12 +204,14 @@ class SubAgentCard(Container):
         store: Optional["MessageStore"] = None,
         buffered_notifications: Optional[list] = None,
         model_name: str = "",
+        subagent_name: str = "",
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.subagent_id = subagent_id
         self.transcript_path = transcript_path
         self.model_name = model_name
+        self.subagent_name = subagent_name
         self._status = "running"
         self._collapsed = False
         self._duration_ms: Optional[int] = None
@@ -232,7 +240,7 @@ class SubAgentCard(Container):
         self._body: Optional[_SubagentBody] = None
 
     def compose(self):
-        yield _SubagentHeader(self.subagent_id, model_name=self.model_name, id="sa-header")
+        yield _SubagentHeader(self.subagent_id, model_name=self.model_name, subagent_name=self.subagent_name, id="sa-header")
         yield _SubagentBody(id="sa-body")
 
     async def on_mount(self) -> None:
@@ -366,7 +374,13 @@ class SubAgentCard(Container):
         state = notification.tool_state
         status = state.status
 
-        if status == ToolStatus.RUNNING:
+        if status == ToolStatus.AWAITING_APPROVAL:
+            card.status = ToolStatus.AWAITING_APPROVAL
+        elif status == ToolStatus.APPROVED:
+            card.status = ToolStatus.APPROVED
+        elif status == ToolStatus.REJECTED:
+            card.status = ToolStatus.REJECTED
+        elif status == ToolStatus.RUNNING:
             card.start_running()
         elif status == ToolStatus.SUCCESS:
             # Result content comes from tool MESSAGE_ADDED, not state update.

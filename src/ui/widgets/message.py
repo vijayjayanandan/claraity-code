@@ -236,6 +236,9 @@ class MessageWidget(Vertical):
         self._streaming_text: Text | None = None  # Rich Text object for O(1) appends
         self._is_streaming_mode: bool = False
 
+        # Content segments for accurate copying (stores text as blocks are added)
+        self._segments: list[str] = []
+
     def compose(self) -> ComposeResult:
         """Compose the message with header containing copy button."""
         yield MessageHeader(self.role, self)
@@ -265,10 +268,16 @@ class MessageWidget(Vertical):
             self._current_markdown = Markdown("")
             self._blocks.append(self._current_markdown)
             await self.mount(self._current_markdown)
+            # Start new segment
+            self._segments.append("")
 
         # Append content and update (update() already triggers refresh internally)
         self._markdown_text += content
         self._current_markdown.update(self._markdown_text)
+        
+        # Update the current segment
+        if self._segments:
+            self._segments[-1] = self._markdown_text
 
     async def set_text(self, content: str) -> None:
         """
@@ -284,6 +293,12 @@ class MessageWidget(Vertical):
             self._current_markdown = Markdown("")
             self._blocks.append(self._current_markdown)
             await self.mount(self._current_markdown)
+            # Start new segment
+            self._segments.append(content)
+        else:
+            # Update existing segment
+            if self._segments:
+                self._segments[-1] = content
 
         self._markdown_text = content
         self._current_markdown.update(self._markdown_text)
@@ -385,6 +400,9 @@ class MessageWidget(Vertical):
             self._blocks.append(self._current_markdown)
             self.mount(self._current_markdown)
 
+            # Store text segment for copying
+            self._segments.append(final_text)
+
             # Performance counter - this should be ~1 per text block
             _perf_counters["markdown_parses"] += 1
             _perf_counters["widgets_mounted"] += 1
@@ -437,6 +455,9 @@ class MessageWidget(Vertical):
         self._current_code = block
         self.mount(block)
 
+        # Start new segment for code block (will be updated in append_code/end_code_block)
+        self._segments.append("")
+
         return block
 
     def append_code(self, content: str) -> None:
@@ -453,6 +474,11 @@ class MessageWidget(Vertical):
         """Finalize current code block."""
         if self._current_code:
             self._current_code.finalize()
+            # Update segment with final code content
+            if self._segments:
+                lang = self._current_code.language or ""
+                code = self._current_code.code or ""
+                self._segments[-1] = f"```{lang}\n{code}\n```"
             self._current_code = None
 
     def get_current_code_block(self) -> CodeBlock | None:
@@ -503,6 +529,10 @@ class MessageWidget(Vertical):
         self._tool_cards[call_id] = card
         self.mount(card)
 
+        # Add tool card segment (will be updated when result is set)
+        # Store call_id as marker to update later
+        self._segments.append(f"[Tool: {tool_name}]")
+
         return card
 
     def get_tool_card(self, call_id: str) -> ToolCard | None:
@@ -547,6 +577,9 @@ class MessageWidget(Vertical):
         self._current_thinking = block
         self.mount(block)
 
+        # Start new segment for thinking block (will be updated in end_thinking)
+        self._segments.append("")
+
         return block
 
     def append_thinking(self, content: str) -> None:
@@ -568,6 +601,10 @@ class MessageWidget(Vertical):
         """
         if self._current_thinking:
             self._current_thinking.finalize(token_count)
+            # Update segment with final thinking content
+            if self._segments:
+                content = self._current_thinking.content or ""
+                self._segments[-1] = f"<thinking>\n{content}\n</thinking>"
             self._current_thinking = None
 
     def get_current_thinking_block(self) -> ThinkingBlock | None:
@@ -610,41 +647,45 @@ class MessageWidget(Vertical):
         """
         Get all text content from the message as plain text.
 
-        Collects text from:
-        - Markdown blocks
-        - Code blocks
-        - Tool cards (name and result summary)
-        - Thinking blocks
+        Uses pre-stored content segments for accurate copying.
+        For tool cards, extracts current result/error from the widget.
+        Handles streaming mode by including current streaming text.
 
         Returns:
             Plain text content suitable for clipboard
         """
-        parts = []
-
-        # Get streaming text if still in streaming mode
+        # Build final segments list with tool card results
+        final_segments = []
+        tool_card_index = 0
+        
+        for i, segment in enumerate(self._segments):
+            # Check if this segment is a tool card placeholder
+            if segment.startswith("[Tool: "):
+                # Find corresponding tool card and extract result
+                if tool_card_index < len(self._tool_cards):
+                    tool_card = list(self._tool_cards.values())[tool_card_index]
+                    tool_card_index += 1
+                    
+                    # Build tool card text with result/error
+                    tool_text = f"[Tool: {tool_card.tool_name}]"
+                    if tool_card.result_preview:
+                        tool_text += f"\nResult: {tool_card.result_preview}"
+                    elif tool_card.error_message:
+                        tool_text += f"\nError: {tool_card.error_message}"
+                    
+                    final_segments.append(tool_text)
+                else:
+                    # Fallback to placeholder if tool card not found
+                    final_segments.append(segment)
+            else:
+                # Regular segment (text, code, thinking, attachment)
+                final_segments.append(segment)
+        
+        # If in streaming mode, include current streaming text
         if self._is_streaming_mode and self._streaming_text:
-            parts.append(self._streaming_text.plain)
-        # Otherwise use markdown text (accumulated during message building)
-        elif self._markdown_text:
-            parts.append(self._markdown_text)
-
-        # Get text from code blocks, tool cards, and thinking blocks
-        for block in self._blocks:
-            if isinstance(block, CodeBlock):
-                # Get code content from reactive attribute
-                if block.code:
-                    lang = block.language or ""
-                    parts.append(f"```{lang}\n{block.code}\n```")
-            elif isinstance(block, ToolCard):
-                # Get tool info
-                tool_text = f"[Tool: {block.tool_name}]"
-                parts.append(tool_text)
-            elif isinstance(block, ThinkingBlock):
-                # Get thinking content from reactive attribute
-                if block.content:
-                    parts.append(f"<thinking>\n{block.content}\n</thinking>")
-
-        return "\n\n".join(parts) if parts else ""
+            final_segments.append(self._streaming_text.plain)
+        
+        return "\n\n".join(final_segments) if final_segments else ""
 
     def clear(self) -> None:
         """
@@ -661,6 +702,7 @@ class MessageWidget(Vertical):
         self._current_code = None
         self._current_thinking = None
         self._markdown_text = ""
+        self._segments.clear()
 
 
 class ClickableAttachmentPlaceholder(Static):
@@ -854,6 +896,7 @@ class UserMessage(MessageWidget):
                 self._markdown_text = text_content
                 self._current_markdown = Markdown(text_content)
                 self._blocks.append(self._current_markdown)
+                self._segments.append(text_content)
                 yield self._current_markdown
     
     def _compose_multimodal_content(self) -> ComposeResult:
@@ -883,6 +926,7 @@ class UserMessage(MessageWidget):
                         text_content = " ".join(text_parts)
                         markdown = Markdown(text_content)
                         self._blocks.append(markdown)
+                        self._segments.append(text_content)
                         yield markdown
                         text_parts = []
                     
@@ -908,6 +952,8 @@ class UserMessage(MessageWidget):
                         message_uuid=self._message_uuid
                     )
                     self._blocks.append(placeholder)
+                    # Add file content to segments (the actual file text)
+                    self._segments.append(text)
                     yield placeholder
                 else:
                     # Regular text - accumulate
@@ -919,6 +965,7 @@ class UserMessage(MessageWidget):
                     text_content = " ".join(text_parts)
                     markdown = Markdown(text_content)
                     self._blocks.append(markdown)
+                    self._segments.append(text_content)
                     yield markdown
                     text_parts = []
                 
@@ -943,6 +990,8 @@ class UserMessage(MessageWidget):
                     message_uuid=self._message_uuid
                 )
                 self._blocks.append(placeholder)
+                # Add image placeholder to segments
+                self._segments.append(f"[Image: {filename}]")
                 yield placeholder
         
         # Flush remaining text
@@ -950,6 +999,7 @@ class UserMessage(MessageWidget):
             text_content = " ".join(text_parts)
             markdown = Markdown(text_content)
             self._blocks.append(markdown)
+            self._segments.append(text_content)
             yield markdown
     
     @staticmethod
@@ -1089,4 +1139,5 @@ class SystemMessage(MessageWidget):
             self._markdown_text = self._initial_content
             self._current_markdown = Markdown(self._initial_content)
             self._blocks.append(self._current_markdown)
+            self._segments.append(self._initial_content)
             yield self._current_markdown

@@ -25,13 +25,18 @@ class ToolCallAccumulator:
         return bool(self.id and self.name)
 
     def to_tool_call(self) -> ToolCall:
-        """Convert accumulated data to ToolCall object."""
+        """Convert accumulated data to ToolCall object.
+
+        The ID is already canonical (generated at ProviderDelta emission
+        in the backend), so we use the direct constructor to avoid
+        double-generating a new canonical ID.
+        """
         return ToolCall(
             id=self.id,
             function=ToolCallFunction(
                 name=self.name,
                 arguments=self.arguments_buffer or "{}"
-            )
+            ),
         )
 
 
@@ -62,6 +67,10 @@ class StreamingState:
     in_thinking: bool = False
     thinking_content: str = ""
     thinking_buffer: str = ""       # Buffer for detecting thinking tags
+    thinking_signature: str = ""    # Anthropic thinking block signature
+
+    # Reasoning content (Kimi K2.5 etc.) - must be echoed back on iteration 2+
+    reasoning_content: str = ""
 
     # Tool call state
     tool_calls: List[ToolCall] = field(default_factory=list)
@@ -89,6 +98,8 @@ class StreamingState:
         self.in_thinking = False
         self.thinking_content = ""
         self.thinking_buffer = ""
+        self.thinking_signature = ""
+        self.reasoning_content = ""
         self.tool_calls = []
         self.tool_call_accumulators = {}
         self.segments = []

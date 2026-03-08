@@ -15,8 +15,8 @@ LLM configuration is nested under an ``llm:`` key::
 All ``llm`` fields are optional. Omitted fields inherit from the main agent.
 
 Configuration files are loaded hierarchically:
-1. Project: .claude/agents/*.md (highest priority)
-2. User: ~/.claude/agents/*.md (lower priority)
+1. Project: .clarity/agents/*.md (highest priority)
+2. User: ~/.clarity/agents/*.md (lower priority)
 """
 
 from dataclasses import dataclass, field
@@ -127,7 +127,7 @@ class SubAgentConfig:
             ValueError: If file format is invalid
 
         Example:
-            >>> config = SubAgentConfig.from_file(Path(".claude/agents/code-reviewer.md"))
+            >>> config = SubAgentConfig.from_file(Path(".clarity/agents/code-reviewer.md"))
             >>> print(config.name)
             'code-reviewer'
         """
@@ -273,7 +273,7 @@ class SubAgentConfig:
             >>> SubAgentConfig.create_template(
             ...     "my-agent",
             ...     "My custom subagent",
-            ...     Path(".claude/agents/my-agent.md")
+            ...     Path(".clarity/agents/my-agent.md")
             ... )
         """
         # Validate name format
@@ -334,8 +334,8 @@ class SubAgentConfigLoader:
 
     Search order (highest to lowest priority):
     1. Built-in: src/prompts/subagents/*.py (Python constants)
-    2. Legacy: ./.claude/agents/*.md (Markdown files, deprecated)
-    3. User: ~/.claude/agents/*.md (Markdown files, deprecated)
+    2. Legacy: ./.clarity/agents/*.md (Markdown files, deprecated)
+    3. User: ~/.clarity/agents/*.md (Markdown files, deprecated)
     
     Note: Markdown format is deprecated. Use Python constants in src/prompts/subagents/
     """
@@ -371,7 +371,7 @@ class SubAgentConfigLoader:
             logger.info(f"Loaded {len(builtin_configs)} built-in subagent(s) from src/prompts/subagents/")
 
         # Load from user directory (legacy, lower priority)
-        user_dir = Path.home() / ".claude" / "agents"
+        user_dir = Path.home() / ".clarity" / "agents"
         if user_dir.exists():
             user_configs = self._load_from_directory(user_dir)
             added_count = 0
@@ -385,7 +385,7 @@ class SubAgentConfigLoader:
                 logger.warning(f"Loaded {added_count} subagent(s) from legacy user directory (consider migrating to src/prompts/subagents/)")
 
         # Load from project directory (legacy, can override user but not built-in)
-        project_dir = self.working_directory / ".claude" / "agents"
+        project_dir = self.working_directory / ".clarity" / "agents"
         if project_dir.exists():
             project_configs = self._load_from_directory(project_dir)
             added_count = 0
@@ -418,6 +418,14 @@ class SubAgentConfigLoader:
                 CODE_REVIEWER_PROMPT,
                 TEST_WRITER_PROMPT,
                 DOC_WRITER_PROMPT,
+                CODE_WRITER_PROMPT,
+                EXPLORE_PROMPT,
+                PLANNER_PROMPT,
+                GENERAL_PURPOSE_PROMPT,
+                KNOWLEDGE_BUILDER_PROMPT,
+                EXPLORE_TOOLS,
+                PLANNER_TOOLS,
+                KNOWLEDGE_BUILDER_TOOLS,
             )
 
             # Define subagent configurations
@@ -437,6 +445,40 @@ class SubAgentConfigLoader:
                     'description': 'Expert technical writer creating clear, comprehensive documentation',
                     'prompt': DOC_WRITER_PROMPT,
                 },
+                {
+                    'name': 'code-writer',
+                    'description': 'Implementation engineer that writes minimum code to satisfy requirements and tests',
+                    'prompt': CODE_WRITER_PROMPT,
+                },
+                {
+                    'name': 'explore',
+                    'description': 'Fast read-only codebase explorer for finding code, tracing execution flows, and answering architecture questions',
+                    'prompt': EXPLORE_PROMPT,
+                    'tools': EXPLORE_TOOLS,
+                },
+                {
+                    'name': 'planner',
+                    'description': 'Implementation planner that explores code and produces detailed step-by-step plans without writing any code',
+                    'prompt': PLANNER_PROMPT,
+                    'tools': PLANNER_TOOLS,
+                },
+                {
+                    'name': 'general-purpose',
+                    'description': 'Versatile agent with full tool access for multi-step research and implementation tasks',
+                    'prompt': GENERAL_PURPOSE_PROMPT,
+                },
+                {
+                    'name': 'knowledge-builder',
+                    'description': (
+                        'Codebase analyst that autonomously explores the project and generates '
+                        'structured markdown knowledge base files in .clarity/knowledge/. '
+                        'Delegate with a SHORT task like "Build knowledge base for this project" '
+                        'or "Update architecture.md". Do NOT specify file contents, structure, '
+                        'or filenames -- the subagent discovers these on its own.'
+                    ),
+                    'prompt': KNOWLEDGE_BUILDER_PROMPT,
+                    'tools': KNOWLEDGE_BUILDER_TOOLS,
+                },
             ]
 
             # Create SubAgentConfig objects
@@ -445,7 +487,7 @@ class SubAgentConfigLoader:
                     name=subagent['name'],
                     description=subagent['description'],
                     system_prompt=subagent['prompt'],
-                    tools=None,  # Inherit all tools
+                    tools=subagent.get('tools'),  # None = inherit all, list = allowlist
                     llm=None,  # Inherit LLM config from main agent
                     config_path=None,  # No file path for Python constants
                     metadata={'source': 'builtin'}

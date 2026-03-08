@@ -16,11 +16,16 @@ Security:
 
 import platform
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 
 from .base import Tool, ToolResult, ToolStatus
 from .search_tools import validate_path_security
+from src.tools.command_safety import check_command_safety, clamp_timeout
+from src.observability import get_logger
+
+logger = get_logger("tools.file_operations")
 
 
 class FileOperationTool(Tool):
@@ -378,21 +383,40 @@ class ListDirectoryTool(FileOperationTool):
 
             entries = []
             for entry in path.iterdir():
+                stat = entry.stat()
+                mtime_iso = datetime.fromtimestamp(
+                    stat.st_mtime, tz=timezone.utc
+                ).isoformat()
                 entry_info = {
                     "name": entry.name,
                     "type": "directory" if entry.is_dir() else "file",
-                    "size": entry.stat().st_size if entry.is_file() else None
+                    "size": stat.st_size if entry.is_file() else None,
+                    "mtime": mtime_iso,
                 }
                 entries.append(entry_info)
 
             # Sort entries: directories first, then files, both alphabetically
             entries.sort(key=lambda x: (x["type"] == "file", x["name"].lower()))
 
+            # Format as human-readable text so str() in downstream
+            # consumers (agent, subagent, VS Code serializer) is a no-op
+            output_lines = []
+            for e in entries:
+                if e["type"] == "directory":
+                    output_lines.append(f"[dir]  {e['name']}/")
+                else:
+                    size_str = f" ({e['size']} bytes)" if e["size"] is not None else ""
+                    output_lines.append(f"[file] {e['name']}{size_str}")
+
             return ToolResult(
                 tool_name=self.name,
                 status=ToolStatus.SUCCESS,
-                output=entries,
-                metadata={"directory_path": str(path), "entry_count": len(entries)}
+                output="\n".join(output_lines),
+                metadata={
+                    "directory_path": str(path),
+                    "entry_count": len(entries),
+                    "entries": entries,
+                }
             )
 
         except Exception as e:
@@ -589,7 +613,13 @@ class RunCommandTool(Tool):
             "properties": {
                 "command": {"type": "string", "description": "Shell command to execute"},
                 "working_directory": {"type": "string", "description": "Working directory"},
-                "timeout": {"type": "integer", "description": "Timeout in seconds"}
+                "timeout": {
+                    "type": "integer",
+                    "description": (
+                        "Timeout in seconds (default: 120). Use higher values for "
+                        "long-running commands like test suites or builds (max: 600)"
+                    )
+                }
             },
             "required": ["command"]
         }
@@ -598,7 +628,7 @@ class RunCommandTool(Tool):
         self,
         command: str,
         working_directory: Optional[str] = None,
-        timeout: int = 30,
+        timeout: int = 120,
         **kwargs: Any
     ) -> ToolResult:
         """Execute a shell command."""
@@ -611,6 +641,24 @@ class RunCommandTool(Tool):
                     output=None,
                     error="Command cannot be empty"
                 )
+
+            # --- COMMAND SAFETY CHECK ---
+            is_safe, safety_reason = check_command_safety(command)
+            if not is_safe:
+                return ToolResult(
+                    tool_name=self.name,
+                    status=ToolStatus.ERROR,
+                    output=None,
+                    error=(
+                        f"[BLOCKED] Command rejected by safety controls: {safety_reason}\n"
+                        "This command matches a pattern that could cause irreversible damage "
+                        "or data exfiltration. If this command is legitimately needed, the user "
+                        "must run it manually in their terminal."
+                    )
+                )
+
+            # --- CLAMP TIMEOUT ---
+            timeout = clamp_timeout(timeout)
 
             # Validate working directory if provided
             cwd = None
@@ -635,6 +683,9 @@ class RunCommandTool(Tool):
             # Execute command
             # On Windows, use PowerShell instead of cmd.exe for better Unix compatibility
             # Use explicit UTF-8 encoding with error replacement to avoid cp1252 decode errors
+            # stdin=DEVNULL prevents subprocess from reading terminal input
+            # CREATE_NO_WINDOW / start_new_session isolate subprocess from parent terminal,
+            # preventing tools like npx from writing escape sequences directly to the TUI
             if platform.system() == "Windows":
                 result = subprocess.run(
                     ["powershell", "-NoProfile", "-Command", command],
@@ -643,7 +694,9 @@ class RunCommandTool(Tool):
                     text=True,
                     timeout=timeout,
                     encoding='utf-8',
-                    errors='replace'  # Replace undecodable chars to prevent crashes
+                    errors='replace',
+                    stdin=subprocess.DEVNULL,
+                    creationflags=subprocess.CREATE_NO_WINDOW
                 )
             else:
                 # On Unix-like systems, use the default shell
@@ -655,7 +708,9 @@ class RunCommandTool(Tool):
                     text=True,
                     timeout=timeout,
                     encoding='utf-8',
-                    errors='replace'
+                    errors='replace',
+                    stdin=subprocess.DEVNULL,
+                    start_new_session=True
                 )
 
             # Prepare output
@@ -666,6 +721,9 @@ class RunCommandTool(Tool):
                 output_parts.append(f"STDERR:\n{result.stderr}")
 
             output = "\n\n".join(output_parts) if output_parts else "(no output)"
+
+            # Audit log the execution
+            logger.info(f"[COMMAND_AUDIT] Executed: {command[:200]}, exit_code={result.returncode}, timeout={timeout}s")
 
             # Determine success based on exit code
             if result.returncode == 0:
@@ -694,12 +752,38 @@ class RunCommandTool(Tool):
                     }
                 )
 
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as e:
+            # subprocess.run() kills the process and collects buffered output.
+            # e.stdout/e.stderr may be str (text=True) or bytes (on some platforms),
+            # or None/empty if PowerShell hadn't flushed its buffers before kill.
+            output_parts = []
+            stdout = e.stdout
+            stderr = e.stderr
+            # Handle bytes (can happen on some platforms despite text=True)
+            if isinstance(stdout, bytes):
+                stdout = stdout.decode('utf-8', errors='replace')
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode('utf-8', errors='replace')
+            if stdout:
+                output_parts.append(f"STDOUT:\n{stdout}")
+            if stderr:
+                output_parts.append(f"STDERR:\n{stderr}")
+            partial_output = "\n\n".join(output_parts) if output_parts else (
+                "(no output captured - process was killed before producing output)"
+            )
+
             return ToolResult(
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
-                output=None,
-                error=f"Command timed out after {timeout} seconds"
+                output=partial_output,
+                error=f"Command timed out after {timeout} seconds. "
+                      f"Use a longer timeout if the command needs more time (max 600s).",
+                metadata={
+                    "command": command,
+                    "timeout": timeout,
+                    "working_directory": cwd or "current",
+                    "partial_output": bool(output_parts)
+                }
             )
         except Exception as e:
             return ToolResult(

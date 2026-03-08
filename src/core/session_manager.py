@@ -106,7 +106,7 @@ class SessionManager:
 
         Args:
             sessions_dir: Directory for session storage
-                         (default: .opencodeagent/sessions)
+                         (default: .clarity/sessions)
         """
         if sessions_dir is None:
             sessions_dir = Path.cwd() / ".clarity" / "sessions"
@@ -396,8 +396,23 @@ class SessionManager:
         Returns:
             Path to session directory or None if not found
         """
+        import re
+
+        # Validate session ID format (UUID or UUID prefix) to prevent path traversal
+        if not re.match(r'^[0-9a-f\-]{1,36}$', session_id):
+            logger.warning(f"[SESSION] Invalid session ID format rejected: {session_id!r}")
+            return None
+
         # Try exact match first
         session_dir = self.sessions_dir / session_id
+
+        # Verify resolved path is under sessions_dir (defense-in-depth)
+        try:
+            session_dir.resolve().relative_to(self.sessions_dir.resolve())
+        except ValueError:
+            logger.warning(f"[SESSION] Path traversal blocked for session ID: {session_id!r}")
+            return None
+
         if session_dir.exists():
             return session_dir
 

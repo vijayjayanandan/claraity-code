@@ -9,32 +9,12 @@ from .file_operations import (
     ListDirectoryTool,
     RunCommandTool,
 )
-from .code_search import SearchCodeTool, AnalyzeCodeTool
 from .search_tools import GrepTool, GlobTool
 from .lsp_tools import GetFileOutlineTool, GetSymbolContextTool
-from .git_operations import GitStatusTool, GitDiffTool, GitCommitTool
 from .delegation import DelegateToSubagentTool
 from .task_state import TaskState
 from .planning_tool import TaskCreateTool, TaskUpdateTool, TaskListTool, TaskGetTool
 from .checkpoint_tool import CreateCheckpointTool
-from .clarity_tools import (
-    QueryComponentTool,
-    QueryDependenciesTool,
-    QueryDecisionsTool,
-    QueryFlowsTool,
-    QueryArchitectureSummaryTool,
-    SearchComponentsTool,
-    GetNextTaskTool,
-    UpdateComponentStatusTool,
-    AddArtifactTool,
-    GetImplementationSpecTool,
-    AddMethodTool,
-    AddAcceptanceCriterionTool,
-    UpdateMethodTool,
-    UpdateAcceptanceCriterionTool,
-    UpdateImplementationPatternTool,
-)
-from .clarity_setup_tool import ClaritySetupTool
 from .clarify_tool import ClarifyTool
 from .plan_mode_tools import EnterPlanModeTool, RequestPlanApprovalTool
 from .web_tools import (
@@ -49,9 +29,7 @@ from .tool_schemas import (
     ALL_TOOLS,
     FILE_TOOLS,
     CODE_TOOLS,
-    GIT_TOOLS,
     EXECUTION_TOOLS,
-    CLARITY_TOOLS,
     TESTING_TOOLS,
     WEB_TOOLS,
     PLAN_MODE_TOOLS,
@@ -74,15 +52,10 @@ __all__ = [
     "AppendToFileTool",
     "ListDirectoryTool",
     "RunCommandTool",
-    "SearchCodeTool",
-    "AnalyzeCodeTool",
     "GrepTool",
     "GlobTool",
     "GetFileOutlineTool",
     "GetSymbolContextTool",
-    "GitStatusTool",
-    "GitDiffTool",
-    "GitCommitTool",
     "DelegateToSubagentTool",
     "TaskState",
     "TaskCreateTool",
@@ -90,22 +63,6 @@ __all__ = [
     "TaskListTool",
     "TaskGetTool",
     "CreateCheckpointTool",
-    "QueryComponentTool",
-    "QueryDependenciesTool",
-    "QueryDecisionsTool",
-    "QueryFlowsTool",
-    "QueryArchitectureSummaryTool",
-    "SearchComponentsTool",
-    "GetNextTaskTool",
-    "UpdateComponentStatusTool",
-    "AddArtifactTool",
-    "GetImplementationSpecTool",
-    "AddMethodTool",
-    "AddAcceptanceCriterionTool",
-    "UpdateMethodTool",
-    "UpdateAcceptanceCriterionTool",
-    "UpdateImplementationPatternTool",
-    "ClaritySetupTool",
     "ClarifyTool",
     # Plan mode tools
     "EnterPlanModeTool",
@@ -121,9 +78,7 @@ __all__ = [
     "ALL_TOOLS",
     "FILE_TOOLS",
     "CODE_TOOLS",
-    "GIT_TOOLS",
     "EXECUTION_TOOLS",
-    "CLARITY_TOOLS",
     "TESTING_TOOLS",
     "WEB_TOOLS",
     "PLAN_MODE_TOOLS",

@@ -1,18 +1,20 @@
-"""Test Jira connection via Atlassian Remote MCP Server.
+"""Test Jira connection via mcp-atlassian MCP server.
 
 Usage:
-    python scripts/test_jira_connection.py
+    python scripts/test_jira_connection.py <profile>
+
+    e.g.  python scripts/test_jira_connection.py personal
+          python scripts/test_jira_connection.py corporate
 
 Prerequisites:
-    - Node.js v18+ (for npx mcp-remote)
-    - An Atlassian Cloud account with Jira
+    - uv / uvx installed (Python package manager)
+    - A Jira profile configured in .clarity/integrations/jira/<profile>.json
 
 What happens:
-    1. Checks that npx is available
-    2. Launches `npx mcp-remote https://mcp.atlassian.com/v1/mcp`
-    3. On first run, opens a browser for OAuth 2.1 login
-    4. Discovers available MCP tools
-    5. Invokes a read-only search query
+    1. Loads the named profile config
+    2. Launches `uvx mcp-atlassian` with API token env vars
+    3. Discovers available MCP tools
+    4. Invokes a read-only search query
 """
 
 import asyncio
@@ -26,67 +28,53 @@ sys.path.insert(0, str(project_root))
 
 
 def check_prerequisites():
-    """Verify npx is available."""
+    """Verify uvx is available."""
     import shutil
 
     print("=" * 60)
-    print("  Jira MCP Connection Test")
+    print("  Jira MCP Connection Test (mcp-atlassian)")
     print("=" * 60)
     print()
 
-    npx = shutil.which("npx")
-    if not npx:
-        print("[FAIL] npx not found on PATH. Install Node.js v18+.")
+    uvx = shutil.which("uvx")
+    if not uvx:
+        print("[FAIL] uvx not found on PATH. Install uv: https://docs.astral.sh/uv/")
         sys.exit(1)
-    print(f"[OK] npx found: {npx}")
-
-    # Check node version
-    import subprocess
-    result = subprocess.run(["node", "--version"], capture_output=True, text=True)
-    if result.returncode == 0:
-        version = result.stdout.strip()
-        print(f"[OK] Node.js: {version}")
-        major = int(version.lstrip("v").split(".")[0])
-        if major < 18:
-            print(f"[WARN] Node.js v18+ recommended, you have {version}")
+    print(f"[OK] uvx found: {uvx}")
     print()
 
 
-async def test_connection():
-    """Connect to Atlassian MCP via mcp-remote and discover tools."""
-    from src.integrations.mcp.client import McpClient, StdioTransport, McpError
-    from src.integrations.mcp.config import McpServerConfig
-    from src.integrations.jira.connection import ATLASSIAN_MCP_URL
+async def test_connection(profile: str):
+    """Connect to Jira via mcp-atlassian and discover tools."""
+    from src.integrations.mcp.client import McpClient, StdioTransport
+    from src.integrations.jira.connection import JiraConnection
+
+    conn = JiraConnection(profile=profile)
+    if not conn.is_configured():
+        print(f"[FAIL] Profile '{profile}' not configured.")
+        print(f"       Edit .clarity/integrations/jira/{profile}.json")
+        sys.exit(1)
+
+    config = conn.get_mcp_config()
 
     print("-" * 60)
-    print("  Step 1: Connect via mcp-remote (stdio transport)")
+    print("  Step 1: Connect via mcp-atlassian (stdio transport)")
     print("-" * 60)
-    print(f"  MCP URL: {ATLASSIAN_MCP_URL}")
-    print(f"  Command: npx -y mcp-remote {ATLASSIAN_MCP_URL}")
+    print(f"  Profile:  {profile}")
+    print(f"  Jira URL: {conn.jira_url}")
+    print(f"  Username: {conn.username}")
+    print(f"  Command:  {config.command}")
     print()
-    print("  If this is your first connection, a browser window will open")
-    print("  for Atlassian OAuth login. Authorize the connection there.")
-    print()
-
-    config = McpServerConfig(
-        name="atlassian-rovo-test",
-        command=f"npx -y mcp-remote {ATLASSIAN_MCP_URL}",
-        tool_prefix="jira",
-        connect_timeout=120.0,  # Generous timeout for first OAuth flow
-        invoke_timeout=60.0,
-        discovery_timeout=30.0,
-    )
 
     transport = StdioTransport()
     client = McpClient(config, transport)
 
     try:
-        print("  Connecting (this may take a moment for npm download + OAuth)...")
+        print("  Connecting...")
         await client.connect()
-        print("  [OK] Connected to Atlassian MCP server")
+        print("  [OK] Connected to mcp-atlassian")
     except Exception as e:
         print(f"  [FAIL] Connection failed: {type(e).__name__}: {e}")
-        # Check if there's stderr output
         if transport._process and transport._process.stderr:
             stderr = await transport._process.stderr.read()
             if stderr:
@@ -110,12 +98,10 @@ async def test_list_tools(client):
         for tool in tools:
             name = tool.get("name", "?")
             desc = tool.get("description", "")
-            # Truncate long descriptions
             if len(desc) > 80:
                 desc = desc[:77] + "..."
             print(f"    {name}")
             print(f"      {desc}")
-            # Show parameters
             schema = tool.get("inputSchema", {})
             props = schema.get("properties", {})
             required = schema.get("required", [])
@@ -139,13 +125,11 @@ async def test_invoke_search(client, tools):
     print("  Step 3: Invoke a Read-Only Tool")
     print("-" * 60)
 
-    # Look for a search or list tool
     tool_names = [t.get("name", "") for t in tools]
 
-    # Try common Jira tool names
     search_candidates = [
         "search_issues", "searchIssues", "jql_search",
-        "list_projects", "listProjects", "get_projects",
+        "jira_search", "list_projects", "listProjects",
     ]
     target_tool = None
     for candidate in search_candidates:
@@ -154,7 +138,6 @@ async def test_invoke_search(client, tools):
             break
 
     if not target_tool:
-        # Just use the first tool that looks read-only
         print(f"  Available tools: {tool_names}")
         if tool_names:
             target_tool = tool_names[0]
@@ -165,13 +148,11 @@ async def test_invoke_search(client, tools):
 
     print(f"  Invoking: {target_tool}")
 
-    # Build minimal arguments based on what we know
     args = {}
     tool_schema = next((t for t in tools if t.get("name") == target_tool), {})
     required = tool_schema.get("inputSchema", {}).get("required", [])
     props = tool_schema.get("inputSchema", {}).get("properties", {})
 
-    # Try to fill required params with sensible defaults
     for param in required:
         ptype = props.get(param, {}).get("type", "string")
         if "jql" in param.lower():
@@ -179,7 +160,7 @@ async def test_invoke_search(client, tools):
         elif "query" in param.lower():
             args[param] = "test"
         elif "project" in param.lower():
-            args[param] = ""  # empty might list all
+            args[param] = ""
         elif ptype == "integer":
             args[param] = 5
         else:
@@ -202,7 +183,6 @@ async def test_invoke_search(client, tools):
                 btype = block.get("type", "?")
                 if btype == "text":
                     text = block.get("text", "")
-                    # Try to pretty-print JSON
                     try:
                         parsed = json.loads(text)
                         text = json.dumps(parsed, indent=2)[:500]
@@ -217,9 +197,22 @@ async def test_invoke_search(client, tools):
 
 
 async def main():
+    if len(sys.argv) < 2:
+        # List available profiles
+        from src.integrations.jira.connection import JiraConnection
+        profiles = JiraConnection.list_profiles()
+        if profiles:
+            print(f"Available profiles: {', '.join(profiles)}")
+            print(f"Usage: python scripts/test_jira_connection.py <profile>")
+        else:
+            print("No Jira profiles configured.")
+            print("Create one at .clarity/integrations/jira/<profile>.json")
+        sys.exit(1)
+
+    profile = sys.argv[1]
     check_prerequisites()
 
-    client, transport = await test_connection()
+    client, transport = await test_connection(profile)
     if not client:
         sys.exit(1)
 
@@ -229,12 +222,12 @@ async def main():
         if tools:
             await test_invoke_search(client, tools)
 
-        # Summary
         print()
         print("=" * 60)
         print("  Summary")
         print("=" * 60)
-        print(f"  Transport:  stdio (mcp-remote)")
+        print(f"  Profile:    {profile}")
+        print(f"  Transport:  stdio (uvx mcp-atlassian)")
         print(f"  MCP tools:  {len(tools)} discovered")
         print(f"  Connection: OK")
         print()

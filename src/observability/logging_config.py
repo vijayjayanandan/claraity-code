@@ -29,6 +29,7 @@ import json
 import logging
 import logging.handlers
 import os
+import platform
 import queue
 import re
 import signal
@@ -692,6 +693,17 @@ def configure_logging(
     log_path = Path(log_dir)
     log_path.mkdir(parents=True, exist_ok=True)
 
+    # Set restrictive permissions on the log directory (700 on POSIX)
+    # NOTE: We inline the chmod call here instead of importing from
+    # src.security.file_permissions to avoid a circular import:
+    #   file_permissions -> get_logger -> configure_logging -> file_permissions
+    if platform.system() != "Windows":
+        try:
+            import stat as _stat
+            log_path.chmod(_stat.S_IRWXU)  # 700: owner rwx only
+        except OSError:
+            pass  # Best-effort, non-fatal
+
     # Create handlers list
     handlers = []
 
@@ -839,6 +851,9 @@ def configure_logging(
         # LiteLLM generates DEBUG logs per streaming chunk - extremely noisy
         'litellm', 'LiteLLM', 'litellm.proxy', 'litellm.llms',
         'litellm.router', 'litellm.caching',
+        # markdown-it-py emits DEBUG logs per parser state transition
+        # Incremental streaming triggers repeated re-parses, flooding the queue
+        'markdown_it',
     ]
     for logger_name in noisy_loggers:
         logging.getLogger(logger_name).setLevel(logging.WARNING)

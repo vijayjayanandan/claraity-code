@@ -38,7 +38,8 @@ class TestSessionManagerCreation:
 
             assert info.is_new == True
             assert info.message_count == 0
-            assert info.file_path.exists()
+            # File is NOT created until first write (lazy creation by design)
+            assert not info.file_path.exists()
             assert manager.is_active == True
 
     def test_create_session_with_cwd(self):
@@ -178,8 +179,9 @@ class TestSessionManagerLifecycle:
 
             await manager.start_writer()
 
-            # Writer should be bound and ready
-            assert manager._writer.is_open == True
+            # Writer should be initialized and ready (file is lazily created on first write)
+            # is_open checks for file handle, which is deferred; check _loop instead
+            assert manager._writer._loop is not None
 
             await manager.close()
 
@@ -212,10 +214,22 @@ class TestSessionManagerDiscovery:
         with tempfile.TemporaryDirectory() as tmpdir:
             manager = SessionManager(sessions_dir=tmpdir)
 
-            # Create multiple sessions
+            # Create multiple sessions and write a message to each
+            # (files are not created until first write)
             info1 = manager.create_session()
+            msg1 = Message.create_user("Msg", info1.session_id, None, 1)
+            with open(info1.file_path, 'w') as f:
+                f.write(json.dumps(msg1.to_dict()) + "\n")
+
             info2 = manager.create_session()
+            msg2 = Message.create_user("Msg", info2.session_id, None, 1)
+            with open(info2.file_path, 'w') as f:
+                f.write(json.dumps(msg2.to_dict()) + "\n")
+
             info3 = manager.create_session()
+            msg3 = Message.create_user("Msg", info3.session_id, None, 1)
+            with open(info3.file_path, 'w') as f:
+                f.write(json.dumps(msg3.to_dict()) + "\n")
 
             sessions = manager.list_sessions()
 
@@ -226,20 +240,38 @@ class TestSessionManagerDiscovery:
             manager = SessionManager(sessions_dir=tmpdir)
 
             for _ in range(5):
-                manager.create_session()
+                info = manager.create_session()
+                # Write a message so the file is created
+                msg = Message.create_user("Msg", info.session_id, None, 1)
+                with open(info.file_path, 'w') as f:
+                    f.write(json.dumps(msg.to_dict()) + "\n")
 
             sessions = manager.list_sessions(limit=2)
 
             assert len(sessions) == 2
 
     def test_list_sessions_sorted_by_time(self):
+        import time
         with tempfile.TemporaryDirectory() as tmpdir:
             manager = SessionManager(sessions_dir=tmpdir)
 
-            # Create sessions with different timestamps
+            # Create sessions with different timestamps, writing a message to each
             info1 = manager.create_session()
+            msg1 = Message.create_user("Msg", info1.session_id, None, 1)
+            with open(info1.file_path, 'w') as f:
+                f.write(json.dumps(msg1.to_dict()) + "\n")
+            time.sleep(0.05)
+
             info2 = manager.create_session()
+            msg2 = Message.create_user("Msg", info2.session_id, None, 1)
+            with open(info2.file_path, 'w') as f:
+                f.write(json.dumps(msg2.to_dict()) + "\n")
+            time.sleep(0.05)
+
             info3 = manager.create_session()
+            msg3 = Message.create_user("Msg", info3.session_id, None, 1)
+            with open(info3.file_path, 'w') as f:
+                f.write(json.dumps(msg3.to_dict()) + "\n")
 
             sessions = manager.list_sessions()
 
@@ -247,11 +279,20 @@ class TestSessionManagerDiscovery:
             assert sessions[0].session_id == info3.session_id
 
     def test_get_recent_session(self):
+        import time
         with tempfile.TemporaryDirectory() as tmpdir:
             manager = SessionManager(sessions_dir=tmpdir)
 
-            manager.create_session()
+            info1 = manager.create_session()
+            msg1 = Message.create_user("Msg", info1.session_id, None, 1)
+            with open(info1.file_path, 'w') as f:
+                f.write(json.dumps(msg1.to_dict()) + "\n")
+            time.sleep(0.05)
+
             info = manager.create_session()
+            msg2 = Message.create_user("Msg", info.session_id, None, 1)
+            with open(info.file_path, 'w') as f:
+                f.write(json.dumps(msg2.to_dict()) + "\n")
 
             recent = manager.get_recent_session()
 
@@ -270,6 +311,10 @@ class TestSessionManagerDiscovery:
             manager = SessionManager(sessions_dir=tmpdir)
 
             info = manager.create_session()
+            # Write a message so the file is created (lazy creation)
+            msg = Message.create_user("Msg", info.session_id, None, 1)
+            with open(info.file_path, 'w') as f:
+                f.write(json.dumps(msg.to_dict()) + "\n")
 
             assert manager.session_exists(info.session_id) == True
             # Use valid UUID format for nonexistent check
@@ -308,6 +353,11 @@ class TestSessionManagerDelete:
 
             info = manager.create_session()
             session_id = info.session_id
+
+            # Write a message so the file is created (lazy creation)
+            msg = Message.create_user("Msg", session_id, None, 1)
+            with open(info.file_path, 'w') as f:
+                f.write(json.dumps(msg.to_dict()) + "\n")
 
             # Clear manager state
             manager._store = None

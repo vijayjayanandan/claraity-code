@@ -1,10 +1,10 @@
 """
-File-based hierarchical memory loader for OpenCode agent.
+File-based hierarchical memory loader for ClarAIty agent.
 
 Supports 4-level hierarchy:
-1. Enterprise: /etc/opencodeagent/memory.md (Linux/Mac) or C:/ProgramData/opencodeagent/memory.md (Windows)
-2. User: ~/.opencodeagent/memory.md
-3. Project: ./.opencodeagent/memory.md (traverses upward from cwd)
+1. Enterprise: /etc/clarity/memory.md (Linux/Mac) or C:/ProgramData/clarity/memory.md (Windows)
+2. User: ~/.clarity/memory.md
+3. Project: ./.clarity/memory.md (traverses upward from cwd)
 4. Imports: @path/to/file.md (recursive, max 5 levels)
 
 Features:
@@ -24,10 +24,11 @@ Example:
 from pathlib import Path
 from typing import List, Optional, Set
 import re
-import logging
 import platform
 
-logger = logging.getLogger(__name__)
+from src.observability import get_logger
+
+logger = get_logger(__name__)
 
 
 class MemoryFileLoader:
@@ -37,7 +38,7 @@ class MemoryFileLoader:
     MEMORY_FILENAME = "memory.md"
 
     # Directory name
-    CONFIG_DIR = ".opencodeagent"
+    CONFIG_DIR = ".clarity"
 
     # Maximum import depth (prevent infinite recursion)
     MAX_IMPORT_DEPTH = 5
@@ -51,9 +52,9 @@ class MemoryFileLoader:
         Load memory files from all hierarchy levels.
 
         Hierarchy (lowest to highest priority):
-        1. Enterprise: /etc/opencodeagent/memory.md (Linux/Mac)
-        2. User: ~/.opencodeagent/memory.md
-        3. Project: Traverse upward from starting_dir looking for .opencodeagent/memory.md
+        1. Enterprise: /etc/clarity/memory.md (Linux/Mac)
+        2. User: ~/.clarity/memory.md
+        3. Project: Traverse upward from starting_dir looking for .clarity/memory.md
 
         Args:
             starting_dir: Directory to start search (default: cwd)
@@ -112,16 +113,16 @@ class MemoryFileLoader:
         system = platform.system()
 
         if system == "Linux" or system == "Darwin":  # macOS
-            return Path("/etc/opencodeagent") / self.MEMORY_FILENAME
+            return Path("/etc/clarity") / self.MEMORY_FILENAME
         elif system == "Windows":
-            return Path("C:/ProgramData/opencodeagent") / self.MEMORY_FILENAME
+            return Path("C:/ProgramData/clarity") / self.MEMORY_FILENAME
         return None
 
     def _load_project_hierarchy(self, starting_dir: Path) -> List[str]:
         """
         Traverse upward from starting_dir to find project memories.
 
-        Looks for .opencodeagent/memory.md in each directory.
+        Looks for .clarity/memory.md in each directory.
         Stops at filesystem root.
         """
         memories = []
@@ -189,8 +190,8 @@ class MemoryFileLoader:
 
         Supports:
         - Relative: @./docs/architecture.md
-        - Home: @~/personal/preferences.md
-        - Absolute: @/full/path/to/file.md
+        - Home: @~/.clarity/preferences.md (restricted to ~/.clarity/)
+        Note: Absolute path imports are blocked for security.
 
         Args:
             content: File content to process
@@ -245,6 +246,9 @@ class MemoryFileLoader:
         """
         Resolve import path to absolute path.
 
+        Security: Only allows .md files within the project root or ~/.clarity/.
+        Absolute path imports are blocked entirely.
+
         Args:
             import_path: Import path from @syntax
             base_dir: Base directory for relative paths
@@ -252,21 +256,53 @@ class MemoryFileLoader:
         Returns:
             Resolved absolute path or None
         """
+        # Security: only allow .md file extension
+        if not import_path.endswith('.md'):
+            logger.warning(f"[SECURITY] Blocked non-.md import: {import_path}")
+            return None
+
+        # Security: block absolute path imports entirely
+        if import_path.startswith('/') or (len(import_path) >= 3 and import_path[1] == ':'):
+            logger.warning(f"[SECURITY] Absolute path imports are not allowed: {import_path}")
+            return None
+
         # Home directory: @~/path/to/file.md
         if import_path.startswith('~/'):
-            return (Path.home() / import_path[2:]).resolve()
+            resolved = (Path.home() / import_path[2:]).resolve()
 
         # Relative: @./path or @../path
         elif import_path.startswith('./') or import_path.startswith('../'):
-            return (base_dir / import_path).resolve()
-
-        # Absolute: @/full/path
-        elif import_path.startswith('/'):
-            return Path(import_path)
+            resolved = (base_dir / import_path).resolve()
 
         # Default: treat as relative
         else:
-            return (base_dir / import_path).resolve()
+            resolved = (base_dir / import_path).resolve()
+
+        # Security: restrict imports to project root or user .clarity directory
+        project_root = Path.cwd().resolve()
+        user_clarity = Path.home().resolve() / ".clarity"
+
+        is_safe = False
+        try:
+            resolved.relative_to(project_root)
+            is_safe = True
+        except ValueError:
+            pass
+
+        if not is_safe:
+            try:
+                resolved.relative_to(user_clarity)
+                is_safe = True
+            except ValueError:
+                pass
+
+        if not is_safe:
+            logger.warning(
+                f"[SECURITY] Blocked import outside allowed directories: {import_path}"
+            )
+            return None
+
+        return resolved
 
     def quick_add(self, text: str, location: str = "project") -> Path:
         """
@@ -281,7 +317,7 @@ class MemoryFileLoader:
 
         Example:
             >>> loader.quick_add("Always use 2-space indent", "project")
-            PosixPath('/path/to/project/.opencodeagent/memory.md')
+            PosixPath('/path/to/project/.clarity/memory.md')
         """
         if location == "project":
             path = Path.cwd() / self.CONFIG_DIR / self.MEMORY_FILENAME
@@ -336,7 +372,7 @@ class MemoryFileLoader:
         Initialize a new memory.md file with template.
 
         Args:
-            path: Path to create file (default: ./.opencodeagent/memory.md)
+            path: Path to create file (default: ./.clarity/memory.md)
 
         Returns:
             Path to created file
@@ -350,7 +386,7 @@ class MemoryFileLoader:
         if path.exists():
             raise FileExistsError(f"Memory file already exists: {path}")
 
-        template = """# OpenCode Project Memory
+        template = """# ClarAIty Project Memory
 
 ## Project Context
 [Describe your project, its purpose, and key information]

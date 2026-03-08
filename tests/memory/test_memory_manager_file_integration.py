@@ -27,7 +27,7 @@ class TestMemoryManagerFileIntegration:
     @pytest.fixture
     def temp_project_with_memory(self, temp_project_dir):
         """Create a project with existing memory file."""
-        memory_dir = temp_project_dir / ".opencodeagent"
+        memory_dir = temp_project_dir / ".clarity"
         memory_dir.mkdir()
         memory_file = memory_dir / "memory.md"
         memory_file.write_text(
@@ -155,7 +155,7 @@ class TestMemoryManagerFileIntegration:
         assert manager.file_memory_content == ""
 
         # Create a memory file
-        memory_dir = temp_project_dir / ".opencodeagent"
+        memory_dir = temp_project_dir / ".clarity"
         memory_dir.mkdir()
         memory_file = memory_dir / "memory.md"
         memory_file.write_text("# New Memory\n\nNew content\n", encoding="utf-8")
@@ -181,7 +181,7 @@ class TestMemoryManagerFileIntegration:
         # Verify file created
         assert path.exists()
         assert path.name == "memory.md"
-        assert ".opencodeagent" in str(path)
+        assert ".clarity" in str(path)
 
         # Verify content
         content = path.read_text(encoding="utf-8")
@@ -219,7 +219,7 @@ class TestMemoryManagerFileIntegration:
 
         assert path.exists()
         assert home_dir in path.parents
-        assert ".opencodeagent" in str(path)
+        assert ".clarity" in str(path)
 
     # ===== Init Project Memory Tests =====
 
@@ -238,12 +238,12 @@ class TestMemoryManagerFileIntegration:
 
         # Verify template content
         content = path.read_text(encoding="utf-8")
-        assert "# OpenCode Project Memory" in content
+        assert "# ClarAIty Project Memory" in content
         assert "## Project Context" in content
         assert "## Code Standards" in content
 
         # Verify auto-reload
-        assert "OpenCode Project Memory" in manager.file_memory_content
+        assert "ClarAIty Project Memory" in manager.file_memory_content
 
     def test_init_project_memory_raises_if_exists(self, temp_project_with_memory, monkeypatch):
         """Test that init raises error if file already exists."""
@@ -256,14 +256,14 @@ class TestMemoryManagerFileIntegration:
 
     def test_init_project_memory_custom_path(self, tmp_path):
         """Test initializing at custom path."""
-        custom_path = tmp_path / "custom_dir" / ".opencodeagent" / "memory.md"
+        custom_path = tmp_path / "custom_dir" / ".clarity" / "memory.md"
 
         manager = MemoryManager(load_file_memories=False)
         path = manager.init_project_memory(path=custom_path)
 
         assert path.exists()
         assert path == custom_path
-        assert "OpenCode Project Memory" in manager.file_memory_content
+        assert "ClarAIty Project Memory" in manager.file_memory_content
 
     # ===== Hierarchy Tests =====
 
@@ -272,7 +272,7 @@ class TestMemoryManagerFileIntegration:
         # Set up home directory with user memory
         home_dir = tmp_path / "home"
         home_dir.mkdir()
-        user_memory_dir = home_dir / ".opencodeagent"
+        user_memory_dir = home_dir / ".clarity"
         user_memory_dir.mkdir()
         user_memory = user_memory_dir / "memory.md"
         user_memory.write_text("# User Memory\n\nUser preference\n", encoding="utf-8")
@@ -281,7 +281,7 @@ class TestMemoryManagerFileIntegration:
         # Set up project directory with project memory
         project_dir = tmp_path / "project"
         project_dir.mkdir()
-        project_memory_dir = project_dir / ".opencodeagent"
+        project_memory_dir = project_dir / ".clarity"
         project_memory_dir.mkdir()
         project_memory = project_memory_dir / "memory.md"
         project_memory.write_text("# Project Memory\n\nProject preference\n", encoding="utf-8")
@@ -298,7 +298,7 @@ class TestMemoryManagerFileIntegration:
         monkeypatch.chdir(temp_project_dir)
 
         # Create main memory file with import
-        memory_dir = temp_project_dir / ".opencodeagent"
+        memory_dir = temp_project_dir / ".clarity"
         memory_dir.mkdir()
 
         # Create imported file

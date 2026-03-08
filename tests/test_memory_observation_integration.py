@@ -1,10 +1,18 @@
 """Tests for MemoryManager + ObservationStore integration (Phase 2)."""
 
-import os
 import tempfile
 import pytest
+import chromadb.api.shared_system_client
 
 from src.memory import MemoryManager, Importance
+
+
+@pytest.fixture(autouse=True)
+def reset_chromadb():
+    """Reset ChromaDB singleton between tests to avoid settings conflicts."""
+    yield
+    # Clear the ChromaDB singleton cache after each test
+    chromadb.api.shared_system_client.SharedSystemClient._identifier_to_system.clear()
 
 
 class TestMemoryManagerObservationIntegration:
@@ -75,12 +83,12 @@ class TestMemoryManagerObservationIntegration:
         """Test rehydrating a pointer back to content."""
         memory_manager.add_user_message("Read file")
 
-        original_content = "def important_function(): pass"
+        original_content = "def important_function(): pass\n" * 50  # Large enough to exceed threshold
         pointer, is_pointer = memory_manager.add_tool_observation(
             tool_name="read_file",
             args={"path": "/important.py"},
             content=original_content,
-            inline_threshold_tokens=10,  # Force pointer
+            inline_threshold_tokens=5,  # Force pointer with very low threshold
         )
 
         assert is_pointer

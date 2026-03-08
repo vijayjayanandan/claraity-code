@@ -16,7 +16,6 @@ class TestContextAssemblyReport:
             system_prompt_tokens=5000,
             tools_schema_tokens=3000,
             file_references_tokens=0,
-            rag_tokens=0,
             agent_state_tokens=500,
             working_memory_tokens=10000,
             episodic_memory_tokens=2000,
@@ -108,7 +107,6 @@ class TestContextAssemblyReport:
             safety_buffer_tokens=2000,
             system_prompt_tokens=5000,
             tools_schema_tokens=3000,
-            rag_tokens=1000,
             working_memory_tokens=10000,
         )
 
@@ -164,15 +162,14 @@ class TestContextAssemblyReport:
             system_prompt_tokens=5000,
             tools_schema_tokens=3000,
             file_references_tokens=2000,
-            rag_tokens=8000,
             agent_state_tokens=500,
             working_memory_tokens=20000,
             episodic_memory_tokens=5000,
         )
 
-        expected_total = 5000 + 3000 + 2000 + 8000 + 500 + 20000 + 5000
+        expected_total = 5000 + 3000 + 2000 + 500 + 20000 + 5000
         assert report.total_input_tokens == expected_total
-        assert report.total_input_tokens == 43500
+        assert report.total_input_tokens == 35500
 
 
 class TestContextAssemblyReportThresholds:

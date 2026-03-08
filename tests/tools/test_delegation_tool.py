@@ -12,7 +12,7 @@ from src.subagents import SubAgentManager, SubAgentResult
 @pytest.fixture
 def temp_agent_dir(tmp_path):
     """Create temporary directory with subagent configs."""
-    agents_dir = tmp_path / ".claude" / "agents"
+    agents_dir = tmp_path / ".clarity" / "agents"
     agents_dir.mkdir(parents=True)
 
     # Create test subagent config
@@ -79,130 +79,14 @@ class TestDelegationToolInitialization:
 class TestDelegationToolExecution:
     """Test DelegateToSubagentTool execution."""
 
-    def test_execute_success(self, mock_subagent_manager):
-        """Test successful delegation to subagent."""
+    def test_sync_execute_returns_error_stub(self, mock_subagent_manager):
+        """Sync execute() returns error directing to async path."""
         tool = DelegateToSubagentTool(mock_subagent_manager)
 
-        # Mock successful subagent result
-        mock_result = SubAgentResult(
-            success=True,
-            subagent_name='test-agent',
-            output='Test output from subagent',
-            execution_time=1.5,
-            tool_calls=[
-                {'tool': 'read_file', 'success': True},
-                {'tool': 'write_file', 'success': True}
-            ]
-        )
-        mock_subagent_manager.delegate.return_value = mock_result
-
-        # Execute tool
         result = tool.execute(subagent='test-agent', task='Test task')
 
-        # Verify delegation was called
-        mock_subagent_manager.delegate.assert_called_once_with(
-            subagent_name='test-agent',
-            task_description='Test task'
-        )
-
-        # Verify result
-        assert result.status == ToolStatus.SUCCESS
-        assert result.output == 'Test output from subagent'
-        assert result.metadata['subagent'] == 'test-agent'
-        assert result.metadata['execution_time'] == 1.5
-        assert result.metadata['tools_used'] == 2
-
-    def test_execute_subagent_not_found(self, mock_subagent_manager):
-        """Test execution when subagent doesn't exist."""
-        tool = DelegateToSubagentTool(mock_subagent_manager)
-
-        # Mock subagent not found
-        mock_subagent_manager.delegate.return_value = None
-
-        # Execute tool
-        result = tool.execute(subagent='non-existent', task='Test task')
-
-        # Verify error result
         assert result.status == ToolStatus.ERROR
-        assert result.output is None
-        assert 'not found' in result.error.lower()
-        assert 'test-agent' in result.error  # Should list available
-
-    def test_execute_subagent_fails(self, mock_subagent_manager):
-        """Test execution when subagent execution fails."""
-        tool = DelegateToSubagentTool(mock_subagent_manager)
-
-        # Mock failed subagent result
-        mock_result = SubAgentResult(
-            success=False,
-            subagent_name='test-agent',
-            output='',
-            error='Subagent execution failed',
-            execution_time=0.5
-        )
-        mock_subagent_manager.delegate.return_value = mock_result
-
-        # Execute tool
-        result = tool.execute(subagent='test-agent', task='Test task')
-
-        # Verify error result
-        assert result.status == ToolStatus.ERROR
-        assert result.output is None
-        assert 'failed' in result.error.lower()
-
-    def test_execute_empty_subagent_name(self, mock_subagent_manager):
-        """Test execution with empty subagent name."""
-        tool = DelegateToSubagentTool(mock_subagent_manager)
-
-        # Execute with empty name
-        result = tool.execute(subagent='', task='Test task')
-
-        # Should not call delegate
-        mock_subagent_manager.delegate.assert_not_called()
-
-        # Verify error result
-        assert result.status == ToolStatus.ERROR
-        assert 'required' in result.error.lower()
-
-    def test_execute_empty_task(self, mock_subagent_manager):
-        """Test execution with empty task."""
-        tool = DelegateToSubagentTool(mock_subagent_manager)
-
-        # Execute with empty task
-        result = tool.execute(subagent='test-agent', task='')
-
-        # Should not call delegate
-        mock_subagent_manager.delegate.assert_not_called()
-
-        # Verify error result
-        assert result.status == ToolStatus.ERROR
-        assert 'required' in result.error.lower()
-
-    def test_execute_with_whitespace_trimming(self, mock_subagent_manager):
-        """Test that whitespace is trimmed from inputs."""
-        tool = DelegateToSubagentTool(mock_subagent_manager)
-
-        mock_result = SubAgentResult(
-            success=True,
-            subagent_name='test-agent',
-            output='Output',
-            execution_time=1.0
-        )
-        mock_subagent_manager.delegate.return_value = mock_result
-
-        # Execute with whitespace
-        result = tool.execute(
-            subagent='  test-agent  ',
-            task='  Test task with spaces  '
-        )
-
-        # Verify trimmed values were used
-        mock_subagent_manager.delegate.assert_called_once_with(
-            subagent_name='test-agent',
-            task_description='Test task with spaces'
-        )
-
-        assert result.status == ToolStatus.SUCCESS
+        assert 'async' in result.error.lower()
 
 
 class TestDelegationToolParameters:

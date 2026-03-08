@@ -27,8 +27,8 @@ class TestMemoryFileLoader:
 
     @pytest.fixture
     def temp_memory_dir(self, tmp_path):
-        """Create temporary .opencodeagent directory."""
-        memory_dir = tmp_path / ".opencodeagent"
+        """Create temporary .clarity directory."""
+        memory_dir = tmp_path / ".clarity"
         memory_dir.mkdir()
         return memory_dir
 
@@ -72,7 +72,7 @@ class TestMemoryFileLoader:
         # Create project memory
         project_dir = tmp_path / "project"
         project_dir.mkdir()
-        memory_dir = project_dir / ".opencodeagent"
+        memory_dir = project_dir / ".clarity"
         memory_dir.mkdir()
         memory_file = memory_dir / "memory.md"
         memory_file.write_text("# Project Memory\n\nProject content\n", encoding="utf-8")
@@ -87,7 +87,7 @@ class TestMemoryFileLoader:
         # Create user memory
         user_dir = tmp_path / "user"
         user_dir.mkdir()
-        user_memory_dir = user_dir / ".opencodeagent"
+        user_memory_dir = user_dir / ".clarity"
         user_memory_dir.mkdir()
         user_memory_file = user_memory_dir / "memory.md"
         user_memory_file.write_text("# User Memory\n\nUser content\n", encoding="utf-8")
@@ -98,7 +98,7 @@ class TestMemoryFileLoader:
         # Create project memory
         project_dir = tmp_path / "project"
         project_dir.mkdir()
-        project_memory_dir = project_dir / ".opencodeagent"
+        project_memory_dir = project_dir / ".clarity"
         project_memory_dir.mkdir()
         project_memory_file = project_memory_dir / "memory.md"
         project_memory_file.write_text("# Project Memory\n\nProject content\n", encoding="utf-8")
@@ -116,11 +116,11 @@ class TestMemoryFileLoader:
 
     def test_project_hierarchy_traversal(self, loader, tmp_path):
         """Test upward traversal to find project memory."""
-        # Create nested structure: root/.opencodeagent/memory.md
+        # Create nested structure: root/.clarity/memory.md
         # and start from root/subdir/subsubdir
         root = tmp_path / "root"
         root.mkdir()
-        memory_dir = root / ".opencodeagent"
+        memory_dir = root / ".clarity"
         memory_dir.mkdir()
         memory_file = memory_dir / "memory.md"
         memory_file.write_text("# Root Memory\n\nFound me!\n", encoding="utf-8")
@@ -136,11 +136,13 @@ class TestMemoryFileLoader:
 
     # ===== Import Processing =====
 
-    def test_import_relative(self, loader, tmp_path):
+    def test_import_relative(self, loader, tmp_path, monkeypatch):
         """Test relative import (@./docs/file.md)."""
         # Create main file with relative import
         main_dir = tmp_path / "main"
         main_dir.mkdir()
+        # cwd must contain the resolved path for security containment
+        monkeypatch.chdir(tmp_path)
         main_file = main_dir / "memory.md"
         main_file.write_text("@./docs/imported.md\n# Main Content\n", encoding="utf-8")
 
@@ -157,20 +159,23 @@ class TestMemoryFileLoader:
         assert imported_file in loader.loaded_files
 
     def test_import_home(self, loader, tmp_path, monkeypatch):
-        """Test home directory import (@~/file.md)."""
+        """Test home directory import (@~/.clarity/file.md) restricted to ~/.clarity/."""
         # Mock home directory
         home_dir = tmp_path / "home"
         home_dir.mkdir()
         monkeypatch.setattr(Path, "home", lambda: home_dir)
+        monkeypatch.chdir(tmp_path)
 
-        # Create main file with home import
+        # Create main file with home import (must be inside ~/.clarity/)
         main_dir = tmp_path / "main"
         main_dir.mkdir()
         main_file = main_dir / "memory.md"
-        main_file.write_text("@~/preferences.md\n# Main Content\n", encoding="utf-8")
+        main_file.write_text("@~/.clarity/preferences.md\n# Main Content\n", encoding="utf-8")
 
-        # Create home file
-        home_file = home_dir / "preferences.md"
+        # Create home .clarity file
+        clarity_dir = home_dir / ".clarity"
+        clarity_dir.mkdir()
+        home_file = clarity_dir / "preferences.md"
         home_file.write_text("# My Preferences\n\nHome content!\n", encoding="utf-8")
 
         content = loader._load_file(main_file)
@@ -178,8 +183,10 @@ class TestMemoryFileLoader:
         assert "Home content!" in content
         assert home_file in loader.loaded_files
 
-    def test_import_absolute(self, loader, tmp_path):
-        """Test absolute path import (@/full/path/file.md)."""
+    def test_import_absolute_blocked(self, loader, tmp_path, monkeypatch):
+        """Test absolute path import is blocked for security."""
+        monkeypatch.chdir(tmp_path)
+
         # Create main file with absolute import
         main_dir = tmp_path / "main"
         main_dir.mkdir()
@@ -190,16 +197,19 @@ class TestMemoryFileLoader:
         abs_file.parent.mkdir()
         abs_file.write_text("# Absolute Content\n\nAbsolute!\n", encoding="utf-8")
 
-        # Use absolute path in import
+        # Use absolute path in import - should be blocked
         main_file.write_text(f"@{abs_file}\n# Main Content\n", encoding="utf-8")
 
         content = loader._load_file(main_file)
 
-        assert "Absolute!" in content
-        assert abs_file in loader.loaded_files
+        assert "Absolute!" not in content
+        assert "Main Content" in content
+        # Absolute import should be treated as not found (blocked by security)
+        assert "<!-- Import not found:" in content
 
-    def test_import_not_found(self, loader, tmp_path):
+    def test_import_not_found(self, loader, tmp_path, monkeypatch):
         """Test import of non-existent file adds comment."""
+        monkeypatch.chdir(tmp_path)
         main_dir = tmp_path / "main"
         main_dir.mkdir()
         main_file = main_dir / "memory.md"
@@ -210,8 +220,10 @@ class TestMemoryFileLoader:
         assert "<!-- Import not found: ./nonexistent.md -->" in content
         assert "Main Content" in content
 
-    def test_circular_import_detection(self, loader, tmp_path):
+    def test_circular_import_detection(self, loader, tmp_path, monkeypatch):
         """Test circular import detection prevents infinite loop."""
+        monkeypatch.chdir(tmp_path)
+
         # Create file A that imports B
         file_a = tmp_path / "a.md"
         file_a.write_text("@./b.md\n# File A\n", encoding="utf-8")
@@ -227,8 +239,10 @@ class TestMemoryFileLoader:
         assert "File A" in content
         assert "File B" in content
 
-    def test_import_already_loaded(self, loader, tmp_path):
+    def test_import_already_loaded(self, loader, tmp_path, monkeypatch):
         """Test importing already loaded file adds comment."""
+        monkeypatch.chdir(tmp_path)
+
         # Create imported file
         imported_file = tmp_path / "imported.md"
         imported_file.write_text("# Imported\n\nContent\n", encoding="utf-8")
@@ -236,16 +250,18 @@ class TestMemoryFileLoader:
         # Load it first
         loader._load_file(imported_file)
 
-        # Create main file that tries to import it
+        # Create main file that tries to import it using relative path
         main_file = tmp_path / "main.md"
-        main_file.write_text(f"@{imported_file}\n# Main\n", encoding="utf-8")
+        main_file.write_text("@./imported.md\n# Main\n", encoding="utf-8")
 
         content = loader._load_file(main_file)
 
         assert "<!-- Import already loaded:" in content
 
-    def test_max_import_depth(self, loader, tmp_path):
+    def test_max_import_depth(self, loader, tmp_path, monkeypatch):
         """Test max import depth protection."""
+        monkeypatch.chdir(tmp_path)
+
         # Create chain of 10 files (exceeds MAX_IMPORT_DEPTH=5)
         for i in range(10):
             file = tmp_path / f"file{i}.md"
@@ -276,7 +292,7 @@ class TestMemoryFileLoader:
 
         assert path.exists()
         assert path.name == "memory.md"
-        assert ".opencodeagent" in str(path)
+        assert ".clarity" in str(path)
 
         content = path.read_text(encoding="utf-8")
         assert "Project Memory" in content
@@ -294,7 +310,7 @@ class TestMemoryFileLoader:
 
         assert path.exists()
         assert path.name == "memory.md"
-        assert ".opencodeagent" in str(path)
+        assert ".clarity" in str(path)
 
         content = path.read_text(encoding="utf-8")
         assert "User Memory" in content
@@ -305,7 +321,7 @@ class TestMemoryFileLoader:
         monkeypatch.chdir(tmp_path)
 
         # Create existing file with Quick Notes section
-        memory_dir = tmp_path / ".opencodeagent"
+        memory_dir = tmp_path / ".clarity"
         memory_dir.mkdir()
         memory_file = memory_dir / "memory.md"
         memory_file.write_text(
@@ -330,7 +346,7 @@ class TestMemoryFileLoader:
         monkeypatch.chdir(tmp_path)
 
         # Create existing file without Quick Notes
-        memory_dir = tmp_path / ".opencodeagent"
+        memory_dir = tmp_path / ".clarity"
         memory_dir.mkdir()
         memory_file = memory_dir / "memory.md"
         memory_file.write_text("# Project Memory\n\nExisting content\n", encoding="utf-8")
@@ -359,10 +375,10 @@ class TestMemoryFileLoader:
 
         assert path.exists()
         assert path.name == "memory.md"
-        assert ".opencodeagent" in str(path)
+        assert ".clarity" in str(path)
 
         content = path.read_text(encoding="utf-8")
-        assert "# OpenCode Project Memory" in content
+        assert "# ClarAIty Project Memory" in content
         assert "## Project Context" in content
         assert "## Code Standards" in content
         assert "## Development Workflow" in content
@@ -370,7 +386,7 @@ class TestMemoryFileLoader:
 
     def test_init_project_memory_custom_path(self, loader, tmp_path):
         """Test initializing project memory at custom path."""
-        custom_path = tmp_path / "custom" / ".opencodeagent" / "memory.md"
+        custom_path = tmp_path / "custom" / ".clarity" / "memory.md"
 
         path = loader.init_project_memory(path=custom_path)
 
@@ -395,21 +411,21 @@ class TestMemoryFileLoader:
         """Test enterprise path on Linux."""
         mock_system.return_value = "Linux"
         path = loader._get_enterprise_path()
-        assert path == Path("/etc/opencodeagent/memory.md")
+        assert path == Path("/etc/clarity/memory.md")
 
     @patch('platform.system')
     def test_enterprise_path_darwin(self, mock_system, loader):
         """Test enterprise path on macOS."""
         mock_system.return_value = "Darwin"
         path = loader._get_enterprise_path()
-        assert path == Path("/etc/opencodeagent/memory.md")
+        assert path == Path("/etc/clarity/memory.md")
 
     @patch('platform.system')
     def test_enterprise_path_windows(self, mock_system, loader):
         """Test enterprise path on Windows."""
         mock_system.return_value = "Windows"
         path = loader._get_enterprise_path()
-        assert path == Path("C:/ProgramData/opencodeagent/memory.md")
+        assert path == Path("C:/ProgramData/clarity/memory.md")
 
     @patch('platform.system')
     def test_enterprise_path_unknown(self, mock_system, loader):
@@ -420,8 +436,9 @@ class TestMemoryFileLoader:
 
     # ===== Import Path Resolution =====
 
-    def test_resolve_import_path_relative_current(self, loader, tmp_path):
-        """Test resolving ./path import."""
+    def test_resolve_import_path_relative_current(self, loader, tmp_path, monkeypatch):
+        """Test resolving ./path import within project root."""
+        monkeypatch.chdir(tmp_path)
         base_dir = tmp_path / "base"
         base_dir.mkdir()
 
@@ -430,8 +447,9 @@ class TestMemoryFileLoader:
 
         assert resolved == expected
 
-    def test_resolve_import_path_relative_parent(self, loader, tmp_path):
-        """Test resolving ../path import."""
+    def test_resolve_import_path_relative_parent(self, loader, tmp_path, monkeypatch):
+        """Test resolving ../path import within project root."""
+        monkeypatch.chdir(tmp_path)
         base_dir = tmp_path / "base" / "subdir"
         base_dir.mkdir(parents=True)
 
@@ -440,26 +458,45 @@ class TestMemoryFileLoader:
 
         assert resolved == expected
 
-    def test_resolve_import_path_home(self, loader, tmp_path, monkeypatch):
-        """Test resolving ~/path import."""
+    def test_resolve_import_path_home_clarity(self, loader, tmp_path, monkeypatch):
+        """Test resolving ~/ import restricted to ~/.clarity/ directory."""
         home_dir = tmp_path / "home"
         home_dir.mkdir()
         monkeypatch.setattr(Path, "home", lambda: home_dir)
 
-        resolved = loader._resolve_import_path("~/docs/file.md", tmp_path)
-        expected = (home_dir / "docs" / "file.md").resolve()
-
+        # Inside ~/.clarity/ - should be allowed
+        resolved = loader._resolve_import_path("~/.clarity/docs/file.md", tmp_path)
+        expected = (home_dir / ".clarity" / "docs" / "file.md").resolve()
         assert resolved == expected
 
-    def test_resolve_import_path_absolute(self, loader, tmp_path):
-        """Test resolving /absolute/path import."""
+    def test_resolve_import_path_home_outside_clarity_blocked(self, loader, tmp_path, monkeypatch):
+        """Test ~/ import outside ~/.clarity/ is blocked."""
+        # Set up home and project as separate sibling directories so they don't overlap
+        home_dir = tmp_path / "home"
+        home_dir.mkdir()
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+
+        monkeypatch.setattr(Path, "home", lambda: home_dir)
+        monkeypatch.chdir(project_dir)
+
+        # ~/docs/file.md resolves outside both ~/.clarity/ and project_dir - should be blocked
+        resolved = loader._resolve_import_path("~/docs/file.md", project_dir)
+        assert resolved is None
+
+    def test_resolve_import_path_absolute_blocked(self, loader, tmp_path):
+        """Test absolute path imports are blocked for security."""
         resolved = loader._resolve_import_path("/etc/config/file.md", tmp_path)
-        expected = Path("/etc/config/file.md")
+        assert resolved is None
 
-        assert resolved == expected
+    def test_resolve_import_path_absolute_windows_blocked(self, loader, tmp_path):
+        """Test Windows absolute path imports are blocked for security."""
+        resolved = loader._resolve_import_path("C:/Users/file.md", tmp_path)
+        assert resolved is None
 
-    def test_resolve_import_path_default_relative(self, loader, tmp_path):
-        """Test resolving bare path defaults to relative."""
+    def test_resolve_import_path_default_relative(self, loader, tmp_path, monkeypatch):
+        """Test resolving bare path defaults to relative within project root."""
+        monkeypatch.chdir(tmp_path)
         base_dir = tmp_path / "base"
         base_dir.mkdir()
 
@@ -467,6 +504,32 @@ class TestMemoryFileLoader:
         expected = (base_dir / "docs" / "file.md").resolve()
 
         assert resolved == expected
+
+    def test_resolve_import_path_traversal_outside_project_blocked(self, loader, tmp_path, monkeypatch):
+        """Test ../ traversal that escapes project root is blocked."""
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        monkeypatch.chdir(project_dir)
+
+        base_dir = project_dir / "subdir"
+        base_dir.mkdir()
+
+        # This would resolve to tmp_path/secret/file.md, outside project_dir
+        resolved = loader._resolve_import_path("../../secret/file.md", base_dir)
+        assert resolved is None
+
+    def test_resolve_import_path_non_md_blocked(self, loader, tmp_path, monkeypatch):
+        """Test non-.md file extensions are blocked."""
+        monkeypatch.chdir(tmp_path)
+
+        resolved = loader._resolve_import_path("./config.yaml", tmp_path)
+        assert resolved is None
+
+        resolved = loader._resolve_import_path("./script.py", tmp_path)
+        assert resolved is None
+
+        resolved = loader._resolve_import_path("./data.json", tmp_path)
+        assert resolved is None
 
     # ===== Edge Cases =====
 
@@ -489,14 +552,16 @@ class TestMemoryFileLoader:
 
         assert processed == content
 
-    def test_process_imports_mixed_content(self, loader, tmp_path):
+    def test_process_imports_mixed_content(self, loader, tmp_path, monkeypatch):
         """Test processing content with imports mixed with regular content."""
+        monkeypatch.chdir(tmp_path)
+
         # Create imported file
         imported_file = tmp_path / "imported.md"
         imported_file.write_text("# Imported\n\nImported content\n", encoding="utf-8")
 
-        # Create content with import in the middle
-        content = f"# Before\n\nBefore import\n\n@{imported_file}\n\n# After\n\nAfter import\n"
+        # Create content with relative import in the middle
+        content = "# Before\n\nBefore import\n\n@./imported.md\n\n# After\n\nAfter import\n"
 
         processed = loader._process_imports(content, tmp_path)
 
@@ -515,28 +580,29 @@ class TestMemoryFileLoaderIntegration:
         home_dir.mkdir()
         monkeypatch.setattr(Path, "home", lambda: home_dir)
 
-        # Create user memory with import
-        user_prefs = home_dir / "preferences.md"
+        # Create user memory with import inside ~/.clarity/
+        user_clarity_dir = home_dir / ".clarity"
+        user_clarity_dir.mkdir()
+        user_prefs = user_clarity_dir / "preferences.md"
         user_prefs.write_text("# User Preferences\n\nI like tabs\n", encoding="utf-8")
 
-        user_memory_dir = home_dir / ".opencodeagent"
-        user_memory_dir.mkdir()
-        user_memory = user_memory_dir / "memory.md"
+        user_memory = user_clarity_dir / "memory.md"
         user_memory.write_text(
-            f"@{user_prefs}\n# User Memory\n\nUser level\n",
+            "@~/.clarity/preferences.md\n# User Memory\n\nUser level\n",
             encoding="utf-8"
         )
 
         # Create project memory with import
         project_dir = tmp_path / "project"
         project_dir.mkdir()
+        monkeypatch.chdir(project_dir)
         project_docs = project_dir / "docs.md"
         project_docs.write_text("# Project Docs\n\nProject info\n", encoding="utf-8")
 
-        project_memory_dir = project_dir / ".opencodeagent"
+        project_memory_dir = project_dir / ".clarity"
         project_memory_dir.mkdir()
         project_memory = project_memory_dir / "memory.md"
-        # Use @../docs.md to go up from .opencodeagent to project dir
+        # Use @../docs.md to go up from .clarity to project dir (still within project root)
         project_memory.write_text(
             "@../docs.md\n# Project Memory\n\nProject level\n",
             encoding="utf-8"
@@ -586,5 +652,5 @@ class TestMemoryFileLoaderIntegration:
         loader2 = MemoryFileLoader()
         content = loader2.load_hierarchy(starting_dir=tmp_path)
 
-        assert "OpenCode Project Memory" in content
+        assert "ClarAIty Project Memory" in content
         assert "New quick note" in content

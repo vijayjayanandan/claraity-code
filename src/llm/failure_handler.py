@@ -27,6 +27,7 @@ Thread Safety:
         for t in threads: t.start()
 """
 
+import asyncio
 import time
 import logging
 import random
@@ -378,6 +379,74 @@ class LLMFailureHandler:
                 self._show_progress(error_message, delay, attempt, max_attempts)
 
         # Should never reach here, but just in case
+        raise LLMError(f"Failed after {max_attempts} attempts") from last_error
+
+    async def execute_with_retry_async(
+        self,
+        func: Callable,
+        max_attempts: int = 3,
+        backoff_base: float = 2.0
+    ) -> Any:
+        """Async version of execute_with_retry using asyncio.sleep instead of time.sleep.
+
+        Prevents blocking the event loop during retries. Use this when the callable
+        is an async function or when retries happen on the asyncio event loop
+        (e.g., during compaction).
+
+        Thread Safety: Uses only local variables, safe for concurrent calls.
+
+        Args:
+            func: Async function to execute (must be awaitable)
+            max_attempts: Maximum execution attempts (default: 3)
+            backoff_base: Base for exponential backoff (default: 2.0)
+                         delay = backoff_base ** attempt
+
+        Returns:
+            Result of function execution
+
+        Raises:
+            LLMError: If all retry attempts fail or error is fatal
+        """
+        last_error = None
+
+        for attempt in range(max_attempts):
+            try:
+                result = await func()
+
+                if attempt > 0:
+                    self.logger.info(
+                        f"[OK] Async retry successful after {attempt + 1} attempts"
+                    )
+
+                return result
+
+            except Exception as e:
+                last_error = e
+
+                is_retryable, error_message = self.handle_api_error(e)
+
+                if not is_retryable:
+                    self.logger.error(
+                        f"[FAIL] Fatal error (not retrying): {error_message}"
+                    )
+                    raise LLMError(error_message) from e
+
+                if attempt == max_attempts - 1:
+                    self.logger.error(
+                        f"[FAIL] All {max_attempts} async retry attempts exhausted: {error_message}"
+                    )
+                    raise LLMError(f"Failed after {max_attempts} attempts: {error_message}") from e
+
+                base_delay = backoff_base ** attempt
+                delay = self._calculate_delay(base_delay, self.max_backoff_delay)
+
+                self.logger.warning(
+                    f"[RETRY] Async attempt {attempt + 1}/{max_attempts} failed: {error_message}. "
+                    f"Retrying in {delay:.1f}s (base: {base_delay:.1f}s, cap: {self.max_backoff_delay}s)..."
+                )
+
+                await asyncio.sleep(delay)
+
         raise LLMError(f"Failed after {max_attempts} attempts") from last_error
 
     def handle_api_error(self, error: Exception) -> Tuple[bool, str]:

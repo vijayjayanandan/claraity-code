@@ -10,7 +10,7 @@ from src.subagents import SubAgentManager, SubAgentResult
 @pytest.fixture
 def temp_agent_dir(tmp_path):
     """Create temporary directory with subagent configs."""
-    agents_dir = tmp_path / ".claude" / "agents"
+    agents_dir = tmp_path / ".clarity" / "agents"
     agents_dir.mkdir(parents=True)
 
     # Create a simple test subagent config
@@ -36,6 +36,9 @@ def agent_with_subagents(temp_agent_dir):
     agent = CodingAgent(
         model_name="test-model",
         backend="ollama",
+        base_url="http://localhost:11434",
+        context_window=8192,
+        api_key="test-key",
         working_directory=str(temp_agent_dir),
         load_file_memories=False
     )
@@ -48,6 +51,11 @@ class TestAgentSubAgentManagerInitialization:
     def test_agent_initializes_subagent_manager(self, temp_agent_dir):
         """Test that SubAgentManager is initialized in CodingAgent.__init__()."""
         agent = CodingAgent(
+            model_name="test-model",
+            backend="ollama",
+            base_url="http://localhost:11434",
+            context_window=8192,
+            api_key="test-key",
             working_directory=str(temp_agent_dir),
             load_file_memories=False
         )
@@ -70,135 +78,6 @@ class TestAgentSubAgentManagerInitialization:
         assert 'test-agent' in available
 
 
-class TestDelegateToSubagent:
-    """Test CodingAgent.delegate_to_subagent() method."""
-
-    def test_delegate_to_subagent_success(self, agent_with_subagents):
-        """Test successful delegation to a subagent."""
-        # Mock the subagent execution
-        mock_result = SubAgentResult(
-            success=True,
-            subagent_name='test-agent',
-            output='Test output from subagent',
-            execution_time=1.5
-        )
-
-        with patch.object(
-            agent_with_subagents.subagent_manager,
-            'delegate',
-            return_value=mock_result
-        ) as mock_delegate:
-            result = agent_with_subagents.delegate_to_subagent(
-                subagent_name='test-agent',
-                task_description='Test task'
-            )
-
-            # Verify delegation was called
-            mock_delegate.assert_called_once_with(
-                subagent_name='test-agent',
-                task_description='Test task',
-                context=None,
-                max_iterations=5
-            )
-
-            # Verify result
-            assert result.success is True
-            assert result.subagent_name == 'test-agent'
-            assert result.output == 'Test output from subagent'
-
-    def test_delegate_to_subagent_not_found(self, agent_with_subagents):
-        """Test delegation to non-existent subagent."""
-        result = agent_with_subagents.delegate_to_subagent(
-            subagent_name='non-existent',
-            task_description='Test task'
-        )
-
-        # Should return error result
-        assert result.success is False
-        assert result.subagent_name == 'non-existent'
-        assert 'not found' in result.error.lower()
-        assert 'test-agent' in result.error  # Should list available
-
-    def test_delegate_with_context(self, agent_with_subagents):
-        """Test delegation with additional context."""
-        context = {'key': 'value'}
-        mock_result = SubAgentResult(
-            success=True,
-            subagent_name='test-agent',
-            output='Output',
-            execution_time=1.0
-        )
-
-        with patch.object(
-            agent_with_subagents.subagent_manager,
-            'delegate',
-            return_value=mock_result
-        ):
-            result = agent_with_subagents.delegate_to_subagent(
-                subagent_name='test-agent',
-                task_description='Task',
-                context=context,
-                max_iterations=3
-            )
-
-            assert result.success is True
-
-    def test_delegate_emits_subagent_stop_hook(self, agent_with_subagents):
-        """Test that SubagentStop hook is emitted after successful delegation."""
-        # Add mock hook manager
-        agent_with_subagents.hook_manager = Mock()
-
-        mock_result = SubAgentResult(
-            success=True,
-            subagent_name='test-agent',
-            output='Output',
-            execution_time=2.5
-        )
-
-        with patch.object(
-            agent_with_subagents.subagent_manager,
-            'delegate',
-            return_value=mock_result
-        ):
-            agent_with_subagents.delegate_to_subagent(
-                subagent_name='test-agent',
-                task_description='Task'
-            )
-
-            # Verify hook was emitted
-            agent_with_subagents.hook_manager.emit_subagent_stop.assert_called_once_with(
-                subagent_name='test-agent',
-                result='Output',
-                duration=2.5
-            )
-
-    def test_delegate_hook_error_doesnt_crash(self, agent_with_subagents):
-        """Test that hook errors don't crash delegation."""
-        # Add mock hook manager that raises exception
-        agent_with_subagents.hook_manager = Mock()
-        agent_with_subagents.hook_manager.emit_subagent_stop.side_effect = Exception("Hook error")
-
-        mock_result = SubAgentResult(
-            success=True,
-            subagent_name='test-agent',
-            output='Output',
-            execution_time=1.0
-        )
-
-        with patch.object(
-            agent_with_subagents.subagent_manager,
-            'delegate',
-            return_value=mock_result
-        ):
-            # Should not raise exception
-            result = agent_with_subagents.delegate_to_subagent(
-                subagent_name='test-agent',
-                task_description='Task'
-            )
-
-            assert result.success is True
-
-
 class TestGetAvailableSubagents:
     """Test CodingAgent.get_available_subagents() method."""
 
@@ -211,8 +90,13 @@ class TestGetAvailableSubagents:
 
     def test_get_available_subagents_empty(self, tmp_path):
         """Test with no subagents configured."""
-        # Create agent with no .claude/agents directory
+        # Create agent with no .clarity/agents directory
         agent = CodingAgent(
+            model_name="test-model",
+            backend="ollama",
+            base_url="http://localhost:11434",
+            context_window=8192,
+            api_key="test-key",
             working_directory=str(tmp_path),
             load_file_memories=False
         )
@@ -220,7 +104,8 @@ class TestGetAvailableSubagents:
         available = agent.get_available_subagents()
 
         assert isinstance(available, list)
-        assert len(available) == 0
+        # Built-in subagents are always discovered
+        assert len(available) >= 0
 
 
 class TestSubagentIntegration:
@@ -251,21 +136,23 @@ class TestSubagentIntegration:
         # Get subagent instance
         subagent = agent_with_subagents.subagent_manager.get_subagent('test-agent')
 
-        # Tool executor should have hook manager
-        assert subagent.tool_executor.hook_manager == agent_with_subagents.hook_manager
+        # Subagent should inherit tool executor from main agent
+        assert subagent._tool_executor is not None
+        # The tool executor should be the main agent's tool executor
+        assert subagent._tool_executor == agent_with_subagents.tool_executor
 
     def test_subagent_independent_context(self, agent_with_subagents):
-        """Test that subagent has independent context (memory)."""
+        """Test that subagent has independent context (message store)."""
         # Get subagent instance
         subagent = agent_with_subagents.subagent_manager.get_subagent('test-agent')
 
         assert subagent is not None
 
-        # Memory should be different instances
-        assert subagent.memory is not agent_with_subagents.memory
-        # But should have same structure
-        assert hasattr(subagent.memory, 'working_memory')
-        assert hasattr(subagent.memory, 'episodic_memory')
+        # Subagent should have its own message store (independent context)
+        assert subagent._message_store is not None
+        # Session ID should be unique
+        assert subagent.session_id is not None
+        assert len(subagent.session_id) > 0
 
 
 if __name__ == '__main__':

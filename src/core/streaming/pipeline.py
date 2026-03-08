@@ -121,6 +121,10 @@ class StreamingPipeline:
         if delta.usage:
             self._state.usage = TokenUsage.from_dict(delta.usage) if isinstance(delta.usage, dict) else delta.usage
 
+        # Capture thinking signature (Anthropic sends on final delta)
+        if delta.thinking_signature:
+            self._state.thinking_signature = delta.thinking_signature
+
         # Finalize on finish_reason
         if delta.finish_reason:
             return self._finalize_message(delta.finish_reason)
@@ -338,6 +342,11 @@ class StreamingPipeline:
 
         # Accumulate thinking content
         self._state.thinking_content += text
+        # Only accumulate reasoning_content for models that need echo-back
+        # (Kimi K2.5, Moonshot). Claude uses thinking + thinking_signature.
+        model_lower = (self._state.model or "").lower()
+        if "kimi" in model_lower or "moonshot" in model_lower:
+            self._state.reasoning_content += text
 
     # =========================================================================
     # Tool Call Processing
@@ -390,7 +399,11 @@ class StreamingPipeline:
         # Build message
         message = self._build_message(stop_reason=finish_reason)
 
-        logger.debug(f"Stream finalized: {state.stream_id}, segments={len(state.segments)}")
+        logger.debug(
+            f"Stream finalized: {state.stream_id}, segments={len(state.segments)}, "
+            f"reasoning={len(state.reasoning_content) if state.reasoning_content else 0}, "
+            f"tool_calls={len(state.tool_calls)}, finish={finish_reason}"
+        )
 
         # Reset state
         self._state = None
@@ -403,6 +416,13 @@ class StreamingPipeline:
         if state is None:
             return
 
+        # Flush native thinking content FIRST (appears above text in UI)
+        # Must come before text flush so segment order matches live rendering.
+        if state.thinking_content and not any(
+            isinstance(s, ThinkingSegment) for s in state.segments
+        ):
+            state.segments.append(ThinkingSegment(content=state.thinking_content))
+
         # Flush pending code block
         if state.in_code_block and state.code_block_content:
             state.segments.append(CodeBlockSegment(
@@ -412,21 +432,16 @@ class StreamingPipeline:
             state.in_code_block = False
             state.code_block_content = ""
 
-        # Flush pending thinking (tag-based)
+        # Flush pending thinking (tag-based, if not already added above)
         if state.in_thinking and state.thinking_content:
-            state.segments.append(ThinkingSegment(content=state.thinking_content))
+            if not any(isinstance(s, ThinkingSegment) for s in state.segments):
+                state.segments.append(ThinkingSegment(content=state.thinking_content))
             state.in_thinking = False
 
         # Flush pending text buffer
         if state.text_buffer.strip():
             state.segments.append(TextSegment(content=state.text_buffer))
             state.text_buffer = ""
-
-        # Flush native thinking content (if not already added via tags)
-        if state.thinking_content and not any(
-            isinstance(s, ThinkingSegment) for s in state.segments
-        ):
-            state.segments.append(ThinkingSegment(content=state.thinking_content))
 
     def _finalize_tool_calls(self) -> None:
         """Convert tool call accumulators to ToolCall objects and add segments."""
@@ -472,6 +487,8 @@ class StreamingPipeline:
                 usage=state.usage,
                 segments=list(state.segments) if state.segments else None,
                 thinking=state.thinking_content or None,
+                thinking_signature=state.thinking_signature or None,
+                reasoning_content=state.reasoning_content or None,
                 provider=state.provider,
                 model=state.model,
             )

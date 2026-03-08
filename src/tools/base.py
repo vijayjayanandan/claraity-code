@@ -39,8 +39,8 @@ TOOL_TIMEOUT_OVERRIDES = {
     # Commands can run long (builds, tests, etc.)
     "run_command": 600,  # 10 minutes
 
-    # Subagent delegation needs time for full subagent execution
-    "delegate_to_subagent": 600,  # 10 minutes (subagents run multiple tools)
+    # Subagent delegation: None disables outer timeout (internal pause handles limits)
+    "delegate_to_subagent": None,
 
     # LSP tools need extra time for server startup (jedi-language-server ~25s)
     "get_file_outline": 90,
@@ -275,6 +275,12 @@ class ToolExecutor:
         This allows tools to be executed without blocking the asyncio event loop,
         enabling the TUI to remain responsive during tool execution.
 
+        Native async path: If a tool has an `execute_async` method, it is called
+        directly on the event loop (no thread pool). This is used by the subprocess
+        delegation tool to avoid blocking the event loop entirely.
+
+        Default path: Sync tools are wrapped in run_in_executor (thread pool).
+
         Safety: Every tool has a timeout to prevent indefinite hangs. This is
         critical when MAX_WALL_TIME_SECONDS is disabled - without per-tool
         timeouts, a hanging tool would freeze the agent forever.
@@ -292,10 +298,19 @@ class ToolExecutor:
         """
         # Determine timeout for this tool
         timeout_s = TOOL_TIMEOUT_OVERRIDES.get(tool_name, DEFAULT_TOOL_TIMEOUT_S)
-        loop = asyncio.get_running_loop()
 
         try:
-            # Wrap executor call with timeout
+            # Check for native async tool (subprocess delegation)
+            tool = self.tools.get(tool_name)
+            if tool and hasattr(tool, 'execute_async'):
+                # Native async path - runs directly on event loop, no thread pool
+                return await asyncio.wait_for(
+                    tool.execute_async(**kwargs),
+                    timeout=timeout_s,
+                )
+
+            # Default: sync tool in thread pool (existing behavior)
+            loop = asyncio.get_running_loop()
             return await asyncio.wait_for(
                 loop.run_in_executor(
                     self._executor,
@@ -330,6 +345,22 @@ class ToolExecutor:
             # Propagate cancellation cleanly (user interrupt via Ctrl+C)
             logger.info(f"Tool '{tool_name}' was cancelled by user")
             raise
+        except Exception as e:
+            # Safety net: catch unexpected errors so they get logged and returned
+            # as ToolResult rather than propagating unclassified to the agent loop.
+            logger.error(
+                "tool_unexpected_error",
+                category=ErrorCategory.TOOL_ERROR,
+                error_type=type(e).__name__,
+                tool_name=tool_name,
+                error_message=str(e),
+            )
+            return ToolResult(
+                tool_name=tool_name,
+                status=ToolStatus.ERROR,
+                output=None,
+                error=f"Unexpected error in tool '{tool_name}': {type(e).__name__}: {e}",
+            )
 
     def shutdown(self) -> None:
         """Shutdown the thread pool executor."""

@@ -1,3 +1,3 @@
 @echo off
-set DASHSCOPE_API_KEY=sk-4e4a13fc4efb48408e22eb9feb40a03d
+if "%DASHSCOPE_API_KEY%"=="" echo ERROR: Set DASHSCOPE_API_KEY environment variable first && exit /b 1
 python -m src.validation.run --scenario easy_cli_weather --verbose

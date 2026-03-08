@@ -45,6 +45,11 @@ class TestCheckpointManager:
         """Create mock CodingAgent with memory and tool history"""
         agent = Mock()
 
+        # Prevent Mock auto-creation of attributes that get serialized
+        agent.current_todos = []
+        agent.model_name = "test-model"
+        agent.context_window = 8192
+
         # Mock memory structure
         agent.memory = Mock()
 
@@ -266,9 +271,12 @@ class TestCheckpointManager:
         checkpoints = checkpoint_manager.list_checkpoints()
         assert len(checkpoints) == 0
 
-        # Save 3 checkpoints
+        # Save 3 checkpoints with small delays to ensure distinct timestamps
+        import time
         id1 = checkpoint_manager.save_checkpoint(mock_agent, "Progress 1", "Task 1")
+        time.sleep(0.05)
         id2 = checkpoint_manager.save_checkpoint(mock_agent, "Progress 2", "Task 2")
+        time.sleep(0.05)
         id3 = checkpoint_manager.save_checkpoint(mock_agent, "Progress 3", "Task 3")
 
         # List them
@@ -347,6 +355,9 @@ class TestCheckpointManager:
         agent.memory.task_context.key_concepts = []
         agent.tool_execution_history = []
         agent.working_directory = "/tmp/test"
+        agent.current_todos = []
+        agent.model_name = "test-model"
+        agent.context_window = 8192
 
         # Save checkpoint
         checkpoint_id = checkpoint_manager.save_checkpoint(
