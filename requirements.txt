@@ -5,7 +5,7 @@ chromadb>=0.4.24  # Keep for local vector DB (fast queries)
 tiktoken>=0.7.0
 
 # AST Parsing - Specific versions required for compatibility
-tree-sitter==0.21.3  # Required: v0.25+ has breaking changes
+tree-sitter==0.25.2  # Required: v0.25+ has breaking changes
 tree-sitter-languages>=1.10.2
 
 # LSP Integration (Code Intelligence)
