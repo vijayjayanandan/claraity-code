@@ -130,8 +130,8 @@ class SubAgentManager:
         self.config_loader = SubAgentConfigLoader(self.working_directory)
 
         # Loaded configurations and cached instances
-        self.configs: dict[str, 'SubAgentConfig'] = {}
-        self.subagent_instances: dict[str, 'SubAgent'] = {}
+        self.configs: dict[str, SubAgentConfig] = {}
+        self.subagent_instances: dict[str, SubAgent] = {}
 
         # Delegation statistics
         self.delegation_count: dict[str, int] = {}
@@ -342,7 +342,7 @@ class SubAgentManager:
             >>> print(f"All succeeded: {result.success}")
         """
         start_time = time.time()
-        results: list['SubAgentResult'] = []
+        results: list[SubAgentResult] = []
 
         logger.info(f"Executing {len(tasks)} subagent tasks in parallel")
 

@@ -114,7 +114,7 @@ class MessageStore:
 
     def __init__(self):
         # Primary storage
-        self._messages: dict[str, "Message"] = {}
+        self._messages: dict[str, Message] = {}
 
         # Indexes
         self._by_seq: dict[int, str] = {}  # seq -> uuid (unique keys)
@@ -142,7 +142,7 @@ class MessageStore:
         self._compact_summary_uuid: str | None = None
 
         # File snapshots
-        self._snapshots: dict[str, "FileHistorySnapshot"] = {}
+        self._snapshots: dict[str, FileHistorySnapshot] = {}
 
         # Ephemeral tool execution state (NOT persisted)
         # Keyed by tool_call_id, updated by Agent, read by TUI
