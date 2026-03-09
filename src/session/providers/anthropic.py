@@ -4,24 +4,24 @@ Converts Anthropic API responses to unified Message format.
 Flattens content blocks, preserves order in segments, puts thinking in meta.
 """
 
-from typing import Dict, Any, List, Optional
 import json
+from typing import Any, Optional
 
-from ..models.base import generate_uuid, now_iso, generate_stream_id
+from ..models.base import generate_stream_id, generate_uuid, now_iso
 from ..models.message import (
     Message,
     MessageMeta,
+    Segment,
+    TextSegment,
+    ThinkingSegment,
+    TokenUsage,
     ToolCall,
     ToolCallFunction,
-    TokenUsage,
-    TextSegment,
     ToolCallSegment,
-    ThinkingSegment,
-    Segment,
 )
 
 
-def map_stop_reason(stop_reason: Optional[str]) -> str:
+def map_stop_reason(stop_reason: str | None) -> str:
     """Map Anthropic stop_reason to our format."""
     mapping = {
         "end_turn": "complete",
@@ -34,11 +34,11 @@ def map_stop_reason(stop_reason: Optional[str]) -> str:
 
 
 def from_anthropic(
-    response: Dict[str, Any],
+    response: dict[str, Any],
     session_id: str,
-    parent_uuid: Optional[str],
+    parent_uuid: str | None,
     seq: int,
-    stream_id: Optional[str] = None,
+    stream_id: str | None = None,
 ) -> Message:
     """
     Convert Anthropic API response to Message.
@@ -63,11 +63,11 @@ def from_anthropic(
     content_blocks = response.get("content", [])
 
     # Process content blocks
-    text_parts: List[str] = []
-    tool_calls: List[ToolCall] = []
-    segments: List[Segment] = []
-    thinking: Optional[str] = None
-    thinking_signature: Optional[str] = None
+    text_parts: list[str] = []
+    tool_calls: list[ToolCall] = []
+    segments: list[Segment] = []
+    thinking: str | None = None
+    thinking_signature: str | None = None
 
     for block in content_blocks:
         block_type = block.get("type", "")
@@ -143,15 +143,15 @@ def from_anthropic(
 
 
 def from_anthropic_stream_event(
-    event: Dict[str, Any],
+    event: dict[str, Any],
     session_id: str,
-    parent_uuid: Optional[str],
+    parent_uuid: str | None,
     seq: int,
     stream_id: str,
     accumulated_text: str = "",
-    accumulated_tool_calls: Optional[List[ToolCall]] = None,
+    accumulated_tool_calls: list[ToolCall] | None = None,
     accumulated_thinking: str = "",
-    current_block_type: Optional[str] = None,
+    current_block_type: str | None = None,
     current_block_index: int = 0,
 ) -> Message:
     """
@@ -226,7 +226,7 @@ def from_anthropic_stream_event(
                 )
 
     # Build segments
-    segments: List[Segment] = []
+    segments: list[Segment] = []
     if accumulated_thinking:
         segments.append(ThinkingSegment(content=accumulated_thinking))
     if accumulated_text:
@@ -263,17 +263,17 @@ def from_anthropic_stream_event(
     )
 
 
-def to_anthropic(messages: List[Message]) -> List[Dict[str, Any]]:
+def to_anthropic(messages: list[Message]) -> list[dict[str, Any]]:
     """
     Convert Messages to Anthropic API request format.
 
     Expands tool_calls back to content blocks.
 
     Args:
-        messages: List of Message objects
+        messages: list of Message objects
 
     Returns:
-        List of dicts ready for Anthropic API
+        list of dicts ready for Anthropic API
     """
     result = []
 
@@ -335,14 +335,14 @@ def to_anthropic(messages: List[Message]) -> List[Dict[str, Any]]:
     return result
 
 
-def get_system_prompt(messages: List[Message]) -> Optional[str]:
+def get_system_prompt(messages: list[Message]) -> str | None:
     """
     Extract system prompt for Anthropic API.
 
     Anthropic takes system as a separate parameter, not in messages array.
 
     Args:
-        messages: List of Message objects
+        messages: list of Message objects
 
     Returns:
         System prompt string or None

@@ -6,7 +6,7 @@ writer for use in subagent execution which runs synchronously.
 
 import json
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from src.observability import get_logger
 

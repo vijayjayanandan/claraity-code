@@ -34,9 +34,9 @@ import queue
 import sys
 import threading
 from contextvars import ContextVar
-from typing import Any, Dict, Optional, Set
+from typing import Any, Optional
 
-from .log_store import get_log_store, LogStore
+from .log_store import LogStore, get_log_store
 
 # =============================================================================
 # CONSTANTS
@@ -59,7 +59,7 @@ WRITER_SHUTDOWN_TIMEOUT = 5.0
 # MODULE-LEVEL STATE
 # =============================================================================
 
-_registered_handlers: Set["SQLiteLogHandler"] = set()
+_registered_handlers: set["SQLiteLogHandler"] = set()
 _atexit_registered: bool = False
 _atexit_lock = threading.Lock()
 
@@ -248,7 +248,7 @@ class SQLiteLogHandler(logging.Handler):
         finally:
             _in_log_emit.reset(token)
 
-    def _extract_record_data(self, record: logging.LogRecord) -> Dict[str, Any]:
+    def _extract_record_data(self, record: logging.LogRecord) -> dict[str, Any]:
         """
         Extract structured data from log record for LogStore.record_batch().
 
@@ -259,9 +259,9 @@ class SQLiteLogHandler(logging.Handler):
             record: Log record
 
         Returns:
-            Dict of fields for LogStore.record_from_dict() / record_batch()
+            dict of fields for LogStore.record_from_dict() / record_batch()
         """
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             'level': record.levelname,
             'event': '',
         }

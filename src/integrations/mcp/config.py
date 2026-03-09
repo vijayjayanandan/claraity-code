@@ -1,7 +1,7 @@
 """MCP server configuration."""
 
 from dataclasses import dataclass, field
-from typing import Dict, Optional
+from typing import Optional
 
 
 @dataclass
@@ -13,8 +13,8 @@ class McpServerConfig:
 
     # Server identity
     name: str  # e.g. "atlassian-rovo"
-    server_url: Optional[str] = None  # For remote (SSE) transport
-    command: Optional[str] = None  # For local (stdio) transport
+    server_url: str | None = None  # For remote (SSE) transport
+    command: str | None = None  # For local (stdio) transport
 
     # Timeouts (seconds)
     connect_timeout: float = 30.0
@@ -33,10 +33,10 @@ class McpServerConfig:
     auth_secret_key: str = ""  # SecretStore key to look up at connect time
 
     # Extra headers (non-secret, e.g. content-type)
-    extra_headers: Dict[str, str] = field(default_factory=dict)
+    extra_headers: dict[str, str] = field(default_factory=dict)
 
     # Extra environment variables for stdio subprocess (e.g. Okta config)
-    extra_env: Dict[str, str] = field(default_factory=dict)
+    extra_env: dict[str, str] = field(default_factory=dict)
 
     # Tool name prefix for namespacing (e.g. "jira" -> "jira_searchJiraIssuesUsingJql")
     tool_prefix: str = ""

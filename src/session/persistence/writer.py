@@ -11,19 +11,20 @@ Durability Guarantee:
 - NOT guaranteed: power-loss durability (no os.fsync)
 """
 
-import json
 import asyncio
+import json
 import threading
-from pathlib import Path
-from typing import Union, Optional, Callable, TYPE_CHECKING
+from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING, Optional, Union
 
 from src.observability import get_logger
 from src.security import redact_dict, redact_secrets
 from src.security.file_permissions import secure_file
 
 if TYPE_CHECKING:
-    from ..models.message import Message, FileHistorySnapshot
+    from ..models.message import FileHistorySnapshot, Message
     from ..store.memory_store import MessageStore, StoreNotification
 
 logger = get_logger("session.persistence.writer")
@@ -34,7 +35,7 @@ class WriteResult:
     """Result of a write operation."""
     success: bool
     bytes_written: int = 0
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class SessionWriter:
@@ -53,8 +54,8 @@ class SessionWriter:
 
     def __init__(
         self,
-        file_path: Union[str, Path],
-        on_error: Optional[Callable[[Exception], None]] = None,
+        file_path: str | Path,
+        on_error: Callable[[Exception], None] | None = None,
         drain_timeout: float = 5.0
     ):
         self._file_path = Path(file_path)
@@ -63,20 +64,20 @@ class SessionWriter:
 
         # Async state
         self._file = None
-        self._write_lock: Optional[asyncio.Lock] = None
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._write_lock: asyncio.Lock | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
 
         # Pending write tracking (thread-safe) - v3.1 Patch 3
         self._pending_count: int = 0
         self._pending_lock = threading.Lock()
-        self._drain_complete: Optional[asyncio.Event] = None
+        self._drain_complete: asyncio.Event | None = None
 
         # Stats
         self._total_writes = 0
         self._total_bytes = 0
 
         # Store subscription
-        self._unsubscribe: Optional[Callable] = None
+        self._unsubscribe: Callable | None = None
 
     # =========================================================================
     # Lifecycle
@@ -87,7 +88,7 @@ class SessionWriter:
         Open the file for writing.
 
         MUST be called from the async context where events will be processed.
-        
+
         Note: File and parent directory are not created until first write to avoid empty session folders.
         """
         self._loop = asyncio.get_running_loop()
@@ -97,7 +98,7 @@ class SessionWriter:
 
         # DO NOT create parent directory yet - will be created on first write
         # This prevents empty session folders from appearing in /sessions
-        
+
         # DO NOT open file yet - will be opened on first write
         # This prevents empty session files from appearing in /resume
         logger.info(f"SessionWriter ready (file and directory will be created on first write): {self._file_path}")
@@ -249,9 +250,9 @@ class SessionWriter:
         self,
         session_id: str,
         todos: list,
-        current_todo_id: Optional[str] = None,
-        last_stop_reason: Optional[str] = None,
-        seq: Optional[int] = None
+        current_todo_id: str | None = None,
+        last_stop_reason: str | None = None,
+        seq: int | None = None
     ) -> WriteResult:
         """
         Write agent state to the JSONL file as a system event.
@@ -290,7 +291,7 @@ class SessionWriter:
 
     async def _write_line(self, data: dict) -> WriteResult:
         """Write a single JSON line.
-        
+
         Opens the file on first write if not already open.
         Creates parent directory on first write to prevent empty session folders.
         """
@@ -301,7 +302,7 @@ class SessionWriter:
             if self._on_error:
                 self._on_error(RuntimeError(error_msg))
             return WriteResult(success=False, error=error_msg)
-        
+
         try:
             async with self._write_lock:
                 # Open file on first write (lazy creation)
@@ -312,7 +313,7 @@ class SessionWriter:
                     # Set restrictive permissions on the session file (600 on POSIX)
                     secure_file(self._file_path)
                     logger.info(f"SessionWriter file created on first write: {self._file_path}")
-                
+
                 # Redact secrets before persistence
                 safe_data = redact_dict(data)
                 if "content" in safe_data and isinstance(safe_data["content"], str):
@@ -372,7 +373,7 @@ class SessionWriter:
 # Convenience Functions
 # =========================================================================
 
-def create_session_file(file_path: Union[str, Path]) -> Path:
+def create_session_file(file_path: str | Path) -> Path:
     """Create a new empty session file."""
     path = Path(file_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -381,7 +382,7 @@ def create_session_file(file_path: Union[str, Path]) -> Path:
 
 
 async def append_to_session(
-    file_path: Union[str, Path],
+    file_path: str | Path,
     message: Union["Message", "FileHistorySnapshot", dict]
 ) -> WriteResult:
     """

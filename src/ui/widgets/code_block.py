@@ -9,12 +9,12 @@ Features:
 - Visual distinction between streaming and complete states
 """
 
-from textual.widgets import Static
-from textual.reactive import reactive
-from rich.syntax import Syntax
-from rich.panel import Panel
-from rich.text import Text
 from rich.console import RenderableType
+from rich.panel import Panel
+from rich.syntax import Syntax
+from rich.text import Text
+from textual.reactive import reactive
+from textual.widgets import Static
 
 
 class CodeBlock(Static):

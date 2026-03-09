@@ -5,22 +5,22 @@ OpenAI is the primary/canonical format - responses are already correct shape.
 Just add meta and detect segments if needed.
 """
 
-from typing import Dict, Any, List, Optional
+from typing import Any, Optional
 
-from ..models.base import generate_uuid, now_iso, generate_stream_id
+from ..models.base import generate_stream_id, generate_uuid, now_iso
 from ..models.message import (
     Message,
     MessageMeta,
+    Segment,
+    TextSegment,
+    TokenUsage,
     ToolCall,
     ToolCallFunction,
-    TokenUsage,
-    TextSegment,
     ToolCallSegment,
-    Segment,
 )
 
 
-def map_stop_reason(finish_reason: Optional[str]) -> str:
+def map_stop_reason(finish_reason: str | None) -> str:
     """Map OpenAI finish_reason to our stop_reason."""
     mapping = {
         "stop": "complete",
@@ -33,11 +33,11 @@ def map_stop_reason(finish_reason: Optional[str]) -> str:
 
 
 def from_openai(
-    response: Dict[str, Any],
+    response: dict[str, Any],
     session_id: str,
-    parent_uuid: Optional[str],
+    parent_uuid: str | None,
     seq: int,
-    stream_id: Optional[str] = None,
+    stream_id: str | None = None,
 ) -> Message:
     """
     Convert OpenAI API response to Message.
@@ -75,7 +75,7 @@ def from_openai(
     ]
 
     # Build segments only if both content and tool_calls present (interleaving)
-    segments: Optional[List[Segment]] = None
+    segments: list[Segment] | None = None
     if content and tool_calls:
         segments = [
             TextSegment(content=content),
@@ -121,13 +121,13 @@ def from_openai(
 
 
 def from_openai_stream_chunk(
-    chunk: Dict[str, Any],
+    chunk: dict[str, Any],
     session_id: str,
-    parent_uuid: Optional[str],
+    parent_uuid: str | None,
     seq: int,
     stream_id: str,
     accumulated_content: str = "",
-    accumulated_tool_calls: Optional[List[ToolCall]] = None,
+    accumulated_tool_calls: list[ToolCall] | None = None,
 ) -> Message:
     """
     Convert OpenAI streaming chunk to Message.
@@ -195,7 +195,7 @@ def from_openai_stream_chunk(
                 )
 
     # Build segments if both present
-    segments: Optional[List[Segment]] = None
+    segments: list[Segment] | None = None
     if accumulated_content and accumulated_tool_calls:
         segments = [
             TextSegment(content=accumulated_content),
@@ -228,16 +228,16 @@ def from_openai_stream_chunk(
     )
 
 
-def to_openai(messages: List[Message]) -> List[Dict[str, Any]]:
+def to_openai(messages: list[Message]) -> list[dict[str, Any]]:
     """
     Convert Messages to OpenAI API request format.
 
     Strips meta - only includes OpenAI core fields.
 
     Args:
-        messages: List of Message objects
+        messages: list of Message objects
 
     Returns:
-        List of dicts ready for OpenAI API
+        list of dicts ready for OpenAI API
     """
     return [msg.to_llm_dict() for msg in messages]

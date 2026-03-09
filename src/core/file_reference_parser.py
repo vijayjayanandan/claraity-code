@@ -16,12 +16,12 @@ Supported formats:
 - @./src/main.py - Explicit relative path
 """
 
-import re
-import os
-from pathlib import Path
-from dataclasses import dataclass
-from typing import List, Optional, Dict
 import logging
+import os
+import re
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -40,10 +40,10 @@ class FileReference:
     """
     original: str
     path: Path
-    content: Optional[str] = None
-    error: Optional[str] = None
-    line_start: Optional[int] = None
-    line_end: Optional[int] = None
+    content: str | None = None
+    error: str | None = None
+    line_start: int | None = None
+    line_end: int | None = None
 
     @property
     def is_loaded(self) -> bool:
@@ -107,7 +107,7 @@ class FileReferenceParser:
         r'|[A-Za-z0-9_./\-]+(?:\.[A-Za-z0-9]+)?(?::\d+(?:-\d+)?)?)'
     )
 
-    def __init__(self, base_dir: Optional[Path] = None, max_file_size: int = 100_000):
+    def __init__(self, base_dir: Path | None = None, max_file_size: int = 100_000):
         """Initialize file reference parser.
 
         Args:
@@ -118,14 +118,14 @@ class FileReferenceParser:
         self.max_file_size = max_file_size
         logger.info(f"FileReferenceParser initialized (base_dir: {self.base_dir})")
 
-    def parse_references(self, message: str) -> List[FileReference]:
+    def parse_references(self, message: str) -> list[FileReference]:
         """Extract file references from a user message.
 
         Args:
             message: User message that may contain @file.py references
 
         Returns:
-            List of FileReference objects (content not loaded yet)
+            list of FileReference objects (content not loaded yet)
         """
         references = []
 
@@ -199,11 +199,11 @@ class FileReferenceParser:
         resolved = (self.base_dir / path).resolve()
         return resolved
 
-    def load_files(self, references: List[FileReference]) -> List[FileReference]:
+    def load_files(self, references: list[FileReference]) -> list[FileReference]:
         """Load file contents for all references.
 
         Args:
-            references: List of FileReference objects to load
+            references: list of FileReference objects to load
 
         Returns:
             Same list with content populated (or errors set)
@@ -252,7 +252,7 @@ class FileReferenceParser:
 
         # Read file content
         try:
-            with open(ref.path, 'r', encoding='utf-8') as f:
+            with open(ref.path, encoding='utf-8') as f:
                 content = f.read()
         except UnicodeDecodeError:
             # Try reading as binary and decoding with fallback
@@ -275,23 +275,23 @@ class FileReferenceParser:
 
         return content
 
-    def parse_and_load(self, message: str) -> List[FileReference]:
+    def parse_and_load(self, message: str) -> list[FileReference]:
         """Parse and load file references in one step.
 
         Args:
             message: User message with file references
 
         Returns:
-            List of loaded FileReference objects
+            list of loaded FileReference objects
         """
         references = self.parse_references(message)
         return self.load_files(references)
 
     def inject_into_context(
         self,
-        references: List[FileReference],
-        context: List[Dict[str, str]]
-    ) -> List[Dict[str, str]]:
+        references: list[FileReference],
+        context: list[dict[str, str]]
+    ) -> list[dict[str, str]]:
         """Inject loaded file contents into LLM context.
 
         File contents are added as system messages after the main system prompt
@@ -299,7 +299,7 @@ class FileReferenceParser:
         when responding.
 
         Args:
-            references: List of loaded FileReference objects
+            references: list of loaded FileReference objects
             context: Existing LLM context (list of message dicts)
 
         Returns:
@@ -361,11 +361,11 @@ class FileReferenceParser:
 
         return cleaned
 
-    def format_summary(self, references: List[FileReference]) -> str:
+    def format_summary(self, references: list[FileReference]) -> str:
         """Format a summary of loaded files for display to user.
 
         Args:
-            references: List of FileReference objects
+            references: list of FileReference objects
 
         Returns:
             Human-readable summary string

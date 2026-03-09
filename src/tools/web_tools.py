@@ -22,7 +22,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Optional
 from urllib.parse import urlparse
 
 import httpx
@@ -52,10 +52,10 @@ class TTLCache:
             ttl_seconds: Time-to-live for cached entries (default: 1 hour)
         """
         self.ttl = ttl_seconds
-        self._cache: Dict[str, Tuple[Any, float]] = {}
+        self._cache: dict[str, tuple[Any, float]] = {}
         self._lock = threading.Lock()
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         """Get cached value if not expired."""
         with self._lock:
             if key in self._cache:
@@ -94,7 +94,7 @@ class RateLimiter:
         """
         self.limit = requests_per_minute
         self.window_seconds = 60
-        self._requests: List[float] = []
+        self._requests: list[float] = []
         self._lock = threading.Lock()
 
     def check(self) -> bool:
@@ -242,12 +242,12 @@ class UrlSafety:
         return hostname.lower().rstrip('.')
 
     @classmethod
-    def is_ip_blocked(cls, ip_str: str) -> Tuple[bool, str]:
+    def is_ip_blocked(cls, ip_str: str) -> tuple[bool, str]:
         """
         Check if IP is in any blocked range.
 
         Returns:
-            Tuple of (is_blocked, reason)
+            tuple of (is_blocked, reason)
         """
         try:
             ip = ipaddress.ip_address(ip_str)
@@ -278,12 +278,12 @@ class UrlSafety:
         return False, ""
 
     @classmethod
-    def is_hostname_blocked(cls, hostname: str) -> Tuple[bool, str]:
+    def is_hostname_blocked(cls, hostname: str) -> tuple[bool, str]:
         """
         Check if hostname matches blocklist.
 
         Returns:
-            Tuple of (is_blocked, reason)
+            tuple of (is_blocked, reason)
         """
         normalized = cls.normalize_hostname(hostname)
 
@@ -375,7 +375,7 @@ class UrlSafety:
 # Content Type Safety
 # =============================================================================
 
-ALLOWED_CONTENT_TYPES: Set[str] = {
+ALLOWED_CONTENT_TYPES: set[str] = {
     'text/html',
     'text/plain',
     'text/xml',
@@ -389,7 +389,7 @@ ALLOWED_CONTENT_TYPES: Set[str] = {
 }
 
 
-def is_content_type_allowed(content_type: str) -> Tuple[bool, str]:
+def is_content_type_allowed(content_type: str) -> tuple[bool, str]:
     """
     Check if content-type is in allowlist.
 
@@ -397,7 +397,7 @@ def is_content_type_allowed(content_type: str) -> Tuple[bool, str]:
         content_type: Content-Type header value
 
     Returns:
-        Tuple of (is_allowed, base_type)
+        tuple of (is_allowed, base_type)
     """
     if not content_type:
         return False, ""
@@ -432,8 +432,8 @@ class SearchResultItem:
 @dataclass
 class WebSearchResult:
     """Provider-agnostic search result."""
-    results: List[SearchResultItem] = field(default_factory=list)
-    answer: Optional[str] = None  # AI summary if provider supports
+    results: list[SearchResultItem] = field(default_factory=list)
+    answer: str | None = None  # AI summary if provider supports
 
 
 class RateLimitError(Exception):
@@ -450,8 +450,8 @@ class WebSearchProvider(ABC):
         query: str,
         max_results: int = 5,
         search_depth: str = "basic",
-        include_domains: Optional[List[str]] = None,
-        exclude_domains: Optional[List[str]] = None,
+        include_domains: list[str] | None = None,
+        exclude_domains: list[str] | None = None,
     ) -> WebSearchResult:
         """
         Execute search and return normalized results.
@@ -480,7 +480,7 @@ class TavilyProvider(WebSearchProvider):
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         api_key_env: str = "TAVILY_API_KEY",
         timeout_seconds: float = 30.0,
     ):
@@ -495,7 +495,7 @@ class TavilyProvider(WebSearchProvider):
         self.api_key = api_key or os.getenv(api_key_env)
         if not self.api_key:
             raise ValueError(
-                f"Tavily API key not provided. Set {api_key_env} environment variable "
+                f"Tavily API key not provided. set {api_key_env} environment variable "
                 f"or pass api_key parameter. Get a key at https://tavily.com"
             )
         self.timeout = timeout_seconds
@@ -505,8 +505,8 @@ class TavilyProvider(WebSearchProvider):
         query: str,
         max_results: int = 5,
         search_depth: str = "basic",
-        include_domains: Optional[List[str]] = None,
-        exclude_domains: Optional[List[str]] = None,
+        include_domains: list[str] | None = None,
+        exclude_domains: list[str] | None = None,
     ) -> WebSearchResult:
         """Execute Tavily search."""
         # Build request payload
@@ -600,10 +600,10 @@ class WebFetchTool(Tool):
         self.cache = TTLCache(ttl_seconds=cache_ttl_seconds)
         self.timeout = timeout_seconds
         self.max_bytes = max_content_bytes
-        self._run_budget: Optional[RunBudget] = None
+        self._run_budget: RunBudget | None = None
 
     def set_run_budget(self, budget: RunBudget) -> None:
-        """Set run budget for current turn. Called at turn start."""
+        """set run budget for current turn. Called at turn start."""
         self._run_budget = budget
 
     def execute(
@@ -828,7 +828,7 @@ class WebFetchTool(Tool):
 
         return html.strip()
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         """Get parameter schema for LLM."""
         return {
             "type": "object",
@@ -866,7 +866,7 @@ class WebSearchTool(Tool):
 
     def __init__(
         self,
-        provider: Optional[WebSearchProvider] = None,
+        provider: WebSearchProvider | None = None,
         cache_ttl_seconds: int = 3600,
         rate_limit_per_minute: int = 10,
     ):
@@ -885,10 +885,10 @@ class WebSearchTool(Tool):
         self._provider = provider  # Lazy init if None
         self.cache = TTLCache(ttl_seconds=cache_ttl_seconds)
         self.rate_limiter = RateLimiter(requests_per_minute=rate_limit_per_minute)
-        self._run_budget: Optional[RunBudget] = None
+        self._run_budget: RunBudget | None = None
 
     def set_run_budget(self, budget: RunBudget) -> None:
-        """Set run budget for current turn. Called at turn start."""
+        """set run budget for current turn. Called at turn start."""
         self._run_budget = budget
 
     def _get_provider(self) -> WebSearchProvider:
@@ -902,8 +902,8 @@ class WebSearchTool(Tool):
         query: str,
         max_results: int = 5,
         search_depth: str = "basic",
-        include_domains: Optional[List[str]] = None,
-        exclude_domains: Optional[List[str]] = None,
+        include_domains: list[str] | None = None,
+        exclude_domains: list[str] | None = None,
         **kwargs: Any
     ) -> ToolResult:
         """
@@ -1128,7 +1128,7 @@ class WebSearchTool(Tool):
 
         return "\n".join(parts)
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         """Get parameter schema for LLM."""
         return {
             "type": "object",

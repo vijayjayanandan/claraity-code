@@ -1,6 +1,7 @@
 """Model configurations and recommendations."""
 
-from typing import Dict, Optional
+from typing import Optional
+
 from pydantic import BaseModel
 
 
@@ -92,7 +93,7 @@ GENERAL_MODELS = {
 ALL_MODELS = {**CODING_MODELS, **GENERAL_MODELS}
 
 
-def get_model_config(model_name: str) -> Optional[ModelConfig]:
+def get_model_config(model_name: str) -> ModelConfig | None:
     """
     Get configuration for a model.
 
@@ -105,7 +106,7 @@ def get_model_config(model_name: str) -> Optional[ModelConfig]:
     return ALL_MODELS.get(model_name)
 
 
-def list_recommended_models(use_case: str = "coding") -> Dict[str, ModelConfig]:
+def list_recommended_models(use_case: str = "coding") -> dict[str, ModelConfig]:
     """
     List recommended models for a use case.
 
@@ -123,7 +124,7 @@ def list_recommended_models(use_case: str = "coding") -> Dict[str, ModelConfig]:
         return ALL_MODELS
 
 
-def get_best_model_for_context(required_context: int) -> Optional[str]:
+def get_best_model_for_context(required_context: int) -> str | None:
     """
     Get best model name for required context window.
 

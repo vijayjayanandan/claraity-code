@@ -28,12 +28,13 @@ Thread Safety:
 """
 
 import asyncio
-import time
 import logging
 import random
 import re
-from typing import Callable, Any, Tuple, Optional
+import time
+from collections.abc import Callable
 from functools import wraps
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +168,7 @@ class LLMFailureHandler:
 
     def __init__(
         self,
-        logger_instance: Optional[logging.Logger] = None,
+        logger_instance: logging.Logger | None = None,
         max_backoff_delay: float = 15.0,
         max_rate_limit_delay: float = 30.0,
         rate_limit_base_delay: float = 10.0,
@@ -449,7 +450,7 @@ class LLMFailureHandler:
 
         raise LLMError(f"Failed after {max_attempts} attempts") from last_error
 
-    def handle_api_error(self, error: Exception) -> Tuple[bool, str]:
+    def handle_api_error(self, error: Exception) -> tuple[bool, str]:
         """
         Classify API error as retryable or fatal.
 
@@ -469,7 +470,7 @@ class LLMFailureHandler:
             error: API error to classify
 
         Returns:
-            Tuple of (is_retryable, error_message)
+            tuple of (is_retryable, error_message)
             - is_retryable: True if error can be retried, False if fatal
             - error_message: Human-readable error description (sanitized)
 
@@ -715,7 +716,7 @@ class LLMFailureHandler:
     def validate_response(
         self,
         response: str,
-        expected_format: Optional[str] = None,
+        expected_format: str | None = None,
         check_truncation: bool = True,
         check_repetition: bool = True
     ) -> bool:

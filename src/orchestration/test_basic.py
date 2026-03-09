@@ -41,7 +41,7 @@ def test_basic_communication():
     print("[2/5] Starting conversation...")
     try:
         session = orchestrator.start_conversation()
-        print(f"   [OK] Conversation started")
+        print("   [OK] Conversation started")
         print(f"   ID: {session.conversation_id}")
         print(f"   Workspace: {session.working_directory}\n")
     except Exception as e:
@@ -54,7 +54,7 @@ def test_basic_communication():
     print(f"   Message: '{message}'")
     try:
         response = session.send_message(message)
-        print(f"   [OK] Agent responded")
+        print("   [OK] Agent responded")
         print(f"   Success: {response.success}")
         if response.success:
             print(f"   Files generated: {response.files_generated}")
@@ -78,7 +78,7 @@ def test_basic_communication():
                 if file_path.exists():
                     print(f"   [OK] File exists: {file}")
                     # Show first few lines
-                    with open(file_path, 'r', encoding='utf-8') as f:
+                    with open(file_path, encoding='utf-8') as f:
                         content = f.read()
                         print(f"        Preview: {content[:100]}...")
                 else:
@@ -93,7 +93,7 @@ def test_basic_communication():
     print("[5/5] Ending conversation...")
     try:
         log = orchestrator.end_conversation(session.conversation_id)
-        print(f"   [OK] Conversation ended")
+        print("   [OK] Conversation ended")
         print(f"   Total turns: {log.total_turns}")
         print(f"   Total messages: {len(log.messages)}")
         print(f"   Duration: {(log.ended_at - log.started_at).total_seconds():.1f}s")
@@ -104,7 +104,7 @@ def test_basic_communication():
         if log_path.exists():
             print(f"   [OK] Log file exists ({log_path.stat().st_size} bytes)")
         else:
-            print(f"   [WARN] Log file not found")
+            print("   [WARN] Log file not found")
         print()
     except Exception as e:
         print(f"   [FAIL] Failed to end conversation: {e}")
@@ -115,11 +115,11 @@ def test_basic_communication():
     print("SUCCESS: Phase 1 basic communication working!")
     print("="*70)
     print("\nSummary:")
-    print(f"  - Orchestrator initialized: OK")
-    print(f"  - Conversation started: OK")
-    print(f"  - Message sent and received: OK")
+    print("  - Orchestrator initialized: OK")
+    print("  - Conversation started: OK")
+    print("  - Message sent and received: OK")
     print(f"  - Files generated: {len(response.files_generated)}")
-    print(f"  - Conversation logged: OK")
+    print("  - Conversation logged: OK")
     print("\nPhase 1 is COMPLETE!")
     print("="*70 + "\n")
 
@@ -142,7 +142,7 @@ def test_simple_send_message_api():
 
         response = orchestrator.send_message("Create a file called test.txt with the text 'Testing!'")
 
-        print(f"   [OK] Message sent and received")
+        print("   [OK] Message sent and received")
         print(f"   Success: {response.success}")
         print(f"   Files: {response.files_generated}")
         print()
@@ -154,7 +154,7 @@ def test_simple_send_message_api():
     try:
         active = orchestrator.list_active_conversations()
         if len(active) == 0:
-            print(f"   [OK] No active sessions (as expected)")
+            print("   [OK] No active sessions (as expected)")
         else:
             print(f"   [WARN] Found {len(active)} active sessions")
         print()

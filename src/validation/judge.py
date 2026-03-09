@@ -11,10 +11,11 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Any, Optional
 
-from .scenario import ValidationScenario, ValidationResult
-from src.llm import LLMBackend, OpenAIBackend, LLMConfig, LLMBackendType
+from src.llm import LLMBackend, LLMBackendType, LLMConfig, OpenAIBackend
+
+from .scenario import ValidationResult, ValidationScenario
 
 
 class ValidationJudge:
@@ -29,10 +30,10 @@ class ValidationJudge:
 
     def __init__(
         self,
-        llm_backend: Optional[LLMBackend] = None,
-        model_name: Optional[str] = None,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None
+        llm_backend: LLMBackend | None = None,
+        model_name: str | None = None,
+        api_key: str | None = None,
+        base_url: str | None = None
     ):
         """
         Initialize judge.
@@ -82,7 +83,7 @@ class ValidationJudge:
         result: ValidationResult,
         workspace: Path,
         verbose: bool = True
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Evaluate generated code using Claude.
 
@@ -138,7 +139,7 @@ class ValidationJudge:
             result.judge_report_path = str(judge_report_path)
 
             if verbose:
-                print(f"   [OK] Judge evaluation complete")
+                print("   [OK] Judge evaluation complete")
                 print(f"      Completeness: {judge_result['completeness']:.1%}")
                 print(f"      Correctness: {judge_result['correctness']:.1%}")
                 print(f"      Quality: {judge_result['quality']:.1%}")
@@ -159,7 +160,7 @@ class ValidationJudge:
                 "overall_assessment": "Could not evaluate code due to error."
             }
 
-    def _collect_code_files(self, code_dir: Path) -> Dict[str, str]:
+    def _collect_code_files(self, code_dir: Path) -> dict[str, str]:
         """Collect all code files from workspace"""
 
         code_files = {}
@@ -173,7 +174,7 @@ class ValidationJudge:
                 rel_path = py_file.relative_to(code_dir)
                 content = py_file.read_text()
                 code_files[str(rel_path)] = content
-            except:
+            except Exception:
                 pass
 
         # Also collect README
@@ -181,7 +182,7 @@ class ValidationJudge:
         if readme_path.exists():
             try:
                 code_files["README.md"] = readme_path.read_text()
-            except:
+            except Exception:
                 pass
 
         # Collect requirements.txt
@@ -189,7 +190,7 @@ class ValidationJudge:
         if req_path.exists():
             try:
                 code_files["requirements.txt"] = req_path.read_text()
-            except:
+            except Exception:
                 pass
 
         return code_files
@@ -198,7 +199,7 @@ class ValidationJudge:
         self,
         scenario: ValidationScenario,
         result: ValidationResult,
-        code_files: Dict[str, str]
+        code_files: dict[str, str]
     ) -> str:
         """Build evaluation prompt for Claude"""
 
@@ -299,7 +300,7 @@ Respond with ONLY the JSON, no other text."""
 
         return prompt
 
-    def _parse_judge_response(self, response_text: str) -> Dict[str, Any]:
+    def _parse_judge_response(self, response_text: str) -> dict[str, Any]:
         """
         Parse judge response, handling markdown code blocks.
 
@@ -365,8 +366,8 @@ Respond with ONLY the JSON, no other text."""
         self,
         scenario: ValidationScenario,
         result: ValidationResult,
-        judge_scores: Dict[str, float]
-    ) -> Dict[str, float]:
+        judge_scores: dict[str, float]
+    ) -> dict[str, float]:
         """
         Calculate final weighted scores combining automated checks + judge evaluation.
 

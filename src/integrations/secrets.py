@@ -37,7 +37,7 @@ class SecretStore(ABC):
     """
 
     @abstractmethod
-    def get(self, key: str) -> Optional[str]:
+    def get(self, key: str) -> str | None:
         """Retrieve a secret. Returns None if not found."""
 
     @abstractmethod
@@ -61,7 +61,7 @@ class KeyringSecretStore(SecretStore):
         self._kr = _kr
         self._service = service
 
-    def get(self, key: str) -> Optional[str]:
+    def get(self, key: str) -> str | None:
         try:
             return self._kr.get_password(self._service, key)
         except Exception:
@@ -98,7 +98,7 @@ class EncryptedFileSecretStore(SecretStore):
         <store_dir>/secret.key    - Fernet key (only if auto-generated)
     """
 
-    def __init__(self, store_dir: Optional[Path] = None):
+    def __init__(self, store_dir: Path | None = None):
         from cryptography.fernet import Fernet
 
         self._store_dir = store_dir or Path(".clarity") / "secrets"
@@ -144,7 +144,7 @@ class EncryptedFileSecretStore(SecretStore):
         encrypted = self._fernet.encrypt(plaintext)
         self._enc_path.write_bytes(encrypted)
 
-    def get(self, key: str) -> Optional[str]:
+    def get(self, key: str) -> str | None:
         return self._load().get(key)
 
     def set(self, key: str, value: str) -> None:
@@ -161,7 +161,7 @@ class EncryptedFileSecretStore(SecretStore):
         return key in self._load()
 
 
-def get_secret_store(store_dir: Optional[Path] = None) -> SecretStore:
+def get_secret_store(store_dir: Path | None = None) -> SecretStore:
     """Factory: returns best available SecretStore backend.
 
     Tries OS keyring first; falls back to encrypted file store.

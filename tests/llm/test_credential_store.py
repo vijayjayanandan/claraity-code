@@ -30,17 +30,26 @@ class TestSaveApiKey:
         assert save_api_key("") is False
         mock_get_kr.assert_not_called()
 
+    @patch("src.llm.credential_store._save_to_config_yaml", return_value=True)
     @patch("src.llm.credential_store._get_keyring", return_value=None)
-    def test_save_no_keyring_returns_false(self, mock_get_kr):
+    def test_save_no_keyring_falls_back_to_config(self, mock_get_kr, mock_save_yaml):
+        assert save_api_key("sk-test-123") is True
+        mock_save_yaml.assert_called_once_with("sk-test-123")
+
+    @patch("src.llm.credential_store._save_to_config_yaml", return_value=False)
+    @patch("src.llm.credential_store._get_keyring", return_value=None)
+    def test_save_no_keyring_no_yaml_returns_false(self, mock_get_kr, mock_save_yaml):
         assert save_api_key("sk-test-123") is False
 
+    @patch("src.llm.credential_store._save_to_config_yaml", return_value=True)
     @patch("src.llm.credential_store._get_keyring")
-    def test_save_keyring_error_returns_false(self, mock_get_kr):
+    def test_save_keyring_error_falls_back_to_config(self, mock_get_kr, mock_save_yaml):
         mock_kr = MagicMock()
         mock_kr.set_password.side_effect = Exception("keyring error")
         mock_get_kr.return_value = mock_kr
 
-        assert save_api_key("sk-test-123") is False
+        assert save_api_key("sk-test-123") is True
+        mock_save_yaml.assert_called_once_with("sk-test-123")
 
 
 class TestLoadApiKey:
@@ -54,8 +63,9 @@ class TestLoadApiKey:
 
         assert load_api_key() == "sk-from-keyring"
 
+    @patch("src.llm.credential_store._load_from_config_yaml", return_value="")
     @patch("src.llm.credential_store._get_keyring")
-    def test_load_falls_back_to_env_var(self, mock_get_kr):
+    def test_load_falls_back_to_env_var(self, mock_get_kr, mock_load_yaml):
         mock_kr = MagicMock()
         mock_kr.get_password.return_value = None  # Not in keyring
         mock_get_kr.return_value = mock_kr
@@ -63,19 +73,22 @@ class TestLoadApiKey:
         with patch.dict(os.environ, {"MY_API_KEY": "sk-from-env"}):
             assert load_api_key(api_key_env="MY_API_KEY") == "sk-from-env"
 
+    @patch("src.llm.credential_store._load_from_config_yaml", return_value="")
     @patch("src.llm.credential_store._get_keyring", return_value=None)
-    def test_load_no_keyring_uses_env_var(self, mock_get_kr):
+    def test_load_no_keyring_uses_env_var(self, mock_get_kr, mock_load_yaml):
         with patch.dict(os.environ, {"MY_API_KEY": "sk-env-only"}):
             assert load_api_key(api_key_env="MY_API_KEY") == "sk-env-only"
 
+    @patch("src.llm.credential_store._load_from_config_yaml", return_value="")
     @patch("src.llm.credential_store._get_keyring", return_value=None)
-    def test_load_nothing_returns_empty(self, mock_get_kr):
+    def test_load_nothing_returns_empty(self, mock_get_kr, mock_load_yaml):
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("NONEXISTENT_KEY", None)
             assert load_api_key(api_key_env="NONEXISTENT_KEY") == ""
 
+    @patch("src.llm.credential_store._load_from_config_yaml", return_value="")
     @patch("src.llm.credential_store._get_keyring")
-    def test_load_keyring_error_falls_back(self, mock_get_kr):
+    def test_load_keyring_error_falls_back(self, mock_get_kr, mock_load_yaml):
         mock_kr = MagicMock()
         mock_kr.get_password.side_effect = Exception("keyring error")
         mock_get_kr.return_value = mock_kr

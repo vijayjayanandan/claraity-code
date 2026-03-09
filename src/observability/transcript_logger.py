@@ -21,12 +21,11 @@ Event Schema (v1):
 
 import json
 import re
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional, List
 from threading import Lock
-
+from typing import Any, Optional
 
 # Patterns for secret detection
 SECRET_PATTERNS = [
@@ -67,10 +66,10 @@ class TranscriptEvent:
     ts: str
     event: str
     level: str = "info"
-    turn_id: Optional[str] = None
-    span_id: Optional[str] = None
-    parent_span_id: Optional[str] = None
-    data: Dict[str, Any] = field(default_factory=dict)
+    turn_id: str | None = None
+    span_id: str | None = None
+    parent_span_id: str | None = None
+    data: dict[str, Any] = field(default_factory=dict)
 
     def to_json(self) -> str:
         """Serialize to JSON string."""
@@ -147,7 +146,7 @@ class TranscriptLogger:
         """Initialize sequence number from existing transcript file."""
         if self.transcript_path.exists():
             try:
-                with open(self.transcript_path, 'r', encoding='utf-8') as f:
+                with open(self.transcript_path, encoding='utf-8') as f:
                     for line in f:
                         if line.strip():
                             try:
@@ -204,7 +203,7 @@ class TranscriptLogger:
 
         return redacted
 
-    def _sanitize_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def _sanitize_data(self, data: dict[str, Any]) -> dict[str, Any]:
         """
         Sanitize event data: truncate large content, redact secrets.
 
@@ -256,11 +255,11 @@ class TranscriptLogger:
     def log(
         self,
         event: str,
-        data: Dict[str, Any],
+        data: dict[str, Any],
         level: str = "info",
-        turn_id: Optional[str] = None,
-        span_id: Optional[str] = None,
-        parent_span_id: Optional[str] = None
+        turn_id: str | None = None,
+        span_id: str | None = None,
+        parent_span_id: str | None = None
     ) -> TranscriptEvent:
         """
         Log an event to the transcript.
@@ -303,8 +302,8 @@ class TranscriptLogger:
     def log_user_message(
         self,
         content: str,
-        turn_id: Optional[str] = None,
-        token_count: Optional[int] = None
+        turn_id: str | None = None,
+        token_count: int | None = None
     ) -> TranscriptEvent:
         """Log a user message."""
         data = {
@@ -318,9 +317,9 @@ class TranscriptLogger:
     def log_assistant_message(
         self,
         content: str,
-        tool_calls: Optional[List[Dict[str, Any]]] = None,
-        turn_id: Optional[str] = None,
-        token_count: Optional[int] = None
+        tool_calls: list[dict[str, Any]] | None = None,
+        turn_id: str | None = None,
+        token_count: int | None = None
     ) -> TranscriptEvent:
         """Log an assistant message."""
         data = {
@@ -337,8 +336,8 @@ class TranscriptLogger:
         self,
         tool_call_id: str,
         name: str,
-        arguments: Dict[str, Any],
-        turn_id: Optional[str] = None
+        arguments: dict[str, Any],
+        turn_id: str | None = None
     ) -> TranscriptEvent:
         """Log a tool call (before execution)."""
         return self.log("tool_call", {
@@ -353,9 +352,9 @@ class TranscriptLogger:
         name: str,
         content: str,
         status: str = "ok",
-        duration_ms: Optional[float] = None,
-        error: Optional[str] = None,
-        turn_id: Optional[str] = None
+        duration_ms: float | None = None,
+        error: str | None = None,
+        turn_id: str | None = None
     ) -> TranscriptEvent:
         """Log a tool result (after execution)."""
         data = {
@@ -400,7 +399,7 @@ class TranscriptLogger:
     def log_continuation_injected(
         self,
         injected_chars: int,
-        sections_included: List[str]
+        sections_included: list[str]
     ) -> TranscriptEvent:
         """Log when continuation summary is injected."""
         return self.log("continuation_injected", {
@@ -412,8 +411,8 @@ class TranscriptLogger:
         self,
         error_type: str,
         message: str,
-        traceback: Optional[str] = None,
-        turn_id: Optional[str] = None
+        traceback: str | None = None,
+        turn_id: str | None = None
     ) -> TranscriptEvent:
         """Log an error event."""
         data = {
@@ -429,7 +428,7 @@ class TranscriptLogger:
         self,
         file_path: str,
         bytes_written: int,
-        turn_id: Optional[str] = None
+        turn_id: str | None = None
     ) -> TranscriptEvent:
         """Log a file write operation."""
         return self.log("file_write", {
@@ -441,7 +440,7 @@ class TranscriptLogger:
         self,
         file_path: str,
         edit_summary: str,
-        turn_id: Optional[str] = None
+        turn_id: str | None = None
     ) -> TranscriptEvent:
         """Log a file edit operation."""
         return self.log("file_edit", {
@@ -453,10 +452,10 @@ class TranscriptLogger:
 
     def get_events(
         self,
-        event_types: Optional[List[str]] = None,
+        event_types: list[str] | None = None,
         since_seq: int = 0,
         limit: int = 1000
-    ) -> List[TranscriptEvent]:
+    ) -> list[TranscriptEvent]:
         """
         Query events from transcript.
 
@@ -466,14 +465,14 @@ class TranscriptLogger:
             limit: Maximum events to return
 
         Returns:
-            List of TranscriptEvent objects
+            list of TranscriptEvent objects
         """
         events = []
 
         if not self.transcript_path.exists():
             return events
 
-        with open(self.transcript_path, 'r', encoding='utf-8') as f:
+        with open(self.transcript_path, encoding='utf-8') as f:
             for line in f:
                 if not line.strip():
                     continue
@@ -497,7 +496,7 @@ class TranscriptLogger:
 
         return events
 
-    def get_user_messages(self) -> List[str]:
+    def get_user_messages(self) -> list[str]:
         """Get all user messages from transcript."""
         events = self.get_events(event_types=["user_message"])
         return [e.data.get("content", "") for e in events]
@@ -506,7 +505,7 @@ class TranscriptLogger:
         """Get path to transcript file."""
         return self.transcript_path
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get transcript statistics."""
         if not self.transcript_path.exists():
             return {
@@ -515,10 +514,10 @@ class TranscriptLogger:
                 "session_id": self.session_id
             }
 
-        event_counts: Dict[str, int] = {}
+        event_counts: dict[str, int] = {}
         total_events = 0
 
-        with open(self.transcript_path, 'r', encoding='utf-8') as f:
+        with open(self.transcript_path, encoding='utf-8') as f:
             for line in f:
                 if not line.strip():
                     continue

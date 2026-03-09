@@ -6,7 +6,6 @@ safety floor that cannot be bypassed by permission settings.
 """
 
 import re
-from typing import Tuple
 
 from src.observability import get_logger
 
@@ -66,14 +65,14 @@ DANGEROUS_PATTERNS: list[re.Pattern] = [
 MAX_COMMAND_TIMEOUT = 600
 
 
-def check_command_safety(command: str) -> Tuple[bool, str]:
+def check_command_safety(command: str) -> tuple[bool, str]:
     """Check if a command matches any dangerous patterns.
 
     Args:
         command: The shell command to check.
 
     Returns:
-        Tuple of (is_safe, reason). If is_safe is False, reason explains why.
+        tuple of (is_safe, reason). If is_safe is False, reason explains why.
     """
     command_stripped = command.strip()
 

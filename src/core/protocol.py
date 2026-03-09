@@ -12,12 +12,13 @@ Design Principles:
 - This module lives in core/ so agent has no UI dependency
 """
 
-from dataclasses import dataclass
-from typing import AsyncIterator, Callable, List, Dict, Any, Optional
 import asyncio
+from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass
+from typing import Any, Optional
 
-from src.observability import get_logger
 from src.core.events import UIEvent
+from src.observability import get_logger
 
 logger = get_logger("core.protocol")
 
@@ -69,7 +70,7 @@ class ClarifyResult:
     """
     call_id: str
     submitted: bool
-    responses: Dict[str, Any] | None = None  # question_id -> selected_option_id(s)
+    responses: dict[str, Any] | None = None  # question_id -> selected_option_id(s)
     chat_instead: bool = False  # User chose to chat instead
     chat_message: str | None = None  # User's chat message if chat_instead=True
 
@@ -199,10 +200,10 @@ class UIProtocol:
         self._interrupted = asyncio.Event()
 
         # Callback for todo updates (Agent -> UI)
-        self._on_todos_updated: Optional[Callable[[List[Dict[str, Any]]], None]] = None
+        self._on_todos_updated: Callable[[list[dict[str, Any]]], None] | None = None
 
         # Callback for pause requests (delegation tool -> UI)
-        self._on_pause_requested: Optional[Callable] = None
+        self._on_pause_requested: Callable | None = None
 
     # -------------------------------------------------------------------------
     # Agent-side methods
@@ -539,7 +540,7 @@ class UIProtocol:
 
     def set_pause_requested_callback(
         self,
-        callback: Optional[Callable]
+        callback: Callable | None
     ) -> None:
         """
         Register a callback invoked when a subagent requests a pause.
@@ -559,8 +560,8 @@ class UIProtocol:
         self,
         reason: str,
         reason_code: str,
-        stats: Dict[str, Any],
-        pending_todos: Optional[List[Dict[str, Any]]] = None,
+        stats: dict[str, Any],
+        pending_todos: list[dict[str, Any]] | None = None,
     ) -> 'PauseResult':
         """
         Request a pause from the user (called by delegation tool).
@@ -571,7 +572,7 @@ class UIProtocol:
         Args:
             reason: Human-readable pause reason
             reason_code: Machine-readable code (e.g., "iteration_limit")
-            stats: Dict with iteration/time stats for display
+            stats: dict with iteration/time stats for display
             pending_todos: Optional list of pending todo items
 
         Returns:
@@ -591,7 +592,7 @@ class UIProtocol:
 
     def set_todos_callback(
         self,
-        callback: Optional[Callable[[List[Dict[str, Any]]], None]]
+        callback: Callable[[list[dict[str, Any]]], None] | None
     ) -> None:
         """
         Register a callback to be called when todos are updated.
@@ -603,13 +604,13 @@ class UIProtocol:
         Usage in Textual App:
             self.ui_protocol.set_todos_callback(self.on_todos_updated)
 
-            def on_todos_updated(self, todos: List[Dict]) -> None:
+            def on_todos_updated(self, todos: list[dict]) -> None:
                 todo_bar = self.query_one("#todo-bar", TodoBar)
                 todo_bar.update_todos(todos)
         """
         self._on_todos_updated = callback
 
-    def notify_todos_updated(self, todos: List[Dict[str, Any]]) -> None:
+    def notify_todos_updated(self, todos: list[dict[str, Any]]) -> None:
         """
         Notify UI that todos have been updated.
 

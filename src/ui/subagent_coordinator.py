@@ -6,8 +6,9 @@ routing, and pending mount queues. Works with SubagentRegistry and SubAgentCard
 widgets to provide live subagent visibility in the TUI.
 """
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from src.observability import get_logger
 
@@ -15,10 +16,10 @@ logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from ..session.store.memory_store import StoreNotification
-    from .widgets.tool_card import ToolCard
-    from .widgets.subagent_card import SubAgentCard
-    from .subagent_registry import SubagentRegistry
     from .protocol import UIProtocol
+    from .subagent_registry import SubagentRegistry
+    from .widgets.subagent_card import SubAgentCard
+    from .widgets.tool_card import ToolCard
 
 
 class SubagentCoordinator:
@@ -48,9 +49,9 @@ class SubagentCoordinator:
         self._buffered_subagent_notifications: dict[str, list] = {}
 
         # Registry unsubscribe handles
-        self._unsubscribe_registry_reg: Optional[Callable[[], None]] = None
-        self._unsubscribe_registry_unreg: Optional[Callable[[], None]] = None
-        self._unsubscribe_registry_notif: Optional[Callable[[], None]] = None
+        self._unsubscribe_registry_reg: Callable[[], None] | None = None
+        self._unsubscribe_registry_unreg: Callable[[], None] | None = None
+        self._unsubscribe_registry_notif: Callable[[], None] | None = None
 
     @property
     def subscriptions(self) -> dict[str, dict]:
@@ -106,7 +107,7 @@ class SubagentCoordinator:
         if self._unsubscribe_registry_notif:
             self._unsubscribe_registry_notif()
 
-        for sub_id, sub_info in self._subagent_subscriptions.items():
+        for _sub_id, sub_info in self._subagent_subscriptions.items():
             if sub_info.get("unsubscribe"):
                 sub_info["unsubscribe"]()
 

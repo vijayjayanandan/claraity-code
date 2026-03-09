@@ -49,14 +49,13 @@ Engineering Principles:
 import argparse
 import json
 import sys
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
-from .error_store import ErrorStore, ErrorRecord, ErrorCategory, get_error_store
+from .error_store import ErrorCategory, ErrorRecord, ErrorStore, get_error_store
 from .log_store import LogRecord, get_log_store
-
 
 # =============================================================================
 # JSONL SCANNER
@@ -68,26 +67,26 @@ class JsonlEntry:
     ts: str = ""
     level: str = ""
     event: str = ""
-    logger: Optional[str] = None
-    session_id: Optional[str] = None
-    component: Optional[str] = None
-    raw: Dict[str, Any] = field(default_factory=dict)
+    logger: str | None = None
+    session_id: str | None = None
+    component: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return self.raw
 
 
 def scan_jsonl_files(
     log_dir: str = ".clarity/logs",
-    session_id: Optional[str] = None,
-    level: Optional[str] = None,
-    component: Optional[str] = None,
-    event: Optional[str] = None,
-    text: Optional[str] = None,
-    minutes: Optional[int] = None,
+    session_id: str | None = None,
+    level: str | None = None,
+    component: str | None = None,
+    event: str | None = None,
+    text: str | None = None,
+    minutes: int | None = None,
     limit: int = 100,
-) -> List[JsonlEntry]:
+) -> list[JsonlEntry]:
     """
     Scan JSONL log files (app.jsonl + rotated backups).
 
@@ -108,7 +107,7 @@ def scan_jsonl_files(
         limit: Maximum results
 
     Returns:
-        List of JsonlEntry, sorted by timestamp descending
+        list of JsonlEntry, sorted by timestamp descending
     """
     log_path = Path(log_dir)
 
@@ -139,7 +138,7 @@ def scan_jsonl_files(
 
     for file_path in files:
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, encoding='utf-8') as f:
                 for line in f:
                     if not line.strip():
                         continue
@@ -388,9 +387,9 @@ def format_jsonl(entry: JsonlEntry, verbose: bool = False) -> str:
 
 def query_session_logs(
     session_id: str,
-    level: Optional[str] = None,
+    level: str | None = None,
     limit: int = 100,
-) -> List[LogRecord]:
+) -> list[LogRecord]:
     """
     Query logs for a specific session from logs.db.
 
@@ -402,7 +401,7 @@ def query_session_logs(
         limit: Maximum results
 
     Returns:
-        List of LogRecord objects
+        list of LogRecord objects
     """
     try:
         store = get_log_store()
@@ -417,9 +416,9 @@ def query_session_logs(
 
 def query_session_errors(
     session_id: str,
-    category: Optional[str] = None,
+    category: str | None = None,
     limit: int = 100,
-) -> List[ErrorRecord]:
+) -> list[ErrorRecord]:
     """
     Query errors for a specific session from metrics.db.
 
@@ -429,7 +428,7 @@ def query_session_errors(
         limit: Maximum results
 
     Returns:
-        List of ErrorRecord objects
+        list of ErrorRecord objects
     """
     store = get_error_store()
     return store.query(
@@ -489,13 +488,13 @@ def _jsonl_to_log_record(entry: JsonlEntry) -> LogRecord:
 # =============================================================================
 
 def query_errors(
-    session_id: Optional[str] = None,
-    category: Optional[str] = None,
-    component: Optional[str] = None,
-    minutes: Optional[int] = None,
+    session_id: str | None = None,
+    category: str | None = None,
+    component: str | None = None,
+    minutes: int | None = None,
     limit: int = 20,
     verbose: bool = False,
-) -> List[ErrorRecord]:
+) -> list[ErrorRecord]:
     """Query errors from metrics.db."""
     store = get_error_store()
     return store.query(
@@ -507,7 +506,7 @@ def query_errors(
     )
 
 
-def show_summary(minutes: Optional[int] = None) -> None:
+def show_summary(minutes: int | None = None) -> None:
     """Show error summary by category."""
     store = get_error_store()
     counts = store.count_by_category(since_minutes=minutes)
@@ -659,7 +658,7 @@ def _query_jsonl(args) -> None:
 
 
 def _show_level_summary(
-    counts: Dict[str, int], minutes: Optional[int] = None
+    counts: dict[str, int], minutes: int | None = None
 ) -> None:
     """Show log summary by level."""
     if not counts:

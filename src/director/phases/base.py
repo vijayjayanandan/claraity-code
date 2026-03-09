@@ -20,7 +20,7 @@ class PhaseHandler(ABC):
         ...
 
     @abstractmethod
-    def validate_input(self, input_data: Any) -> Optional[str]:
+    def validate_input(self, input_data: Any) -> str | None:
         """Check if input is good enough. Returns None if valid, error string if not."""
         ...
 

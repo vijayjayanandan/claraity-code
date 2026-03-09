@@ -7,7 +7,7 @@ full context through the observability framework.
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Optional
 
 from src.observability import get_logger
 
@@ -23,7 +23,7 @@ logger = get_logger(__name__)
 
 
 # The track map: from each phase, which phases can you reach?
-VALID_TRANSITIONS: Dict[DirectorPhase, Set[DirectorPhase]] = {
+VALID_TRANSITIONS: dict[DirectorPhase, set[DirectorPhase]] = {
     DirectorPhase.IDLE:              {DirectorPhase.UNDERSTAND},
     DirectorPhase.UNDERSTAND:        {DirectorPhase.PLAN, DirectorPhase.FAILED},
     DirectorPhase.PLAN:              {DirectorPhase.AWAITING_APPROVAL, DirectorPhase.FAILED},
@@ -44,12 +44,12 @@ class DirectorProtocol:
 
     def __init__(self) -> None:
         self._phase: DirectorPhase = DirectorPhase.IDLE
-        self._task_description: Optional[str] = None
-        self._context: Optional[ContextDocument] = None
-        self._plan: Optional[DirectorPlan] = None
-        self._phase_history: List[PhaseResult] = []
-        self._started_at: Optional[datetime] = None
-        self._rejection_feedback: Optional[str] = None
+        self._task_description: str | None = None
+        self._context: ContextDocument | None = None
+        self._plan: DirectorPlan | None = None
+        self._phase_history: list[PhaseResult] = []
+        self._started_at: datetime | None = None
+        self._rejection_feedback: str | None = None
 
     # -- Properties --
 
@@ -58,19 +58,19 @@ class DirectorProtocol:
         return self._phase
 
     @property
-    def task_description(self) -> Optional[str]:
+    def task_description(self) -> str | None:
         return self._task_description
 
     @property
-    def context(self) -> Optional[ContextDocument]:
+    def context(self) -> ContextDocument | None:
         return self._context
 
     @property
-    def plan(self) -> Optional[DirectorPlan]:
+    def plan(self) -> DirectorPlan | None:
         return self._plan
 
     @property
-    def phase_history(self) -> List[PhaseResult]:
+    def phase_history(self) -> list[PhaseResult]:
         return list(self._phase_history)
 
     @property
@@ -82,7 +82,7 @@ class DirectorProtocol:
         )
 
     @property
-    def rejection_feedback(self) -> Optional[str]:
+    def rejection_feedback(self) -> str | None:
         return self._rejection_feedback
 
     # -- Internal transition engine --
@@ -170,7 +170,7 @@ class DirectorProtocol:
         self._rejection_feedback = None
         self._transition(DirectorPhase.EXECUTE)
 
-    def reject_plan(self, feedback: Optional[str] = None) -> None:
+    def reject_plan(self, feedback: str | None = None) -> None:
         """Human says revise: AWAITING_APPROVAL -> PLAN."""
         self._rejection_feedback = feedback
         self._transition(DirectorPhase.PLAN)
@@ -198,7 +198,7 @@ class DirectorProtocol:
 
     # -- Status --
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Dashboard readout — snapshot of current state."""
         return {
             "phase": self._phase.name,

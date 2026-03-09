@@ -6,8 +6,9 @@ and type safety.
 """
 
 from datetime import datetime
-from typing import Any, Dict, Optional, List
-from pydantic import BaseModel, Field, ConfigDict
+from typing import Any, Optional
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class HookContext(BaseModel):
@@ -40,11 +41,11 @@ class PreToolUseContext(HookContext):
     """
 
     tool: str = Field(..., description="Tool name being called (e.g., 'write_file')")
-    arguments: Dict[str, Any] = Field(
+    arguments: dict[str, Any] = Field(
         default_factory=dict,
         description="Tool arguments that will be passed to the tool"
     )
-    step_id: Optional[int] = Field(
+    step_id: int | None = Field(
         None,
         description="Workflow step ID if this tool call is part of a workflow"
     )
@@ -65,14 +66,14 @@ class PostToolUseContext(HookContext):
     """
 
     tool: str = Field(..., description="Tool name that was called")
-    arguments: Dict[str, Any] = Field(
+    arguments: dict[str, Any] = Field(
         default_factory=dict,
         description="Tool arguments that were used"
     )
     result: Any = Field(..., description="Tool execution result")
     success: bool = Field(..., description="Whether tool execution succeeded")
     duration: float = Field(..., description="Execution time in seconds")
-    error: Optional[str] = Field(None, description="Error message if tool failed")
+    error: str | None = Field(None, description="Error message if tool failed")
 
 
 class UserPromptSubmitContext(HookContext):
@@ -89,7 +90,7 @@ class UserPromptSubmitContext(HookContext):
     """
 
     prompt: str = Field(..., description="User's input prompt")
-    metadata: Dict[str, Any] = Field(
+    metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Additional metadata about the prompt"
     )
@@ -110,11 +111,11 @@ class NotificationContext(HookContext):
 
     notification_type: str = Field(..., description="Type of notification (e.g., 'approval_request')")
     message: str = Field(..., description="Notification message")
-    step_info: Optional[Dict[str, Any]] = Field(
+    step_info: dict[str, Any] | None = Field(
         None,
         description="Information about the step requiring approval"
     )
-    risk_level: Optional[str] = Field(
+    risk_level: str | None = Field(
         None,
         description="Risk level assessment (low/medium/high)"
     )
@@ -134,7 +135,7 @@ class SessionStartContext(HookContext):
 
     working_directory: str = Field(..., description="Current working directory")
     model_name: str = Field(..., description="LLM model being used")
-    config: Dict[str, Any] = Field(
+    config: dict[str, Any] = Field(
         default_factory=dict,
         description="Session configuration"
     )
@@ -152,7 +153,7 @@ class SessionEndContext(HookContext):
     """
 
     duration: float = Field(..., description="Total session duration in seconds")
-    statistics: Dict[str, Any] = Field(
+    statistics: dict[str, Any] = Field(
         default_factory=dict,
         description="Session statistics (tool calls, tokens used, etc.)"
     )
@@ -180,7 +181,7 @@ class PreCompactContext(HookContext):
 
     current_tokens: int = Field(..., description="Current context token count")
     target_tokens: int = Field(..., description="Target token count after compaction")
-    messages_to_drop: List[str] = Field(
+    messages_to_drop: list[str] = Field(
         default_factory=list,
         description="Messages that will be dropped during compaction"
     )
@@ -199,9 +200,9 @@ class StopContext(HookContext):
     """
 
     response: str = Field(..., description="Agent's generated response")
-    tool_calls: List[Dict[str, Any]] = Field(
+    tool_calls: list[dict[str, Any]] = Field(
         default_factory=list,
-        description="List of tools called during this response generation"
+        description="list of tools called during this response generation"
     )
     execution_time: float = Field(..., description="Total execution time in seconds")
 

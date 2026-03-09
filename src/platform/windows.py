@@ -12,11 +12,10 @@ Use text markers: [OK], [FAIL], [WARN], [INFO], [TEST]
 """
 
 import os
-import sys
 import subprocess
+import sys
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Union, Tuple
-
+from typing import Any, Optional, Union
 
 # =============================================================================
 # PLATFORM DETECTION
@@ -64,7 +63,7 @@ def get_shell_type() -> str:
 # PATH NORMALIZATION
 # =============================================================================
 
-def normalize_path(path: Union[str, Path]) -> str:
+def normalize_path(path: str | Path) -> str:
     """
     Normalize path for current platform.
 
@@ -86,7 +85,7 @@ def normalize_path(path: Union[str, Path]) -> str:
     return str(p)
 
 
-def to_posix_path(path: Union[str, Path]) -> str:
+def to_posix_path(path: str | Path) -> str:
     """
     Convert path to POSIX format (forward slashes).
 
@@ -104,7 +103,7 @@ def to_posix_path(path: Union[str, Path]) -> str:
     return Path(path).as_posix()
 
 
-def to_windows_path(path: Union[str, Path]) -> str:
+def to_windows_path(path: str | Path) -> str:
     """
     Convert path to Windows format (backslashes).
 
@@ -138,7 +137,7 @@ def safe_path_join(*parts: str) -> str:
     return normalize_path(Path(*parts))
 
 
-def get_relative_path(path: Union[str, Path], base: Union[str, Path]) -> str:
+def get_relative_path(path: str | Path, base: str | Path) -> str:
     """
     Get relative path from base to path.
 
@@ -283,11 +282,11 @@ def safe_print(text: str, **kwargs) -> None:
 # =============================================================================
 
 def run_command(
-    command: Union[str, List[str]],
-    cwd: Optional[str] = None,
-    env: Optional[Dict[str, str]] = None,
+    command: str | list[str],
+    cwd: str | None = None,
+    env: dict[str, str] | None = None,
     capture_output: bool = True,
-    timeout: Optional[float] = None,
+    timeout: float | None = None,
     shell: bool = False,
     _allow_shell: bool = False
 ) -> subprocess.CompletedProcess:
@@ -417,7 +416,7 @@ def is_in_virtualenv() -> bool:
     )
 
 
-def get_virtualenv_path() -> Optional[str]:
+def get_virtualenv_path() -> str | None:
     """
     Get path to current virtual environment.
 
@@ -430,7 +429,7 @@ def get_virtualenv_path() -> Optional[str]:
     return normalize_path(sys.prefix)
 
 
-def get_activation_script() -> Optional[str]:
+def get_activation_script() -> str | None:
     """
     Get path to virtual environment activation script.
 
@@ -461,7 +460,7 @@ def get_activation_script() -> Optional[str]:
     return None
 
 
-def create_virtualenv_command(venv_path: str) -> Tuple[str, str]:
+def create_virtualenv_command(venv_path: str) -> tuple[str, str]:
     """
     Create command to activate virtual environment.
 
@@ -469,7 +468,7 @@ def create_virtualenv_command(venv_path: str) -> Tuple[str, str]:
         venv_path: Path to virtual environment
 
     Returns:
-        Tuple of (shell_type, activation_command)
+        tuple of (shell_type, activation_command)
     """
     venv = Path(venv_path)
     shell = get_shell_type()
@@ -491,7 +490,7 @@ def create_virtualenv_command(venv_path: str) -> Tuple[str, str]:
 # FILE OPERATIONS (Windows-safe)
 # =============================================================================
 
-def safe_read_file(file_path: Union[str, Path], encoding: str = 'utf-8') -> str:
+def safe_read_file(file_path: str | Path, encoding: str = 'utf-8') -> str:
     """
     Safely read file with encoding fallback.
 
@@ -506,13 +505,13 @@ def safe_read_file(file_path: Union[str, Path], encoding: str = 'utf-8') -> str:
 
     try:
         # Try preferred encoding
-        with open(path, 'r', encoding=encoding) as f:
+        with open(path, encoding=encoding) as f:
             return f.read()
     except UnicodeDecodeError:
         # Fallback to platform encoding
         platform_encoding = get_console_encoding()
         try:
-            with open(path, 'r', encoding=platform_encoding, errors='replace') as f:
+            with open(path, encoding=platform_encoding, errors='replace') as f:
                 return f.read()
         except Exception:
             # Last resort: binary mode
@@ -521,7 +520,7 @@ def safe_read_file(file_path: Union[str, Path], encoding: str = 'utf-8') -> str:
 
 
 def safe_write_file(
-    file_path: Union[str, Path],
+    file_path: str | Path,
     content: str,
     encoding: str = 'utf-8',
     ensure_parent: bool = True
@@ -558,7 +557,7 @@ def get_line_ending() -> str:
     return '\r\n' if is_windows() else '\n'
 
 
-def normalize_line_endings(text: str, target: Optional[str] = None) -> str:
+def normalize_line_endings(text: str, target: str | None = None) -> str:
     """
     Normalize line endings in text.
 
@@ -597,7 +596,7 @@ def get_max_path_length() -> int:
         return 4096
 
 
-def is_path_too_long(path: Union[str, Path]) -> bool:
+def is_path_too_long(path: str | Path) -> bool:
     """
     Check if path exceeds platform maximum.
 

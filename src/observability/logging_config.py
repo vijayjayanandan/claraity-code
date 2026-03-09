@@ -40,7 +40,11 @@ import uuid
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional
+from typing import TYPE_CHECKING, Any, Literal, Optional
+
+if TYPE_CHECKING:
+    from src.observability.sqlite_error_handler import SQLiteErrorHandler
+    from src.observability.sqlite_log_handler import SQLiteLogHandler
 
 import structlog
 from structlog.stdlib import BoundLogger
@@ -77,8 +81,8 @@ operation: ContextVar[str] = ContextVar('operation', default='')
 # GLOBALS
 # =============================================================================
 
-_queue_listener: Optional[logging.handlers.QueueListener] = None
-_log_queue: Optional[queue.Queue] = None
+_queue_listener: logging.handlers.QueueListener | None = None
+_log_queue: queue.Queue | None = None
 _sqlite_handler: Optional["SQLiteErrorHandler"] = None  # Forward reference
 _sqlite_log_handler: Optional["SQLiteLogHandler"] = None  # Forward reference
 _configured: bool = False
@@ -145,12 +149,12 @@ def _redact_value(value: Any, max_length: int = REDACT_MAX_LENGTH) -> Any:
         return value
     elif isinstance(value, dict):
         return _redact_dict(value, max_length)
-    elif isinstance(value, (list, tuple)):
+    elif isinstance(value, list | tuple):
         return [_redact_value(v, max_length) for v in value[:10]]  # Limit list length
     return value
 
 
-def _redact_dict(d: Dict[str, Any], max_length: int = REDACT_MAX_LENGTH) -> Dict[str, Any]:
+def _redact_dict(d: dict[str, Any], max_length: int = REDACT_MAX_LENGTH) -> dict[str, Any]:
     """Recursively redact sensitive keys in dictionaries."""
     result = {}
     for key, value in d.items():
@@ -161,7 +165,7 @@ def _redact_dict(d: Dict[str, Any], max_length: int = REDACT_MAX_LENGTH) -> Dict
     return result
 
 
-def redact_sensitive(logger: Any, method_name: str, event_dict: Dict[str, Any]) -> Dict[str, Any]:
+def redact_sensitive(logger: Any, method_name: str, event_dict: dict[str, Any]) -> dict[str, Any]:
     """Structlog processor to redact sensitive information."""
     return _redact_dict(event_dict)
 
@@ -170,7 +174,7 @@ def redact_sensitive(logger: Any, method_name: str, event_dict: Dict[str, Any]) 
 # CONTEXT INJECTION (structlog processor)
 # =============================================================================
 
-def add_context(logger: Any, method_name: str, event_dict: Dict[str, Any]) -> Dict[str, Any]:
+def add_context(logger: Any, method_name: str, event_dict: dict[str, Any]) -> dict[str, Any]:
     """Structlog processor to inject context variables."""
     ctx_run = run_id.get()
     ctx_session = session_id.get()
@@ -252,8 +256,8 @@ def create_console_formatter() -> structlog.stdlib.ProcessorFormatter:
 
 
 def _add_source_location(
-    logger: Any, method_name: str, event_dict: Dict[str, Any]
-) -> Dict[str, Any]:
+    logger: Any, method_name: str, event_dict: dict[str, Any]
+) -> dict[str, Any]:
     """Processor to add source location from LogRecord."""
     record = event_dict.get('_record')
     if record:
@@ -266,7 +270,7 @@ def _add_source_location(
 
 
 def _console_renderer(
-    logger: Any, method_name: str, event_dict: Dict[str, Any]
+    logger: Any, method_name: str, event_dict: dict[str, Any]
 ) -> str:
     """Simple console renderer: [LEVEL] logger: event"""
     level = event_dict.get('level', 'INFO').upper()
@@ -486,7 +490,7 @@ def _asyncio_exception_handler(loop, context):
     This captures exceptions from background tasks that weren't awaited
     or had their exceptions ignored.
     """
-    from .error_store import get_error_store, ErrorCategory
+    from .error_store import ErrorCategory, get_error_store
 
     exception = context.get('exception')
     message = context.get('message', 'Unknown asyncio error')
@@ -632,7 +636,7 @@ def _install_crash_hooks():
 
 def configure_logging(
     mode: Literal["cli", "tui"] = "cli",
-    log_level: Optional[str] = None,
+    log_level: str | None = None,
     log_dir: str = ".clarity/logs",
     max_bytes: int = 50 * 1024 * 1024,  # 50MB
     backup_count: int = 5,
@@ -664,10 +668,10 @@ def configure_logging(
 
     # ---- Load centralized config from .clarity/config.yaml ----
     from .log_config_loader import (
-        load_logging_config,
-        resolve_logging_config,
         apply_component_levels,
         generate_default_config,
+        load_logging_config,
+        resolve_logging_config,
     )
 
     # Generate default config on first run
@@ -846,7 +850,7 @@ def configure_logging(
     # These libraries generate excessive DEBUG/INFO logs during streaming/HTTP operations
     # which can flood the log queue (10,000 items) and cause message drops
     noisy_loggers = [
-        'httpx', 'httpcore', 'openai', 'multilspy', 'chromadb',
+        'httpx', 'httpcore', 'openai', 'multilspy',
         'urllib3', 'asyncio', 'hpack', 'h2',
         # LiteLLM generates DEBUG logs per streaming chunk - extremely noisy
         'litellm', 'LiteLLM', 'litellm.proxy', 'litellm.llms',
@@ -893,12 +897,12 @@ def configure_logging(
 # =============================================================================
 
 def bind_context(
-    run: Optional[str] = None,
-    session: Optional[str] = None,
-    stream: Optional[str] = None,
-    request: Optional[str] = None,
-    comp: Optional[str] = None,
-    op: Optional[str] = None,
+    run: str | None = None,
+    session: str | None = None,
+    stream: str | None = None,
+    request: str | None = None,
+    comp: str | None = None,
+    op: str | None = None,
 ) -> None:
     """
     Bind context variables for logging correlation.

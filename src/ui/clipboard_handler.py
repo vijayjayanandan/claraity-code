@@ -7,9 +7,9 @@ PIL handles DIB->PNG conversion automatically and works on Windows + macOS.
 Reference: https://pillow.readthedocs.io/en/stable/reference/ImageGrab.html
 """
 
-from typing import Optional, List, Tuple
 from io import BytesIO
 from pathlib import Path
+from typing import Optional
 
 from src.observability import get_logger
 
@@ -27,12 +27,12 @@ class ClipboardHandler:
     """
 
     @classmethod
-    def get_clipboard_content(cls) -> Tuple[Optional[bytes], Optional[List[str]], Optional[str]]:
+    def get_clipboard_content(cls) -> tuple[bytes | None, list[str] | None, str | None]:
         """
         Get clipboard content in priority order: image, files, text.
 
         Returns:
-            Tuple of (image_bytes, file_list, text) - only one will be non-None
+            tuple of (image_bytes, file_list, text) - only one will be non-None
         """
         # Try to get text first (safest, works everywhere)
         text = cls._get_text_fallback()
@@ -88,7 +88,7 @@ class ClipboardHandler:
             return None, None, text
 
     @classmethod
-    def _get_text_fallback(cls) -> Optional[str]:
+    def _get_text_fallback(cls) -> str | None:
         """
         Get text from clipboard using pyperclip or ctypes fallback.
 

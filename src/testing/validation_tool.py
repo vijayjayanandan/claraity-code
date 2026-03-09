@@ -1,11 +1,12 @@
 """LLM tool for autonomous test execution."""
 
-from typing import Optional, List, Dict, Any
 import logging
+from typing import Any, Optional
 
 from src.tools.base import Tool, ToolResult, ToolStatus
-from .validation_engine import ValidationEngine
+
 from .test_runner import TestRunner
+from .validation_engine import ValidationEngine
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ class RunTestsTool(Tool):
         self.validation_engine = ValidationEngine(working_directory)
         self.test_runner = TestRunner(working_directory)
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         """Return parameter schema for this tool."""
         return {
             "type": "object",
@@ -57,7 +58,7 @@ class RunTestsTool(Tool):
                 "files_changed": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Optional: List of changed files for validation context"
+                    "description": "Optional: list of changed files for validation context"
                 }
             },
             "required": []
@@ -65,9 +66,9 @@ class RunTestsTool(Tool):
 
     def execute(
         self,
-        framework: Optional[str] = None,
-        file_pattern: Optional[str] = None,
-        files_changed: Optional[List[str]] = None
+        framework: str | None = None,
+        file_pattern: str | None = None,
+        files_changed: list[str] | None = None
     ) -> ToolResult:
         """
         Execute tests and return results with feedback.
@@ -158,7 +159,7 @@ class DetectTestFrameworkTool(Tool):
         )
         self.test_runner = TestRunner(working_directory)
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         """Return parameter schema for this tool."""
         return {
             "type": "object",

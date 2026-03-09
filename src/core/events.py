@@ -14,7 +14,7 @@ Design Principles:
 
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Any, Union
+from typing import Any
 
 
 class ToolStatus(Enum):
@@ -284,17 +284,17 @@ class FileReadEvent:
 # Type Union for Pattern Matching
 # =============================================================================
 
-UIEvent = Union[
-    StreamStart, StreamEnd,
-    TextDelta,
-    CodeBlockStart, CodeBlockDelta, CodeBlockEnd,
-    ToolCallStart, ToolCallStatus, ToolCallResult,
-    ThinkingStart, ThinkingDelta, ThinkingEnd,
-    PausePromptStart, PausePromptEnd,
-    ContextUpdated, ContextCompacting, ContextCompacted,
-    FileReadEvent,
-    ErrorEvent
-]
+UIEvent = (
+    StreamStart | StreamEnd
+    | TextDelta
+    | CodeBlockStart | CodeBlockDelta | CodeBlockEnd
+    | ToolCallStart | ToolCallStatus | ToolCallResult
+    | ThinkingStart | ThinkingDelta | ThinkingEnd
+    | PausePromptStart | PausePromptEnd
+    | ContextUpdated | ContextCompacting | ContextCompacted
+    | FileReadEvent
+    | ErrorEvent
+)
 
 # Export all event types
 __all__ = [

@@ -16,15 +16,15 @@ Usage:
     python -m src.validation.run --scenario easy_cli_weather
 """
 
-from .scenario import (
-    ValidationScenario,
-    ValidationResult,
-    DifficultyLevel,
-    ValidationStep,
-    SuccessCriteria
-)
-from .orchestrator import ValidationOrchestrator
 from .judge import ValidationJudge
+from .orchestrator import ValidationOrchestrator
+from .scenario import (
+    DifficultyLevel,
+    SuccessCriteria,
+    ValidationResult,
+    ValidationScenario,
+    ValidationStep,
+)
 from .scenarios import VALIDATION_SCENARIOS
 
 __all__ = [

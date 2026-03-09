@@ -9,7 +9,8 @@ The tools interact with the agent's PlanModeState and persist events
 to MessageStore for UI rendering and session resume.
 """
 
-from typing import Any, Dict, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
 from .base import Tool, ToolResult, ToolStatus
 
 if TYPE_CHECKING:
@@ -116,7 +117,7 @@ class EnterPlanModeTool(Tool):
                 error=f"Failed to enter plan mode: {str(e)}"
             )
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
@@ -223,7 +224,7 @@ class RequestPlanApprovalTool(Tool):
                 error=f"Failed to request plan approval: {str(e)}"
             )
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {},

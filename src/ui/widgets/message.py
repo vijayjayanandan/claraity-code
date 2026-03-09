@@ -14,21 +14,21 @@ Performance Optimizations:
 - Debug counters available via TUI_PERF_DEBUG=1
 """
 
+import os
+import re
+from typing import Any, Optional
+
+from rich.text import Text
 from textual.app import ComposeResult
-from textual.widgets import Static, Markdown, Button
-from textual.containers import Vertical, Horizontal
+from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
 from textual.timer import Timer
 from textual.widget import Widget
-from rich.text import Text
-from typing import Any, Optional
-import os
-import re
+from textual.widgets import Button, Markdown, Static
 
 from .code_block import CodeBlock
-
-from .tool_card import ToolCard
 from .thinking import ThinkingBlock
+from .tool_card import ToolCard
 
 # Performance debug flag - set TUI_PERF_DEBUG=1 to enable
 TUI_PERF_DEBUG = os.getenv("TUI_PERF_DEBUG", "").lower() in ("1", "true", "yes")
@@ -274,7 +274,7 @@ class MessageWidget(Vertical):
         # Append content and update (update() already triggers refresh internally)
         self._markdown_text += content
         self._current_markdown.update(self._markdown_text)
-        
+
         # Update the current segment
         if self._segments:
             self._segments[-1] = self._markdown_text
@@ -657,22 +657,22 @@ class MessageWidget(Vertical):
         # Build final segments list with tool card results
         final_segments = []
         tool_card_index = 0
-        
-        for i, segment in enumerate(self._segments):
+
+        for _i, segment in enumerate(self._segments):
             # Check if this segment is a tool card placeholder
             if segment.startswith("[Tool: "):
                 # Find corresponding tool card and extract result
                 if tool_card_index < len(self._tool_cards):
                     tool_card = list(self._tool_cards.values())[tool_card_index]
                     tool_card_index += 1
-                    
+
                     # Build tool card text with result/error
                     tool_text = f"[Tool: {tool_card.tool_name}]"
                     if tool_card.result_preview:
                         tool_text += f"\nResult: {tool_card.result_preview}"
                     elif tool_card.error_message:
                         tool_text += f"\nError: {tool_card.error_message}"
-                    
+
                     final_segments.append(tool_text)
                 else:
                     # Fallback to placeholder if tool card not found
@@ -680,11 +680,11 @@ class MessageWidget(Vertical):
             else:
                 # Regular segment (text, code, thinking, attachment)
                 final_segments.append(segment)
-        
+
         # If in streaming mode, include current streaming text
         if self._is_streaming_mode and self._streaming_text:
             final_segments.append(self._streaming_text.plain)
-        
+
         return "\n\n".join(final_segments) if final_segments else ""
 
     def clear(self) -> None:
@@ -707,7 +707,7 @@ class MessageWidget(Vertical):
 
 class ClickableAttachmentPlaceholder(Static):
     """Clickable attachment placeholder that opens file in external viewer."""
-    
+
     DEFAULT_CSS = """
     ClickableAttachmentPlaceholder {
         width: auto;
@@ -715,18 +715,18 @@ class ClickableAttachmentPlaceholder(Static):
         color: $accent;
         text-style: underline;
     }
-    
+
     ClickableAttachmentPlaceholder:hover {
         color: $accent-lighten-2;
         text-style: bold underline;
     }
     """
-    
-    def __init__(self, attachment_type: str, attachment_num: int, attachment_data: str, 
+
+    def __init__(self, attachment_type: str, attachment_num: int, attachment_data: str,
                  filename: str = "", message_uuid: str = ""):
         """
         Initialize clickable attachment placeholder.
-        
+
         Args:
             attachment_type: Type of attachment ("image" or "file")
             attachment_num: Attachment sequence number (1-indexed)
@@ -738,27 +738,27 @@ class ClickableAttachmentPlaceholder(Static):
             label = f"[Image #{attachment_num}]"
         else:
             label = f"[File #{attachment_num}: {filename}]"
-        
+
         super().__init__(label)
         self.attachment_type = attachment_type
         self.attachment_num = attachment_num
         self.attachment_data = attachment_data
         self.filename = filename
         self.message_uuid = message_uuid
-    
+
     def on_click(self, event) -> None:
         """Handle click to open attachment in external viewer."""
         event.stop()
         self._open_attachment()
-    
+
     def _open_attachment(self) -> None:
         """Open attachment in system viewer."""
-        import tempfile
         import base64
-        import subprocess
-        import platform
         import os
-        
+        import platform
+        import subprocess
+        import tempfile
+
         try:
             if self.attachment_type == "image":
                 self._open_image()
@@ -766,39 +766,39 @@ class ClickableAttachmentPlaceholder(Static):
                 self._open_file()
         except Exception as e:
             self.app.notify(f"Failed to open attachment: {e}", severity="error", timeout=3)
-    
+
     def _open_image(self) -> None:
         """Decode base64 image and open in system viewer."""
-        import tempfile
         import base64
-        import subprocess
-        import platform
         import os
-        
+        import platform
+        import subprocess
+        import tempfile
+
         # Extract base64 data from data URL
         if not self.attachment_data.startswith("data:image/"):
             self.app.notify("Invalid image data", severity="error", timeout=3)
             return
-        
+
         # Parse data URL: data:image/png;base64,<data>
         parts = self.attachment_data.split(",", 1)
         if len(parts) != 2:
             self.app.notify("Invalid image format", severity="error", timeout=3)
             return
-        
+
         # Extract MIME type and extension
         header = parts[0]  # data:image/png;base64
         data = parts[1]    # base64 data
-        
+
         # Decode base64
         img_bytes = base64.b64decode(data)
-        
+
         # Save to temporary file with original filename
         if self.filename:
             # Use original filename in temp directory
             temp_dir = tempfile.gettempdir()
             temp_path = os.path.join(temp_dir, self.filename)
-            
+
             with open(temp_path, 'wb') as f:
                 f.write(img_bytes)
         else:
@@ -807,7 +807,7 @@ class ClickableAttachmentPlaceholder(Static):
             with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as f:
                 f.write(img_bytes)
                 temp_path = f.name
-        
+
         # Open in system viewer
         system = platform.system()
         if system == "Windows":
@@ -816,11 +816,11 @@ class ClickableAttachmentPlaceholder(Static):
             subprocess.run(["open", temp_path])
         else:  # Linux
             subprocess.run(["xdg-open", temp_path])
-        
+
         # Show notification with actual filename
         actual_filename = os.path.basename(temp_path)
         self.app.notify(f"Opening: {actual_filename}", timeout=3)
-    
+
     def _get_extension_from_mime(self, mime_header: str) -> str:
         """Extract file extension from MIME type header."""
         if "png" in mime_header:
@@ -833,21 +833,21 @@ class ClickableAttachmentPlaceholder(Static):
             return ".webp"
         else:
             return ".png"  # Default
-    
+
     def _open_file(self) -> None:
         """Save text file and open in system viewer."""
-        import tempfile
-        import subprocess
-        import platform
         import os
-        
+        import platform
+        import subprocess
+        import tempfile
+
         # Save to temporary file with original filename
         temp_dir = tempfile.gettempdir()
         temp_path = os.path.join(temp_dir, self.filename)
-        
+
         with open(temp_path, 'w', encoding='utf-8') as f:
             f.write(self.attachment_data)
-        
+
         # Open in system viewer
         system = platform.system()
         if system == "Windows":
@@ -856,7 +856,7 @@ class ClickableAttachmentPlaceholder(Static):
             subprocess.run(["open", temp_path])
         else:  # Linux
             subprocess.run(["xdg-open", temp_path])
-        
+
         self.app.notify(f"Opening {self.filename}...", timeout=2)
 
 
@@ -866,7 +866,7 @@ class UserMessage(MessageWidget):
     def __init__(self, content: Any = "", message_uuid: str = "", **kwargs):
         """
         Initialize user message.
-        
+
         Args:
             content: Message content (string or multimodal list)
             message_uuid: UUID of the message (for image retrieval)
@@ -885,7 +885,7 @@ class UserMessage(MessageWidget):
         """Compose the header and content with clickable attachment placeholders."""
         # Yield header with copy button from parent
         yield from super().compose()
-        
+
         # Handle multimodal content with clickable attachments
         if self._has_attachments:
             yield from self._compose_multimodal_content()
@@ -898,27 +898,27 @@ class UserMessage(MessageWidget):
                 self._blocks.append(self._current_markdown)
                 self._segments.append(text_content)
                 yield self._current_markdown
-    
+
     def _compose_multimodal_content(self) -> ComposeResult:
         """Compose multimodal content with clickable attachment placeholders."""
         if not isinstance(self._raw_content, list):
             return
-        
+
         image_count = 0
         file_count = 0
         text_parts = []
-        
+
         for item in self._raw_content:
             if not isinstance(item, dict):
                 continue
-            
+
             item_type = item.get("type", "")
-            
+
             if item_type == "text":
                 text = item.get("text", "")
                 if not text:
                     continue
-                
+
                 # Check if this is a file attachment (has file header)
                 if text.startswith("--- BEGIN FILE:"):
                     # Flush accumulated text before file
@@ -929,19 +929,19 @@ class UserMessage(MessageWidget):
                         self._segments.append(text_content)
                         yield markdown
                         text_parts = []
-                    
+
                     # Extract filename from structured field (with backward compatibility)
                     filename = item.get("filename")
-                    
+
                     if not filename:
                         # Backward compatibility: parse from text header
                         # Format: --- BEGIN FILE: filename.txt ---
                         try:
                             header_line = text.split("\n")[0]
                             filename = header_line.split("--- BEGIN FILE:")[1].split("---")[0].strip()
-                        except:
+                        except Exception:
                             filename = "attachment.txt"
-                    
+
                     # Create clickable file placeholder
                     file_count += 1
                     placeholder = ClickableAttachmentPlaceholder(
@@ -958,7 +958,7 @@ class UserMessage(MessageWidget):
                 else:
                     # Regular text - accumulate
                     text_parts.append(text)
-            
+
             elif item_type == "image_url":
                 # Flush accumulated text before image
                 if text_parts:
@@ -968,20 +968,20 @@ class UserMessage(MessageWidget):
                     self._segments.append(text_content)
                     yield markdown
                     text_parts = []
-                
+
                 # Create clickable image placeholder
                 image_count += 1
                 image_url = item.get("image_url", {})
                 data_url = image_url.get("url", "") if isinstance(image_url, dict) else str(image_url)
-                
+
                 # Extract filename from structured field (with fallback)
                 filename = item.get("filename", f"image_{image_count}.png")
-                
+
                 # Debug: Log extracted filename
                 from src.observability import get_logger
                 logger = get_logger(__name__)
                 logger.debug("image_filename_extracted", filename=filename, has_filename_field=("filename" in item))
-                
+
                 placeholder = ClickableAttachmentPlaceholder(
                     attachment_type="image",
                     attachment_num=image_count,
@@ -993,7 +993,7 @@ class UserMessage(MessageWidget):
                 # Add image placeholder to segments
                 self._segments.append(f"[Image: {filename}]")
                 yield placeholder
-        
+
         # Flush remaining text
         if text_parts:
             text_content = " ".join(text_parts)
@@ -1001,24 +1001,24 @@ class UserMessage(MessageWidget):
             self._blocks.append(markdown)
             self._segments.append(text_content)
             yield markdown
-    
+
     @staticmethod
     def _extract_text_only(content: Any) -> str:
         """
         Extract plain text from content (for simple text messages).
-        
+
         Args:
             content: Message content (string or list)
-            
+
         Returns:
             Plain text string
         """
         if isinstance(content, str):
             return content
-        
+
         if not isinstance(content, list):
             return str(content) if content is not None else ""
-        
+
         # Extract text parts only (images handled separately)
         parts = []
         for item in content:
@@ -1026,7 +1026,7 @@ class UserMessage(MessageWidget):
                 text = item.get("text", "")
                 if text:
                     parts.append(text)
-        
+
         return " ".join(parts) if parts else ""
 
     async def add_annotation(self, label: str) -> None:
@@ -1068,8 +1068,8 @@ class AssistantMessage(MessageWidget):
         super().__init__(role="assistant", **kwargs)
         # Loading state
         self.is_loading: bool = False
-        self._loading_widget: Optional[Widget] = None
-        self._loading_timer: Optional[Timer] = None
+        self._loading_widget: Widget | None = None
+        self._loading_timer: Timer | None = None
 
     async def set_loading(self, on: bool) -> None:
         """

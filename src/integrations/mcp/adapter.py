@@ -12,7 +12,7 @@ are deferred to method bodies to avoid the circular import chain:
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from .config import McpServerConfig
 
@@ -34,7 +34,7 @@ class McpToolAdapter:
         self._config = config
         self._prefix = config.tool_prefix
 
-    def adapt_schema(self, mcp_tool: Dict[str, Any]):
+    def adapt_schema(self, mcp_tool: dict[str, Any]):
         """Convert an MCP tool schema to a ToolDefinition.
 
         MCP schema format:
@@ -72,14 +72,14 @@ class McpToolAdapter:
             parameters=parameters,
         )
 
-    def adapt_schemas(self, mcp_tools: List[Dict[str, Any]]) -> list:
+    def adapt_schemas(self, mcp_tools: list[dict[str, Any]]) -> list:
         """Batch-convert MCP tool schemas."""
         return [self.adapt_schema(t) for t in mcp_tools]
 
     def adapt_result(
         self,
         tool_name: str,
-        mcp_result: Dict[str, Any],
+        mcp_result: dict[str, Any],
     ):
         """Normalize an MCP tool result into a ToolResult.
 
@@ -107,7 +107,7 @@ class McpToolAdapter:
         content_blocks = mcp_result.get("content", [])
 
         # Extract text content from MCP content blocks
-        parts: List[str] = []
+        parts: list[str] = []
         for block in content_blocks:
             block_type = block.get("type", "text")
             if block_type == "text":

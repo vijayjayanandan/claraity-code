@@ -10,11 +10,10 @@ The actual conversion to provider-specific formats (OpenAI, Anthropic, etc.)
 happens in the LLM adapter layer, NOT here.
 """
 
-from dataclasses import dataclass, field
-from typing import Literal, Optional, List
-from datetime import datetime
 import base64
-
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Literal, Optional
 
 # Size limits (configurable)
 MAX_IMAGE_SIZE_MB = 10  # 10MB max for images
@@ -28,7 +27,7 @@ class Attachment:
     Provider-agnostic attachment for multimodal LLM input.
 
     This is the ONLY attachment structure used in the pipeline.
-    UI and Agent layers pass List[Attachment] - never provider-specific schemas.
+    UI and Agent layers pass list[Attachment] - never provider-specific schemas.
 
     Attributes:
         kind: "image" or "text" - determines how it's sent to LLM
@@ -57,8 +56,8 @@ class Attachment:
     kind: Literal["image", "text"]
     filename: str
     mime: str
-    data: Optional[bytes] = None  # For binary (images)
-    text: Optional[str] = None    # For text files
+    data: bytes | None = None  # For binary (images)
+    text: str | None = None    # For text files
     created_at: datetime = field(default_factory=datetime.now)
 
     def __post_init__(self):
@@ -108,7 +107,7 @@ class Attachment:
         else:
             return self.size_kb > MAX_TEXT_FILE_SIZE_KB
 
-    def get_size_limit_exceeded_msg(self) -> Optional[str]:
+    def get_size_limit_exceeded_msg(self) -> str | None:
         """Get human-readable message if size limit exceeded."""
         if self.kind == "image" and self.size_mb > MAX_IMAGE_SIZE_MB:
             return f"Image too large: {self.size_mb:.1f}MB (max {MAX_IMAGE_SIZE_MB}MB)"
@@ -163,7 +162,7 @@ def create_image_attachment(
 def create_text_attachment(
     text_content: str,
     filename: str,
-    mime: Optional[str] = None
+    mime: str | None = None
 ) -> Attachment:
     """
     Factory function to create a text attachment.
@@ -244,8 +243,8 @@ def create_attachment_from_file(file_path: str) -> Attachment:
         FileNotFoundError: If file doesn't exist
         ValueError: If file type not supported
     """
-    from pathlib import Path
     import mimetypes
+    from pathlib import Path
 
     path = Path(file_path)
     if not path.exists():
@@ -288,15 +287,15 @@ def create_attachment_from_file(file_path: str) -> Attachment:
         raise ValueError(f"Unsupported file type: {mime} for {filename}")
 
 
-def validate_attachments(attachments: List[Attachment]) -> List[str]:
+def validate_attachments(attachments: list[Attachment]) -> list[str]:
     """
     Validate a list of attachments.
 
     Args:
-        attachments: List of attachments to validate
+        attachments: list of attachments to validate
 
     Returns:
-        List of error messages (empty if all valid)
+        list of error messages (empty if all valid)
     """
     errors = []
 

@@ -5,8 +5,8 @@ to prevent unauthorized access on shared systems.
 """
 
 import os
-import stat
 import platform
+import stat
 from pathlib import Path
 from typing import Optional
 

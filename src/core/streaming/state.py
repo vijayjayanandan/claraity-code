@@ -5,12 +5,10 @@ state of a streaming message being assembled from provider deltas.
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any
+from typing import Any, Optional
 
-from src.session.models.message import (
-    Segment, ToolCall, ToolCallFunction, TokenUsage
-)
 from src.session.models.base import generate_stream_id
+from src.session.models.message import Segment, TokenUsage, ToolCall, ToolCallFunction
 
 
 @dataclass
@@ -51,7 +49,7 @@ class StreamingState:
     # Identity
     stream_id: str = field(default_factory=generate_stream_id)
     session_id: str = ""
-    parent_uuid: Optional[str] = None
+    parent_uuid: str | None = None
 
     # Text accumulation
     text_buffer: str = ""           # Current text being accumulated
@@ -73,18 +71,18 @@ class StreamingState:
     reasoning_content: str = ""
 
     # Tool call state
-    tool_calls: List[ToolCall] = field(default_factory=list)
-    tool_call_accumulators: Dict[int, ToolCallAccumulator] = field(default_factory=dict)
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    tool_call_accumulators: dict[int, ToolCallAccumulator] = field(default_factory=dict)
 
     # Segments (ordered)
-    segments: List[Segment] = field(default_factory=list)
+    segments: list[Segment] = field(default_factory=list)
 
     # Metrics
-    usage: Optional[TokenUsage] = None
+    usage: TokenUsage | None = None
 
     # Provider info
-    provider: Optional[str] = None
-    model: Optional[str] = None
+    provider: str | None = None
+    model: str | None = None
 
     def reset(self) -> None:
         """Reset state for new stream."""

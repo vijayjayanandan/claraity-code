@@ -7,13 +7,14 @@ Supports:
 - Mouse: Click to select, click X to remove
 """
 
-from textual.widget import Widget
-from textual.reactive import reactive
-from textual.message import Message
-from textual.binding import Binding
-from textual import events
+from typing import TYPE_CHECKING
+
 from rich.text import Text
-from typing import List, TYPE_CHECKING
+from textual import events
+from textual.binding import Binding
+from textual.message import Message
+from textual.reactive import reactive
+from textual.widget import Widget
 
 if TYPE_CHECKING:
     from src.core.attachment import Attachment
@@ -75,10 +76,10 @@ class AttachmentBar(Widget, can_focus=True):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._attachments: List['Attachment'] = []
+        self._attachments: list['Attachment'] = []
         self._hover_index: int = -1  # Track mouse hover
 
-    def update_attachments(self, attachments: List['Attachment']) -> None:
+    def update_attachments(self, attachments: list['Attachment']) -> None:
         """Update the list of attachments."""
         self._attachments = attachments
 

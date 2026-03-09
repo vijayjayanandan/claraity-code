@@ -5,9 +5,9 @@ This module defines all available tools in OpenAI's function calling format.
 These schemas are used by the LLM to understand what tools are available and how to call them.
 """
 
-from typing import List, Optional
-from src.llm.base import ToolDefinition
+from typing import Optional
 
+from src.llm.base import ToolDefinition
 
 # File Operations Tools
 
@@ -101,7 +101,7 @@ APPEND_TO_FILE_TOOL = ToolDefinition(
 
 LIST_DIRECTORY_TOOL = ToolDefinition(
     name="list_directory",
-    description="List all files and subdirectories in a directory",
+    description="list all files and subdirectories in a directory",
     parameters={
         "type": "object",
         "properties": {
@@ -149,6 +149,15 @@ RUN_COMMAND_TOOL = ToolDefinition(
             "timeout": {
                 "type": "number",
                 "description": "Timeout in seconds (default: 120). Use higher values for long-running commands like test suites or builds (max: 600)"
+            },
+            "background": {
+                "type": "boolean",
+                "description": (
+                    "Set true to run in background (non-blocking). Returns immediately with a task ID. "
+                    "You will be automatically notified via a [BACKGROUND TASK UPDATE] message when the "
+                    "task completes. Use for long-running operations like test suites, builds, or linters "
+                    "while you continue other work."
+                )
             }
         },
         "required": ["command"]
@@ -166,7 +175,7 @@ GREP_TOOL = ToolDefinition(
         "properties": {
             "pattern": {
                 "type": "string",
-                "description": "Regex pattern to search for (e.g., '^class \w+', 'TODO|FIXME', 'def authenticate')"
+                "description": r"Regex pattern to search for (e.g., '^class \w+', 'TODO|FIXME', 'def authenticate')"
             },
             "path": {
                 "type": "string",
@@ -328,7 +337,7 @@ CREATE_CHECKPOINT_TOOL = ToolDefinition(
             "pending_tasks": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "Optional: List of tasks remaining to complete"
+                "description": "Optional: list of tasks remaining to complete"
             }
         },
         "required": ["description"]
@@ -356,7 +365,7 @@ RUN_TESTS_TOOL = ToolDefinition(
             "files_changed": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "Optional: List of changed files for validation context"
+                "description": "Optional: list of changed files for validation context"
             }
         },
         "required": []
@@ -601,7 +610,7 @@ DIRECTOR_COMPLETE_PLAN_TOOL = ToolDefinition(
             },
             "slices": {
                 "type": "array",
-                "description": "List of vertical slices for execution tracking (3-5 recommended)",
+                "description": "list of vertical slices for execution tracking (3-5 recommended)",
                 "items": {
                     "type": "object",
                     "properties": {
@@ -655,6 +664,33 @@ DIRECTOR_COMPLETE_INTEGRATION_TOOL = ToolDefinition(
         "required": [],
     },
 )
+
+# Background Task Tools
+
+CHECK_BACKGROUND_TASK_TOOL = ToolDefinition(
+    name="check_background_task",
+    description=(
+        "Check status or get full output of a background task. "
+        "Returns status, exit code, stdout, and stderr. "
+        "You will be automatically notified when background tasks complete, "
+        "then use this tool to retrieve the full output."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "task_id": {
+                "type": "string",
+                "description": "Background task ID (e.g., 'bg-1')",
+            },
+        },
+        "required": ["task_id"],
+    },
+)
+
+BACKGROUND_TOOLS = [
+    CHECK_BACKGROUND_TASK_TOOL,
+]
+
 
 # Tool Collections
 
@@ -721,7 +757,7 @@ TESTING_TOOLS = [
 ]
 
 
-def get_tools_for_task(task_type: str) -> List[ToolDefinition]:
+def get_tools_for_task(task_type: str) -> list[ToolDefinition]:
     """
     Get relevant tools based on task type.
 
@@ -729,7 +765,7 @@ def get_tools_for_task(task_type: str) -> List[ToolDefinition]:
         task_type: Type of task (feature, bug_fix, refactor, etc.)
 
     Returns:
-        List of relevant tool definitions
+        list of relevant tool definitions
     """
     # For most tasks, return all tools
     # Can be refined later based on task analysis
@@ -737,8 +773,8 @@ def get_tools_for_task(task_type: str) -> List[ToolDefinition]:
 
 
 def get_all_tools(
-    mcp_definitions: Optional[List[ToolDefinition]] = None,
-) -> List[ToolDefinition]:
+    mcp_definitions: list[ToolDefinition] | None = None,
+) -> list[ToolDefinition]:
     """Return native tools merged with any active MCP tool definitions.
 
     This is the single function that builds the tool list for LLM requests.

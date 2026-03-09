@@ -9,8 +9,9 @@ Uses the official Anthropic Python SDK for direct API access, enabling:
 
 import json
 import logging
+from collections.abc import AsyncIterator, Iterator
 from copy import deepcopy
-from typing import List, Dict, Any, Iterator, Optional, AsyncIterator
+from typing import Any, Optional
 
 import httpx
 
@@ -24,7 +25,7 @@ except ImportError:
 
 # Try to import structured logging with get_logger
 try:
-    from src.observability import get_logger, ErrorCategory
+    from src.observability import ErrorCategory, get_logger
     logger = get_logger("llm.anthropic_backend")
     STRUCTURED_LOGGING = True
 except ImportError:
@@ -40,14 +41,20 @@ DEFAULT_CONNECT_TIMEOUT = 10.0
 DEFAULT_WRITE_TIMEOUT = 10.0
 DEFAULT_POOL_TIMEOUT = 10.0
 
-from .base import (
-    LLMBackend, LLMConfig, LLMResponse, StreamChunk, ToolDefinition,
-    ProviderDelta, ToolCallDelta
-)
-from src.session.models.message import ToolCall, ToolCallFunction
 from src.session.models.base import generate_tool_call_id
-from .failure_handler import LLMFailureHandler
+from src.session.models.message import ToolCall, ToolCallFunction
+
+from .base import (
+    LLMBackend,
+    LLMConfig,
+    LLMResponse,
+    ProviderDelta,
+    StreamChunk,
+    ToolCallDelta,
+    ToolDefinition,
+)
 from .cache_tracker import CacheTracker
+from .failure_handler import LLMFailureHandler
 
 # Known Claude models (Anthropic has no list models endpoint)
 KNOWN_CLAUDE_MODELS = [
@@ -82,7 +89,7 @@ class AnthropicBackend(LLMBackend):
     def __init__(
         self,
         config: LLMConfig,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         api_key_env: str = "ANTHROPIC_API_KEY",
     ):
         """Initialize Anthropic backend.
@@ -111,7 +118,7 @@ class AnthropicBackend(LLMBackend):
         )
 
         # Build client kwargs (base_url is optional -- SDK defaults to api.anthropic.com)
-        client_kwargs: Dict[str, Any] = {
+        client_kwargs: dict[str, Any] = {
             "api_key": self.api_key,
             "timeout": timeout,
         }
@@ -139,7 +146,7 @@ class AnthropicBackend(LLMBackend):
     # =========================================================================
 
     def _translate_messages(
-        self, messages: List[Dict[str, Any]]
+        self, messages: list[dict[str, Any]]
     ) -> tuple:
         """Convert OpenAI-format messages to Anthropic API format.
 
@@ -316,7 +323,7 @@ class AnthropicBackend(LLMBackend):
         return system_text, merged
 
     @staticmethod
-    def _merge_consecutive_roles(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _merge_consecutive_roles(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Merge consecutive messages with the same role.
 
         Anthropic strictly requires alternating user/assistant messages.
@@ -345,7 +352,7 @@ class AnthropicBackend(LLMBackend):
         return merged
 
     @staticmethod
-    def _to_content_blocks(content) -> List[Dict[str, Any]]:
+    def _to_content_blocks(content) -> list[dict[str, Any]]:
         """Convert content to list of content blocks."""
         if isinstance(content, str):
             return [{"type": "text", "text": content}] if content else []
@@ -358,7 +365,7 @@ class AnthropicBackend(LLMBackend):
     # =========================================================================
 
     @staticmethod
-    def _convert_tools(tools: List[ToolDefinition]) -> List[Dict[str, Any]]:
+    def _convert_tools(tools: list[ToolDefinition]) -> list[dict[str, Any]]:
         """Convert ToolDefinition list to Anthropic tool format.
 
         OpenAI uses "parameters", Anthropic uses "input_schema" -- same JSON Schema.
@@ -373,7 +380,7 @@ class AnthropicBackend(LLMBackend):
         ]
 
     @staticmethod
-    def _convert_tool_choice(tool_choice: str) -> Dict[str, str]:
+    def _convert_tool_choice(tool_choice: str) -> dict[str, str]:
         """Convert OpenAI tool_choice string to Anthropic format."""
         mapping = {
             "auto": {"type": "auto"},
@@ -383,7 +390,7 @@ class AnthropicBackend(LLMBackend):
         return mapping.get(tool_choice, {"type": "auto"})
 
     @staticmethod
-    def _parse_tool_use_blocks(content_blocks: list) -> List[ToolCall]:
+    def _parse_tool_use_blocks(content_blocks: list) -> list[ToolCall]:
         """Extract ToolCall objects from Anthropic content blocks.
 
         Anthropic returns tool_use as content blocks with input as dict.
@@ -416,7 +423,7 @@ class AnthropicBackend(LLMBackend):
         return tool_calls
 
     @staticmethod
-    def _map_stop_reason(stop_reason: Optional[str]) -> str:
+    def _map_stop_reason(stop_reason: str | None) -> str:
         """Map Anthropic stop_reason to OpenAI-compatible finish_reason."""
         if not stop_reason:
             return "stop"
@@ -427,7 +434,7 @@ class AnthropicBackend(LLMBackend):
     # =========================================================================
 
     def _apply_cache_control(
-        self, system_text: str, messages: List[Dict[str, Any]]
+        self, system_text: str, messages: list[dict[str, Any]]
     ) -> tuple:
         """Apply Anthropic prompt caching breakpoints.
 
@@ -466,7 +473,7 @@ class AnthropicBackend(LLMBackend):
         return system_param, messages
 
     @staticmethod
-    def _add_cache_control_to_message(message: Dict[str, Any]) -> Dict[str, Any]:
+    def _add_cache_control_to_message(message: dict[str, Any]) -> dict[str, Any]:
         """Add cache_control to the last content block of a message."""
         msg = message.copy()
         content = msg.get("content")
@@ -496,7 +503,7 @@ class AnthropicBackend(LLMBackend):
     # =========================================================================
 
     @staticmethod
-    def _build_usage_dict(usage) -> Dict[str, Any]:
+    def _build_usage_dict(usage) -> dict[str, Any]:
         """Build usage dict from Anthropic usage object for CacheTracker."""
         if not usage:
             return {}
@@ -524,13 +531,13 @@ class AnthropicBackend(LLMBackend):
 
     def generate(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         **kwargs: Any,
     ) -> LLMResponse:
         """Generate completion from messages.
 
         Args:
-            messages: List of message dicts with 'role' and 'content'
+            messages: list of message dicts with 'role' and 'content'
             **kwargs: Additional generation parameters
 
         Returns:
@@ -598,13 +605,13 @@ class AnthropicBackend(LLMBackend):
 
     def generate_stream(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         **kwargs: Any,
     ) -> Iterator[StreamChunk]:
         """Generate streaming completion.
 
         Args:
-            messages: List of message dicts
+            messages: list of message dicts
             **kwargs: Additional parameters
 
         Yields:
@@ -660,16 +667,16 @@ class AnthropicBackend(LLMBackend):
 
     def generate_with_tools(
         self,
-        messages: List[Dict[str, str]],
-        tools: List[ToolDefinition],
+        messages: list[dict[str, str]],
+        tools: list[ToolDefinition],
         tool_choice: str = "auto",
         **kwargs: Any,
     ) -> LLMResponse:
         """Generate completion with tool calling support.
 
         Args:
-            messages: List of message dicts
-            tools: List of available tools
+            messages: list of message dicts
+            tools: list of available tools
             tool_choice: "auto", "required", "none"
             **kwargs: Additional generation parameters
 
@@ -747,7 +754,7 @@ class AnthropicBackend(LLMBackend):
             finish_reason = self._map_stop_reason(response.stop_reason)
             if finish_reason == "length":
                 logger.warning(
-                    f"[TRUNCATION DETECTED] Response exceeded max_tokens limit."
+                    "[TRUNCATION DETECTED] Response exceeded max_tokens limit."
                 )
 
             return LLMResponse(
@@ -774,15 +781,15 @@ class AnthropicBackend(LLMBackend):
 
     def generate_with_tools_stream(
         self,
-        messages: List[Dict[str, str]],
-        tools: List[ToolDefinition],
+        messages: list[dict[str, str]],
+        tools: list[ToolDefinition],
         tool_choice: str = "auto",
         **kwargs: Any,
     ) -> Iterator[tuple]:
         """Generate streaming completion with tool calling support.
 
         Yields:
-            Tuple of (StreamChunk, Optional[List[ToolCall]]):
+            Tuple of (StreamChunk, Optional[list[ToolCall]]):
             - During streaming: (chunk with done=False, None)
             - On completion: (chunk with done=True, tool_calls or None)
         """
@@ -824,7 +831,7 @@ class AnthropicBackend(LLMBackend):
 
         try:
             # Accumulators
-            tool_calls_acc: Dict[int, Dict[str, Any]] = {}
+            tool_calls_acc: dict[int, dict[str, Any]] = {}
             finish_reason = None
             model_name = self.config.model_name
             usage_dict = None
@@ -958,8 +965,8 @@ class AnthropicBackend(LLMBackend):
 
     async def generate_with_tools_stream_async(
         self,
-        messages: List[Dict[str, str]],
-        tools: List[ToolDefinition],
+        messages: list[dict[str, str]],
+        tools: list[ToolDefinition],
         tool_choice: str = "auto",
         **kwargs: Any,
     ) -> AsyncIterator[tuple]:
@@ -1000,7 +1007,7 @@ class AnthropicBackend(LLMBackend):
             # top_p already omitted from params
 
         try:
-            tool_calls_acc: Dict[int, Dict[str, Any]] = {}
+            tool_calls_acc: dict[int, dict[str, Any]] = {}
             finish_reason = None
             model_name = self.config.model_name
             usage_dict = None
@@ -1134,10 +1141,10 @@ class AnthropicBackend(LLMBackend):
 
     def generate_provider_deltas(
         self,
-        messages: List[Dict[str, str]],
-        tools: Optional[List[ToolDefinition]] = None,
+        messages: list[dict[str, str]],
+        tools: list[ToolDefinition] | None = None,
         tool_choice: str = "auto",
-        stream_id: Optional[str] = None,
+        stream_id: str | None = None,
         **kwargs: Any,
     ) -> Iterator[ProviderDelta]:
         """Generate streaming completion as ProviderDelta objects.
@@ -1146,7 +1153,7 @@ class AnthropicBackend(LLMBackend):
         Emits raw deltas consumed by StreamingPipeline.
 
         Args:
-            messages: List of message dicts
+            messages: list of message dicts
             tools: Optional list of tools
             tool_choice: "auto", "required", "none"
             stream_id: Optional stream ID (auto-generated if not provided)
@@ -1303,10 +1310,10 @@ class AnthropicBackend(LLMBackend):
 
     async def generate_provider_deltas_async(
         self,
-        messages: List[Dict[str, str]],
-        tools: Optional[List[ToolDefinition]] = None,
+        messages: list[dict[str, str]],
+        tools: list[ToolDefinition] | None = None,
         tool_choice: str = "auto",
-        stream_id: Optional[str] = None,
+        stream_id: str | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[ProviderDelta]:
         """Async version of generate_provider_deltas for TUI."""
@@ -1473,7 +1480,7 @@ class AnthropicBackend(LLMBackend):
             logger.error(f"Backend availability check failed: {type(e).__name__}: {str(e)}")
             return False
 
-    def list_models(self) -> List[str]:
+    def list_models(self) -> list[str]:
         """Return known Claude model IDs (Anthropic has no list endpoint)."""
         return list(KNOWN_CLAUDE_MODELS)
 

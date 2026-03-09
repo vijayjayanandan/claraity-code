@@ -5,14 +5,15 @@ Manages a single conversation between Testing Claude and AI Coding Agent,
 maintaining state across multiple turns.
 """
 
-from pathlib import Path
-from datetime import datetime
-from typing import List, Optional, Any
 import json
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Optional
 
-from .models import AgentMessage, AgentResponse, ConversationLog
 from src.core.agent import CodingAgent
 from src.execution.checkpoint.manager import CheckpointMetadata
+
+from .models import AgentMessage, AgentResponse, ConversationLog
 
 
 class ConversationSession:
@@ -31,8 +32,8 @@ class ConversationSession:
         conversation_id: str,
         working_directory: Path,
         agent: CodingAgent,
-        log_file: Optional[Path] = None,
-        controller: Optional[Any] = None
+        log_file: Path | None = None,
+        controller: Any | None = None
     ):
         """
         Initialize conversation session.
@@ -49,7 +50,7 @@ class ConversationSession:
         self.agent = agent
         self.log_file = Path(log_file) if log_file else None
         self.controller = controller
-        self.messages: List[AgentMessage] = []
+        self.messages: list[AgentMessage] = []
         self.started_at = datetime.now()
 
         # Ensure working directory exists
@@ -91,24 +92,6 @@ class ConversationSession:
                 "Use agent.stream_response() (async) instead."
             )
 
-            # Extract files generated from tool execution history
-            files_generated = self._extract_files_from_history()
-
-            # Extract tool calls from history
-            tool_calls = self._extract_tool_calls()
-
-            # Create successful response
-            # Extract content from AgentResponse object
-            response_content = agent_response_obj.content if agent_response_obj else ""
-
-            response = AgentResponse(
-                content=response_content,
-                files_generated=files_generated,
-                tool_calls=tool_calls,
-                success=True,
-                error=None
-            )
-
         except Exception as e:
             # Handle agent execution failure
             response = AgentResponse(
@@ -138,14 +121,14 @@ class ConversationSession:
 
         return response
 
-    def _extract_files_from_history(self) -> List[str]:
+    def _extract_files_from_history(self) -> list[str]:
         """
         Extract files created/modified from agent's tool execution history.
 
         Looks for write_file and edit_file tool calls that succeeded.
 
         Returns:
-            List of file paths that were created or modified
+            list of file paths that were created or modified
         """
         files = []
 
@@ -171,12 +154,12 @@ class ConversationSession:
 
         return unique_files
 
-    def _extract_tool_calls(self) -> List[dict]:
+    def _extract_tool_calls(self) -> list[dict]:
         """
         Extract all tool calls from agent's execution history.
 
         Returns:
-            List of tool call dictionaries with tool name, arguments, and success status
+            list of tool call dictionaries with tool name, arguments, and success status
         """
         if not hasattr(self.agent, 'tool_execution_history'):
             return []
@@ -184,16 +167,16 @@ class ConversationSession:
         # Return copy of tool execution history
         return [dict(call) for call in self.agent.tool_execution_history]
 
-    def get_history(self) -> List[AgentMessage]:
+    def get_history(self) -> list[AgentMessage]:
         """
         Get conversation history.
 
         Returns:
-            List of all messages in chronological order
+            list of all messages in chronological order
         """
         return self.messages.copy()
 
-    def save_log(self, custom_path: Optional[Path] = None) -> Path:
+    def save_log(self, custom_path: Path | None = None) -> Path:
         """
         Save conversation to JSON file.
 
@@ -244,8 +227,8 @@ class ConversationSession:
     def save_checkpoint(
         self,
         description: str,
-        phase: Optional[str] = None,
-        pending_tasks: Optional[List[str]] = None
+        phase: str | None = None,
+        pending_tasks: list[str] | None = None
     ) -> str:
         """
         Save checkpoint programmatically (API method).
@@ -281,12 +264,12 @@ class ConversationSession:
 
         return checkpoint_id
 
-    def list_checkpoints(self) -> List[CheckpointMetadata]:
+    def list_checkpoints(self) -> list[CheckpointMetadata]:
         """
-        List all checkpoints for this session (API method).
+        list all checkpoints for this session (API method).
 
         Returns:
-            List of CheckpointMetadata objects (newest first)
+            list of CheckpointMetadata objects (newest first)
 
         Raises:
             RuntimeError: If controller not initialized
@@ -355,7 +338,7 @@ class ConversationSession:
             # If session restore fails, we've already restored agent
             # Log the error but still return True since agent was restored
             print(f"[WARN] Failed to restore session history: {e}")
-            print(f"[INFO] Agent state was restored successfully")
+            print("[INFO] Agent state was restored successfully")
             return True
 
     def clear_checkpoints(self) -> int:

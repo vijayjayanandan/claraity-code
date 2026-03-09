@@ -11,18 +11,18 @@ Features:
 - Enter to select, Escape to cancel
 """
 
-from pathlib import Path
-from datetime import datetime
-from typing import Optional, List, Callable
-from dataclasses import dataclass
 import json
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 
 from textual.app import ComposeResult
-from textual.screen import ModalScreen
-from textual.widgets import Static, Input, OptionList
-from textual.widgets.option_list import Option
-from textual.containers import Vertical
 from textual.binding import Binding
+from textual.containers import Vertical
+from textual.screen import ModalScreen
+from textual.widgets import Input, OptionList, Static
+from textual.widgets.option_list import Option
 
 from src.observability import get_logger
 
@@ -37,7 +37,7 @@ class SessionDisplay:
     first_message: str
     message_count: int
     updated_at: datetime
-    git_branch: Optional[str] = None
+    git_branch: str | None = None
 
     @property
     def time_ago(self) -> str:
@@ -74,7 +74,7 @@ class SessionDisplay:
         return " - ".join(parts)
 
 
-def scan_sessions(sessions_dir: Path, limit: int = 50) -> List[SessionDisplay]:
+def scan_sessions(sessions_dir: Path, limit: int = 50) -> list[SessionDisplay]:
     """
     Scan sessions directory for available sessions.
 
@@ -83,7 +83,7 @@ def scan_sessions(sessions_dir: Path, limit: int = 50) -> List[SessionDisplay]:
         limit: Maximum number of sessions to return
 
     Returns:
-        List of SessionDisplay objects, sorted by updated_at (newest first)
+        list of SessionDisplay objects, sorted by updated_at (newest first)
     """
     sessions = []
 
@@ -121,7 +121,7 @@ def scan_sessions(sessions_dir: Path, limit: int = 50) -> List[SessionDisplay]:
     return sessions[:limit]
 
 
-def _extract_session_info(jsonl_path: Path, session_id: str) -> Optional[SessionDisplay]:
+def _extract_session_info(jsonl_path: Path, session_id: str) -> SessionDisplay | None:
     """
     Extract session info from JSONL file.
 
@@ -136,7 +136,7 @@ def _extract_session_info(jsonl_path: Path, session_id: str) -> Optional[Session
     message_count = 0
 
     try:
-        with open(jsonl_path, 'r', encoding='utf-8') as f:
+        with open(jsonl_path, encoding='utf-8') as f:
             for i, line in enumerate(f):
                 line = line.strip()
                 if not line:
@@ -184,7 +184,7 @@ def _extract_session_info(jsonl_path: Path, session_id: str) -> Optional[Session
         return None
 
 
-class SessionPickerScreen(ModalScreen[Optional[str]]):
+class SessionPickerScreen(ModalScreen[str | None]):
     """
     Modal screen for selecting a session to resume.
 
@@ -244,14 +244,14 @@ class SessionPickerScreen(ModalScreen[Optional[str]]):
     def __init__(
         self,
         sessions_dir: Path,
-        name: Optional[str] = None,
-        id: Optional[str] = None,
-        classes: Optional[str] = None
+        name: str | None = None,
+        id: str | None = None,
+        classes: str | None = None
     ):
         super().__init__(name=name, id=id, classes=classes)
         self._sessions_dir = sessions_dir
-        self._sessions: List[SessionDisplay] = []
-        self._filtered_sessions: List[SessionDisplay] = []
+        self._sessions: list[SessionDisplay] = []
+        self._filtered_sessions: list[SessionDisplay] = []
 
     def compose(self) -> ComposeResult:
         """Compose the session picker UI."""

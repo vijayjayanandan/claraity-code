@@ -10,14 +10,14 @@ Replicates the Claude Code AskUserQuestion pattern:
 - "Chat about this" escape hatch
 """
 
-from typing import Optional, List, Dict, Any
+from typing import Any, Optional
 
-from textual.widgets import Static
+from rich.console import RenderableType
+from rich.text import Text
+from textual.binding import Binding
 from textual.containers import Container
 from textual.reactive import reactive
-from textual.binding import Binding
-from rich.text import Text
-from rich.console import RenderableType
+from textual.widgets import Static
 
 from ..messages import ClarifyResponseMessage
 
@@ -25,7 +25,7 @@ from ..messages import ClarifyResponseMessage
 class _TabBar(Static):
     """Horizontal tab navigation bar."""
 
-    def __init__(self, labels: List[str], **kwargs):
+    def __init__(self, labels: list[str], **kwargs):
         super().__init__(**kwargs)
         self.labels = labels
         self.active_index = 0
@@ -66,7 +66,7 @@ class _QuestionPanel(Static):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._question: Dict[str, Any] = {}
+        self._question: dict[str, Any] = {}
         self._option_index: int = 0
         self._multi_select: bool = False
         self._checked: set[int] = set()  # indices of checked options
@@ -76,7 +76,7 @@ class _QuestionPanel(Static):
 
     def set_question(
         self,
-        question: Dict[str, Any],
+        question: dict[str, Any],
         option_index: int,
         checked: set[int],
         custom_text: str,
@@ -102,8 +102,8 @@ class _QuestionPanel(Static):
 
     def set_review(
         self,
-        questions: List[Dict[str, Any]],
-        responses: Dict[str, Any],
+        questions: list[dict[str, Any]],
+        responses: dict[str, Any],
         option_index: int,
     ) -> None:
         """Set the review/submit tab content."""
@@ -197,7 +197,7 @@ class _QuestionPanel(Static):
 
         return t
 
-    def _render_review(self, q: Dict[str, Any]) -> RenderableType:
+    def _render_review(self, q: dict[str, Any]) -> RenderableType:
         t = Text()
         t.append("Review your answers\n\n", style="bold white")
 
@@ -315,8 +315,8 @@ class ClarifyWidget(Container, can_focus=True):
     def __init__(
         self,
         call_id: str,
-        questions: List[Dict[str, Any]],
-        context: Optional[str] = None,
+        questions: list[dict[str, Any]],
+        context: str | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -325,10 +325,10 @@ class ClarifyWidget(Container, can_focus=True):
         self.context = context
 
         # State per question
-        self.responses: Dict[str, Any] = {}  # qid -> selected option id(s)
-        self.selections: Dict[str, set] = {}  # qid -> set of checked option indices (multi-select)
-        self.custom_texts: Dict[str, str] = {}  # qid -> freeform text
-        self.option_indices: Dict[int, int] = {}  # tab_index -> current option index
+        self.responses: dict[str, Any] = {}  # qid -> selected option id(s)
+        self.selections: dict[str, set] = {}  # qid -> set of checked option indices (multi-select)
+        self.custom_texts: dict[str, str] = {}  # qid -> freeform text
+        self.option_indices: dict[int, int] = {}  # tab_index -> current option index
 
         # Tab labels: one per question + "Submit"
         self._tab_labels = [q.get("label", f"Q{i+1}") for i, q in enumerate(questions)]
@@ -594,7 +594,7 @@ class ClarifyWidget(Container, can_focus=True):
                 self._completed_tabs.add(self.current_tab)
                 self._advance_tab()
 
-    def _finalize_question(self, qid: str, question: Dict[str, Any]) -> None:
+    def _finalize_question(self, qid: str, question: dict[str, Any]) -> None:
         """Finalize multi-select question and advance."""
         options = question.get("options", [])
         checked = self.selections.get(qid, set())

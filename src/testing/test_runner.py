@@ -1,14 +1,14 @@
 """Test runner for autonomous test execution."""
 
-import subprocess
 import json
+import logging
 import os
 import re
+import subprocess
 from pathlib import Path
-from typing import Optional, Dict, Any, List
-import logging
+from typing import Any, Optional
 
-from .models import TestSuiteResult, TestCase, TestStatus
+from .models import TestCase, TestStatus, TestSuiteResult
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +103,7 @@ class TestRunner:
         """
         self.working_directory = _validate_working_directory(working_directory)
 
-    def detect_test_framework(self) -> Optional[str]:
+    def detect_test_framework(self) -> str | None:
         """
         Detect test framework from project files.
 
@@ -141,7 +141,7 @@ class TestRunner:
         package_json = self.working_directory / "package.json"
         if package_json.exists():
             try:
-                with open(package_json, 'r') as f:
+                with open(package_json) as f:
                     pkg = json.load(f)
                     deps = {**pkg.get('dependencies', {}), **pkg.get('devDependencies', {})}
 
@@ -160,8 +160,8 @@ class TestRunner:
 
     def run_tests(
         self,
-        framework: Optional[str] = None,
-        file_pattern: Optional[str] = None
+        framework: str | None = None,
+        file_pattern: str | None = None
     ) -> TestSuiteResult:
         """
         Run tests using detected or specified framework.
@@ -201,7 +201,7 @@ class TestRunner:
         else:
             raise ValueError(f"Unsupported test framework: {framework}")
 
-    def _run_pytest(self, file_pattern: Optional[str] = None) -> TestSuiteResult:
+    def _run_pytest(self, file_pattern: str | None = None) -> TestSuiteResult:
         """
         Run pytest tests and parse JSON report output.
 
@@ -232,7 +232,7 @@ class TestRunner:
             # Read JSON report
             report_path = self.working_directory / ".pytest_report.json"
             if report_path.exists():
-                with open(report_path, 'r') as f:
+                with open(report_path) as f:
                     report = json.load(f)
 
                 # Parse pytest report
@@ -292,7 +292,7 @@ class TestRunner:
                 exit_code=1
             )
 
-    def _run_jest(self, file_pattern: Optional[str] = None) -> TestSuiteResult:
+    def _run_jest(self, file_pattern: str | None = None) -> TestSuiteResult:
         """
         Run jest tests and parse JSON output.
 
@@ -377,12 +377,12 @@ class TestRunner:
                 exit_code=1
             )
 
-    def _run_vitest(self, file_pattern: Optional[str] = None) -> TestSuiteResult:
+    def _run_vitest(self, file_pattern: str | None = None) -> TestSuiteResult:
         """Run vitest tests (similar to jest)."""
         # Implementation similar to jest
         raise NotImplementedError("vitest support coming soon")
 
-    def _run_cargo(self, file_pattern: Optional[str] = None) -> TestSuiteResult:
+    def _run_cargo(self, file_pattern: str | None = None) -> TestSuiteResult:
         """Run cargo test for Rust projects."""
         raise NotImplementedError("cargo test support coming soon")
 
@@ -390,7 +390,6 @@ class TestRunner:
         """Fallback: Parse pytest stdout when JSON report unavailable."""
         # Simple parsing of pytest summary line
         # Example: "5 passed, 2 failed in 1.23s"
-        import re
 
         passed = failed = errors = skipped = 0
         duration = 0.0
@@ -432,7 +431,6 @@ class TestRunner:
     def _parse_jest_stdout(self, stdout: str, exit_code: int) -> TestSuiteResult:
         """Fallback: Parse jest stdout when JSON parsing fails."""
         # Similar pattern matching for jest output
-        import re
 
         passed = failed = 0
 

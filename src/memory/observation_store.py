@@ -13,11 +13,12 @@ import os
 import re
 import sqlite3
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
-from datetime import datetime
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ class Observation:
     importance: Importance
     token_count: int
     created_at: float
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_pointer(self) -> str:
         """Generate pointer format for this observation."""
@@ -51,7 +52,7 @@ class Observation:
             importance=self.importance.value
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
             "observation_id": self.observation_id,
@@ -88,7 +89,7 @@ class ObservationPointer:
         return f"[[OBS#{observation_id} tool={tool_name} tokens={token_count} importance={importance}]]"
 
     @classmethod
-    def parse(cls, pointer: str) -> Optional[Dict[str, Any]]:
+    def parse(cls, pointer: str) -> dict[str, Any] | None:
         """Parse a pointer string into its components."""
         match = cls.POINTER_PATTERN.search(pointer)
         if match:
@@ -106,7 +107,7 @@ class ObservationPointer:
         return bool(cls.POINTER_PATTERN.search(text))
 
     @classmethod
-    def extract_all(cls, text: str) -> List[Dict[str, Any]]:
+    def extract_all(cls, text: str) -> list[dict[str, Any]]:
         """Extract all pointers from text."""
         pointers = []
         for match in cls.POINTER_PATTERN.finditer(text):
@@ -129,8 +130,8 @@ class ObservationStore:
 
     def __init__(
         self,
-        db_path: Optional[str] = None,
-        token_counter: Optional[callable] = None,
+        db_path: str | None = None,
+        token_counter: Callable | None = None,
     ):
         """
         Initialize the observation store.
@@ -205,7 +206,7 @@ class ObservationStore:
         content: str,
         turn_id: int,
         importance: Importance = Importance.NORMAL,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> Observation:
         """
         Save a tool observation to the store.
@@ -269,7 +270,7 @@ class ObservationStore:
 
         return observation
 
-    def get(self, observation_id: str) -> Optional[Observation]:
+    def get(self, observation_id: str) -> Observation | None:
         """
         Retrieve an observation by ID.
 
@@ -293,7 +294,7 @@ class ObservationStore:
 
         return self._row_to_observation(row)
 
-    def get_content(self, observation_id: str) -> Optional[str]:
+    def get_content(self, observation_id: str) -> str | None:
         """
         Retrieve just the content for an observation.
 
@@ -306,7 +307,7 @@ class ObservationStore:
         observation = self.get(observation_id)
         return observation.content if observation else None
 
-    def rehydrate(self, pointer: str) -> Optional[str]:
+    def rehydrate(self, pointer: str) -> str | None:
         """
         Rehydrate a pointer to its full content.
 
@@ -325,13 +326,13 @@ class ObservationStore:
 
     def find(
         self,
-        tool_name: Optional[str] = None,
-        turn_id: Optional[int] = None,
-        importance: Optional[Importance] = None,
-        min_turn_id: Optional[int] = None,
-        max_turn_id: Optional[int] = None,
+        tool_name: str | None = None,
+        turn_id: int | None = None,
+        importance: Importance | None = None,
+        min_turn_id: int | None = None,
+        max_turn_id: int | None = None,
         limit: int = 100,
-    ) -> List[Observation]:
+    ) -> list[Observation]:
         """
         Find observations matching criteria.
 
@@ -344,7 +345,7 @@ class ObservationStore:
             limit: Maximum number of results
 
         Returns:
-            List of matching Observation objects
+            list of matching Observation objects
         """
         conditions = []
         params = []
@@ -387,7 +388,7 @@ class ObservationStore:
         current_turn_id: int,
         mask_age: int = 15,
         exclude_critical: bool = True,
-    ) -> List[Observation]:
+    ) -> list[Observation]:
         """
         Find observations eligible for masking.
 
@@ -397,7 +398,7 @@ class ObservationStore:
             exclude_critical: If True, exclude critical observations
 
         Returns:
-            List of observations eligible for masking
+            list of observations eligible for masking
         """
         cutoff_turn = current_turn_id - mask_age
 
@@ -479,7 +480,7 @@ class ObservationStore:
         logger.info(f"[OBS] Deleted {deleted} observations before turn {turn_id}")
         return deleted
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get statistics about stored observations."""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row

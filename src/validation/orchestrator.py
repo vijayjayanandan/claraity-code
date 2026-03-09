@@ -6,24 +6,25 @@ runs checks, and generates results.
 """
 
 import asyncio
-import subprocess
 import json
 import os
+import shutil
+import subprocess
 import sys
 import uuid
-import shutil
-from pathlib import Path
 from datetime import datetime
-from typing import Dict, List, Optional, Any
+from pathlib import Path
+from typing import Any, Optional
+
+from src.platform import safe_print
 
 from .scenario import (
-    ValidationScenario,
-    ValidationResult,
-    ValidationStep,
+    DifficultyLevel,
     StepType,
-    DifficultyLevel
+    ValidationResult,
+    ValidationScenario,
+    ValidationStep,
 )
-from src.platform import safe_print
 
 
 class ValidationOrchestrator:
@@ -111,7 +112,7 @@ class ValidationOrchestrator:
             # Step 2: Run initial setup
             if scenario.initial_setup:
                 if verbose:
-                    safe_print(f"🔧 Running initial setup...")
+                    safe_print("🔧 Running initial setup...")
                 await self._run_setup(scenario, workspace)
 
             # Step 3: Spawn agent
@@ -129,7 +130,7 @@ class ValidationOrchestrator:
 
             # Step 4: Run validation checks
             if verbose:
-                safe_print(f"\n[OK] Running validation checks...")
+                safe_print("\n[OK] Running validation checks...")
             check_results = await self._run_validation_checks(
                 scenario, workspace, agent_result, verbose
             )
@@ -155,7 +156,7 @@ class ValidationOrchestrator:
             result.transcript_path = str(workspace / "transcript.json")
 
             if verbose:
-                safe_print(f"\n[REPORT] Validation checks complete!")
+                safe_print("\n[REPORT] Validation checks complete!")
                 safe_print(f"   Files created: {len(result.files_created)}")
                 safe_print(f"   Lines of code: {result.lines_of_code}")
                 safe_print(f"   Tests passed: {result.tests_passed}/{result.tests_passed + result.tests_failed}")
@@ -229,7 +230,7 @@ class ValidationOrchestrator:
         scenario: ValidationScenario,
         workspace: Path,
         verbose: bool
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Spawn agent in subprocess and monitor execution.
 
@@ -412,9 +413,9 @@ except Exception as e:
         self,
         scenario: ValidationScenario,
         workspace: Path,
-        agent_result: Dict[str, Any],
+        agent_result: dict[str, Any],
         verbose: bool
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Run automated validation checks.
 
@@ -447,7 +448,7 @@ except Exception as e:
                 if missing_files:
                     safe_print(f"   [WARN]  Missing files: {', '.join(missing_files)}")
                 else:
-                    safe_print(f"   [OK] All required files present")
+                    safe_print("   [OK] All required files present")
 
         # Check 2: Run tests
         if scenario.success_criteria.tests_must_pass:
@@ -481,7 +482,7 @@ except Exception as e:
         self,
         code_dir: Path,
         verbose: bool
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Install dependencies from requirements.txt if it exists.
 
@@ -537,7 +538,7 @@ except Exception as e:
         self,
         code_dir: Path,
         verbose: bool
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Run tests using pytest or unittest.
 
@@ -552,7 +553,7 @@ except Exception as e:
         install_result = await self._install_dependencies(code_dir, verbose)
         if not install_result["success"] and not install_result.get("skipped"):
             if verbose:
-                print(f"   [WARN] Tests may fail due to missing dependencies")
+                print("   [WARN] Tests may fail due to missing dependencies")
 
         # Step 2: Try pytest
         try:
@@ -614,7 +615,7 @@ except Exception as e:
         self,
         code_dir: Path,
         verbose: bool
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Run tests using unittest discovery."""
 
         try:
@@ -699,7 +700,7 @@ except Exception as e:
         step: ValidationStep,
         code_dir: Path,
         verbose: bool
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Run a single validation step"""
 
         if step.type == StepType.BASH:
@@ -715,7 +716,7 @@ except Exception as e:
         self,
         step: ValidationStep,
         code_dir: Path
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Run a bash command validation step"""
 
         try:
@@ -756,7 +757,7 @@ except Exception as e:
         self,
         step: ValidationStep,
         code_dir: Path
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Inspect file contents"""
 
         file_path = code_dir / step.file_path
@@ -790,7 +791,7 @@ except Exception as e:
                 "error": str(e)
             }
 
-    def _get_created_files(self, workspace: Path) -> List[str]:
+    def _get_created_files(self, workspace: Path) -> list[str]:
         """Get list of all files created in workspace"""
         code_dir = workspace / "code"
         if not code_dir.exists():
@@ -815,12 +816,12 @@ except Exception as e:
             try:
                 lines = len(py_file.read_text().splitlines())
                 total_lines += lines
-            except:
+            except Exception:
                 pass
 
         return total_lines
 
-    def _calculate_autonomy(self, agent_result: Dict[str, Any]) -> float:
+    def _calculate_autonomy(self, agent_result: dict[str, Any]) -> float:
         """
         Calculate autonomy percentage.
 

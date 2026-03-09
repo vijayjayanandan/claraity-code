@@ -8,7 +8,7 @@ The <clarity-context> format is similar to Claude Code's <system-reminder> patte
 providing the LLM with continuity context while clearly marking it as reference-only.
 """
 
-from typing import Optional, List, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from src.observability import get_logger
 
@@ -137,7 +137,7 @@ INSTRUCTION: This is context from earlier in the conversation that was compacted
             .replace("<clarity-context", "&lt;clarity-context")  # Catch partial tags
         )
 
-    def _extract_sections(self, summary: str) -> List[str]:
+    def _extract_sections(self, summary: str) -> list[str]:
         """
         Extract which sections are present in the summary.
 
@@ -148,7 +148,7 @@ INSTRUCTION: This is context from earlier in the conversation that was compacted
             summary: The continuation summary
 
         Returns:
-            List of section names found in the summary
+            list of section names found in the summary
         """
         sections = []
         section_markers = [

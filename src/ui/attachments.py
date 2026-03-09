@@ -7,9 +7,8 @@ This ensures privacy and avoids disk clutter.
 Uses the core Attachment model for provider-agnostic representation.
 """
 
-from typing import List
-import mimetypes
 import asyncio
+import mimetypes
 
 from src.observability import get_logger
 
@@ -17,14 +16,14 @@ logger = get_logger(__name__)
 
 # Import the core Attachment model (provider-agnostic)
 from src.core.attachment import (
-    Attachment,
-    create_image_attachment,
-    create_text_attachment,
-    create_attachment_from_file,
-    validate_attachments,
+    MAX_ATTACHMENTS_PER_MESSAGE,
     MAX_IMAGE_SIZE_MB,
     MAX_TEXT_FILE_SIZE_KB,
-    MAX_ATTACHMENTS_PER_MESSAGE,
+    Attachment,
+    create_attachment_from_file,
+    create_image_attachment,
+    create_text_attachment,
+    validate_attachments,
 )
 
 # Re-export for convenience
@@ -48,7 +47,7 @@ class AttachmentManager:
     MAX_TOTAL_SIZE_MB = 20
 
     def __init__(self):
-        self._attachments: List[Attachment] = []
+        self._attachments: list[Attachment] = []
         self._screenshot_counter = 0
 
     def add_screenshot(self, image_bytes: bytes, format: str = "png") -> Attachment:
@@ -77,17 +76,17 @@ class AttachmentManager:
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         self._screenshot_counter += 1
         filename = f"screenshot_{timestamp}_{self._screenshot_counter}.{format}"
-        
+
         logger.debug("screenshot_filename_generated", filename=filename, counter=self._screenshot_counter)
-        
+
         attachment = create_image_attachment(
             image_bytes=image_bytes,
             filename=filename,
             mime=f"image/{format}",
         )
-        
+
         logger.debug("attachment_created", filename=attachment.filename, size_kb=attachment.size_kb)
-        
+
         self._attachments.append(attachment)
         return attachment
 
@@ -147,7 +146,7 @@ class AttachmentManager:
         self._attachments.clear()
 
     @property
-    def attachments(self) -> List[Attachment]:
+    def attachments(self) -> list[Attachment]:
         """Get current attachments (copy to prevent mutation)."""
         return self._attachments.copy()
 
@@ -182,12 +181,12 @@ class AttachmentManager:
 
         return " ".join(parts)
 
-    def validate(self) -> List[str]:
+    def validate(self) -> list[str]:
         """
         Validate all attachments.
 
         Returns:
-            List of error messages (empty if all valid)
+            list of error messages (empty if all valid)
         """
         return validate_attachments(self._attachments)
 

@@ -5,9 +5,9 @@ Provides a decoupling layer between subsystems and agent implementation.
 Enables testing subsystems in isolation with MockAgent.
 """
 
-from abc import ABC, abstractmethod
-from typing import List, Dict, Any
 import threading
+from abc import ABC, abstractmethod
+from typing import Any
 
 
 class AgentInterface(ABC):
@@ -38,7 +38,7 @@ class AgentInterface(ABC):
     @abstractmethod
     def call_llm(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         temperature: float = 0.7,
         max_tokens: int = 4096,
         stream: bool = False,
@@ -97,7 +97,7 @@ class AgentInterface(ABC):
         pass
 
     @abstractmethod
-    def get_context(self) -> Dict[str, Any]:
+    def get_context(self) -> dict[str, Any]:
         """
         Get current execution context.
 
@@ -108,7 +108,7 @@ class AgentInterface(ABC):
         - session_id: Current session identifier
 
         Returns:
-            Dict[str, Any]: Context dictionary
+            dict[str, Any]: Context dictionary
 
         Example:
             context = agent.get_context()
@@ -147,8 +147,8 @@ class MockAgent(AgentInterface):
     Enables fast, deterministic testing without real LLM/tools.
 
     Attributes:
-        call_history: List of all call_llm invocations
-        tool_history: List of all execute_tool invocations
+        call_history: list of all call_llm invocations
+        tool_history: list of all execute_tool invocations
         memory: Dictionary of memory updates
         context: Dictionary of context to return
 
@@ -172,7 +172,7 @@ class MockAgent(AgentInterface):
         self,
         mock_llm_response: str = "Mocked LLM response",
         mock_tool_result: Any = None,
-        mock_context: Dict[str, Any] = None
+        mock_context: dict[str, Any] = None
     ):
         """
         Initialize MockAgent with configurable mock responses.
@@ -185,9 +185,9 @@ class MockAgent(AgentInterface):
         # Thread safety: Lock for all mutable state
         self._lock = threading.RLock()  # Reentrant lock
 
-        self.call_history: List[tuple] = []
-        self.tool_history: List[tuple] = []
-        self.memory: Dict[str, Any] = {}
+        self.call_history: list[tuple] = []
+        self.tool_history: list[tuple] = []
+        self.memory: dict[str, Any] = {}
 
         self._mock_llm_response = mock_llm_response
         self._mock_tool_result = mock_tool_result or {"status": "success", "mocked": True}
@@ -200,7 +200,7 @@ class MockAgent(AgentInterface):
 
     def call_llm(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         temperature: float = 0.7,
         max_tokens: int = 4096,
         stream: bool = False,
@@ -227,7 +227,7 @@ class MockAgent(AgentInterface):
             self.tool_history.append((tool_name, params))
             return self._mock_tool_result
 
-    def get_context(self) -> Dict[str, Any]:
+    def get_context(self) -> dict[str, Any]:
         """
         Return mock context.
 
@@ -277,7 +277,7 @@ class MockAgent(AgentInterface):
         with self._lock:
             self._mock_tool_result = result
 
-    def set_context(self, context: Dict[str, Any]) -> None:
+    def set_context(self, context: dict[str, Any]) -> None:
         """
         Change the mocked context.
 

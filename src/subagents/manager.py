@@ -25,21 +25,21 @@ Example:
     >>> results = manager.execute_parallel(tasks)
 """
 
-from typing import Dict, List, Optional, Tuple, Any, TYPE_CHECKING
-from pathlib import Path
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from src.core.agent_interface import AgentInterface
     from src.subagents.config import SubAgentConfig
     from src.subagents.subagent import SubAgent, SubAgentResult
 
+from src.platform import remove_emojis
 from src.subagents.config import SubAgentConfigLoader
 from src.subagents.subagent import SubAgent
-from src.platform import remove_emojis
 
 logger = logging.getLogger(__name__)
 
@@ -55,9 +55,9 @@ class DelegationResult:
         metadata: Additional information about the delegation
     """
     success: bool
-    subagent_results: List['SubAgentResult']
+    subagent_results: list['SubAgentResult']
     total_time: float
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __str__(self) -> str:
         """Human-readable representation."""
@@ -97,7 +97,7 @@ class SubAgentManager:
         >>> manager = SubAgentManager(main_agent, working_directory=Path.cwd())
         >>> manager.discover_subagents()
         >>>
-        >>> # List available subagents
+        >>> # list available subagents
         >>> print(manager.get_available_subagents())
         ['code-reviewer', 'test-writer', 'doc-writer']
         >>>
@@ -109,7 +109,7 @@ class SubAgentManager:
     def __init__(
         self,
         main_agent: 'AgentInterface',
-        working_directory: Optional[Path] = None,
+        working_directory: Path | None = None,
         max_parallel_workers: int = 4,
         enable_auto_delegation: bool = True
     ):
@@ -130,11 +130,11 @@ class SubAgentManager:
         self.config_loader = SubAgentConfigLoader(self.working_directory)
 
         # Loaded configurations and cached instances
-        self.configs: Dict[str, 'SubAgentConfig'] = {}
-        self.subagent_instances: Dict[str, 'SubAgent'] = {}
+        self.configs: dict[str, 'SubAgentConfig'] = {}
+        self.subagent_instances: dict[str, 'SubAgent'] = {}
 
         # Delegation statistics
-        self.delegation_count: Dict[str, int] = {}
+        self.delegation_count: dict[str, int] = {}
         self.total_delegations = 0
 
         logger.info(
@@ -142,7 +142,7 @@ class SubAgentManager:
             f"(max_workers={max_parallel_workers}, auto_delegation={enable_auto_delegation})"
         )
 
-    def discover_subagents(self) -> Dict[str, 'SubAgentConfig']:
+    def discover_subagents(self) -> dict[str, 'SubAgentConfig']:
         """Discover all available subagent configurations.
 
         Loads configurations from:
@@ -150,7 +150,7 @@ class SubAgentManager:
         2. Project directory: .clarity/agents/*.md (overrides user configs)
 
         Returns:
-            Dict mapping subagent names to configurations
+            dict mapping subagent names to configurations
 
         Example:
             >>> manager.discover_subagents()
@@ -162,13 +162,13 @@ class SubAgentManager:
 
         return self.configs
 
-    def reload_subagents(self) -> Dict[str, 'SubAgentConfig']:
+    def reload_subagents(self) -> dict[str, 'SubAgentConfig']:
         """Reload all configurations and clear cached instances.
 
         Useful when subagent configurations have been modified.
 
         Returns:
-            Dict mapping subagent names to configurations
+            dict mapping subagent names to configurations
         """
         # Clear cached instances
         self.subagent_instances.clear()
@@ -227,7 +227,7 @@ class SubAgentManager:
         self,
         subagent_name: str,
         task_description: str,
-        context: Optional[Dict[str, Any]] = None,
+        context: dict[str, Any] | None = None,
         max_iterations: int = 50
     ) -> Optional['SubAgentResult']:
         """Delegate task to a specific subagent.
@@ -277,7 +277,7 @@ class SubAgentManager:
     def auto_delegate(
         self,
         task_description: str,
-        context: Optional[Dict[str, Any]] = None,
+        context: dict[str, Any] | None = None,
         max_iterations: int = 50
     ) -> Optional['SubAgentResult']:
         """Automatically select and delegate to best subagent.
@@ -320,13 +320,13 @@ class SubAgentManager:
 
     def execute_parallel(
         self,
-        tasks: List[Tuple[str, str, Optional[Dict[str, Any]]]],
+        tasks: list[tuple[str, str, dict[str, Any] | None]],
         max_iterations: int = 50
     ) -> DelegationResult:
         """Execute multiple subagent tasks in parallel.
 
         Args:
-            tasks: List of (subagent_name, task_description, context) tuples
+            tasks: list of (subagent_name, task_description, context) tuples
             max_iterations: Maximum tool-calling iterations per subagent
 
         Returns:
@@ -342,7 +342,7 @@ class SubAgentManager:
             >>> print(f"All succeeded: {result.success}")
         """
         start_time = time.time()
-        results: List['SubAgentResult'] = []
+        results: list['SubAgentResult'] = []
 
         logger.info(f"Executing {len(tasks)} subagent tasks in parallel")
 
@@ -393,7 +393,7 @@ class SubAgentManager:
 
         return delegation_result
 
-    def _select_best_subagent(self, task_description: str) -> Optional[str]:
+    def _select_best_subagent(self, task_description: str) -> str | None:
         """Select the best subagent for a task based on description similarity.
 
         Uses simple keyword matching between task and subagent descriptions.
@@ -441,11 +441,11 @@ class SubAgentManager:
 
         return None
 
-    def get_available_subagents(self) -> List[str]:
+    def get_available_subagents(self) -> list[str]:
         """Get list of all available subagent names.
 
         Returns:
-            List of subagent names
+            list of subagent names
 
         Example:
             >>> manager.get_available_subagents()
@@ -453,14 +453,14 @@ class SubAgentManager:
         """
         return list(self.configs.keys())
 
-    def get_subagent_info(self, name: str) -> Optional[Dict[str, Any]]:
+    def get_subagent_info(self, name: str) -> dict[str, Any] | None:
         """Get information about a subagent.
 
         Args:
             name: Subagent name
 
         Returns:
-            Dict with subagent info, None if not found
+            dict with subagent info, None if not found
 
         Example:
             >>> info = manager.get_subagent_info("code-reviewer")
@@ -485,7 +485,7 @@ class SubAgentManager:
             "delegation_count": self.delegation_count.get(name, 0)
         }
 
-    def get_statistics(self) -> Dict[str, Any]:
+    def get_statistics(self) -> dict[str, Any]:
         """Get delegation statistics.
 
         Returns:

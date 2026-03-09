@@ -8,13 +8,13 @@ Features:
 - Memory management (configurable size limit, default 10MB)
 """
 
-from collections import OrderedDict
-from typing import Optional, Any
-from dataclasses import dataclass
-from pathlib import Path
-import time
 import logging
 import threading
+import time
+from collections import OrderedDict
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Optional
 
 
 @dataclass
@@ -22,8 +22,8 @@ class CacheEntry:
     """Single cache entry with metadata."""
     value: Any
     timestamp: float
-    file_path: Optional[str]
-    file_mtime: Optional[float]
+    file_path: str | None
+    file_mtime: float | None
 
 
 class LSPCache:
@@ -41,7 +41,7 @@ class LSPCache:
         self,
         max_size_mb: int = 10,
         ttl_seconds: int = 300,
-        repo_root: Optional[str] = None
+        repo_root: str | None = None
     ):
         """
         Initialize LSP cache.
@@ -71,7 +71,7 @@ class LSPCache:
                 f"normalized={normalize_path(self.repo_root)}"
             )
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         """
         Get value from cache (thread-safe).
 
@@ -117,7 +117,7 @@ class LSPCache:
         self,
         key: str,
         value: Any,
-        file_path: Optional[str] = None
+        file_path: str | None = None
     ) -> None:
         """
         Set cache entry (thread-safe).
@@ -198,7 +198,7 @@ class LSPCache:
             ValueError: If path is outside repo_root (security check)
         """
         # Normalize path
-        from src.code_intelligence.path_utils import normalize_path, is_within_repo
+        from src.code_intelligence.path_utils import is_within_repo, normalize_path
 
         normalized_path = normalize_path(file_path)
 
@@ -301,7 +301,7 @@ class LSPCache:
         """
         if isinstance(obj, str):
             return len(obj)
-        elif isinstance(obj, (int, float)):
+        elif isinstance(obj, int | float):
             return 8
         elif isinstance(obj, dict):
             return 100 + sum(

@@ -1,0 +1,28 @@
+# Source files (compiled output is in out/)
+src/**
+**/*.ts
+!**/*.d.ts
+tsconfig.json
+
+# Webview source (built output goes to webview-ui/dist/)
+webview-ui/src/**
+webview-ui/node_modules/**
+webview-ui/tsconfig.json
+webview-ui/vite.config.ts
+
+# Development files
+.vscode/**
+node_modules/**
+.gitignore
+
+# Test files
+__mocks__/**
+jest.config.*
+**/__tests__/**
+*.test.*
+
+# Package manager locks (not needed at runtime)
+package-lock.json
+
+# Documentation source (README is included by default)
+CHANGELOG.md

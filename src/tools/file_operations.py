@@ -18,12 +18,13 @@ import platform
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Any, Optional
+
+from src.observability import get_logger
+from src.tools.command_safety import check_command_safety, clamp_timeout
 
 from .base import Tool, ToolResult, ToolStatus
 from .search_tools import validate_path_security
-from src.tools.command_safety import check_command_safety, clamp_timeout
-from src.observability import get_logger
 
 logger = get_logger("tools.file_operations")
 
@@ -39,7 +40,7 @@ class FileOperationTool(Tool):
 
     # Class-level workspace root override (for testing)
     # Set this to allow operations in test directories
-    _workspace_root: Optional[Path] = None
+    _workspace_root: Path | None = None
 
     def _validate_path(
         self,
@@ -104,7 +105,7 @@ class ReadFileTool(FileOperationTool):
             description="Read contents of a file with optional line range support"
         )
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         """Get parameter schema (canonical source is tool_schemas.py)."""
         return {
             "type": "object",
@@ -120,9 +121,9 @@ class ReadFileTool(FileOperationTool):
     def execute(
         self,
         file_path: str,
-        start_line: Optional[int] = None,
-        end_line: Optional[int] = None,
-        max_lines: Optional[int] = None,
+        start_line: int | None = None,
+        end_line: int | None = None,
+        max_lines: int | None = None,
         **kwargs: Any
     ) -> ToolResult:
         """
@@ -186,12 +187,12 @@ class ReadFileTool(FileOperationTool):
 
             # STREAMING READ - bounded memory
             # Only stores lines we need, stops early
-            collected_lines: List[str] = []
+            collected_lines: list[str] = []
             total_lines = 0
             stopped_at_end = False
 
             try:
-                with open(path, "r", encoding="utf-8", errors="replace") as f:
+                with open(path, encoding="utf-8", errors="replace") as f:
                     for lineno, line in enumerate(f, start=1):
                         total_lines = lineno
 
@@ -237,7 +238,7 @@ class ReadFileTool(FileOperationTool):
             if not stopped_at_end and len(collected_lines) >= effective_max:
                 # We stopped due to max_lines, need to count rest of file
                 try:
-                    with open(path, "r", encoding="utf-8", errors="replace") as f:
+                    with open(path, encoding="utf-8", errors="replace") as f:
                         total_lines = sum(1 for _ in f)
                 except Exception:
                     pass  # Keep the count we had
@@ -286,7 +287,7 @@ class WriteFileTool(FileOperationTool):
             description="Write content to a file (creates or overwrites)"
         )
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         """Get parameter schema."""
         return {
             "type": "object",
@@ -339,10 +340,10 @@ class ListDirectoryTool(FileOperationTool):
     def __init__(self):
         super().__init__(
             name="list_directory",
-            description="List contents of a directory with file details"
+            description="list contents of a directory with file details"
         )
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         """Get parameter schema."""
         return {
             "type": "object",
@@ -353,7 +354,7 @@ class ListDirectoryTool(FileOperationTool):
         }
 
     def execute(self, directory_path: str, **kwargs: Any) -> ToolResult:
-        """List directory contents."""
+        """list directory contents."""
         try:
             # Validate path security
             try:
@@ -437,7 +438,7 @@ class EditFileTool(FileOperationTool):
             description="Edit a file by replacing old text with new text"
         )
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         """Get parameter schema."""
         return {
             "type": "object",
@@ -477,7 +478,7 @@ class EditFileTool(FileOperationTool):
                 )
 
             # Read current content
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 content = f.read()
 
             # Check if old_text exists
@@ -486,7 +487,7 @@ class EditFileTool(FileOperationTool):
                     tool_name=self.name,
                     status=ToolStatus.ERROR,
                     output=None,
-                    error=f"Text to replace not found in file"
+                    error="Text to replace not found in file"
                 )
 
             # Replace
@@ -524,7 +525,7 @@ class AppendToFileTool(FileOperationTool):
             description="Append content to an existing file (or create if doesn't exist)"
         )
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         """Get parameter schema."""
         return {
             "type": "object",
@@ -568,7 +569,7 @@ class AppendToFileTool(FileOperationTool):
 
             # Get total file stats (efficient line count)
             total_size = path.stat().st_size
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 total_lines = sum(1 for _ in f)
 
             return ToolResult(
@@ -596,17 +597,21 @@ class RunCommandTool(Tool):
     """
     Tool for running shell commands safely.
 
+    Supports both synchronous (foreground) and asynchronous (background) execution.
+    When background=True, delegates to BackgroundTaskRegistry for non-blocking execution.
+
     Note: Does not inherit from FileOperationTool as it doesn't
     operate on files directly. Security handled via command validation.
     """
 
-    def __init__(self):
+    def __init__(self, registry=None):
         super().__init__(
             name="run_command",
             description="Execute a shell command and return its output"
         )
+        self._registry = registry
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         """Get parameter schema."""
         return {
             "type": "object",
@@ -619,15 +624,106 @@ class RunCommandTool(Tool):
                         "Timeout in seconds (default: 120). Use higher values for "
                         "long-running commands like test suites or builds (max: 600)"
                     )
+                },
+                "background": {
+                    "type": "boolean",
+                    "description": (
+                        "Run in background (non-blocking). Returns immediately with a task ID. "
+                        "You will be automatically notified when the task completes. "
+                        "Use for long-running operations like test suites, builds, or linters."
+                    )
                 }
             },
             "required": ["command"]
         }
 
+    async def execute_async(
+        self,
+        command: str,
+        working_directory: str | None = None,
+        timeout: int = 120,
+        background: bool = False,
+        description: str = "",
+        **kwargs: Any,
+    ) -> ToolResult:
+        """Async execution path -- required for background=True (registry.launch is async)."""
+        if not background:
+            # Foreground: delegate to sync execute() (will be run in thread pool by ToolExecutor)
+            return self.execute(
+                command=command,
+                working_directory=working_directory,
+                timeout=timeout,
+                **kwargs,
+            )
+
+        # --- Background path ---
+        if self._registry is None:
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.ERROR,
+                output=None,
+                error="Background execution not available (no task registry configured)",
+            )
+
+        if not command or not command.strip():
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.ERROR,
+                output=None,
+                error="Command cannot be empty",
+            )
+
+        # Validate working directory (same checks as sync path)
+        work_dir = None
+        if working_directory:
+            cwd_path = Path(working_directory)
+            if not cwd_path.exists():
+                return ToolResult(
+                    tool_name=self.name,
+                    status=ToolStatus.ERROR,
+                    output=None,
+                    error=f"Working directory does not exist: {working_directory}",
+                )
+            if not cwd_path.is_dir():
+                return ToolResult(
+                    tool_name=self.name,
+                    status=ToolStatus.ERROR,
+                    output=None,
+                    error=f"Working directory path is not a directory: {working_directory}",
+                )
+            work_dir = str(cwd_path.absolute())
+
+        task_id, error = await self._registry.launch(
+            command=command,
+            description=description,
+            working_dir=work_dir,
+            timeout=timeout if timeout != 120 else None,  # let registry use its default
+        )
+
+        if error:
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.ERROR,
+                output=None,
+                error=error,
+            )
+
+        active = self._registry.active_count()
+        return ToolResult(
+            tool_name=self.name,
+            status=ToolStatus.SUCCESS,
+            output=(
+                f"Background task launched: {task_id}\n"
+                f"Command: {command}\n"
+                f"Active background tasks: {active}\n"
+                "You will be notified when it completes."
+            ),
+        )
+
     def execute(
         self,
         command: str,
-        working_directory: Optional[str] = None,
+        working_directory: str | None = None,
         timeout: int = 120,
         **kwargs: Any
     ) -> ToolResult:

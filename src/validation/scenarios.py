@@ -7,14 +7,7 @@ Three carefully designed test cases to validate agent capabilities:
 - HARD: Web Scraper with Analytics (5-8 hours)
 """
 
-from .scenario import (
-    ValidationScenario,
-    DifficultyLevel,
-    ValidationStep,
-    StepType,
-    SuccessCriteria
-)
-
+from .scenario import DifficultyLevel, StepType, SuccessCriteria, ValidationScenario, ValidationStep
 
 # ============================================================================
 # EASY: CLI Weather Tool

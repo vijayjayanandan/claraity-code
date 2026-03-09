@@ -19,7 +19,7 @@ import hashlib
 import json
 import logging
 import re
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Any, Optional
 
 from .error_context import ErrorContext
 
@@ -71,7 +71,7 @@ class ErrorRecoveryTracker:
 
     # Tool-specific field normalization to catch "wiggling" attacks
     # where the LLM makes trivial changes to bypass repeat detection
-    NORMALIZE_FIELDS: Dict[str, Dict[str, str]] = {
+    NORMALIZE_FIELDS: dict[str, dict[str, str]] = {
         "run_command": {"command": "collapse_whitespace"},
         "read_file": {"file_path": "normalize_path"},
         "write_file": {"file_path": "normalize_path"},
@@ -99,15 +99,15 @@ class ErrorRecoveryTracker:
         self._failed_call_signatures: set[str] = set()
 
         # Count failures by (tool_name, error_type) - different errors get separate budgets
-        self._failed_tool_error_counts: Dict[Tuple[str, str], int] = {}
+        self._failed_tool_error_counts: dict[tuple[str, str], int] = {}
 
         # History of approaches tried (for LLM context)
-        self._approach_history: List[Dict[str, Any]] = []
+        self._approach_history: list[dict[str, Any]] = []
 
         # Total failures in this request
         self._total_failures = 0
 
-    def _normalize_args(self, tool_name: str, tool_args: Dict[str, Any]) -> Dict[str, Any]:
+    def _normalize_args(self, tool_name: str, tool_args: dict[str, Any]) -> dict[str, Any]:
         """
         Tool-specific argument normalization to catch "wiggling".
 
@@ -142,7 +142,7 @@ class ErrorRecoveryTracker:
 
         return normalized
 
-    def _stable_signature(self, tool_name: str, tool_args: Dict[str, Any]) -> str:
+    def _stable_signature(self, tool_name: str, tool_args: dict[str, Any]) -> str:
         """
         Generate stable hash for tool call.
 
@@ -160,7 +160,7 @@ class ErrorRecoveryTracker:
         canonical = json.dumps({"tool": tool_name, "args": normalized}, sort_keys=True)
         return hashlib.sha256(canonical.encode()).hexdigest()[:32]
 
-    def _get_key_args(self, tool_name: str, tool_args: Dict[str, Any]) -> str:
+    def _get_key_args(self, tool_name: str, tool_args: dict[str, Any]) -> str:
         """
         Get a human-readable summary of key arguments for blocked call messages.
 
@@ -188,8 +188,8 @@ class ErrorRecoveryTracker:
     def is_repeated_failed_call(
         self,
         tool_name: str,
-        tool_args: Dict[str, Any]
-    ) -> Tuple[bool, str]:
+        tool_args: dict[str, Any]
+    ) -> tuple[bool, str]:
         """
         Check if this exact call has FAILED before.
 
@@ -202,7 +202,7 @@ class ErrorRecoveryTracker:
             tool_args: Arguments dictionary
 
         Returns:
-            Tuple of (is_repeat, summary_with_args)
+            tuple of (is_repeat, summary_with_args)
             - is_repeat: True if this call failed before
             - summary_with_args: Human-readable summary (empty if not repeat)
         """
@@ -224,7 +224,7 @@ class ErrorRecoveryTracker:
         self,
         tool_name: str,
         error_type: str
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         """
         Check if retry should be allowed for this tool+error_type.
 
@@ -237,7 +237,7 @@ class ErrorRecoveryTracker:
             error_type: Classification of the error
 
         Returns:
-            Tuple of (allowed, reason)
+            tuple of (allowed, reason)
             - allowed: True if retry should be allowed
             - reason: Human-readable explanation (for both allow and deny)
         """
@@ -259,12 +259,12 @@ class ErrorRecoveryTracker:
         self,
         error_type: str,
         tool_name: str,
-        tool_args: Dict[str, Any],
+        tool_args: dict[str, Any],
         error_message: str,
-        exit_code: Optional[int] = None,
-        stdout: Optional[str] = None,
-        stderr: Optional[str] = None,
-        working_dir: Optional[str] = None
+        exit_code: int | None = None,
+        stdout: str | None = None,
+        stderr: str | None = None,
+        working_dir: str | None = None
     ) -> ErrorContext:
         """
         Record a FAILURE and return structured context for LLM.
@@ -321,7 +321,7 @@ class ErrorRecoveryTracker:
             previous_attempts=self._approach_history[-3:]  # Cap at 3 for context
         )
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """
         Get current tracking statistics.
 
@@ -340,7 +340,7 @@ class ErrorRecoveryTracker:
         """Get total failure count (public accessor)."""
         return self._total_failures
 
-    def reset_tool_error_counts(self, tool_name: Optional[str] = None) -> None:
+    def reset_tool_error_counts(self, tool_name: str | None = None) -> None:
         """
         Reset per-tool-error counters (partial recovery).
 

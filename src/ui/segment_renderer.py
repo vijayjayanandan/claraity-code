@@ -6,18 +6,19 @@ AssistantMessage widgets. Used by both live streaming and session replay paths.
 """
 
 import json
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Optional
 
-from src.observability import get_logger
 from src.core.tool_status import ToolStatus as CoreToolStatus
+from src.observability import get_logger
 
 logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from ..session.models.message import Message
+    from .events import ToolStatus
     from .widgets.message import AssistantMessage
     from .widgets.tool_card import ToolCard
-    from .events import ToolStatus
 
 
 class SegmentRenderer:
@@ -61,7 +62,7 @@ class SegmentRenderer:
         skip_existing_cards: bool = False,
         defer_tool_mount: bool = False,
         use_store_hydration: bool = False,
-        hydrate_fn: Optional[Callable] = None,
+        hydrate_fn: Callable | None = None,
     ) -> int:
         """
         Render segments to a message widget.
@@ -84,8 +85,11 @@ class SegmentRenderer:
             Number of segments rendered
         """
         from src.session.models.message import (
-            TextSegment, ToolCallSegment, CodeBlockSegment,
-            ToolCallRefSegment, ThinkingSegment
+            CodeBlockSegment,
+            TextSegment,
+            ThinkingSegment,
+            ToolCallRefSegment,
+            ToolCallSegment,
         )
 
         rendered = 0
@@ -164,9 +168,7 @@ class SegmentRenderer:
         Called when text was already streamed incrementally via TextDelta.
         Skips TextSegment and CodeBlockSegment (already rendered).
         """
-        from src.session.models.message import (
-            ToolCallSegment, ToolCallRefSegment
-        )
+        from src.session.models.message import ToolCallRefSegment, ToolCallSegment
 
         for segment in segments:
             if isinstance(segment, ToolCallRefSegment):
@@ -201,7 +203,7 @@ class SegmentRenderer:
         message: "Message",
         tc_idx: int,
         context: str = ""
-    ) -> Optional[Any]:
+    ) -> Any | None:
         """
         Safely get a tool call by index with bounds checking and logging.
 
@@ -234,7 +236,7 @@ class SegmentRenderer:
         message: "Message",
         tool_call_id: str,
         context: str = ""
-    ) -> Optional[Any]:
+    ) -> Any | None:
         """
         Get a tool call by ID (stable reference).
 

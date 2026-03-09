@@ -5,11 +5,11 @@ Shows when agent hits budget limits or timeout and needs user decision to contin
 Simple two-option design: Continue or Stop.
 """
 
-from textual.widgets import Static
-from textual.reactive import reactive
-from textual.binding import Binding
-from rich.text import Text
 from rich.console import RenderableType
+from rich.text import Text
+from textual.binding import Binding
+from textual.reactive import reactive
+from textual.widgets import Static
 
 from ..messages import PauseResponseMessage
 

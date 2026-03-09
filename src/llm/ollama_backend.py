@@ -1,8 +1,10 @@
 """Ollama backend implementation."""
 
 import json
+from collections.abc import Iterator
+from typing import Any, Optional
+
 import requests
-from typing import List, Dict, Any, Iterator, Optional
 import tiktoken
 
 from .base import LLMBackend, LLMConfig, LLMResponse, StreamChunk
@@ -24,12 +26,12 @@ class OllamaBackend(LLMBackend):
         # Token counter (fallback, Ollama doesn't provide exact counts)
         try:
             self.encoding = tiktoken.get_encoding("cl100k_base")
-        except:
+        except Exception:
             self.encoding = None
 
     def generate(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         **kwargs: Any
     ) -> LLMResponse:
         """Generate completion from messages."""
@@ -88,7 +90,7 @@ class OllamaBackend(LLMBackend):
 
     def generate_stream(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         **kwargs: Any
     ) -> Iterator[StreamChunk]:
         """Generate streaming completion."""
@@ -153,11 +155,11 @@ class OllamaBackend(LLMBackend):
                 timeout=5.0
             )
             return response.status_code == 200
-        except:
+        except Exception:
             return False
 
-    def list_models(self) -> List[str]:
-        """List available models in Ollama."""
+    def list_models(self) -> list[str]:
+        """list available models in Ollama."""
         try:
             response = requests.get(
                 f"{self.api_url}/tags",
@@ -202,6 +204,6 @@ class OllamaBackend(LLMBackend):
         except requests.exceptions.RequestException as e:
             raise RuntimeError(f"Failed to pull model: {e}")
 
-    def _messages_to_text(self, messages: List[Dict[str, str]]) -> str:
+    def _messages_to_text(self, messages: list[dict[str, str]]) -> str:
         """Convert messages to text for token counting."""
         return "\n".join([f"{m['role']}: {m['content']}" for m in messages])

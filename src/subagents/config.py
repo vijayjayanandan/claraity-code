@@ -19,12 +19,16 @@ Configuration files are loaded hierarchically:
 2. User: ~/.clarity/agents/*.md (lower priority)
 """
 
+import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Dict, Any
-import re
+from typing import TYPE_CHECKING, Any, Optional
+
+if TYPE_CHECKING:
+    from src.llm.config_loader import LLMConfigData
+
 import yaml
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -44,11 +48,11 @@ class SubAgentLLMConfig:
         context_window: Context window size in tokens (None = inherit)
     """
 
-    backend_type: Optional[str] = None
-    model: Optional[str] = None
-    base_url: Optional[str] = None
-    api_key: Optional[str] = None
-    context_window: Optional[int] = None
+    backend_type: str | None = None
+    model: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
+    context_window: int | None = None
 
     @property
     def has_overrides(self) -> bool:
@@ -76,7 +80,7 @@ class SubAgentConfig:
         name: Unique lowercase identifier (e.g., "code-reviewer")
         description: Natural language description for automatic delegation
         system_prompt: Specialized system prompt (from Markdown body)
-        tools: List of allowed tools (None = inherit all)
+        tools: list of allowed tools (None = inherit all)
         llm: LLM overrides (None = inherit everything from main agent)
         config_path: Path to the configuration file
         metadata: Additional metadata from YAML frontmatter
@@ -85,10 +89,10 @@ class SubAgentConfig:
     name: str
     description: str
     system_prompt: str
-    tools: Optional[List[str]] = None
-    llm: Optional[SubAgentLLMConfig] = None
-    config_path: Optional[Path] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    tools: list[str] | None = None
+    llm: SubAgentLLMConfig | None = None
+    config_path: Path | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         """Validate configuration after initialization."""
@@ -211,7 +215,7 @@ class SubAgentConfig:
         )
 
     @staticmethod
-    def _parse_markdown_with_frontmatter(content: str) -> tuple[Dict[str, Any], str]:
+    def _parse_markdown_with_frontmatter(content: str) -> tuple[dict[str, Any], str]:
         """Parse Markdown file with YAML frontmatter.
 
         Format:
@@ -336,24 +340,24 @@ class SubAgentConfigLoader:
     1. Built-in: src/prompts/subagents/*.py (Python constants)
     2. Legacy: ./.clarity/agents/*.md (Markdown files, deprecated)
     3. User: ~/.clarity/agents/*.md (Markdown files, deprecated)
-    
+
     Note: Markdown format is deprecated. Use Python constants in src/prompts/subagents/
     """
 
-    def __init__(self, working_directory: Optional[Path] = None):
+    def __init__(self, working_directory: Path | None = None):
         """Initialize loader.
 
         Args:
             working_directory: Project directory (default: current directory)
         """
         self.working_directory = working_directory or Path.cwd()
-        self.loaded_configs: Dict[str, SubAgentConfig] = {}
+        self.loaded_configs: dict[str, SubAgentConfig] = {}
 
-    def discover_all(self) -> Dict[str, SubAgentConfig]:
+    def discover_all(self) -> dict[str, SubAgentConfig]:
         """Discover all subagent configurations.
 
         Returns:
-            Dict mapping subagent names to configs
+            dict mapping subagent names to configs
 
         Example:
             >>> loader = SubAgentConfigLoader()
@@ -361,7 +365,7 @@ class SubAgentConfigLoader:
             >>> print(list(configs.keys()))
             ['code-reviewer', 'test-writer', 'doc-writer']
         """
-        configs: Dict[str, SubAgentConfig] = {}
+        configs: dict[str, SubAgentConfig] = {}
 
         # Load from built-in prompts (highest priority)
         builtin_configs = self._load_from_python_prompts()
@@ -404,11 +408,11 @@ class SubAgentConfigLoader:
         logger.info(f"Total subagents discovered: {len(configs)}")
         return configs
 
-    def _load_from_python_prompts(self) -> Dict[str, SubAgentConfig]:
+    def _load_from_python_prompts(self) -> dict[str, SubAgentConfig]:
         """Load subagent prompts from Python constants in src/prompts/subagents/.
 
         Returns:
-            Dict mapping subagent names to configs
+            dict mapping subagent names to configs
         """
         configs = {}
 
@@ -416,16 +420,16 @@ class SubAgentConfigLoader:
             # Import the subagent prompts module
             from src.prompts.subagents import (
                 CODE_REVIEWER_PROMPT,
-                TEST_WRITER_PROMPT,
-                DOC_WRITER_PROMPT,
                 CODE_WRITER_PROMPT,
+                DOC_WRITER_PROMPT,
                 EXPLORE_PROMPT,
-                PLANNER_PROMPT,
+                EXPLORE_TOOLS,
                 GENERAL_PURPOSE_PROMPT,
                 KNOWLEDGE_BUILDER_PROMPT,
-                EXPLORE_TOOLS,
-                PLANNER_TOOLS,
                 KNOWLEDGE_BUILDER_TOOLS,
+                PLANNER_PROMPT,
+                PLANNER_TOOLS,
+                TEST_WRITER_PROMPT,
             )
 
             # Define subagent configurations
@@ -502,14 +506,14 @@ class SubAgentConfigLoader:
 
         return configs
 
-    def _load_from_directory(self, directory: Path) -> Dict[str, SubAgentConfig]:
+    def _load_from_directory(self, directory: Path) -> dict[str, SubAgentConfig]:
         """Load all .md files from a directory (legacy format).
 
         Args:
             directory: Directory to scan
 
         Returns:
-            Dict mapping subagent names to configs
+            dict mapping subagent names to configs
         """
         configs = {}
 
@@ -525,7 +529,7 @@ class SubAgentConfigLoader:
 
         return configs
 
-    def load(self, name: str) -> Optional[SubAgentConfig]:
+    def load(self, name: str) -> SubAgentConfig | None:
         """Load a specific subagent by name.
 
         Args:
@@ -550,11 +554,11 @@ class SubAgentConfigLoader:
         # Return requested config
         return self.loaded_configs.get(name)
 
-    def reload(self) -> Dict[str, SubAgentConfig]:
+    def reload(self) -> dict[str, SubAgentConfig]:
         """Reload all configurations (clears cache).
 
         Returns:
-            Dict mapping subagent names to configs
+            dict mapping subagent names to configs
         """
         self.loaded_configs.clear()
         return self.discover_all()
@@ -591,11 +595,11 @@ class SubAgentConfigLoader:
                     f"model={override.model}"
                 )
 
-    def get_all_names(self) -> List[str]:
+    def get_all_names(self) -> list[str]:
         """Get names of all discovered subagents.
 
         Returns:
-            List of subagent names
+            list of subagent names
         """
         if not self.loaded_configs:
             self.discover_all()

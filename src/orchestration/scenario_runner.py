@@ -10,19 +10,20 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from rich.console import Console
-from rich.panel import Panel
+from rich import box
 from rich.columns import Columns
-from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich.table import Table
+from rich.console import Console
 from rich.layout import Layout
 from rich.live import Live
-from rich import box
+from rich.panel import Panel
+from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.table import Table
 
+from src.platform.windows import safe_print
+
+from .agent_orchestrator import AgentOrchestrator
 from .scenario import AutonomousScenario, ScenarioResult, TurnResult
 from .testing_agent import TestingAgent
-from .agent_orchestrator import AgentOrchestrator
-from src.platform.windows import safe_print
 
 
 class AutonomousScenarioRunner:
@@ -91,6 +92,8 @@ class AutonomousScenarioRunner:
         turn_results = []
         turn = 0
         coding_agent_response = None
+        files_generated = []
+        tools_called = []
         files_generated_all = []
         tools_called_all = []
 
@@ -109,7 +112,7 @@ class AutonomousScenarioRunner:
                 reasoning = first_decision["reasoning"]
             else:
                 # Testing Agent generates next message based on Coding Agent's response
-                self._safe_print(f"\n[cyan][TESTING AGENT][/cyan] Analyzing response...")
+                self._safe_print("\n[cyan][TESTING AGENT][/cyan] Analyzing response...")
                 decision = testing_agent.generate_next_message(
                     coding_agent_response=coding_agent_response,
                     files_generated=files_generated,

@@ -29,7 +29,14 @@
       "Bash(powershell -Command \"Get-Content ''C:\\\\Vijay\\\\Learning\\\\AI\\\\ai-coding-agent\\\\.clarity\\\\logs\\\\app.jsonl'' | Select-String -Pattern ''21:57'' | Select-Object -Last 10\")",
       "Bash(for module in \"src.core.cancel_token\" \"src.memory.manager\" \"src.session.subagent_registry\" \"src.tools.file_ops\" \"src.workflow\" \"src.core.auth\")",
       "Bash(do echo \"=== $module ===\")",
-      "Bash(done)"
+      "Bash(done)",
+      "Bash(sqlite3:*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:api.github.com)",
+      "Bash(powershell:*)",
+      "Bash(dir:*)",
+      "Bash(python3:*)",
+      "Bash(npx tsc:*)"
     ],
     "deny": []
   }

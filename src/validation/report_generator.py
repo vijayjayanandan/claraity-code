@@ -5,8 +5,8 @@ Generates validation reports in multiple formats (Markdown, HTML, JSON).
 """
 
 import json
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 from .scenario import ValidationReport, ValidationResult
@@ -19,7 +19,7 @@ class ReportGenerator:
         self,
         report: ValidationReport,
         format: str = "markdown",
-        output_dir: Optional[Path] = None
+        output_dir: Path | None = None
     ) -> Path:
         """
         Generate validation report in specified format.
@@ -168,7 +168,7 @@ class ReportGenerator:
             md += "\n"
 
         # Footer
-        md += f"""---
+        md += """---
 
 ## Next Steps
 

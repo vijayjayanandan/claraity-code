@@ -2,7 +2,8 @@
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -29,8 +30,8 @@ class Message(BaseModel):
     role: MessageRole
     content: str
     timestamp: datetime = Field(default_factory=datetime.now)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-    token_count: Optional[int] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    token_count: int | None = None
 
     def __str__(self) -> str:
         """String representation of message."""
@@ -46,10 +47,10 @@ class MemoryEntry(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.now)
     importance_score: float = 0.5  # 0.0 to 1.0
     access_count: int = 0
-    last_accessed: Optional[datetime] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-    token_count: Optional[int] = None
-    embedding: Optional[List[float]] = None
+    last_accessed: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    token_count: int | None = None
+    embedding: list[float] | None = None
 
     def update_access(self) -> None:
         """Update access statistics."""
@@ -92,10 +93,10 @@ class ConversationTurn(BaseModel):
     id: str
     user_message: Message
     assistant_message: Message
-    tool_calls: List[Dict[str, Any]] = Field(default_factory=list)
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
     timestamp: datetime = Field(default_factory=datetime.now)
-    summary: Optional[str] = None
-    token_count: Optional[int] = None
+    summary: str | None = None
+    token_count: int | None = None
 
     def compress(self) -> str:
         """Create compressed representation of the turn."""
@@ -113,15 +114,15 @@ class CodeContext(BaseModel):
     """Context about code being worked on."""
 
     file_path: str
-    content: Optional[str] = None
-    language: Optional[str] = None
-    start_line: Optional[int] = None
-    end_line: Optional[int] = None
-    summary: Optional[str] = None
-    functions: List[str] = Field(default_factory=list)
-    classes: List[str] = Field(default_factory=list)
-    imports: List[str] = Field(default_factory=list)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    content: str | None = None
+    language: str | None = None
+    start_line: int | None = None
+    end_line: int | None = None
+    summary: str | None = None
+    functions: list[str] = Field(default_factory=list)
+    classes: list[str] = Field(default_factory=list)
+    imports: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class TaskContext(BaseModel):
@@ -131,7 +132,7 @@ class TaskContext(BaseModel):
     description: str
     task_type: str  # e.g., "refactor", "debug", "implement", "explain"
     status: str = "in_progress"  # in_progress, completed, failed
-    related_files: List[str] = Field(default_factory=list)
-    key_concepts: List[str] = Field(default_factory=list)
-    constraints: List[str] = Field(default_factory=list)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    related_files: list[str] = Field(default_factory=list)
+    key_concepts: list[str] = Field(default_factory=list)
+    constraints: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)

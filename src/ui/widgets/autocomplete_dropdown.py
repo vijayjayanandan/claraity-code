@@ -7,11 +7,12 @@ Features:
 - Auto-hide when no suggestions
 """
 
-from textual.widgets import Static
-from textual.reactive import reactive
-from rich.text import Text
+from typing import Optional
+
 from rich.console import RenderableType
-from typing import List, Optional
+from rich.text import Text
+from textual.reactive import reactive
+from textual.widgets import Static
 
 from ..autocomplete import FileSuggestion
 
@@ -61,15 +62,15 @@ class AutocompleteDropdown(Static):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._suggestions: List[FileSuggestion] = []
+        self._suggestions: list[FileSuggestion] = []
         self.add_class("-hidden")
 
-    def show(self, suggestions: List[FileSuggestion]) -> None:
+    def show(self, suggestions: list[FileSuggestion]) -> None:
         """
         Show dropdown with suggestions.
 
         Args:
-            suggestions: List of FileSuggestion objects
+            suggestions: list of FileSuggestion objects
         """
         self._suggestions = suggestions
         self.selected_index = 0
@@ -96,7 +97,7 @@ class AutocompleteDropdown(Static):
             self.selected_index = new_index
             self.refresh()
 
-    def get_selected(self) -> Optional[FileSuggestion]:
+    def get_selected(self) -> FileSuggestion | None:
         """
         Get currently selected suggestion.
 
@@ -107,7 +108,7 @@ class AutocompleteDropdown(Static):
             return self._suggestions[self.selected_index]
         return None
 
-    def get_selected_path(self) -> Optional[str]:
+    def get_selected_path(self) -> str | None:
         """
         Get path of currently selected suggestion.
 

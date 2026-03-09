@@ -12,7 +12,7 @@ Secrets:    SecretStore key "jira_api_token_<profile>"
 import json
 import logging
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
 from src.integrations.mcp.config import McpServerConfig
 
@@ -54,15 +54,15 @@ class JiraConnection:
     def __init__(
         self,
         profile: str = "default",
-        config_dir: Optional[Path] = None,
+        config_dir: Path | None = None,
         secret_store=None,
     ):
         self._profile = profile
         self._config_dir = config_dir or DEFAULT_CONFIG_DIR
         self._config_path = self._config_dir / f"{profile}.json"
         self._secret_store = secret_store
-        self._jira_url: Optional[str] = None
-        self._username: Optional[str] = None
+        self._jira_url: str | None = None
+        self._username: str | None = None
         self._enabled: bool = False
         self._load_config()
 
@@ -99,11 +99,11 @@ class JiraConnection:
         return self._profile
 
     @property
-    def jira_url(self) -> Optional[str]:
+    def jira_url(self) -> str | None:
         return self._jira_url
 
     @property
-    def username(self) -> Optional[str]:
+    def username(self) -> str | None:
         return self._username
 
     @property
@@ -151,7 +151,7 @@ class JiraConnection:
         store = self._get_secret_store()
         return store.has(_secret_key(self._profile))
 
-    def _get_api_token(self) -> Optional[str]:
+    def _get_api_token(self) -> str | None:
         """Retrieve API token from SecretStore."""
         store = self._get_secret_store()
         return store.get(_secret_key(self._profile))
@@ -215,8 +215,8 @@ class JiraConnection:
         )
 
     @classmethod
-    def list_profiles(cls, config_dir: Optional[Path] = None) -> List[str]:
-        """List all configured profile names.
+    def list_profiles(cls, config_dir: Path | None = None) -> list[str]:
+        """list all configured profile names.
 
         Returns:
             Sorted list of profile names (e.g. ["corporate", "personal"]).

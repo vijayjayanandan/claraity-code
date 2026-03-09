@@ -16,10 +16,10 @@ Usage:
 """
 
 from .summarizer import (
+    SUMMARY_PRIORITIES,
+    SUMMARY_TOKEN_BUDGET,
     PrioritizedSummarizer,
     SummarySection,
-    SUMMARY_TOKEN_BUDGET,
-    SUMMARY_PRIORITIES,
 )
 
 __all__ = [

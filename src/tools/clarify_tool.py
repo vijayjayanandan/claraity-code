@@ -5,7 +5,7 @@ In TUI mode, the SpecialToolHandlers + ClarifyWidget handle the interactive UI.
 The execute() method is only called in non-interactive contexts (subagents, tests).
 """
 
-from typing import Any, Dict
+from typing import Any
 
 from .base import Tool, ToolResult
 
@@ -24,7 +24,7 @@ class ClarifyTool(Tool):
             description="Ask the user clarifying questions before proceeding"
         )
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         """Get parameter schema."""
         from .tool_schemas import CLARIFY_TOOL
         return CLARIFY_TOOL.parameters

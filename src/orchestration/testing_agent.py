@@ -7,13 +7,14 @@ to validate its behavior through natural, adaptive conversations.
 
 import os
 import re
-from typing import Dict, Any, Optional, List
 from pathlib import Path
+from typing import Any, Optional
 
-from .scenario import AutonomousScenario, ValidationCheck, ScenarioResult
-from .models import ConversationLog
+from src.llm.base import LLMBackendType, LLMConfig
 from src.llm.openai_backend import OpenAIBackend
-from src.llm.base import LLMConfig, LLMBackendType
+
+from .models import ConversationLog
+from .scenario import AutonomousScenario, ScenarioResult, ValidationCheck
 
 
 class TestingAgent:
@@ -33,10 +34,10 @@ class TestingAgent:
     def __init__(
         self,
         scenario: AutonomousScenario,
-        model_name: Optional[str] = None,
-        backend: Optional[str] = None,
-        base_url: Optional[str] = None,
-        api_key: Optional[str] = None
+        model_name: str | None = None,
+        backend: str | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None
     ):
         """
         Initialize Testing Agent.
@@ -49,7 +50,7 @@ class TestingAgent:
             api_key: API key (defaults to env OPENAI_API_KEY)
         """
         self.scenario = scenario
-        self.conversation_history: List[Dict[str, str]] = []
+        self.conversation_history: list[dict[str, str]] = []
 
         # Initialize LLM backend (using OpenAI-compatible backend)
         self.model_name = model_name or os.getenv("LLM_MODEL")
@@ -118,7 +119,7 @@ IMPORTANT RULES:
 - Your goal is to VALIDATE the coding agent, not to make its job harder
 """
 
-    def generate_first_message(self) -> Dict[str, Any]:
+    def generate_first_message(self) -> dict[str, Any]:
         """
         Generate the first user message to start the conversation.
 
@@ -160,10 +161,10 @@ Provide your response in the required format."""
     def generate_next_message(
         self,
         coding_agent_response: str,
-        files_generated: List[str],
-        tools_called: List[str],
+        files_generated: list[str],
+        tools_called: list[str],
         turn_number: int
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Generate next user message based on coding agent's response.
 
@@ -222,9 +223,9 @@ Provide your response in the required format."""
     def generate_final_verdict(
         self,
         conversation_log: ConversationLog,
-        workspace_files: List[str],
+        workspace_files: list[str],
         workspace_path: Path
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Generate final verdict after conversation ends.
 
@@ -237,8 +238,8 @@ Provide your response in the required format."""
             Dictionary with:
                 - verdict: PASS or FAIL
                 - reasoning: Explanation of verdict
-                - evidence: List of evidence points
-                - validation_checks: List of ValidationCheck objects
+                - evidence: list of evidence points
+                - validation_checks: list of ValidationCheck objects
         """
         # Build conversation summary
         conversation_summary = "\n\n".join([
@@ -302,7 +303,7 @@ REASONING: <why you made this decision>
 
         return self._parse_verdict(response)
 
-    def _parse_response(self, response: str) -> Dict[str, Any]:
+    def _parse_response(self, response: str) -> dict[str, Any]:
         """
         Parse Testing Agent's response into structured format.
 
@@ -347,7 +348,7 @@ REASONING: <why you made this decision>
 
         return result
 
-    def _parse_verdict(self, response: str) -> Dict[str, Any]:
+    def _parse_verdict(self, response: str) -> dict[str, Any]:
         """
         Parse final verdict response.
 
@@ -355,10 +356,10 @@ REASONING: <why you made this decision>
             Dictionary with:
                 - verdict: "PASS" or "FAIL"
                 - reasoning: Explanation
-                - evidence: List of evidence points
-                - validation_checks: List of ValidationCheck objects
+                - evidence: list of evidence points
+                - validation_checks: list of ValidationCheck objects
         """
-        validation_checks: List[ValidationCheck] = []
+        validation_checks: list[ValidationCheck] = []
 
         # Extract validation checks for each criterion
         for i, criterion in enumerate(self.scenario.success_criteria):

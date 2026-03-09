@@ -8,7 +8,7 @@ Follows the same architecture as PlanModeState in plan_mode.py.
 """
 
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from src.observability import get_logger
 
@@ -49,7 +49,7 @@ class DirectorAdapter:
 
     def __init__(self) -> None:
         self._protocol = DirectorProtocol()
-        self._current_slice_id: Optional[int] = None
+        self._current_slice_id: int | None = None
 
     # -- Properties (proxied from protocol) --
 
@@ -75,7 +75,7 @@ class DirectorAdapter:
     # -- Tool Gating --
 
     def gate_tool(
-        self, tool_name: str, tool_args: Optional[Dict[str, Any]] = None,
+        self, tool_name: str, tool_args: dict[str, Any] | None = None,
     ) -> DirectorGateDecision:
         """Check if a tool is allowed in the current phase.
 
@@ -128,7 +128,7 @@ class DirectorAdapter:
 
     # -- Prompt Injection --
 
-    def get_prompt_injection(self) -> Optional[str]:
+    def get_prompt_injection(self) -> str | None:
         """Get the system prompt injection for the current phase.
 
         Returns None when director is inactive.
@@ -161,7 +161,7 @@ class DirectorAdapter:
         if self._protocol.plan and self._protocol.plan.slices:
             self._current_slice_id = self._protocol.plan.slices[0].id
 
-    def reject_plan(self, feedback: Optional[str] = None) -> None:
+    def reject_plan(self, feedback: str | None = None) -> None:
         """AWAITING_APPROVAL -> PLAN (revision cycle)."""
         self._protocol.reject_plan(feedback)
 
@@ -203,7 +203,7 @@ class DirectorAdapter:
 
     # -- Status --
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Dashboard readout."""
         status = self._protocol.get_status()
         status["current_slice_id"] = self._current_slice_id

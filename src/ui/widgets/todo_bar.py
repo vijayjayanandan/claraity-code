@@ -5,22 +5,23 @@ Shows the agent's todo list (from TodoWrite tool) in a collapsible bar
 above the status bar. Hidden until first todo is created.
 """
 
-from textual.widgets import Static
-from textual.reactive import reactive
+from typing import Any
+
 from rich.text import Text
-from typing import List, Dict, Any
+from textual.reactive import reactive
+from textual.widgets import Static
 
 
 class TodoBar(Static):
     """Collapsible todo list display above status bar."""
 
-    todos: reactive[List[Dict[str, Any]]] = reactive([])
+    todos: reactive[list[dict[str, Any]]] = reactive([])
     is_expanded: reactive[bool] = reactive(False)
 
     # CSS handled by src/ui/styles.tcss (#todo-bar styles)
     DEFAULT_CSS = ""
 
-    def watch_todos(self, todos: List[Dict[str, Any]]) -> None:
+    def watch_todos(self, todos: list[dict[str, Any]]) -> None:
         """Show/hide based on whether todos exist and not all completed."""
         if todos:
             # Check if all tasks are completed
@@ -100,7 +101,7 @@ class TodoBar(Static):
         """Toggle expanded/collapsed state."""
         self.is_expanded = not self.is_expanded
 
-    def update_todos(self, todos: List[Dict[str, Any]]) -> None:
+    def update_todos(self, todos: list[dict[str, Any]]) -> None:
         """Update the todo list."""
         self.todos = todos.copy() if todos else []
 

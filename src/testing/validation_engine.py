@@ -1,13 +1,14 @@
 """Validation engine with LLM-powered feedback generation."""
 
 import logging
-from typing import List, Dict, Any, Optional
 from pathlib import Path
+from typing import Any, Optional
 
-from .test_runner import TestRunner
-from .models import TestSuiteResult
 from src.llm.base import LLMBackend
 from src.llm.openai_backend import OpenAIBackend
+
+from .models import TestSuiteResult
+from .test_runner import TestRunner
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,7 @@ class ValidationEngine:
     def __init__(
         self,
         working_directory: str = ".",
-        llm_backend: Optional[LLMBackend] = None
+        llm_backend: LLMBackend | None = None
     ):
         """
         Initialize validation engine.
@@ -46,20 +47,20 @@ class ValidationEngine:
         else:
             self.llm_backend = llm_backend
 
-    def validate_code(self, files_changed: List[str]) -> Dict[str, Any]:
+    def validate_code(self, files_changed: list[str]) -> dict[str, Any]:
         """
         Run full validation pipeline: tests + linters + feedback generation.
 
         Args:
-            files_changed: List of modified files to validate
+            files_changed: list of modified files to validate
 
         Returns:
-            Dict with validation results:
+            dict with validation results:
             {
                 'test_result': TestSuiteResult,
                 'all_passed': bool,
                 'feedback': str,
-                'files_validated': List[str]
+                'files_validated': list[str]
             }
         """
         logger.info(f"Validating {len(files_changed)} changed files")

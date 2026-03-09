@@ -22,18 +22,17 @@ Key features:
 
 from .parser import (
     ParseError,
-    parse_line,
-    parse_file_iter,
-    load_session,
-    validate_session_file,
     get_session_info,
+    load_session,
+    parse_file_iter,
+    parse_line,
+    validate_session_file,
 )
-
 from .writer import (
-    WriteResult,
     SessionWriter,
-    create_session_file,
+    WriteResult,
     append_to_session,
+    create_session_file,
 )
 
 __all__ = [

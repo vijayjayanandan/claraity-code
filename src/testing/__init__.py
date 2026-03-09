@@ -3,7 +3,7 @@
 from .models import TestCase, TestStatus, TestSuiteResult
 from .test_runner import TestRunner
 from .validation_engine import ValidationEngine
-from .validation_tool import RunTestsTool, DetectTestFrameworkTool
+from .validation_tool import DetectTestFrameworkTool, RunTestsTool
 
 __all__ = [
     # Data models

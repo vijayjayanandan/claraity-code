@@ -12,7 +12,7 @@ Lifecycle:
 
 import time
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
+from typing import Any, Optional
 
 
 @dataclass
@@ -41,7 +41,7 @@ class ToolLoopState:
         MAX_ERROR_BUDGET_RESUMES: Cap on error budget "Continue" loops.
     """
 
-    current_context: List[Dict[str, Any]]
+    current_context: list[dict[str, Any]]
 
     # Accumulated counters (persist across iterations)
     tool_call_count: int = 0
@@ -51,15 +51,15 @@ class ToolLoopState:
 
     # Per-iteration state (reset each loop)
     response_content: str = ""
-    tool_calls: Optional[Any] = None
-    tool_messages: List[Dict[str, Any]] = field(default_factory=list)
-    blocked_calls: List[str] = field(default_factory=list)
+    tool_calls: Any | None = None
+    tool_messages: list[dict[str, Any]] = field(default_factory=list)
+    blocked_calls: list[str] = field(default_factory=list)
     user_rejected: bool = False
-    provider_error: Optional[str] = None
+    provider_error: str | None = None
 
     # Budget constants
     MAX_TOOL_CALLS: int = 200
-    MAX_WALL_TIME_SECONDS: Optional[int] = None
+    MAX_WALL_TIME_SECONDS: int | None = None
     ABSOLUTE_MAX_ITERATIONS: int = 50
     MAX_PAUSE_CONTINUES: int = 3
     MAX_ERROR_BUDGET_RESUMES: int = 2

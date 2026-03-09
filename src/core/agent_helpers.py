@@ -5,7 +5,8 @@ Provides utility classes that depend on AgentInterface instead of CodingAgent,
 showing how to build loosely-coupled subsystems.
 """
 
-from typing import Dict, Any, List, Optional
+from typing import Any, Optional
+
 from .agent_interface import AgentInterface
 
 
@@ -37,7 +38,7 @@ class AgentContextProvider:
         """
         self.agent = agent
 
-    def get_full_context(self) -> Dict[str, Any]:
+    def get_full_context(self) -> dict[str, Any]:
         """
         Get complete execution context for monitoring/observability.
 
@@ -45,7 +46,7 @@ class AgentContextProvider:
         session info, and active task.
 
         Returns:
-            Dict[str, Any]: Complete context dictionary
+            dict[str, Any]: Complete context dictionary
         """
         return self.agent.get_context()
 
@@ -105,7 +106,7 @@ class AgentLLMProxy:
 
     def call_llm(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         **kwargs
     ) -> str:
         """
@@ -132,10 +133,10 @@ class AgentLLMProxy:
 
     def call_with_retry(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         max_retries: int = 3,
         **kwargs
-    ) -> Optional[str]:
+    ) -> str | None:
         """
         Call LLM with automatic retry on failure.
 
@@ -159,12 +160,12 @@ class AgentLLMProxy:
 
         return None
 
-    def get_statistics(self) -> Dict[str, int]:
+    def get_statistics(self) -> dict[str, int]:
         """
         Get proxy statistics.
 
         Returns:
-            Dict[str, int]: Call count and error count
+            dict[str, int]: Call count and error count
         """
         return {
             "call_count": self.call_count,
@@ -197,7 +198,7 @@ class AgentToolProxy:
             agent: Agent instance (implements AgentInterface)
         """
         self.agent = agent
-        self.execution_history: List[Dict[str, Any]] = []
+        self.execution_history: list[dict[str, Any]] = []
 
     def execute_tool(
         self,
@@ -258,12 +259,12 @@ class AgentToolProxy:
         """
         return len(self.execution_history)
 
-    def get_tool_usage(self) -> Dict[str, int]:
+    def get_tool_usage(self) -> dict[str, int]:
         """
         Get tool usage statistics.
 
         Returns:
-            Dict[str, int]: Tool name -> execution count
+            dict[str, int]: Tool name -> execution count
         """
         usage = {}
         for entry in self.execution_history:

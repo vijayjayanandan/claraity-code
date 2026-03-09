@@ -5,13 +5,13 @@ from .base import (
     LLMBackendType,
     LLMConfig,
     LLMResponse,
-    ToolDefinition,
     ToolCall,
+    ToolDefinition,
     ToolParameter,
 )
+from .model_config import ModelConfig, get_model_config
 from .ollama_backend import OllamaBackend
 from .openai_backend import OpenAIBackend
-from .model_config import ModelConfig, get_model_config
 
 # Lazy import: AnthropicBackend requires `anthropic` SDK (optional dependency)
 try:

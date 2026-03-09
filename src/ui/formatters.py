@@ -5,12 +5,12 @@ This module provides professional formatting for tool calls during streaming,
 matching modern coding agent UX standards (Claude Code, Cursor, etc.).
 """
 
+import difflib
 import json
 import logging
 import sys
-import difflib
-from typing import Dict, Any, Optional, List, Tuple
 from pathlib import Path
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -89,8 +89,8 @@ class ToolOutputFormatter:
         """Initialize Pygments syntax highlighter if available."""
         try:
             from pygments import highlight
-            from pygments.lexers import get_lexer_by_name, guess_lexer
             from pygments.formatters import TerminalFormatter
+            from pygments.lexers import get_lexer_by_name, guess_lexer
             from pygments.util import ClassNotFound
 
             self.syntax_highlighter = {
@@ -138,7 +138,7 @@ class ToolOutputFormatter:
             logger.warning(f"Invalid file path: {file_path} - {e}")
             return False
 
-    def _sanitize_content(self, content: str, max_bytes: int = 1_000_000) -> Optional[str]:
+    def _sanitize_content(self, content: str, max_bytes: int = 1_000_000) -> str | None:
         """
         Sanitize content before syntax highlighting.
 
@@ -194,7 +194,7 @@ class ToolOutputFormatter:
         ext = Path(file_path).suffix.lower()
         return ext in binary_extensions
 
-    def format_tool_announcement(self, tool_name: str, arguments: Dict[str, Any]) -> str:
+    def format_tool_announcement(self, tool_name: str, arguments: dict[str, Any]) -> str:
         """
         Format the initial tool call announcement.
 
@@ -332,7 +332,7 @@ class ToolOutputFormatter:
 
         # No syntax highlighting or not a terminal - return plain text
         if not self.is_terminal and self.syntax_highlighter:
-            logger.debug(f"Syntax highlighting disabled - not a terminal (stdout.isatty() = False)")
+            logger.debug("Syntax highlighting disabled - not a terminal (stdout.isatty() = False)")
 
         return content
 
@@ -341,7 +341,7 @@ class ToolOutputFormatter:
         Format TODO list for clean display.
 
         Args:
-            todos: List of todo items with content, status, activeForm
+            todos: list of todo items with content, status, activeForm
 
         Returns:
             Formatted checklist
@@ -407,7 +407,7 @@ class ToolOutputFormatter:
         self,
         file_path: str,
         new_content: str,
-        old_content: Optional[str] = None,
+        old_content: str | None = None,
         max_lines: int = 1000
     ) -> str:
         """
@@ -507,10 +507,10 @@ class ToolOutputFormatter:
 
     def _generate_unified_diff_with_line_numbers(
         self,
-        old_lines: List[str],
-        new_lines: List[str],
+        old_lines: list[str],
+        new_lines: list[str],
         max_lines: int
-    ) -> List[str]:
+    ) -> list[str]:
         """
         Generate unified diff with line numbers using difflib.
 
@@ -520,7 +520,7 @@ class ToolOutputFormatter:
             max_lines: Maximum lines to display
 
         Returns:
-            List of formatted diff lines
+            list of formatted diff lines
         """
         # Generate unified diff using difflib
         diff = difflib.unified_diff(
@@ -604,7 +604,7 @@ class StreamingToolCallFormatter:
     def __init__(self):
         """Initialize streaming formatter."""
         self.formatter = ToolOutputFormatter()
-        self.accumulator: Dict[str, Any] = {}
+        self.accumulator: dict[str, Any] = {}
         self.announced = False
 
     def reset(self):
@@ -634,8 +634,8 @@ class StreamingToolCallFormatter:
     def format_complete_tool_call(
         self,
         tool_name: str,
-        arguments: Dict[str, Any]
-    ) -> Optional[str]:
+        arguments: dict[str, Any]
+    ) -> str | None:
         """
         Format a complete tool call for display.
 
@@ -685,7 +685,7 @@ class StreamingToolCallFormatter:
         return None
 
 
-def format_tool_call(tool_name: str, arguments: Dict[str, Any]) -> str:
+def format_tool_call(tool_name: str, arguments: dict[str, Any]) -> str:
     """
     Quick helper to format a tool call announcement.
 
