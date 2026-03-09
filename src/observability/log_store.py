@@ -24,10 +24,11 @@ import os
 import sqlite3
 import threading
 from contextlib import contextmanager
-from dataclasses import dataclass, asdict, fields as dataclass_fields
+from dataclasses import asdict, dataclass
+from dataclasses import fields as dataclass_fields
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 # =============================================================================
 # CONSTANTS
@@ -54,26 +55,26 @@ MAX_EXTRA_JSON_LENGTH = 16384
 @dataclass
 class LogRecord:
     """Structured log record for storage and queries."""
-    id: Optional[int]  # AUTOINCREMENT, assigned by SQLite (None on insert)
+    id: int | None  # AUTOINCREMENT, assigned by SQLite (None on insert)
     ts: str
     level: str
     event: str
-    logger: Optional[str] = None
+    logger: str | None = None
     # Context
-    run_id: Optional[str] = None
-    session_id: Optional[str] = None
-    stream_id: Optional[str] = None
-    request_id: Optional[str] = None
-    component: Optional[str] = None
-    operation: Optional[str] = None
+    run_id: str | None = None
+    session_id: str | None = None
+    stream_id: str | None = None
+    request_id: str | None = None
+    component: str | None = None
+    operation: str | None = None
     # Source location
-    source_file: Optional[str] = None
-    source_line: Optional[int] = None
-    source_function: Optional[str] = None
+    source_file: str | None = None
+    source_line: int | None = None
+    source_function: str | None = None
     # Extra data as JSON (everything that doesn't fit named columns)
-    extra_json: Optional[str] = None
+    extra_json: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return asdict(self)
 
@@ -259,12 +260,12 @@ class LogStore:
         )
         return self.record(log)
 
-    def record_batch(self, records: List[Dict[str, Any]]) -> int:
+    def record_batch(self, records: list[dict[str, Any]]) -> int:
         """
         Insert multiple log records in a single transaction.
 
         Args:
-            records: List of dicts with fields for record_from_dict()
+            records: list of dicts with fields for record_from_dict()
 
         Returns:
             Number of records inserted
@@ -360,14 +361,14 @@ class LogStore:
 
     def query(
         self,
-        session_id: Optional[str] = None,
-        level: Optional[str] = None,
-        component: Optional[str] = None,
-        event: Optional[str] = None,
-        text: Optional[str] = None,
-        since_minutes: Optional[int] = None,
+        session_id: str | None = None,
+        level: str | None = None,
+        component: str | None = None,
+        event: str | None = None,
+        text: str | None = None,
+        since_minutes: int | None = None,
         limit: int = DEFAULT_LOG_QUERY_LIMIT,
-    ) -> List[LogRecord]:
+    ) -> list[LogRecord]:
         """
         Query logs with filters.
 
@@ -381,7 +382,7 @@ class LogStore:
             limit: Maximum results
 
         Returns:
-            List of LogRecord
+            list of LogRecord
         """
         try:
             with self._get_connection() as conn:
@@ -435,8 +436,8 @@ class LogStore:
             return []
 
     def count_by_level(
-        self, since_minutes: Optional[int] = None
-    ) -> Dict[str, int]:
+        self, since_minutes: int | None = None
+    ) -> dict[str, int]:
         """
         Count logs by level.
 
@@ -444,7 +445,7 @@ class LogStore:
             since_minutes: Filter to last N minutes
 
         Returns:
-            Dict mapping level to count
+            dict mapping level to count
         """
         try:
             with self._get_connection() as conn:
@@ -477,7 +478,7 @@ class LogStore:
                 pass
             return {}
 
-    def get_recent(self, count: int = 10) -> List[LogRecord]:
+    def get_recent(self, count: int = 10) -> list[LogRecord]:
         """Get most recent log entries."""
         return self.query(limit=count)
 
@@ -526,7 +527,7 @@ class LogStore:
 # GLOBAL INSTANCE
 # =============================================================================
 
-_log_store_instance: Optional[LogStore] = None
+_log_store_instance: LogStore | None = None
 _log_store_lock = threading.Lock()
 
 

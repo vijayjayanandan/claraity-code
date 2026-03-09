@@ -21,10 +21,10 @@ Example:
     >>> # Loads from enterprise → user → project hierarchy
 """
 
-from pathlib import Path
-from typing import List, Optional, Set
-import re
 import platform
+import re
+from pathlib import Path
+from typing import Optional
 
 from src.observability import get_logger
 
@@ -44,10 +44,10 @@ class MemoryFileLoader:
     MAX_IMPORT_DEPTH = 5
 
     def __init__(self):
-        self.loaded_files: Set[Path] = set()
-        self.import_chain: List[Path] = []
+        self.loaded_files: set[Path] = set()
+        self.import_chain: list[Path] = []
 
-    def load_hierarchy(self, starting_dir: Optional[Path] = None) -> str:
+    def load_hierarchy(self, starting_dir: Path | None = None) -> str:
         """
         Load memory files from all hierarchy levels.
 
@@ -108,7 +108,7 @@ class MemoryFileLoader:
         logger.info(f"Loaded {len(self.loaded_files)} memory files")
         return combined
 
-    def _get_enterprise_path(self) -> Optional[Path]:
+    def _get_enterprise_path(self) -> Path | None:
         """Get platform-specific enterprise memory path."""
         system = platform.system()
 
@@ -118,7 +118,7 @@ class MemoryFileLoader:
             return Path("C:/ProgramData/clarity") / self.MEMORY_FILENAME
         return None
 
-    def _load_project_hierarchy(self, starting_dir: Path) -> List[str]:
+    def _load_project_hierarchy(self, starting_dir: Path) -> list[str]:
         """
         Traverse upward from starting_dir to find project memories.
 
@@ -242,7 +242,7 @@ class MemoryFileLoader:
 
         return '\n'.join(processed)
 
-    def _resolve_import_path(self, import_path: str, base_dir: Path) -> Optional[Path]:
+    def _resolve_import_path(self, import_path: str, base_dir: Path) -> Path | None:
         """
         Resolve import path to absolute path.
 
@@ -367,7 +367,7 @@ class MemoryFileLoader:
 
         return path
 
-    def init_project_memory(self, path: Optional[Path] = None) -> Path:
+    def init_project_memory(self, path: Path | None = None) -> Path:
         """
         Initialize a new memory.md file with template.
 

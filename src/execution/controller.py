@@ -15,7 +15,7 @@ Phase: 1 - Self-Testing & Long-Running Execution
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 from src.execution.checkpoint import CheckpointManager, CheckpointMetadata
 
@@ -70,15 +70,15 @@ class LongRunningController:
         )
 
         # Track last checkpoint for metadata
-        self.last_checkpoint_time: Optional[datetime] = None
-        self.current_checkpoint_id: Optional[str] = None
+        self.last_checkpoint_time: datetime | None = None
+        self.current_checkpoint_id: str | None = None
 
     def create_checkpoint(
         self,
         description: str = "Ongoing work",
-        current_phase: Optional[str] = None,
-        pending_tasks: Optional[List[str]] = None
-    ) -> Optional[str]:
+        current_phase: str | None = None,
+        pending_tasks: list[str] | None = None
+    ) -> str | None:
         """
         Create checkpoint of current agent state.
 
@@ -172,12 +172,12 @@ class LongRunningController:
             print(f"[ERROR] Failed to restore checkpoint: {e}")
             return False
 
-    def list_checkpoints(self) -> List[CheckpointMetadata]:
+    def list_checkpoints(self) -> list[CheckpointMetadata]:
         """
-        List all available checkpoints (newest first).
+        list all available checkpoints (newest first).
 
         Returns:
-            List of checkpoint metadata (sorted by timestamp, newest first)
+            list of checkpoint metadata (sorted by timestamp, newest first)
 
         Example:
             >>> checkpoints = controller.list_checkpoints()

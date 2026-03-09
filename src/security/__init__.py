@@ -5,7 +5,7 @@ transcript logging, and other components that handle potentially sensitive data.
 """
 
 import re
-from typing import Any, Dict
+from typing import Any
 
 # Patterns that match common secret formats
 SECRET_PATTERNS: list[re.Pattern] = [
@@ -58,7 +58,7 @@ def redact_secrets(text: str) -> str:
     return result
 
 
-def redact_dict(data: Dict[str, Any], depth: int = 0, max_depth: int = 10) -> Dict[str, Any]:
+def redact_dict(data: dict[str, Any], depth: int = 0, max_depth: int = 10) -> dict[str, Any]:
     """Recursively redact sensitive values from a dictionary.
 
     Args:

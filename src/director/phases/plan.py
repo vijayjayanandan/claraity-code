@@ -25,7 +25,7 @@ class PlanPhaseHandler(PhaseHandler):
     def phase(self) -> DirectorPhase:
         return DirectorPhase.PLAN
 
-    def validate_input(self, input_data: Any) -> Optional[str]:
+    def validate_input(self, input_data: Any) -> str | None:
         """Must have a ContextDocument with a task description."""
         if not isinstance(input_data, ContextDocument):
             return "PLAN phase requires a ContextDocument from UNDERSTAND phase"

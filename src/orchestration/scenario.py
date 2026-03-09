@@ -5,10 +5,10 @@ Defines scenarios where a Testing LLM autonomously interacts with
 the Coding Agent to validate behavior through realistic conversations.
 """
 
+import json
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Optional, Dict, Any
-import json
+from typing import Any, Optional
 
 
 @dataclass
@@ -23,7 +23,7 @@ class ValidationCheck:
     evidence: str  # Evidence collected (what actually happened)
     timestamp: datetime = field(default_factory=datetime.now)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization"""
         return {
             "expectation": self.expectation,
@@ -44,11 +44,11 @@ class TurnResult:
     turn_number: int
     user_message: str  # What Testing Agent said
     agent_response: str  # What Coding Agent responded
-    files_generated: List[str]  # Files created this turn
-    tools_called: List[str]  # Tools executed this turn
+    files_generated: list[str]  # Files created this turn
+    tools_called: list[str]  # Tools executed this turn
     assessment: str  # Testing Agent's evaluation
     should_continue: bool  # Whether Testing Agent wants to continue
-    validation_checks: List[ValidationCheck] = field(default_factory=list)
+    validation_checks: list[ValidationCheck] = field(default_factory=list)
     timestamp: datetime = field(default_factory=datetime.now)
 
     @property
@@ -56,7 +56,7 @@ class TurnResult:
         """All validation checks passed"""
         return all(check.passed for check in self.validation_checks)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization"""
         return {
             "turn_number": self.turn_number,
@@ -82,17 +82,17 @@ class ScenarioResult:
     scenario_id: str
     scenario_name: str
     passed: bool
-    turn_results: List[TurnResult]
+    turn_results: list[TurnResult]
     final_verdict: str  # Testing Agent's final assessment
-    final_checks: List[ValidationCheck]  # Final validation checks
-    conversation_log_path: Optional[str] = None
-    workspace_path: Optional[str] = None
+    final_checks: list[ValidationCheck]  # Final validation checks
+    conversation_log_path: str | None = None
+    workspace_path: str | None = None
     started_at: datetime = field(default_factory=datetime.now)
-    ended_at: Optional[datetime] = None
+    ended_at: datetime | None = None
     total_turns: int = 0
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization"""
         return {
             "scenario_id": self.scenario_id,
@@ -155,12 +155,12 @@ class AutonomousScenario:
     name: str
     description: str
     testing_agent_prompt: str  # System prompt for Testing LLM
-    success_criteria: List[str]  # High-level expectations for success
+    success_criteria: list[str]  # High-level expectations for success
     max_turns: int = 10
     timeout_seconds: int = 300
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization"""
         return {
             "scenario_id": self.scenario_id,

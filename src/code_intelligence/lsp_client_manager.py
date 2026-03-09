@@ -10,15 +10,16 @@ Features:
 - Multi-language support (Python, TypeScript for Phase 1)
 """
 
-from typing import Optional, Dict, List, Any
-from pathlib import Path
 import asyncio
 import logging
 import os
 import sys
 import time
+from pathlib import Path
+from typing import Any, Optional
 
 from src.code_intelligence.cache import LSPCache
+
 
 # Ensure Python user Scripts directory is in PATH (for jedi-language-server etc.)
 # On Windows, pip --user installs scripts to a directory not in system PATH
@@ -36,7 +37,7 @@ _ensure_user_scripts_in_path()
 # multilspy imports
 try:
     from multilspy import LanguageServer
-    from multilspy.multilspy_config import MultilspyConfig, Language
+    from multilspy.multilspy_config import Language, MultilspyConfig
     from multilspy.multilspy_logger import MultilspyLogger
     MULTILSPY_AVAILABLE = True
 except ImportError:
@@ -139,8 +140,8 @@ class LSPClientManager:
 
     def __init__(
         self,
-        repo_root: Optional[str] = None,
-        cache: Optional[LSPCache] = None,
+        repo_root: str | None = None,
+        cache: LSPCache | None = None,
         max_servers: int = 3,
         query_timeout: float = 5.0
     ):
@@ -172,10 +173,10 @@ class LSPClientManager:
         self.query_timeout = query_timeout
 
         # Active language servers (lazy initialization)
-        self.servers: Dict[str, ServerWrapper] = {}  # language -> ServerWrapper instance
+        self.servers: dict[str, ServerWrapper] = {}  # language -> ServerWrapper instance
 
         # Server initialization locks (prevent duplicate startup)
-        self._server_locks: Dict[str, asyncio.Lock] = {}
+        self._server_locks: dict[str, asyncio.Lock] = {}
 
         # Initialize multilspy logger (if available)
         if MULTILSPY_AVAILABLE:
@@ -193,7 +194,7 @@ class LSPClientManager:
         file_path: str,
         line: int,
         column: int
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """
         Request symbol definition location.
 
@@ -245,7 +246,7 @@ class LSPClientManager:
         file_path: str,
         line: int,
         column: int
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Request all references to a symbol.
 
@@ -255,7 +256,7 @@ class LSPClientManager:
             column: Column number (0-indexed)
 
         Returns:
-            List of reference locations (may be empty)
+            list of reference locations (may be empty)
 
         Example:
             >>> refs = await manager.request_references("src/auth.py", 45, 10)
@@ -295,7 +296,7 @@ class LSPClientManager:
         file_path: str,
         line: int,
         column: int
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """
         Request hover information (type signature, docstring).
 
@@ -343,7 +344,7 @@ class LSPClientManager:
     async def request_document_symbols(
         self,
         file_path: str
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Request document symbols (file outline).
 
@@ -351,7 +352,7 @@ class LSPClientManager:
             file_path: Path to file
 
         Returns:
-            List of symbols (classes, functions, variables)
+            list of symbols (classes, functions, variables)
 
         Example:
             >>> symbols = await manager.request_document_symbols("src/auth.py")
@@ -409,8 +410,8 @@ class LSPClientManager:
     async def request_workspace_symbols(
         self,
         query: str,
-        repo_root: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+        repo_root: str | None = None
+    ) -> list[dict[str, Any]]:
         """
         Search for symbols across workspace.
 
@@ -421,7 +422,7 @@ class LSPClientManager:
             repo_root: Repository root (auto-detected if None)
 
         Returns:
-            List of matching symbols
+            list of matching symbols
 
         Example:
             >>> symbols = await manager.request_workspace_symbols("User")
@@ -646,8 +647,8 @@ class LSPClientManager:
         server: Any,
         method: str,
         file_path: str,
-        line: Optional[int] = None,
-        column: Optional[int] = None
+        line: int | None = None,
+        column: int | None = None
     ) -> Any:
         """
         Query LSP server with retry logic.
@@ -694,8 +695,8 @@ class LSPClientManager:
         server: Any,
         method: str,
         file_path: str,
-        line: Optional[int] = None,
-        column: Optional[int] = None
+        line: int | None = None,
+        column: int | None = None
     ) -> Any:
         """
         Make LSP query using multilspy.
@@ -730,7 +731,7 @@ class LSPClientManager:
             raise LSPQueryError(f"Invalid server type: {type(server)}")
 
         # Security: Validate file_path is within repo_root
-        from src.code_intelligence.path_utils import normalize_path, is_within_repo
+        from src.code_intelligence.path_utils import is_within_repo, normalize_path
 
         if not is_within_repo(file_path, self.repo_root):
             abs_path = normalize_path(file_path)
@@ -826,7 +827,7 @@ class LSPClientManager:
             )
             raise LSPQueryError(f"LSP query failed: {e}") from e
 
-    async def _query_workspace_symbols(self, server: Any, query: str) -> List[Dict[str, Any]]:
+    async def _query_workspace_symbols(self, server: Any, query: str) -> list[dict[str, Any]]:
         """Query workspace symbols using multilspy."""
         # Handle mock server
         if isinstance(server, MockLanguageServer):
@@ -929,7 +930,7 @@ class LSPClientManager:
 
         return extension_map.get(ext, "unknown")
 
-    def _detect_primary_language(self, repo_root: Optional[str]) -> str:
+    def _detect_primary_language(self, repo_root: str | None) -> str:
         """
         Detect primary language in repository.
 
@@ -943,8 +944,8 @@ class LSPClientManager:
         self,
         operation: str,
         file_path: str,
-        line: Optional[int] = None,
-        column: Optional[int] = None
+        line: int | None = None,
+        column: int | None = None
     ) -> str:
         """
         Generate cache key for LSP query.

@@ -1,8 +1,9 @@
 """Prompt optimizer for token efficiency and effectiveness."""
 
 import re
+from typing import Any, Optional
+
 import tiktoken
-from typing import List, Dict, Any, Optional
 
 
 class PromptOptimizer:
@@ -27,7 +28,7 @@ class PromptOptimizer:
     def compress_prompt(
         self,
         prompt: str,
-        target_tokens: Optional[int] = None,
+        target_tokens: int | None = None,
         preserve_structure: bool = True,
     ) -> str:
         """
@@ -162,7 +163,7 @@ class PromptOptimizer:
 
         return truncated_text + "\n[...]"
 
-    def deduplicate_context(self, context_items: List[str]) -> List[str]:
+    def deduplicate_context(self, context_items: list[str]) -> list[str]:
         """Remove duplicate information from context items."""
         seen = set()
         deduplicated = []
@@ -177,14 +178,14 @@ class PromptOptimizer:
 
         return deduplicated
 
-    def optimize_for_attention(self, text: str, key_info: List[str]) -> str:
+    def optimize_for_attention(self, text: str, key_info: list[str]) -> str:
         """
         Optimize text to guide LLM attention.
         Places important info at start and end (primacy/recency effect).
 
         Args:
             text: Text to optimize
-            key_info: List of key information pieces
+            key_info: list of key information pieces
 
         Returns:
             Optimized text

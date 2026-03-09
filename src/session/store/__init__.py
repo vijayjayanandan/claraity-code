@@ -14,16 +14,15 @@ Key invariants:
 v2.1: Collapse by stream_id (not provider_message_id).
 """
 
-from .memory_store import (
-    MessageStore,
-    StoreEvent,
-    StoreNotification,
-    SeqCollisionError,
-    Subscriber,
-)
-
 # Re-export Message from models for convenience
 from ..models.message import Message
+from .memory_store import (
+    MessageStore,
+    SeqCollisionError,
+    StoreEvent,
+    StoreNotification,
+    Subscriber,
+)
 
 __all__ = [
     "MessageStore",

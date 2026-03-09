@@ -11,12 +11,13 @@ import sys
 import uuid
 from dataclasses import asdict
 from pathlib import Path
-from typing import Dict, Any, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 
 from src.observability import get_logger
 
 if TYPE_CHECKING:
     from src.subagents import SubAgentManager
+    from src.subagents.ipc import ApprovalResponse
 
 from .base import Tool, ToolResult, ToolStatus
 
@@ -137,8 +138,10 @@ Use this tool proactively when appropriate!"""
             ToolResult with subagent output or error
         """
         from src.subagents.ipc import (
-            SubprocessInput, IPCEventType,
-            deserialize_notification, deserialize_result,
+            IPCEventType,
+            SubprocessInput,
+            deserialize_notification,
+            deserialize_result,
         )
 
         parent_tool_call_id = kwargs.pop('_tool_call_id', '')
@@ -511,7 +514,7 @@ Use this tool proactively when appropriate!"""
             feedback=feedback,
         )
 
-    def _validate_inputs(self, subagent: str, task: str) -> Optional[ToolResult]:
+    def _validate_inputs(self, subagent: str, task: str) -> ToolResult | None:
         """Validate subagent and task inputs.
 
         Returns ToolResult error if invalid, None if valid.
@@ -627,7 +630,7 @@ Use this tool proactively when appropriate!"""
                 error=result.error or f"Subagent '{subagent_name}' execution failed"
             )
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         """Get tool parameters schema."""
         return {
             "type": "object",

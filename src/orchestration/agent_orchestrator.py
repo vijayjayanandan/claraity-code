@@ -7,14 +7,15 @@ and AI Coding Agent (subject under test).
 
 import os
 import uuid
-from pathlib import Path
 from datetime import datetime
-from typing import Dict, Optional
+from pathlib import Path
+from typing import Optional
+
+from src.core.agent import CodingAgent
+from src.execution.controller import LongRunningController
 
 from .conversation import ConversationSession
 from .models import AgentResponse, ConversationLog
-from src.core.agent import CodingAgent
-from src.execution.controller import LongRunningController
 
 
 class AgentOrchestrator:
@@ -33,10 +34,10 @@ class AgentOrchestrator:
 
     def __init__(
         self,
-        model_name: Optional[str] = None,
-        backend: Optional[str] = None,
-        base_url: Optional[str] = None,
-        api_key: Optional[str] = None,
+        model_name: str | None = None,
+        backend: str | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
         output_dir: str = "./orchestration-logs",
         working_directory: str = "./orchestration-workspace"
     ):
@@ -73,11 +74,11 @@ class AgentOrchestrator:
         self.working_directory.mkdir(exist_ok=True, parents=True)
 
         # Track active sessions
-        self.active_sessions: Dict[str, ConversationSession] = {}
+        self.active_sessions: dict[str, ConversationSession] = {}
 
     def start_conversation(
         self,
-        task_description: Optional[str] = None,
+        task_description: str | None = None,
         isolated_workspace: bool = True
     ) -> ConversationSession:
         """
@@ -182,7 +183,7 @@ class AgentOrchestrator:
 
         return response
 
-    def get_session(self, conversation_id: str) -> Optional[ConversationSession]:
+    def get_session(self, conversation_id: str) -> ConversationSession | None:
         """
         Get active session by ID.
 
@@ -230,7 +231,7 @@ class AgentOrchestrator:
 
         return log
 
-    def list_active_conversations(self) -> Dict[str, dict]:
+    def list_active_conversations(self) -> dict[str, dict]:
         """
         List all active conversations.
 

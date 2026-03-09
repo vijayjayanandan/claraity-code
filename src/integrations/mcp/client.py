@@ -14,7 +14,7 @@ import asyncio
 import json
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from .config import McpServerConfig
 
@@ -29,15 +29,15 @@ class McpTransport(ABC):
     """Abstract transport for MCP JSON-RPC communication."""
 
     @abstractmethod
-    async def connect(self, config: McpServerConfig, auth_headers: Dict[str, str]) -> None:
+    async def connect(self, config: McpServerConfig, auth_headers: dict[str, str]) -> None:
         """Establish connection. auth_headers are ephemeral (not stored)."""
 
     @abstractmethod
-    async def send(self, method: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def send(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         """Send a JSON-RPC request and return the result."""
 
     @abstractmethod
-    async def send_notification(self, method: str, params: Optional[Dict[str, Any]] = None) -> None:
+    async def send_notification(self, method: str, params: dict[str, Any] | None = None) -> None:
         """Send a JSON-RPC notification (no id, no response expected)."""
 
     @abstractmethod
@@ -55,6 +55,7 @@ class McpTransport(ABC):
         Default is a no-op (safe for transports like SSE that only hold
         async resources).
         """
+        return  # no-op default
 
 
 class SseTransport(McpTransport):
@@ -66,12 +67,12 @@ class SseTransport(McpTransport):
 
     def __init__(self):
         self._client = None
-        self._base_url: Optional[str] = None
-        self._base_headers: Dict[str, str] = {}  # Non-secret headers only
-        self._auth_headers: Dict[str, str] = {}  # Per-request auth; set at connect, cleared at disconnect
+        self._base_url: str | None = None
+        self._base_headers: dict[str, str] = {}  # Non-secret headers only
+        self._auth_headers: dict[str, str] = {}  # Per-request auth; set at connect, cleared at disconnect
         self._connected = False
 
-    async def connect(self, config: McpServerConfig, auth_headers: Dict[str, str]) -> None:
+    async def connect(self, config: McpServerConfig, auth_headers: dict[str, str]) -> None:
         import httpx
 
         self._base_url = config.server_url
@@ -95,7 +96,7 @@ class SseTransport(McpTransport):
         self._connected = True
         logger.info("sse_transport_connected", server=config.name)
 
-    async def send(self, method: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def send(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         if not self._client or not self._base_url:
             raise ConnectionError("SSE transport not connected")
 
@@ -122,7 +123,7 @@ class SseTransport(McpTransport):
 
         return result.get("result", {})
 
-    async def send_notification(self, method: str, params: Optional[Dict[str, Any]] = None) -> None:
+    async def send_notification(self, method: str, params: dict[str, Any] | None = None) -> None:
         if not self._client or not self._base_url:
             raise ConnectionError("SSE transport not connected")
 
@@ -164,10 +165,10 @@ class StdioTransport(McpTransport):
         self._process = None
         self._connected = False
         self._request_id = 0
-        self._send_lock: Optional[asyncio.Lock] = None  # created at connect time
-        self._stderr_task: Optional[asyncio.Task] = None  # drains stderr to prevent deadlock
+        self._send_lock: asyncio.Lock | None = None  # created at connect time
+        self._stderr_task: asyncio.Task | None = None  # drains stderr to prevent deadlock
 
-    async def connect(self, config: McpServerConfig, auth_headers: Dict[str, str]) -> None:
+    async def connect(self, config: McpServerConfig, auth_headers: dict[str, str]) -> None:
         import os
         import sys
 
@@ -223,7 +224,7 @@ class StdioTransport(McpTransport):
         except (asyncio.CancelledError, Exception):
             pass
 
-    async def send(self, method: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def send(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         if not self._process or not self._process.stdin or not self._process.stdout:
             raise ConnectionError("Stdio transport not connected")
 
@@ -257,7 +258,7 @@ class StdioTransport(McpTransport):
 
         return result.get("result", {})
 
-    async def send_notification(self, method: str, params: Optional[Dict[str, Any]] = None) -> None:
+    async def send_notification(self, method: str, params: dict[str, Any] | None = None) -> None:
         if not self._process or not self._process.stdin:
             raise ConnectionError("Stdio transport not connected")
 
@@ -401,7 +402,7 @@ class McpClient:
                          this McpClient; the transport holds it for per-request
                          injection and clears it on disconnect.
         """
-        auth_headers: Dict[str, str] = {}
+        auth_headers: dict[str, str] = {}
 
         if self._config.auth_secret_key and secret_store:
             token = secret_store.get(self._config.auth_secret_key)
@@ -435,18 +436,18 @@ class McpClient:
         # Send initialized notification (no id = notification, no response expected)
         await self._transport.send_notification("notifications/initialized")
 
-    async def list_tools(self) -> List[Dict[str, Any]]:
+    async def list_tools(self) -> list[dict[str, Any]]:
         """Discover tools from the MCP server.
 
         Returns:
-            List of raw MCP tool schema dicts.
+            list of raw MCP tool schema dicts.
         """
         result = await self._transport.send("tools/list")
         tools = result.get("tools", [])
         logger.info("mcp_tools_discovered", server=self._config.name, count=len(tools))
         return tools
 
-    async def invoke(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    async def invoke(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Invoke an MCP tool.
 
         Args:

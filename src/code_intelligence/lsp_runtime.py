@@ -32,7 +32,8 @@ import atexit
 import concurrent.futures
 import logging
 import threading
-from typing import Any, Coroutine, Optional, TypeVar
+from collections.abc import Coroutine
+from typing import Any, Optional, TypeVar
 
 from src.code_intelligence.lsp_client_manager import LSPClientManager
 
@@ -41,12 +42,12 @@ logger = logging.getLogger("code_intelligence.lsp_runtime")
 T = TypeVar('T')
 
 # Module-level state
-_loop: Optional[asyncio.AbstractEventLoop] = None
-_thread: Optional[threading.Thread] = None
-_manager: Optional[LSPClientManager] = None
+_loop: asyncio.AbstractEventLoop | None = None
+_thread: threading.Thread | None = None
+_manager: LSPClientManager | None = None
 _lock = threading.Lock()
 _loop_ready = threading.Event()  # Signaled when loop is ready
-_request_lock: Optional[asyncio.Lock] = None  # Serializes LSP requests
+_request_lock: asyncio.Lock | None = None  # Serializes LSP requests
 
 
 def _run_loop():
@@ -330,7 +331,7 @@ def lsp_run(coro: Coroutine[Any, Any, T], timeout: float = 30.0) -> T:
     except asyncio.CancelledError:
         # Request was cancelled (e.g., by user interrupt)
         raise TimeoutError(
-            f"LSP request was cancelled."
+            "LSP request was cancelled."
         )
 
     except Exception:

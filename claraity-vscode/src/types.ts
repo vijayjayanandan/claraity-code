@@ -68,7 +68,7 @@ export type StoreEvent =
 
 export type StreamEvent =
     | { type: 'stream_start' }
-    | { type: 'stream_end'; tool_calls?: number; elapsed_s?: number; iterations?: number }
+    | { type: 'stream_end'; tool_calls?: number; elapsed_s?: number; iterations?: number; total_tokens?: number; duration_ms?: number }
     | { type: 'text_delta'; content: string }
     | { type: 'code_block_start'; language?: string }
     | { type: 'code_block_delta'; content: string }
@@ -101,7 +101,39 @@ export type SubagentEvent =
     | { type: 'subagent'; event: 'registered'; data: { subagent_id: string; parent_tool_call_id: string; model_name: string; subagent_name: string; transcript_path: string } }
     | { type: 'subagent'; event: 'unregistered'; data: { subagent_id: string } };
 
+// ── Session history types ──
+
+export interface SessionSummary {
+    session_id: string;
+    first_message: string;     // First user message (title)
+    message_count: number;
+    updated_at: string;        // ISO datetime
+    git_branch?: string;
+}
+
+export interface ReplayMessage {
+    role: string;
+    content: string;
+    tool_calls?: Array<{
+        id: string;
+        function: { name: string; arguments: string };
+    }>;
+    tool_call_id?: string;
+    meta?: { status?: string; duration_ms?: number; tool_name?: string };
+}
+
 // ── Misc server events ──
+
+// ── Jira integration types ──
+
+export interface JiraProfile {
+    name: string;
+    jira_url: string;
+    username: string;
+    enabled: boolean;
+    has_token: boolean;
+    is_configured: boolean;
+}
 
 export type MiscEvent =
     | { type: 'session_info'; session_id: string; model_name: string; permission_mode: string; working_directory: string; auto_approve_categories?: Record<string, boolean> }
@@ -110,7 +142,13 @@ export type MiscEvent =
     | { type: 'config_loaded'; [key: string]: any }
     | { type: 'models_list'; [key: string]: any }
     | { type: 'config_saved'; [key: string]: any }
-    | { type: 'auto_approve_changed'; categories: Record<string, boolean> };
+    | { type: 'auto_approve_changed'; categories: Record<string, boolean> }
+    | { type: 'sessions_list'; sessions: SessionSummary[] }
+    | { type: 'session_history'; messages: ReplayMessage[] }
+    | { type: 'jira_profiles'; profiles: JiraProfile[]; connected_profile: string | null; error?: string }
+    | { type: 'jira_config_saved'; success: boolean; message: string; profile?: string }
+    | { type: 'jira_connect_result'; success: boolean; message: string; profile?: string; tool_count?: number }
+    | { type: 'jira_disconnect_result'; success: boolean; message: string };
 
 // ── Union of all server messages ──
 
@@ -126,9 +164,24 @@ export type ServerMessage =
 // Client -> Server (WebSocket JSON)
 // ============================================================================
 
+// ── File attachment for @file context mentions ──
+
+export interface FileAttachment {
+    path: string;       // Absolute file path
+    name: string;       // Display name (basename)
+}
+
+export interface ImageAttachment {
+    data: string;       // Base64-encoded image data (without data URL prefix)
+    mimeType: string;   // e.g., 'image/png', 'image/jpeg'
+    name?: string;      // Optional filename
+}
+
 export interface ChatMessagePayload {
     type: 'chat_message';
     content: string;
+    attachments?: FileAttachment[];
+    images?: ImageAttachment[];
 }
 
 export interface ApprovalResultPayload {
@@ -200,6 +253,37 @@ export interface NewSessionPayload {
     type: 'new_session';
 }
 
+export interface ListSessionsPayload {
+    type: 'list_sessions';
+    limit?: number;
+}
+
+export interface ResumeSessionPayload {
+    type: 'resume_session';
+    session_id: string;
+}
+
+export interface GetJiraProfilesPayload {
+    type: 'get_jira_profiles';
+}
+
+export interface SaveJiraConfigPayload {
+    type: 'save_jira_config';
+    profile: string;
+    jira_url: string;
+    username: string;
+    api_token: string;
+}
+
+export interface ConnectJiraPayload {
+    type: 'connect_jira';
+    profile: string;
+}
+
+export interface DisconnectJiraPayload {
+    type: 'disconnect_jira';
+}
+
 export type ClientMessage =
     | ChatMessagePayload
     | ApprovalResultPayload
@@ -213,7 +297,13 @@ export type ClientMessage =
     | ListModelsPayload
     | SetAutoApprovePayload
     | GetAutoApprovePayload
-    | NewSessionPayload;
+    | NewSessionPayload
+    | ListSessionsPayload
+    | ResumeSessionPayload
+    | GetJiraProfilesPayload
+    | SaveJiraConfigPayload
+    | ConnectJiraPayload
+    | DisconnectJiraPayload;
 
 // ============================================================================
 // Extension <-> WebView postMessage types
@@ -223,10 +313,17 @@ export type ExtensionMessage =
     | { type: 'serverMessage'; payload: ServerMessage }
     | { type: 'connectionStatus'; status: 'connected' | 'disconnected' | 'reconnecting' }
     | { type: 'sessionInfo'; sessionId: string; model: string; permissionMode: string;
-        autoApproveCategories?: { edit: boolean; execute: boolean; browser: boolean } };
+        autoApproveCategories?: { edit: boolean; execute: boolean; browser: boolean } }
+    | { type: 'sessionsList'; sessions: SessionSummary[] }
+    | { type: 'sessionHistory'; messages: ReplayMessage[] }
+    | { type: 'fileSearchResults'; files: Array<{ path: string; name: string; relativePath: string }> }
+    | { type: 'undoAvailable'; turnId: string; files: string[] }
+    | { type: 'undoComplete'; turnId: string; restoredFiles: string[] }
+    | { type: 'insertAndSend'; content: string };
 
 export type WebViewMessage =
-    | { type: 'chatMessage'; content: string }
+    | { type: 'chatMessage'; content: string; attachments?: FileAttachment[]; images?: ImageAttachment[] }
+    | { type: 'searchFiles'; query: string }
     | { type: 'approvalResult'; callId: string; approved: boolean; autoApproveFuture?: boolean; feedback?: string }
     | { type: 'interrupt' }
     | { type: 'ready' }
@@ -241,7 +338,14 @@ export type WebViewMessage =
     | { type: 'listModels'; backend: string; base_url: string; api_key: string }
     | { type: 'setAutoApprove'; categories: { edit?: boolean; execute?: boolean; browser?: boolean } }
     | { type: 'getAutoApprove' }
-    | { type: 'newSession' };
+    | { type: 'newSession' }
+    | { type: 'listSessions' }
+    | { type: 'resumeSession'; sessionId: string }
+    | { type: 'undoTurn'; turnId: string }
+    | { type: 'getJiraProfiles' }
+    | { type: 'saveJiraConfig'; profile: string; jira_url: string; username: string; api_token: string }
+    | { type: 'connectJira'; profile: string }
+    | { type: 'disconnectJira' };
 
 // ============================================================================
 // Exhaustive check helper — use in default case of switch statements

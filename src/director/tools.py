@@ -10,7 +10,7 @@ Each tool follows the same pattern as DelegateToSubagentTool:
 - _get_parameters() -> dict -- JSON schema the LLM sees
 """
 
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 
 from src.observability import get_logger
 from src.tools.base import Tool, ToolResult, ToolStatus
@@ -124,7 +124,7 @@ class DirectorCompleteUnderstandTool(Tool):
                 error=str(e),
             )
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
@@ -329,7 +329,7 @@ class DirectorCompletePlanTool(Tool):
                 error=str(e),
             )
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
@@ -350,7 +350,7 @@ class DirectorCompletePlanTool(Tool):
                         },
                         "required": ["title"],
                     },
-                    "description": "List of vertical slices for execution tracking",
+                    "description": "list of vertical slices for execution tracking",
                 },
             },
             "required": ["plan_document", "slices"],
@@ -448,7 +448,7 @@ class DirectorCompleteSliceTool(Tool):
                 error=str(e),
             )
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
@@ -533,7 +533,7 @@ class DirectorCompleteIntegrationTool(Tool):
                 error=str(e),
             )
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {

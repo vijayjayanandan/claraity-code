@@ -12,17 +12,18 @@ Features:
 - Collapsible command preview for run_command
 """
 
-from textual.app import ComposeResult
-from textual.widgets import Static
-from textual.containers import Vertical, VerticalScroll
-from textual.reactive import reactive
-from textual.binding import Binding
-from rich.text import Text
-from rich.console import RenderableType
-from rich.syntax import Syntax
-from typing import Any
 import difflib
 import os
+from typing import Any
+
+from rich.console import RenderableType
+from rich.syntax import Syntax
+from rich.text import Text
+from textual.app import ComposeResult
+from textual.binding import Binding
+from textual.containers import Vertical, VerticalScroll
+from textual.reactive import reactive
+from textual.widgets import Static
 
 from ..events import ToolStatus
 from ..messages import ApprovalResponseMessage
@@ -451,7 +452,7 @@ class ToolCard(Static):
         if not file_path or not old_text:
             return 1
         try:
-            with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+            with open(file_path, encoding='utf-8', errors='replace') as f:
                 content = f.read()
             pos = content.find(old_text)
             if pos == -1:
@@ -647,7 +648,7 @@ class ToolCard(Static):
                 return str(value)[:50]
 
         # Fallback: use first string argument
-        for key, value in self.args.items():
+        for _key, value in self.args.items():
             if isinstance(value, str) and value:
                 if len(value) > 50:
                     return value[:47] + "..."
@@ -679,7 +680,7 @@ class ToolCard(Static):
                 parts.append(f'{key}="{value}"')
             elif isinstance(value, bool):
                 parts.append(f"{key}={str(value).lower()}")
-            elif isinstance(value, (int, float)):
+            elif isinstance(value, int | float):
                 parts.append(f"{key}={value}")
             elif isinstance(value, list):
                 parts.append(f"{key}=[{len(value)}]")
@@ -706,7 +707,7 @@ class ToolCard(Static):
                 parts.append(f'{key}="{value}"')
             elif isinstance(value, bool):
                 parts.append(f"{key}={str(value).lower()}")
-            elif isinstance(value, (int, float)):
+            elif isinstance(value, int | float):
                 parts.append(f"{key}={value}")
             elif isinstance(value, list):
                 parts.append(f"{key}=[{len(value)} items]")
@@ -801,7 +802,7 @@ class ToolCard(Static):
         elif isinstance(result, bool):
             return str(result).lower()
 
-        elif isinstance(result, (int, float)):
+        elif isinstance(result, int | float):
             return str(result)
 
         else:
@@ -978,7 +979,7 @@ class ToolApprovalOptions(Static, can_focus=True):
         if self.selected_index == 1:
             lines.append(Text("  ", style=""))
             lines.append(Text(" 2 ", style="bold #1e1e1e on #3794ff"))
-            lines.append(Text(f" Yes, allow all ", style="bold #3794ff"))
+            lines.append(Text(" Yes, allow all ", style="bold #3794ff"))
             lines.append(Text(tool_display, style="bold #9cdcfe"))
             lines.append(Text(" this session\n", style="bold #3794ff"))
         else:

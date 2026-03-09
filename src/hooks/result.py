@@ -4,10 +4,11 @@ These classes define the return values that hook functions should return.
 They use Pydantic for validation and type safety.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Optional
+
 from pydantic import BaseModel, Field
 
-from .events import HookDecision, HookContinue, HookApproval
+from .events import HookApproval, HookContinue, HookDecision
 
 
 class HookResult(BaseModel):
@@ -39,22 +40,22 @@ class HookResult(BaseModel):
         description="Whether to permit, deny, or block the operation"
     )
 
-    message: Optional[str] = Field(
+    message: str | None = Field(
         None,
         description="Optional message explaining the decision"
     )
 
-    modified_arguments: Optional[Dict[str, Any]] = Field(
+    modified_arguments: dict[str, Any] | None = Field(
         None,
         description="Modified arguments to use instead of original (PreToolUse only)"
     )
 
-    modified_result: Optional[Any] = Field(
+    modified_result: Any | None = Field(
         None,
         description="Modified result to return instead of original (PostToolUse only)"
     )
 
-    metadata: Dict[str, Any] = Field(
+    metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Additional metadata for logging or debugging"
     )
@@ -87,12 +88,12 @@ class UserPromptResult(BaseModel):
         description="Whether to continue or block prompt processing"
     )
 
-    modified_prompt: Optional[str] = Field(
+    modified_prompt: str | None = Field(
         None,
         description="Modified prompt to use instead of original"
     )
 
-    message: Optional[str] = Field(
+    message: str | None = Field(
         None,
         description="Optional message explaining the decision"
     )
@@ -122,7 +123,7 @@ class NotificationResult(BaseModel):
         description="Whether to approve or deny the request"
     )
 
-    message: Optional[str] = Field(
+    message: str | None = Field(
         None,
         description="Optional message explaining the decision"
     )

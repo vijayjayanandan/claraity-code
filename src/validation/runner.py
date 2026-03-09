@@ -4,13 +4,13 @@ Validation Runner
 CLI interface for running validation scenarios and generating reports.
 """
 
-import asyncio
 import argparse
-import sys
+import asyncio
 import os
-from pathlib import Path
+import sys
 from datetime import datetime
-from typing import List, Optional
+from pathlib import Path
+from typing import Optional
 
 # Load environment variables from .env file
 try:
@@ -27,21 +27,13 @@ except ImportError:
                     key, value = line.split('=', 1)
                     os.environ[key] = value
 
-from .scenario import (
-    ValidationScenario,
-    ValidationResult,
-    ValidationReport,
-    DifficultyLevel
-)
-from .orchestrator import ValidationOrchestrator
-from .judge import ValidationJudge
-from .scenarios import (
-    VALIDATION_SCENARIOS,
-    get_scenario_by_id,
-    get_scenarios_by_difficulty
-)
-from .report_generator import ReportGenerator
 from src.platform import safe_print
+
+from .judge import ValidationJudge
+from .orchestrator import ValidationOrchestrator
+from .report_generator import ReportGenerator
+from .scenario import DifficultyLevel, ValidationReport, ValidationResult, ValidationScenario
+from .scenarios import VALIDATION_SCENARIOS, get_scenario_by_id, get_scenarios_by_difficulty
 
 
 class ValidationRunner:
@@ -71,7 +63,7 @@ class ValidationRunner:
             return 1
 
         safe_print(f"\n{'='*70}")
-        safe_print(f"[TEST] Autonomous Validation Framework")
+        safe_print("[TEST] Autonomous Validation Framework")
         safe_print(f"{'='*70}")
         safe_print(f"Scenarios: {len(scenarios)}")
         safe_print(f"Output: {self.orchestrator.output_dir}")
@@ -153,7 +145,7 @@ class ValidationRunner:
 
         # Generate report
         safe_print(f"\n{'='*70}")
-        safe_print(f"[REPORT] Generating Report...")
+        safe_print("[REPORT] Generating Report...")
         safe_print(f"{'='*70}\n")
 
         report = self._create_report(results)
@@ -165,7 +157,7 @@ class ValidationRunner:
 
         safe_print(f"[OK] Report saved: {report_path}")
         safe_print(f"\n{'='*70}")
-        safe_print(f"[TARGET] Summary")
+        safe_print("[TARGET] Summary")
         safe_print(f"{'='*70}")
         safe_print(f"Scenarios: {report.total_scenarios}")
         safe_print(f"Passed: {report.scenarios_passed}")
@@ -178,7 +170,7 @@ class ValidationRunner:
         # Exit code based on results
         return 0 if report.scenarios_passed == report.total_scenarios else 1
 
-    def _select_scenarios(self, args) -> List[ValidationScenario]:
+    def _select_scenarios(self, args) -> list[ValidationScenario]:
         """Select scenarios based on CLI args"""
 
         if args.all:
@@ -189,7 +181,7 @@ class ValidationRunner:
                 return [get_scenario_by_id(args.scenario)]
             except ValueError:
                 safe_print(f"[FAIL] Unknown scenario: {args.scenario}")
-                safe_print(f"Available scenarios:")
+                safe_print("Available scenarios:")
                 for s in VALIDATION_SCENARIOS:
                     safe_print(f"  - {s.id} ({s.difficulty.value}): {s.name}")
                 sys.exit(1)
@@ -200,13 +192,13 @@ class ValidationRunner:
                 return get_scenarios_by_difficulty(diff)
             except ValueError:
                 safe_print(f"[FAIL] Unknown difficulty: {args.difficulty}")
-                safe_print(f"Available: easy, medium, hard")
+                safe_print("Available: easy, medium, hard")
                 sys.exit(1)
 
         # Default: show help
         return []
 
-    def _create_report(self, results: List[ValidationResult]) -> ValidationReport:
+    def _create_report(self, results: list[ValidationResult]) -> ValidationReport:
         """Create aggregated report from results"""
 
         total = len(results)

@@ -18,8 +18,8 @@ Key design principles:
 6. Structured format with XML tags
 """
 
-from typing import Dict, List, Optional
 from enum import Enum
+from typing import Optional
 
 
 class PromptSection(Enum):
@@ -1139,9 +1139,9 @@ class EnhancedSystemPrompts:
 
     @staticmethod
     def get_system_prompt(
-        include_sections: Optional[List[PromptSection]] = None,
+        include_sections: list[PromptSection] | None = None,
         language: str = "python",
-        task_type: Optional[str] = None,
+        task_type: str | None = None,
         context_size: int = 131072,
     ) -> str:
         """
@@ -1234,7 +1234,7 @@ class EnhancedSystemPrompts:
         return notes.get(task_type.lower(), "")
 
     @staticmethod
-    def get_medium_prompt(language: str = "python", task_type: Optional[str] = None) -> str:
+    def get_medium_prompt(language: str = "python", task_type: str | None = None) -> str:
         """
         Get balanced prompt for interactive use.
         Optimized for speed while maintaining quality.

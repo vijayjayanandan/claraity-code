@@ -19,10 +19,10 @@ Phase: 1 - Self-Testing & Long-Running Execution
 import json
 import os
 import uuid
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import Any, Optional
 
 
 @dataclass
@@ -62,22 +62,22 @@ class ExecutionCheckpoint:
         episodic_memory: Compressed summaries of older conversations
         task_context: Project type, key files, key concepts
         tool_execution_history: Complete history of tool calls
-        files_modified: List of files created/modified
+        files_modified: list of files created/modified
         current_todos: Current todo list from TodoWrite tool
         current_phase: Current development phase (e.g., "Phase 1")
         pending_tasks: Tasks remaining to complete
     """
     metadata: CheckpointMetadata
-    working_memory: List[Dict[str, Any]]  # Recent messages
-    episodic_memory: List[str]  # Compressed summaries
-    task_context: Dict[str, Any]  # Project context
-    tool_execution_history: List[Dict[str, Any]]  # All tool calls
-    files_modified: List[str]  # File paths
-    current_todos: Optional[List[Dict[str, Any]]] = None  # TodoWrite state
-    current_phase: Optional[str] = None
-    pending_tasks: Optional[List[str]] = None
+    working_memory: list[dict[str, Any]]  # Recent messages
+    episodic_memory: list[str]  # Compressed summaries
+    task_context: dict[str, Any]  # Project context
+    tool_execution_history: list[dict[str, Any]]  # All tool calls
+    files_modified: list[str]  # File paths
+    current_todos: list[dict[str, Any]] | None = None  # TodoWrite state
+    current_phase: str | None = None
+    pending_tasks: list[str] | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert checkpoint to dictionary for JSON serialization."""
         return {
             "metadata": asdict(self.metadata),
@@ -92,7 +92,7 @@ class ExecutionCheckpoint:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ExecutionCheckpoint":
+    def from_dict(cls, data: dict[str, Any]) -> "ExecutionCheckpoint":
         """Restore checkpoint from dictionary (JSON deserialization)."""
         metadata = CheckpointMetadata(**data["metadata"])
         return cls(
@@ -158,8 +158,8 @@ class CheckpointManager:
         agent: Any,  # CodingAgent instance
         execution_progress: str,
         task_description: str = "Ongoing work",
-        current_phase: Optional[str] = None,
-        pending_tasks: Optional[List[str]] = None
+        current_phase: str | None = None,
+        pending_tasks: list[str] | None = None
     ) -> str:
         """
         Save complete agent execution state to checkpoint.
@@ -176,7 +176,7 @@ class CheckpointManager:
             execution_progress: Description of current progress
             task_description: What the agent is working on
             current_phase: Current development phase (e.g., "Phase 1")
-            pending_tasks: List of tasks remaining
+            pending_tasks: list of tasks remaining
 
         Returns:
             checkpoint_id: Unique ID of saved checkpoint
@@ -229,7 +229,7 @@ class CheckpointManager:
                 key_concepts = getattr(ctx, 'key_concepts', [])
 
                 # Only include if they're JSON-serializable types
-                if isinstance(project_type, (str, type(None))):
+                if isinstance(project_type, str | type(None)):
                     task_context["project_type"] = project_type
                 if isinstance(key_files, list):
                     task_context["key_files"] = key_files
@@ -331,7 +331,7 @@ class CheckpointManager:
                 f"Checkpoint {checkpoint_id} not found at {checkpoint_file}"
             )
 
-        with open(checkpoint_file, 'r', encoding='utf-8') as f:
+        with open(checkpoint_file, encoding='utf-8') as f:
             data = json.load(f)
 
         return ExecutionCheckpoint.from_dict(data)
@@ -388,12 +388,12 @@ class CheckpointManager:
         if hasattr(agent, 'tool_execution_history'):
             agent.tool_execution_history = [dict(call) for call in checkpoint.tool_execution_history]
 
-    def list_checkpoints(self) -> List[CheckpointMetadata]:
+    def list_checkpoints(self) -> list[CheckpointMetadata]:
         """
-        List all available checkpoints, sorted by timestamp (newest first).
+        list all available checkpoints, sorted by timestamp (newest first).
 
         Returns:
-            List of CheckpointMetadata objects
+            list of CheckpointMetadata objects
         """
         checkpoints = []
 
@@ -402,7 +402,7 @@ class CheckpointManager:
 
         for checkpoint_file in checkpoint_files:
             try:
-                with open(checkpoint_file, 'r', encoding='utf-8') as f:
+                with open(checkpoint_file, encoding='utf-8') as f:
                     data = json.load(f)
 
                 metadata = CheckpointMetadata(**data["metadata"])

@@ -14,14 +14,14 @@ Engineering Principles:
 """
 
 import json
-import sqlite3
 import logging
+import sqlite3
 import threading
-from dataclasses import dataclass, asdict
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, List, Dict, Any
-from contextlib import contextmanager
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +91,7 @@ class MetricsCollector:
 
             conn.commit()
 
-    def record(self, metric_name: str, value: float, tags: Optional[Dict[str, Any]] = None):
+    def record(self, metric_name: str, value: float, tags: dict[str, Any] | None = None):
         """
         Record a metric.
 
@@ -118,11 +118,11 @@ class MetricsCollector:
     def query(
         self,
         metric_name: str,
-        since: Optional[datetime] = None,
-        until: Optional[datetime] = None,
-        tags: Optional[Dict[str, Any]] = None,
-        limit: Optional[int] = None
-    ) -> List[MetricEntry]:
+        since: datetime | None = None,
+        until: datetime | None = None,
+        tags: dict[str, Any] | None = None,
+        limit: int | None = None
+    ) -> list[MetricEntry]:
         """
         Query metrics.
 
@@ -134,7 +134,7 @@ class MetricsCollector:
             limit: Maximum number of results
 
         Returns:
-            List of metric entries
+            list of metric entries
         """
         try:
             with self._get_connection() as conn:
@@ -177,10 +177,10 @@ class MetricsCollector:
         self,
         metric_name: str,
         aggregation: str = "avg",
-        since: Optional[datetime] = None,
-        until: Optional[datetime] = None,
-        tags: Optional[Dict[str, Any]] = None
-    ) -> Optional[float]:
+        since: datetime | None = None,
+        until: datetime | None = None,
+        tags: dict[str, Any] | None = None
+    ) -> float | None:
         """
         Aggregate metrics.
 
@@ -239,7 +239,7 @@ class MetricsCollector:
             logger.error(f"[FAIL] Failed to aggregate metric {metric_name}: {e}")
             return None
 
-    def get_stats(self, metric_name: str, hours: int = 24) -> Dict[str, Any]:
+    def get_stats(self, metric_name: str, hours: int = 24) -> dict[str, Any]:
         """
         Get statistics for a metric over the last N hours.
 
@@ -287,7 +287,7 @@ class MetricsCollector:
 # =============================================================================
 
 # Singleton metrics collector
-_metrics_instance: Optional[MetricsCollector] = None
+_metrics_instance: MetricsCollector | None = None
 
 
 def get_metrics_collector() -> MetricsCollector:
@@ -368,7 +368,7 @@ def record_cost_estimate(cost_usd: float, model: str, operation: str = "llm_call
     )
 
 
-def get_session_stats(hours: int = 24) -> Dict[str, Any]:
+def get_session_stats(hours: int = 24) -> dict[str, Any]:
     """
     Get statistics for the current session.
 

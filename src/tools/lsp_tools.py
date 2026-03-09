@@ -16,12 +16,13 @@ ARCHITECTURE:
 
 import asyncio
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Any, Optional
+
+from src.code_intelligence.config import CodeIntelligenceConfig
+from src.code_intelligence.lsp_client_manager import LSPClientManager
+from src.code_intelligence.lsp_runtime import get_manager_async, lsp_run
 
 from .base import Tool, ToolResult, ToolStatus
-from src.code_intelligence.lsp_client_manager import LSPClientManager
-from src.code_intelligence.config import CodeIntelligenceConfig
-from src.code_intelligence.lsp_runtime import lsp_run, get_manager_async
 from .search_tools import validate_path_security
 
 
@@ -55,8 +56,8 @@ class GetFileOutlineTool(Tool):
             description="Get file structure (classes, functions, methods) using LSP semantic analysis"
         )
         # Manager is obtained from lsp_runtime (singleton, reused across calls)
-        self.lsp_manager: Optional[LSPClientManager] = None
-        self.config: Optional[CodeIntelligenceConfig] = None
+        self.lsp_manager: LSPClientManager | None = None
+        self.config: CodeIntelligenceConfig | None = None
 
     async def _ensure_lsp_initialized(self):
         """Initialize LSP manager from persistent runtime."""
@@ -140,7 +141,7 @@ class GetFileOutlineTool(Tool):
                 error=f"Failed to get file outline: {str(e)}"
             )
 
-    def _parse_symbols(self, symbols: List[Dict[str, Any]], file_path: str) -> Dict[str, Any]:
+    def _parse_symbols(self, symbols: list[dict[str, Any]], file_path: str) -> dict[str, Any]:
         """
         Parse LSP symbols into structured outline.
 
@@ -186,7 +187,7 @@ class GetFileOutlineTool(Tool):
 
         return outline
 
-    def _get_symbol_type(self, symbol: Dict[str, Any]) -> str:
+    def _get_symbol_type(self, symbol: dict[str, Any]) -> str:
         """Determine symbol type from LSP kind."""
         # LSP SymbolKind mapping
         kind = symbol.get("kind", 0)
@@ -207,7 +208,7 @@ class GetFileOutlineTool(Tool):
         else:
             return "other"
 
-    def _parse_single_symbol(self, symbol: Dict[str, Any]) -> Dict[str, Any]:
+    def _parse_single_symbol(self, symbol: dict[str, Any]) -> dict[str, Any]:
         """Parse a single LSP symbol."""
         name = symbol.get("name", "unknown")
         kind = symbol.get("kind", 0)
@@ -243,7 +244,7 @@ class GetFileOutlineTool(Tool):
         }
         return kind_map.get(kind, f"kind_{kind}")
 
-    def _format_outline(self, outline: Dict[str, Any]) -> str:
+    def _format_outline(self, outline: dict[str, Any]) -> str:
         """Format outline as human-readable string."""
         lines = [f"File Outline: {outline['file']}", ""]
 
@@ -271,7 +272,7 @@ class GetFileOutlineTool(Tool):
 
         return "\n".join(lines)
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
@@ -327,8 +328,8 @@ class GetSymbolContextTool(Tool):
             description="Get complete symbol details (definition, signature, callers) by name using LSP"
         )
         # Manager is obtained from lsp_runtime (singleton, reused across calls)
-        self.lsp_manager: Optional[LSPClientManager] = None
-        self.config: Optional[CodeIntelligenceConfig] = None
+        self.lsp_manager: LSPClientManager | None = None
+        self.config: CodeIntelligenceConfig | None = None
 
     async def _ensure_lsp_initialized(self):
         """Initialize LSP manager from persistent runtime."""
@@ -342,7 +343,7 @@ class GetSymbolContextTool(Tool):
     def execute(
         self,
         symbol_name: str,
-        file_hint: Optional[str] = None,
+        file_hint: str | None = None,
         include_references: bool = True,
         include_implementation: bool = True,
         **kwargs: Any
@@ -376,7 +377,7 @@ class GetSymbolContextTool(Tool):
     async def _execute_async(
         self,
         symbol_name: str,
-        file_hint: Optional[str],
+        file_hint: str | None,
         include_references: bool,
         include_implementation: bool
     ) -> ToolResult:
@@ -436,7 +437,7 @@ class GetSymbolContextTool(Tool):
                 error=f"Failed to get symbol context: {str(e)}"
             )
 
-    def _filter_by_file(self, symbols: List[Dict[str, Any]], file_hint: str) -> List[Dict[str, Any]]:
+    def _filter_by_file(self, symbols: list[dict[str, Any]], file_hint: str) -> list[dict[str, Any]]:
         """Filter symbols by file path hint."""
         normalized_hint = Path(file_hint).as_posix().lower()
 
@@ -453,10 +454,10 @@ class GetSymbolContextTool(Tool):
 
     async def _load_symbol_context(
         self,
-        symbol_info: Dict[str, Any],
+        symbol_info: dict[str, Any],
         include_references: bool,
         include_implementation: bool
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Load complete context for a symbol."""
         # Extract location from workspace symbol
         location = symbol_info.get("location", {})
@@ -510,7 +511,7 @@ class GetSymbolContextTool(Tool):
 
         return context
 
-    def _extract_signature(self, hover: Dict[str, Any], definition: Dict[str, Any]) -> str:
+    def _extract_signature(self, hover: dict[str, Any], definition: dict[str, Any]) -> str:
         """Extract function/class signature from hover info."""
         # Try to get from hover first (usually has type info)
         if hover and "contents" in hover:
@@ -527,7 +528,7 @@ class GetSymbolContextTool(Tool):
 
         return "Signature not available"
 
-    def _extract_docstring(self, hover: Dict[str, Any]) -> str:
+    def _extract_docstring(self, hover: dict[str, Any]) -> str:
         """Extract docstring from hover info."""
         if not hover or "contents" not in hover:
             return ""
@@ -543,7 +544,7 @@ class GetSymbolContextTool(Tool):
 
         return ""
 
-    def _format_references(self, references: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    def _format_references(self, references: list[dict[str, Any]]) -> list[dict[str, str]]:
         """Format references for output."""
         formatted = []
         for ref in references:
@@ -560,7 +561,7 @@ class GetSymbolContextTool(Tool):
 
         return formatted
 
-    async def _read_implementation(self, file_path: str, start_line: int) -> Dict[str, Any]:
+    async def _read_implementation(self, file_path: str, start_line: int) -> dict[str, Any]:
         """Read function/class implementation."""
         try:
             # Validate path for security (prevent path traversal)
@@ -569,7 +570,7 @@ class GetSymbolContextTool(Tool):
             # they should use read_file directly with appropriate approval.
             validated_path = validate_path_security(file_path, allow_files_outside_workspace=False)
 
-            with open(validated_path, 'r', encoding='utf-8') as f:
+            with open(validated_path, encoding='utf-8') as f:
                 lines = f.readlines()
 
             # Simple heuristic: read until next function/class or end of file
@@ -598,7 +599,7 @@ class GetSymbolContextTool(Tool):
         }
         return kind_map.get(kind, f"kind_{kind}")
 
-    def _format_symbol_context(self, symbol_name: str, matches: List[Dict[str, Any]]) -> str:
+    def _format_symbol_context(self, symbol_name: str, matches: list[dict[str, Any]]) -> str:
         """Format symbol context as human-readable string."""
         if not matches:
             return f"No matches found for '{symbol_name}'"
@@ -627,7 +628,7 @@ class GetSymbolContextTool(Tool):
 
         return "\n".join(lines)
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {

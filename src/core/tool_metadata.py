@@ -11,16 +11,16 @@ will automatically pick it up. If you need a key only in one path,
 pass it via **extra.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 
 def build_tool_metadata(
     tool_name: str,
-    tool_args: Dict[str, Any],
+    tool_args: dict[str, Any],
     args_summary: str = "",
     requires_approval: bool = False,
     **extra: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Build a standard extra_metadata dict for MessageStore.update_tool_state().
 
     Args:
@@ -31,10 +31,10 @@ def build_tool_metadata(
         **extra: Additional keys merged into the dict
 
     Returns:
-        Dict suitable for the ``extra_metadata`` parameter of ``update_tool_state()``.
+        dict suitable for the ``extra_metadata`` parameter of ``update_tool_state()``.
         Always contains "arguments" so the serializer can extract file paths.
     """
-    metadata: Dict[str, Any] = {
+    metadata: dict[str, Any] = {
         "arguments": tool_args,
         "args_summary": args_summary,
         "requires_approval": requires_approval,

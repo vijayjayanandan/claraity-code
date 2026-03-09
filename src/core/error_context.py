@@ -7,7 +7,7 @@ format helps the LLM make informed decisions about error recovery strategies.
 """
 
 from dataclasses import dataclass
-from typing import Dict, Any, List, Optional
+from typing import Any, Optional
 
 
 @dataclass
@@ -29,18 +29,18 @@ class ErrorContext:
         stderr_tail: Last 500 chars of stderr (for command failures)
         working_dir: Working directory when the error occurred
         attempt_number: How many times this tool+error_type combination has failed
-        previous_attempts: List of previous distinct attempts (capped to last 3)
+        previous_attempts: list of previous distinct attempts (capped to last 3)
     """
     error_type: str
     tool_name: str
-    tool_args: Dict[str, Any]
+    tool_args: dict[str, Any]
     error_message: str
-    exit_code: Optional[int]
-    stdout_tail: Optional[str]  # Last 500 chars
-    stderr_tail: Optional[str]  # Last 500 chars
-    working_dir: Optional[str]
+    exit_code: int | None
+    stdout_tail: str | None  # Last 500 chars
+    stderr_tail: str | None  # Last 500 chars
+    working_dir: str | None
     attempt_number: int
-    previous_attempts: List[Dict[str, Any]]  # Capped to last 3
+    previous_attempts: list[dict[str, Any]]  # Capped to last 3
 
     def to_prompt_block(self) -> str:
         """
@@ -86,7 +86,7 @@ rules:
 - If blocked, ask user for clarification or explain stop
 </tool_failure>"""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """
         Convert to dictionary for serialization.
 

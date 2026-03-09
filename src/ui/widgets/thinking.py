@@ -9,12 +9,12 @@ Features:
 - Streams content progressively
 """
 
-from textual.widgets import Static
-from textual.reactive import reactive
-from rich.panel import Panel
-from rich.markdown import Markdown as RichMarkdown
-from rich.text import Text
 from rich.console import RenderableType
+from rich.markdown import Markdown as RichMarkdown
+from rich.panel import Panel
+from rich.text import Text
+from textual.reactive import reactive
+from textual.widgets import Static
 
 
 class ThinkingBlock(Static):

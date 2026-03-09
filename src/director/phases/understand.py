@@ -19,7 +19,7 @@ class UnderstandPhaseHandler(PhaseHandler):
     def phase(self) -> DirectorPhase:
         return DirectorPhase.UNDERSTAND
 
-    def validate_input(self, input_data: Any) -> Optional[str]:
+    def validate_input(self, input_data: Any) -> str | None:
         """Task description must be a non-empty string."""
         if not isinstance(input_data, str):
             return "UNDERSTAND phase requires a task description string"

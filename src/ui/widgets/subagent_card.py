@@ -20,21 +20,24 @@ Mounted inside the parent ToolCard (delegation tool call).
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 
+from rich.console import RenderableType
+from rich.text import Text
 from textual.containers import Container, ScrollableContainer, Vertical
 from textual.widgets import Static
-from rich.text import Text
-from rich.console import RenderableType
 
 from src.core.events import ToolStatus
 from src.observability import get_logger
 
 if TYPE_CHECKING:
-    from src.session.store.memory_store import (
-        MessageStore, StoreNotification, StoreEvent, ToolExecutionState,
-    )
     from src.session.models.message import Message
+    from src.session.store.memory_store import (
+        MessageStore,
+        StoreEvent,
+        StoreNotification,
+        ToolExecutionState,
+    )
     from src.ui.widgets.tool_card import ToolCard
 
 logger = get_logger("ui.widgets.subagent_card")
@@ -44,10 +47,11 @@ logger = get_logger("ui.widgets.subagent_card")
 SILENT_TOOLS = {'task_create', 'task_update', 'task_list', 'task_get', 'enter_plan_mode'}
 
 # Status badge config for the header
-HEADER_ICONS: Dict[str, tuple[str, str, str]] = {
-    "running": ("*", "#1e1e1e", "#cca700"),
-    "done":    ("+", "#1e1e1e", "#73c991"),
-    "failed":  ("!", "#ffffff", "#f14c4c"),
+HEADER_ICONS: dict[str, tuple[str, str, str]] = {
+    "running":           ("*", "#1e1e1e", "#cca700"),
+    "awaiting_approval": ("?", "#1e1e1e", "#ff8c00"),
+    "done":              ("+", "#1e1e1e", "#73c991"),
+    "failed":            ("!", "#ffffff", "#f14c4c"),
 }
 
 
@@ -82,14 +86,14 @@ class _SubagentHeader(Static):
         self._subagent_name = subagent_name
         self._status = "running"
         self._tool_count = 0
-        self._duration_ms: Optional[int] = None
+        self._duration_ms: int | None = None
         self._collapsed = False
 
     def update_status(
         self,
         status: str,
         tool_count: int,
-        duration_ms: Optional[int] = None,
+        duration_ms: int | None = None,
     ) -> None:
         self._status = status
         self._tool_count = tool_count
@@ -110,7 +114,10 @@ class _SubagentHeader(Static):
         t = Text()
         t.append(collapse_indicator, style="bold #73c991" if not self._collapsed else "bold #cca700")
         t.append(" ", style="")
-        t.append(f" {icon} ", style=f"bold {fg} on {bg}")
+        icon_style = f"bold {fg} on {bg}"
+        if self._status == "awaiting_approval":
+            icon_style += " blink"
+        t.append(f" {icon} ", style=icon_style)
         t.append(" ", style="")
         # Show subagent name (e.g., "knowledge-builder") if available, otherwise fall back to ID
         if self._subagent_name:
@@ -128,6 +135,8 @@ class _SubagentHeader(Static):
         if self._duration_ms:
             secs = self._duration_ms / 1000
             t.append(f" | {secs:.1f}s", style="#6e7681")
+        elif self._status == "awaiting_approval":
+            t.append(" | awaiting approval", style="blink #ff8c00")
         elif self._status == "running":
             t.append(" | running", style="#cca700")
 
@@ -200,9 +209,9 @@ class SubAgentCard(Container):
     def __init__(
         self,
         subagent_id: str,
-        transcript_path: Optional[Path] = None,
+        transcript_path: Path | None = None,
         store: Optional["MessageStore"] = None,
-        buffered_notifications: Optional[list] = None,
+        buffered_notifications: list | None = None,
         model_name: str = "",
         subagent_name: str = "",
         **kwargs,
@@ -214,19 +223,19 @@ class SubAgentCard(Container):
         self.subagent_name = subagent_name
         self._status = "running"
         self._collapsed = False
-        self._duration_ms: Optional[int] = None
+        self._duration_ms: int | None = None
 
         # Own tool card tracking (separate from app._tool_cards)
-        self._tool_cards: Dict[str, "ToolCard"] = {}
+        self._tool_cards: dict[str, "ToolCard"] = {}
         self._tool_count = 0
 
         # Buffer for tool state updates that arrive before the card is mounted.
         # call_later creates concurrent async tasks, so TOOL_STATE_UPDATED can
         # race ahead of the MESSAGE_ADDED handler that creates the ToolCard.
-        self._pending_tool_states: Dict[str, "StoreNotification"] = {}
+        self._pending_tool_states: dict[str, "StoreNotification"] = {}
 
         # Current assistant message widget (for appending tool cards)
-        self._current_assistant: Optional[Any] = None
+        self._current_assistant: Any | None = None
 
         # Track which stream_ids we've already rendered
         self._rendered_stream_ids: set = set()
@@ -236,8 +245,8 @@ class SubAgentCard(Container):
         self._pending_notifications = buffered_notifications or []
 
         # Direct widget references (set after compose)
-        self._header: Optional[_SubagentHeader] = None
-        self._body: Optional[_SubagentBody] = None
+        self._header: _SubagentHeader | None = None
+        self._body: _SubagentBody | None = None
 
     def compose(self):
         yield _SubagentHeader(self.subagent_id, model_name=self.model_name, subagent_name=self.subagent_name, id="sa-header")
@@ -506,8 +515,10 @@ class SubAgentCard(Container):
         - ToolCallRefSegment: ToolCard with diffs and results
         """
         from src.session.models.message import (
-            TextSegment, CodeBlockSegment,
-            ToolCallRefSegment, ThinkingSegment
+            CodeBlockSegment,
+            TextSegment,
+            ThinkingSegment,
+            ToolCallRefSegment,
         )
 
         for segment in segments:
@@ -625,8 +636,18 @@ class SubAgentCard(Container):
         return None
 
     def _refresh_header(self) -> None:
-        """Update the header with current status and tool count."""
+        """Update the header with current status and tool count.
+
+        Scans tool cards for AWAITING_APPROVAL to temporarily override the
+        header status with a blinking "awaiting_approval" indicator.
+        """
         if self._header:
+            display_status = self._status  # "running", "done", "failed"
+            if self._status == "running":
+                for card in self._tool_cards.values():
+                    if card.status == ToolStatus.AWAITING_APPROVAL:
+                        display_status = "awaiting_approval"
+                        break
             self._header.update_status(
-                self._status, self._tool_count, self._duration_ms
+                display_status, self._tool_count, self._duration_ms
             )

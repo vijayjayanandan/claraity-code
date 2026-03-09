@@ -13,11 +13,13 @@ v2.1: Uses unified Message class with OpenAI-anchored format.
 """
 
 import json
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Union, Iterator, Optional, Tuple, Callable, List
+from typing import Optional, Union
 
 from src.observability import get_logger
-from ..models.message import Message, FileHistorySnapshot
+
+from ..models.message import FileHistorySnapshot, Message
 from ..store.memory_store import MessageStore
 
 logger = get_logger("session.persistence.parser")
@@ -38,7 +40,7 @@ class ParseError(Exception):
         super().__init__(f"Line {line_number}: {message}")
 
 
-def parse_line(line: str, line_number: int) -> Optional[Union[Message, FileHistorySnapshot]]:
+def parse_line(line: str, line_number: int) -> Message | FileHistorySnapshot | None:
     """
     Parse a single JSONL line into the appropriate model.
 
@@ -96,9 +98,9 @@ def parse_line(line: str, line_number: int) -> Optional[Union[Message, FileHisto
 
 
 def parse_file_iter(
-    file_path: Union[str, Path],
+    file_path: str | Path,
     tolerant_last_line: bool = True
-) -> Iterator[Tuple[int, Union[Message, FileHistorySnapshot]]]:
+) -> Iterator[tuple[int, Message | FileHistorySnapshot]]:
     """
     Parse JSONL file lazily using streaming (no readlines()).
 
@@ -109,7 +111,7 @@ def parse_file_iter(
         tolerant_last_line: If True, skip corrupted last line (crash recovery)
 
     Yields:
-        Tuple of (line_number, parsed message or snapshot)
+        tuple of (line_number, parsed message or snapshot)
         Skips None results from unknown types
     """
     path = Path(file_path)
@@ -117,8 +119,8 @@ def parse_file_iter(
     if not path.exists():
         raise FileNotFoundError(f"Session file not found: {path}")
 
-    with open(path, 'r', encoding='utf-8') as f:
-        prev_line: Optional[str] = None
+    with open(path, encoding='utf-8') as f:
+        prev_line: str | None = None
         prev_line_number: int = 0
 
         for line_number, line in enumerate(f, start=1):
@@ -153,9 +155,9 @@ def parse_file_iter(
 
 
 def load_session(
-    file_path: Union[str, Path],
-    store: Optional[MessageStore] = None,
-    on_progress: Optional[Callable[[int, int], None]] = None
+    file_path: str | Path,
+    store: MessageStore | None = None,
+    on_progress: Callable[[int, int], None] | None = None
 ) -> MessageStore:
     """
     Load a complete session from JSONL file into memory store.
@@ -181,7 +183,7 @@ def load_session(
     # Count lines for progress (separate pass, but streaming)
     total_lines = 0
     if on_progress:
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, encoding='utf-8') as f:
             for line in f:
                 if line.strip():
                     total_lines += 1
@@ -190,7 +192,7 @@ def load_session(
 
     try:
         current = 0
-        for line_number, item in parse_file_iter(path):
+        for _line_number, item in parse_file_iter(path):
             if isinstance(item, FileHistorySnapshot):
                 store.add_snapshot(item)
             else:
@@ -206,23 +208,23 @@ def load_session(
     return store
 
 
-def validate_session_file(file_path: Union[str, Path]) -> Tuple[bool, List[str]]:
+def validate_session_file(file_path: str | Path) -> tuple[bool, list[str]]:
     """
     Validate a JSONL session file without loading into memory.
 
     Uses strict mode (no tolerant last line).
 
     Returns:
-        Tuple of (is_valid, list of error messages)
+        tuple of (is_valid, list of error messages)
     """
-    errors: List[str] = []
+    errors: list[str] = []
     path = Path(file_path)
 
     if not path.exists():
         return False, [f"File not found: {path}"]
 
     try:
-        for line_number, _ in parse_file_iter(path, tolerant_last_line=False):
+        for _line_number, _ in parse_file_iter(path, tolerant_last_line=False):
             pass  # Just iterate to check for errors
     except ParseError as e:
         errors.append(str(e))
@@ -232,7 +234,7 @@ def validate_session_file(file_path: Union[str, Path]) -> Tuple[bool, List[str]]
     return len(errors) == 0, errors
 
 
-def get_session_info(file_path: Union[str, Path]) -> Optional[dict]:
+def get_session_info(file_path: str | Path) -> dict | None:
     """
     Get basic session info from the first few lines without full load.
 
@@ -250,7 +252,7 @@ def get_session_info(file_path: Union[str, Path]) -> Optional[dict]:
     line_count = 0
 
     try:
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
                 if not line:

@@ -10,27 +10,27 @@ Usage:
     protocol.start("Add user authentication")
 """
 
-from .models import (
-    DirectorPhase,
-    SliceStatus,
-    FileMapping,
-    ContextDocument,
-    VerticalSlice,
-    DirectorPlan,
-    PhaseResult,
-)
-from .protocol import DirectorProtocol, VALID_TRANSITIONS
-from .errors import DirectorError, InvalidTransitionError, PhaseError
-from .phases.base import PhaseHandler
-from .phases.understand import UnderstandPhaseHandler
-from .phases.plan import PlanPhaseHandler
 from .adapter import DirectorAdapter, DirectorGateDecision
-from .prompts import PHASE_PROMPTS, PHASE_ALLOWED_TOOLS, get_director_phase_prompt
+from .errors import DirectorError, InvalidTransitionError, PhaseError
+from .models import (
+    ContextDocument,
+    DirectorPhase,
+    DirectorPlan,
+    FileMapping,
+    PhaseResult,
+    SliceStatus,
+    VerticalSlice,
+)
+from .phases.base import PhaseHandler
+from .phases.plan import PlanPhaseHandler
+from .phases.understand import UnderstandPhaseHandler
+from .prompts import PHASE_ALLOWED_TOOLS, PHASE_PROMPTS, get_director_phase_prompt
+from .protocol import VALID_TRANSITIONS, DirectorProtocol
 from .tools import (
-    DirectorCompleteUnderstandTool,
+    DirectorCompleteIntegrationTool,
     DirectorCompletePlanTool,
     DirectorCompleteSliceTool,
-    DirectorCompleteIntegrationTool,
+    DirectorCompleteUnderstandTool,
 )
 
 __all__ = [

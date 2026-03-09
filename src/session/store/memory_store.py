@@ -22,19 +22,17 @@ Per v3.1 Patch 2: _remove_from_indexes() cleans _sidechains as well.
 Per v2.1: Collapse by stream_id (not provider_message_id).
 """
 
-from dataclasses import dataclass, field
-from typing import (
-    Dict, List, Optional, Set, Callable, Any,
-    TYPE_CHECKING
-)
-from enum import Enum
 import threading
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import TYPE_CHECKING, Any, Optional
 
-from src.observability import get_logger
 from src.core.events import ToolStatus
+from src.observability import get_logger
 
 if TYPE_CHECKING:
-    from ..models.message import Message, FileHistorySnapshot
+    from ..models.message import FileHistorySnapshot, Message
 
 logger = get_logger("session.store")
 
@@ -67,9 +65,9 @@ class ToolExecutionState:
     TUI reads via MessageStore.get_tool_state() or TOOL_STATE_UPDATED notifications.
     """
     status: ToolStatus = ToolStatus.PENDING
-    result: Optional[Any] = None
-    error: Optional[str] = None
-    duration_ms: Optional[int] = None
+    result: Any | None = None
+    error: str | None = None
+    duration_ms: int | None = None
 
 
 @dataclass
@@ -78,10 +76,10 @@ class StoreNotification:
     event: StoreEvent
     message: Optional["Message"] = None
     snapshot: Optional["FileHistorySnapshot"] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     # For TOOL_STATE_UPDATED events
-    tool_call_id: Optional[str] = None
-    tool_state: Optional[ToolExecutionState] = None
+    tool_call_id: str | None = None
+    tool_state: ToolExecutionState | None = None
 
 
 Subscriber = Callable[[StoreNotification], None]
@@ -116,58 +114,58 @@ class MessageStore:
 
     def __init__(self):
         # Primary storage
-        self._messages: Dict[str, "Message"] = {}
+        self._messages: dict[str, "Message"] = {}
 
         # Indexes
-        self._by_seq: Dict[int, str] = {}  # seq -> uuid (unique keys)
-        self._children: Dict[str, List[str]] = {}  # parent_uuid -> [child_uuids]
-        self._root_ids: List[str] = []  # Messages with no parent
+        self._by_seq: dict[int, str] = {}  # seq -> uuid (unique keys)
+        self._children: dict[str, list[str]] = {}  # parent_uuid -> [child_uuids]
+        self._root_ids: list[str] = []  # Messages with no parent
 
         # Assistant message collapse index (stream_id -> uuid)
-        self._by_stream_id: Dict[str, str] = {}
+        self._by_stream_id: dict[str, str] = {}
 
         # Tool linkage indexes
-        self._tool_results: Dict[str, str] = {}  # tool_call_id -> tool_result_message_uuid
-        self._assistant_tools: Dict[str, List[str]] = {}  # assistant_uuid -> [tool_call_ids]
-        self._tool_approvals: Dict[str, str] = {}  # tool_call_id -> approval_message_uuid
+        self._tool_results: dict[str, str] = {}  # tool_call_id -> tool_result_message_uuid
+        self._assistant_tools: dict[str, list[str]] = {}  # assistant_uuid -> [tool_call_ids]
+        self._tool_approvals: dict[str, str] = {}  # tool_call_id -> approval_message_uuid
 
         # Clarify indexes (for interactive clarification flow)
-        self._clarify_requests: Dict[str, str] = {}   # call_id -> message_uuid
-        self._clarify_responses: Dict[str, str] = {}  # call_id -> message_uuid
+        self._clarify_requests: dict[str, str] = {}   # call_id -> message_uuid
+        self._clarify_responses: dict[str, str] = {}  # call_id -> message_uuid
 
         # Sidechain tracking
-        self._sidechains: Dict[str, List[str]] = {}  # parent_uuid -> [sidechain_uuids]
+        self._sidechains: dict[str, list[str]] = {}  # parent_uuid -> [sidechain_uuids]
 
         # Compaction tracking
-        self._last_compact_boundary_seq: Optional[int] = None
-        self._compact_boundary_uuid: Optional[str] = None
-        self._compact_summary_uuid: Optional[str] = None
+        self._last_compact_boundary_seq: int | None = None
+        self._compact_boundary_uuid: str | None = None
+        self._compact_summary_uuid: str | None = None
 
         # File snapshots
-        self._snapshots: Dict[str, "FileHistorySnapshot"] = {}
+        self._snapshots: dict[str, "FileHistorySnapshot"] = {}
 
         # Ephemeral tool execution state (NOT persisted)
         # Keyed by tool_call_id, updated by Agent, read by TUI
-        self._tool_state: Dict[str, ToolExecutionState] = {}
+        self._tool_state: dict[str, ToolExecutionState] = {}
 
         # Tool metadata (tool_name, args_summary) for hydration after mount
-        self._tool_metadata: Dict[str, Dict[str, Any]] = {}
+        self._tool_metadata: dict[str, dict[str, Any]] = {}
 
         # Sequence tracking (Store owns seq authority per v3.1 Patch 1)
         self._max_seq: int = 0
 
         # Subscriptions
-        self._subscribers: Set[Subscriber] = set()
+        self._subscribers: set[Subscriber] = set()
         self._lock = threading.RLock()
 
         # Metadata
-        self._session_id: Optional[str] = None
+        self._session_id: str | None = None
         self._is_bulk_loading: bool = False
 
         # Permission mode tracking (extracted from permission_mode_changed events)
         self._current_mode: str = "normal"  # Current permission mode
-        self._plan_hash: Optional[str] = None  # Plan hash if in plan mode
-        self._plan_path: Optional[str] = None  # Plan file path if in plan mode
+        self._plan_hash: str | None = None  # Plan hash if in plan mode
+        self._plan_path: str | None = None  # Plan file path if in plan mode
 
     # =========================================================================
     # Core Operations
@@ -240,7 +238,7 @@ class MessageStore:
                 # This detects orphaned tool results (JSONL corruption, missing assistant message)
                 tool_call_id = message.tool_call_id
                 has_assistant = False
-                for assistant_uuid, tool_call_ids in self._assistant_tools.items():
+                for _assistant_uuid, tool_call_ids in self._assistant_tools.items():
                     if tool_call_id in tool_call_ids:
                         has_assistant = True
                         break
@@ -395,7 +393,7 @@ class MessageStore:
     # Ordering & Iteration
     # =========================================================================
 
-    def get_ordered_messages(self) -> List["Message"]:
+    def get_ordered_messages(self) -> list["Message"]:
         """
         Get all messages ordered by seq.
 
@@ -406,7 +404,7 @@ class MessageStore:
             seqs = sorted(self._by_seq.keys())
             return [self._messages[self._by_seq[s]] for s in seqs if self._by_seq[s] in self._messages]
 
-    def get_messages_after_seq(self, seq: int) -> List["Message"]:
+    def get_messages_after_seq(self, seq: int) -> list["Message"]:
         """Get messages with seq > given value, ordered."""
         with self._lock:
             seqs = sorted(s for s in self._by_seq.keys() if s > seq)
@@ -422,7 +420,7 @@ class MessageStore:
             uuid = self._tool_results.get(tool_call_id)
             return self._messages.get(uuid) if uuid else None
 
-    def get_tool_calls_for_assistant(self, assistant_uuid: str) -> List[str]:
+    def get_tool_calls_for_assistant(self, assistant_uuid: str) -> list[str]:
         """Get tool_call_ids requested by an assistant message."""
         with self._lock:
             return self._assistant_tools.get(assistant_uuid, [])
@@ -456,7 +454,7 @@ class MessageStore:
 
         The questions are in meta.extra:
         - call_id: Tool call ID
-        - questions: List of question dicts
+        - questions: list of question dicts
         - context: Optional context string
         """
         with self._lock:
@@ -472,7 +470,7 @@ class MessageStore:
         The response is in meta.extra:
         - call_id: Tool call ID
         - submitted: bool
-        - responses: Dict of question_id -> selected_option_id(s)
+        - responses: dict of question_id -> selected_option_id(s)
         - chat_instead: bool
         - chat_message: str | None
         """
@@ -480,14 +478,14 @@ class MessageStore:
             uuid = self._clarify_responses.get(call_id)
             return self._messages.get(uuid) if uuid else None
 
-    def get_pending_clarify_call_ids(self) -> List[str]:
+    def get_pending_clarify_call_ids(self) -> list[str]:
         """Get call_ids with requests but no responses.
 
         Used during session resume to detect pending clarifications
         that need to be re-displayed to the user.
 
         Returns:
-            List of call_ids that have clarify_request but no clarify_response
+            list of call_ids that have clarify_request but no clarify_response
         """
         with self._lock:
             pending = []
@@ -504,11 +502,11 @@ class MessageStore:
         self,
         tool_call_id: str,
         status: ToolStatus,
-        result: Optional[Any] = None,
-        error: Optional[str] = None,
-        duration_ms: Optional[int] = None,
-        tool_name: Optional[str] = None,
-        extra_metadata: Optional[Dict[str, Any]] = None,
+        result: Any | None = None,
+        error: str | None = None,
+        duration_ms: int | None = None,
+        tool_name: str | None = None,
+        extra_metadata: dict[str, Any] | None = None,
     ) -> None:
         """Update ephemeral tool execution state.
 
@@ -561,7 +559,7 @@ class MessageStore:
                     metadata=metadata,
                 ))
 
-    def get_tool_state(self, tool_call_id: str) -> Optional[ToolExecutionState]:
+    def get_tool_state(self, tool_call_id: str) -> ToolExecutionState | None:
         """Get ephemeral tool execution state.
 
         Called by TUI when rendering tool cards.
@@ -570,17 +568,17 @@ class MessageStore:
         with self._lock:
             return self._tool_state.get(tool_call_id)
 
-    def get_tool_states(self) -> Dict[str, ToolExecutionState]:
+    def get_tool_states(self) -> dict[str, ToolExecutionState]:
         """Snapshot of all tool execution states (thread-safe copy)."""
         with self._lock:
             return dict(self._tool_state)
 
-    def get_tool_metadata(self, tool_call_id: str) -> Dict[str, Any]:
+    def get_tool_metadata(self, tool_call_id: str) -> dict[str, Any]:
         """Get metadata for a tool call (tool_name, args_summary, etc.)."""
         with self._lock:
             return dict(self._tool_metadata.get(tool_call_id, {}))
 
-    def get_all_tool_metadata(self) -> Dict[str, Dict[str, Any]]:
+    def get_all_tool_metadata(self) -> dict[str, dict[str, Any]]:
         """Snapshot of all tool metadata (thread-safe copy)."""
         with self._lock:
             return {k: dict(v) for k, v in self._tool_metadata.items()}
@@ -595,7 +593,7 @@ class MessageStore:
     # Sidechain Operations
     # =========================================================================
 
-    def get_mainline_messages(self) -> List["Message"]:
+    def get_mainline_messages(self) -> list["Message"]:
         """Get non-sidechain messages in seq order."""
         with self._lock:
             messages = [m for m in self._messages.values() if not m.is_sidechain]
@@ -606,7 +604,7 @@ class MessageStore:
         with self._lock:
             return len(self._sidechains.get(parent_uuid, []))
 
-    def get_sidechains(self, parent_uuid: str) -> List["Message"]:
+    def get_sidechains(self, parent_uuid: str) -> list["Message"]:
         """Get sidechain messages for a parent."""
         with self._lock:
             uuids = self._sidechains.get(parent_uuid, [])
@@ -616,7 +614,7 @@ class MessageStore:
     # Projection Views
     # =========================================================================
 
-    def get_transcript_view(self, include_pre_compaction: bool = False) -> List["Message"]:
+    def get_transcript_view(self, include_pre_compaction: bool = False) -> list["Message"]:
         """
         Get messages for transcript display.
 
@@ -635,7 +633,7 @@ class MessageStore:
 
             return messages
 
-    def get_llm_context(self, max_messages: Optional[int] = None) -> List[Dict[str, Any]]:
+    def get_llm_context(self, max_messages: int | None = None) -> list[dict[str, Any]]:
         """
         Get messages suitable for LLM context (OpenAI format).
 
@@ -645,7 +643,7 @@ class MessageStore:
         - Uses to_llm_dict() to strip meta
 
         Returns:
-            List of dicts in OpenAI message format
+            list of dicts in OpenAI message format
         """
         from src.observability import get_logger
         logger = get_logger("session.store")
@@ -690,7 +688,7 @@ class MessageStore:
             # Convert to LLM format (strip meta)
             return [m.to_llm_dict() for m in messages]
 
-    def get_llm_context_messages(self, max_messages: Optional[int] = None) -> List["Message"]:
+    def get_llm_context_messages(self, max_messages: int | None = None) -> list["Message"]:
         """
         Get Message objects for LLM context (for custom processing).
 
@@ -803,13 +801,13 @@ class MessageStore:
     # Threading (Parent-Child)
     # =========================================================================
 
-    def get_children(self, uuid: str) -> List["Message"]:
+    def get_children(self, uuid: str) -> list["Message"]:
         """Get direct children of a message (non-sidechain)."""
         with self._lock:
             child_ids = self._children.get(uuid, [])
             return [self._messages[cid] for cid in child_ids if cid in self._messages]
 
-    def get_thread(self, uuid: str) -> List["Message"]:
+    def get_thread(self, uuid: str) -> list["Message"]:
         """Get message thread from root to given UUID."""
         with self._lock:
             thread = []
@@ -963,7 +961,7 @@ class MessageStore:
     # =========================================================================
 
     @property
-    def session_id(self) -> Optional[str]:
+    def session_id(self) -> str | None:
         return self._session_id
 
     @property
@@ -988,13 +986,13 @@ class MessageStore:
             return self._current_mode
 
     @property
-    def plan_hash(self) -> Optional[str]:
+    def plan_hash(self) -> str | None:
         """Get the current plan hash (if in plan mode or awaiting approval)."""
         with self._lock:
             return self._plan_hash
 
     @property
-    def plan_path(self) -> Optional[str]:
+    def plan_path(self) -> str | None:
         """Get the current plan file path (if in plan mode or awaiting approval)."""
         with self._lock:
             return self._plan_path

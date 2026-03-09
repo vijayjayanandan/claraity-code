@@ -4,7 +4,7 @@ Shared by all LLM backends that support prompt caching (OpenAI, Anthropic, etc.)
 Tracks cache reads, writes, and hit rate to measure caching effectiveness.
 """
 
-from typing import Any, Dict
+from typing import Any
 
 
 class CacheTracker:
@@ -59,7 +59,7 @@ class CacheTracker:
         if read_tokens > 0:
             self.cache_hits += 1
 
-    def summary(self) -> Dict[str, Any]:
+    def summary(self) -> dict[str, Any]:
         """Return a summary dict of cache performance.
 
         Calculates effective savings: cache reads save 90% but

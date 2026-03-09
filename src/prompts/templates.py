@@ -1,8 +1,9 @@
 """Prompt templates optimized for coding tasks."""
 
-from typing import Dict, Any, List, Optional
-from jinja2 import Template
 from enum import Enum
+from typing import Any, Optional
+
+from jinja2 import Template
 
 
 class TaskType(str, Enum):
@@ -20,7 +21,7 @@ class TaskType(str, Enum):
 class PromptTemplate:
     """A reusable prompt template with variable substitution."""
 
-    def __init__(self, template: str, task_type: TaskType, examples: Optional[List[str]] = None):
+    def __init__(self, template: str, task_type: TaskType, examples: list[str] | None = None):
         """
         Initialize prompt template.
 

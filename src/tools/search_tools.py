@@ -8,10 +8,10 @@ Provides:
 These tools provide Anthropic-grade search capabilities for code discovery and analysis.
 """
 
-from pathlib import Path
-from typing import Dict, Any, List, Optional, Set
 import re
 from enum import Enum
+from pathlib import Path
+from typing import Any, Optional
 
 from .base import Tool, ToolResult, ToolStatus
 
@@ -55,7 +55,7 @@ FILE_TYPE_MAP = {
 
 def validate_path_security(
     path_str: str,
-    workspace_root: Optional[Path] = None,
+    workspace_root: Path | None = None,
     allow_files_outside_workspace: bool = False
 ) -> Path:
     """
@@ -200,9 +200,9 @@ class GrepTool(Tool):
     def execute(
         self,
         pattern: str,
-        path: Optional[str] = None,
-        file_type: Optional[str] = None,
-        glob: Optional[str] = None,
+        path: str | None = None,
+        file_type: str | None = None,
+        glob: str | None = None,
         output_mode: str = "files_with_matches",
         context_before: int = 0,
         context_after: int = 0,
@@ -210,7 +210,7 @@ class GrepTool(Tool):
         case_insensitive: bool = False,
         line_numbers: bool = True,
         multiline: bool = False,
-        head_limit: Optional[int] = None,
+        head_limit: int | None = None,
         offset: int = 0,
         **kwargs: Any
     ) -> ToolResult:
@@ -314,7 +314,7 @@ class GrepTool(Tool):
             # Search files
             all_matches = []
             file_match_counts = {}
-            skipped_files: List[str] = []  # Track files that couldn't be read
+            skipped_files: list[str] = []  # Track files that couldn't be read
 
             for file_path in files:
                 matches = self._search_file(
@@ -397,9 +397,9 @@ class GrepTool(Tool):
     def _find_files(
         self,
         search_path: Path,
-        file_type: Optional[str],
-        glob_pattern: Optional[str]
-    ) -> List[Path]:
+        file_type: str | None,
+        glob_pattern: str | None
+    ) -> list[Path]:
         """Find files matching criteria."""
         files = []
 
@@ -457,8 +457,8 @@ class GrepTool(Tool):
         context_before: int,
         context_after: int,
         show_line_numbers: bool,
-        skipped_files: Optional[List[str]] = None
-    ) -> List[str]:
+        skipped_files: list[str] | None = None
+    ) -> list[str]:
         """
         Search single file for pattern.
 
@@ -472,10 +472,10 @@ class GrepTool(Tool):
             skipped_files: Optional list to track files that couldn't be read
 
         Returns:
-            List of matching lines or indicators
+            list of matching lines or indicators
         """
         try:
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            with open(file_path, encoding='utf-8', errors='ignore') as f:
                 lines = f.readlines()
         except PermissionError:
             if skipped_files is not None:
@@ -495,7 +495,7 @@ class GrepTool(Tool):
             return []
 
         matches = []
-        matched_lines: Set[int] = set()  # Track which lines matched
+        matched_lines: set[int] = set()  # Track which lines matched
 
         # Find all matching lines
         for line_num, line in enumerate(lines):
@@ -510,7 +510,7 @@ class GrepTool(Tool):
             return ["match"]  # Indicator that file has matches
 
         # For CONTENT mode, build output with context
-        output_lines: Set[int] = set()
+        output_lines: set[int] = set()
 
         for line_num in matched_lines:
             # Add context lines
@@ -531,7 +531,7 @@ class GrepTool(Tool):
 
         return matches
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
@@ -616,7 +616,7 @@ class GlobTool(Tool):
     def execute(
         self,
         pattern: str,
-        path: Optional[str] = None,
+        path: str | None = None,
         sort_by_mtime: bool = True,
         **kwargs: Any
     ) -> ToolResult:
@@ -659,7 +659,7 @@ class GlobTool(Tool):
             patterns = self._expand_braces(pattern)
 
             # Find matching files
-            all_files: Set[Path] = set()
+            all_files: set[Path] = set()
 
             for pat in patterns:
                 # Use glob for pattern matching
@@ -707,7 +707,7 @@ class GlobTool(Tool):
                 error=f"Glob search failed: {str(e)}"
             )
 
-    def _expand_braces(self, pattern: str) -> List[str]:
+    def _expand_braces(self, pattern: str) -> list[str]:
         """
         Expand brace patterns (e.g., *.{py,js,ts} -> [*.py, *.js, *.ts]).
         """
@@ -754,7 +754,7 @@ class GlobTool(Tool):
 
         return False
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {

@@ -6,12 +6,13 @@ Supports inline feedback text capture (no separate Input widget).
 """
 
 from typing import Optional
-from textual.widgets import Static
-from textual.containers import Container, VerticalScroll
-from textual.binding import Binding
-from textual.reactive import reactive
-from rich.text import Text
+
 from rich.console import RenderableType
+from rich.text import Text
+from textual.binding import Binding
+from textual.containers import Container, VerticalScroll
+from textual.reactive import reactive
+from textual.widgets import Static
 
 from ..messages import PlanApprovalResponseMessage
 
@@ -19,7 +20,7 @@ from ..messages import PlanApprovalResponseMessage
 class _PlanContent(Static):
     """Renders the plan text (placed inside a scrollable container)."""
 
-    def __init__(self, excerpt: str, truncated: bool, plan_path: Optional[str], **kwargs):
+    def __init__(self, excerpt: str, truncated: bool, plan_path: str | None, **kwargs):
         super().__init__(**kwargs)
         self.excerpt = excerpt
         self.truncated = truncated
@@ -303,7 +304,7 @@ class PlanApprovalWidget(Container, can_focus=False):
         plan_hash: str,
         excerpt: str,
         truncated: bool = False,
-        plan_path: Optional[str] = None,
+        plan_path: str | None = None,
         **kwargs
     ):
         super().__init__(**kwargs)

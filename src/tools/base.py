@@ -3,19 +3,20 @@
 import asyncio
 import json
 import logging
+import time
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
-from pydantic import BaseModel, Field
 from enum import Enum
-import time
+from typing import TYPE_CHECKING, Any, Optional
+
+from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
-    from src.hooks import HookManager, HookDecision, HookBlockedError
+    from src.hooks import HookBlockedError, HookDecision, HookManager
 
 # Try to import structured logging with get_logger
 try:
-    from src.observability import get_logger, ErrorCategory
+    from src.observability import ErrorCategory, get_logger
     logger = get_logger("tools.base")
     STRUCTURED_LOGGING = True
 except ImportError:
@@ -57,6 +58,9 @@ TOOL_TIMEOUT_OVERRIDES = {
     # Web tools need network time
     "web_search": 45,  # API call + processing
     "web_fetch": 60,   # Large pages can be slow
+
+    # Background task check is instant
+    "check_background_task": 10,
 }
 
 
@@ -85,8 +89,8 @@ class ToolResult(BaseModel):
     tool_name: str
     status: ToolStatus
     output: Any
-    error: Optional[str] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    error: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     def is_success(self) -> bool:
         """Check if execution was successful."""
@@ -120,7 +124,7 @@ class Tool(ABC):
         """
         pass
 
-    def get_schema(self) -> Dict[str, Any]:
+    def get_schema(self) -> dict[str, Any]:
         """
         Get tool schema for LLM.
 
@@ -134,7 +138,7 @@ class Tool(ABC):
         }
 
     @abstractmethod
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         """Get parameter schema."""
         pass
 
@@ -150,7 +154,7 @@ class ToolExecutor:
             hook_manager: Optional hook manager for event hooks
             max_workers: Max threads for async tool execution (default: 4)
         """
-        self.tools: Dict[str, Tool] = {}
+        self.tools: dict[str, Tool] = {}
         self.hook_manager = hook_manager
         # ThreadPoolExecutor for running sync tools in async context
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
@@ -186,7 +190,7 @@ class ToolExecutor:
         # PRE-TOOL-USE HOOK
         if self.hook_manager:
             try:
-                from src.hooks import HookDecision, HookBlockedError
+                from src.hooks import HookBlockedError, HookDecision
 
                 decision, modified_kwargs = self.hook_manager.emit_pre_tool_use(
                     tool=tool_name,
@@ -366,12 +370,12 @@ class ToolExecutor:
         """Shutdown the thread pool executor."""
         self._executor.shutdown(wait=True)
 
-    def get_available_tools(self) -> List[Dict[str, Any]]:
+    def get_available_tools(self) -> list[dict[str, Any]]:
         """
         Get list of available tools with schemas.
 
         Returns:
-            List of tool schemas
+            list of tool schemas
         """
         return [tool.get_schema() for tool in self.tools.values()]
 

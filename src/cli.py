@@ -1,8 +1,8 @@
 """Command-line interface for the AI coding agent (TUI-only)."""
 
-import sys
-import os
 import asyncio
+import os
+import sys
 
 # CRITICAL: Remove TERM on Windows BEFORE importing prompt_toolkit
 # This prevents prompt_toolkit from thinking we're in a Unix terminal
@@ -14,33 +14,35 @@ if sys.platform == 'win32' and 'TERM' in os.environ:
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-from pathlib import Path
-from typing import Optional
 import argparse
+from pathlib import Path
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from src.llm.config_loader import LLMConfigData
 
 # CRITICAL: Load .env BEFORE any imports that initialize observability
 # Langfuse/OTEL SDK reads env vars at import time
 from dotenv import load_dotenv
+
 load_dotenv()
 
 # CRITICAL: Import platform module early to activate global print() override
 # This prevents Windows encoding crashes throughout the entire codebase
-import src.platform  # noqa: F401 (unused import - side effect only)
-
 from rich.console import Console
 
+import src.platform  # noqa: F401 (unused import - side effect only)
 from src.core import CodingAgent
 from src.execution.controller import LongRunningController
 from src.ui.app import CodingAgentApp
-
 
 console = Console()
 
 
 def chat_mode(
-    agent: Optional[CodingAgent] = None,
-    controller: Optional[LongRunningController] = None,
-    log_level: Optional[str] = None,
+    agent: CodingAgent | None = None,
+    controller: LongRunningController | None = None,
+    log_level: str | None = None,
     llm_config: Optional["LLMConfigData"] = None,
 ) -> None:
     """Interactive chat mode with Textual TUI and async streaming.
@@ -62,10 +64,11 @@ def chat_mode(
         from src.observability.logging_config import configure_logging, install_asyncio_handler
         configure_logging(mode="tui", log_level=log_level)
 
-        from src.session.store.memory_store import MessageStore
-        from src.session.persistence.writer import SessionWriter
         import uuid
         from datetime import datetime
+
+        from src.session.persistence.writer import SessionWriter
+        from src.session.store.memory_store import MessageStore
 
         if agent:
             # Full mode: agent already has session_id + message_store from from_config()
@@ -242,7 +245,7 @@ def main() -> None:
         return
 
     # Initialize agent
-    console.print(f"\n[cyan]Initializing AI Coding Agent...[/cyan]")
+    console.print("\n[cyan]Initializing AI Coding Agent...[/cyan]")
     console.print(f"Model: {llm_config.model}")
     console.print(f"Backend: {llm_config.backend_type}")
     console.print(f"URL: {llm_config.base_url}")
@@ -261,11 +264,11 @@ def main() -> None:
         # Check if backend is available
         if not agent.llm.is_available():
             console.print(f"[red]Error: {llm_config.backend_type} backend not available at {llm_config.base_url}[/red]")
-            console.print(f"[yellow]This is usually caused by:[/yellow]")
-            console.print(f"  - Incorrect API key")
-            console.print(f"  - Wrong base URL")
-            console.print(f"  - Network/firewall issues")
-            console.print(f"\n[cyan]Opening LLM configuration wizard...[/cyan]\n")
+            console.print("[yellow]This is usually caused by:[/yellow]")
+            console.print("  - Incorrect API key")
+            console.print("  - Wrong base URL")
+            console.print("  - Network/firewall issues")
+            console.print("\n[cyan]Opening LLM configuration wizard...[/cyan]\n")
 
             # Configure logging for TUI mode
             cli_log_level = args.log_level
@@ -276,7 +279,7 @@ def main() -> None:
             chat_mode(agent=None, controller=None, log_level=cli_log_level, llm_config=llm_config)
             return
 
-        console.print(f"[green]Agent initialized successfully![/green]\n")
+        console.print("[green]Agent initialized successfully![/green]\n")
 
         # Initialize Long Running Controller for checkpoints
         controller = LongRunningController(

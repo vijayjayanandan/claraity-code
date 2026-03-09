@@ -6,14 +6,14 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
+from typing import Any, Optional
 from xml.sax.saxutils import escape as xml_escape
 
-from src.observability import get_logger
-from src.memory import MemoryManager
-from src.prompts import PromptOptimizer
-from src.prompts.system_prompts import get_system_prompt, get_plan_mode_injection
 from src.core.file_reference_parser import FileReference
+from src.memory import MemoryManager
+from src.observability import get_logger
+from src.prompts import PromptOptimizer
+from src.prompts.system_prompts import get_plan_mode_injection, get_system_prompt
 
 logger = get_logger(__name__)
 
@@ -106,7 +106,7 @@ class ContextAssemblyReport:
             f"reserve_out={self.reserved_output_tokens:,} headroom={self.headroom_tokens:,}"
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
             'total_limit': self.total_limit,
@@ -133,10 +133,10 @@ class ContextBuilder:
         self,
         memory_manager: MemoryManager,
         max_context_tokens: int = 4096,
-        reserved_output_tokens: Optional[int] = None,
-        safety_buffer_tokens: Optional[int] = None,
-        tools_schema_tokens: Optional[int] = None,
-        project_root: Optional[Path] = None,
+        reserved_output_tokens: int | None = None,
+        safety_buffer_tokens: int | None = None,
+        tools_schema_tokens: int | None = None,
+        project_root: Path | None = None,
     ):
         """
         Initialize context builder.
@@ -166,19 +166,19 @@ class ContextBuilder:
         )
 
         # Store last assembly report for inspection
-        self.last_report: Optional[ContextAssemblyReport] = None
+        self.last_report: ContextAssemblyReport | None = None
 
     def build_context(
         self,
         user_query: str,
         task_type: str = "implement",
         language: str = "python",
-        file_references: Optional[List[FileReference]] = None,
-        agent_state: Optional[Dict[str, Any]] = None,
-        plan_mode_state: Optional[Any] = None,
-        director_adapter: Optional[Any] = None,
+        file_references: list[FileReference] | None = None,
+        agent_state: dict[str, Any] | None = None,
+        plan_mode_state: Any | None = None,
+        director_adapter: Any | None = None,
         log_report: bool = True,
-    ) -> List[Dict[str, str]]:
+    ) -> list[dict[str, str]]:
         """
         Build complete context for LLM.
 
@@ -198,7 +198,7 @@ class ContextBuilder:
             log_report: Whether to log the context assembly report (default True)
 
         Returns:
-            List of message dictionaries
+            list of message dictionaries
         """
         # Token tracking for each bucket
         tokens = {
@@ -371,16 +371,16 @@ class ContextBuilder:
         user_query: str,
         task_type: str = "implement",
         language: str = "python",
-        file_references: Optional[List[FileReference]] = None,
-        agent_state: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[List[Dict[str, str]], ContextAssemblyReport]:
+        file_references: list[FileReference] | None = None,
+        agent_state: dict[str, Any] | None = None,
+    ) -> tuple[list[dict[str, str]], ContextAssemblyReport]:
         """
         Build context and return both messages and assembly report.
 
         This is the preferred method when you need to inspect the report.
 
         Returns:
-            Tuple of (messages, ContextAssemblyReport)
+            tuple of (messages, ContextAssemblyReport)
         """
         context = self.build_context(
             user_query=user_query,
@@ -394,12 +394,12 @@ class ContextBuilder:
         # last_report is guaranteed to be set after build_context
         return context, self.last_report  # type: ignore
 
-    def estimate_tokens(self, context: List[Dict[str, str]]) -> int:
+    def estimate_tokens(self, context: list[dict[str, str]]) -> int:
         """
         Estimate total tokens in context.
 
         Args:
-            context: List of messages
+            context: list of messages
 
         Returns:
             Estimated token count
@@ -409,7 +409,7 @@ class ContextBuilder:
             total += self.optimizer.count_tokens(msg["content"])
         return total
 
-    def _format_agent_state(self, agent_state: Dict[str, Any]) -> Optional[str]:
+    def _format_agent_state(self, agent_state: dict[str, Any]) -> str | None:
         """
         Format agent state as compact, XML-safe block for LLM context.
 
@@ -421,7 +421,7 @@ class ContextBuilder:
         - NO RULES in this block - facts only (rules stay in system prompt)
 
         Args:
-            agent_state: Dict containing todos, current_todo_id, last_stop_reason
+            agent_state: dict containing todos, current_todo_id, last_stop_reason
 
         Returns:
             Formatted XML-like string for LLM context, or None if no incomplete work

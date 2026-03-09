@@ -12,7 +12,7 @@ import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Optional
 
 
 @dataclass
@@ -28,7 +28,7 @@ class CodeIntelligenceConfig:
     """
 
     # Language configuration
-    languages: List[str] = field(default_factory=list)  # ["python", "typescript"]
+    languages: list[str] = field(default_factory=list)  # ["python", "typescript"]
 
     # Resource limits
     max_servers: int = 3  # Max concurrent LSP servers
@@ -36,14 +36,14 @@ class CodeIntelligenceConfig:
     cache_ttl_seconds: int = 300  # Cache TTL (5 minutes)
 
     # Custom LSP paths (optional)
-    lsp_paths: Dict[str, str] = field(default_factory=dict)
+    lsp_paths: dict[str, str] = field(default_factory=dict)
     # Example: {"python": "/custom/path/to/pyright"}
 
     # Enabled features
     enabled: bool = True  # Master enable/disable
 
     @classmethod
-    def auto_detect(cls, repo_root: Optional[str] = None) -> "CodeIntelligenceConfig":
+    def auto_detect(cls, repo_root: str | None = None) -> "CodeIntelligenceConfig":
         """
         Auto-detect configuration from multiple sources.
 
@@ -234,7 +234,7 @@ class CodeIntelligenceConfig:
         )
 
     @staticmethod
-    def detect_languages(repo_root: str) -> List[str]:
+    def detect_languages(repo_root: str) -> list[str]:
         """
         Detect languages from project files.
 
@@ -258,7 +258,7 @@ class CodeIntelligenceConfig:
             repo_root: Repository root path
 
         Returns:
-            List of detected languages (e.g., ["python", "typescript"])
+            list of detected languages (e.g., ["python", "typescript"])
 
         Example:
             >>> langs = CodeIntelligenceConfig.detect_languages("/path/to/repo")

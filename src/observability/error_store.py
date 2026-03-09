@@ -25,10 +25,11 @@ import sqlite3
 import threading
 import uuid
 from contextlib import contextmanager
-from dataclasses import dataclass, asdict, fields as dataclass_fields
+from dataclasses import asdict, dataclass
+from dataclasses import fields as dataclass_fields
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -73,34 +74,34 @@ class ErrorRecord:
     category: str
     error_type: str
     message: str
-    traceback: Optional[str] = None
-    component: Optional[str] = None
-    operation: Optional[str] = None
-    run_id: Optional[str] = None  # Process-level identifier
-    session_id: Optional[str] = None
-    stream_id: Optional[str] = None
-    request_id: Optional[str] = None
-    model: Optional[str] = None
-    backend: Optional[str] = None
-    tool_name: Optional[str] = None
-    tool_timeout_s: Optional[float] = None
-    elapsed_ms: Optional[float] = None  # Standardized to milliseconds
-    payload_bytes: Optional[int] = None
-    prompt_tokens: Optional[int] = None
-    completion_tokens: Optional[int] = None
+    traceback: str | None = None
+    component: str | None = None
+    operation: str | None = None
+    run_id: str | None = None  # Process-level identifier
+    session_id: str | None = None
+    stream_id: str | None = None
+    request_id: str | None = None
+    model: str | None = None
+    backend: str | None = None
+    tool_name: str | None = None
+    tool_timeout_s: float | None = None
+    elapsed_ms: float | None = None  # Standardized to milliseconds
+    payload_bytes: int | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
     # Timeout debugging fields
-    timeout_read_s: Optional[float] = None
-    timeout_write_s: Optional[float] = None
-    timeout_connect_s: Optional[float] = None
-    timeout_pool_s: Optional[float] = None
-    retry_attempt: Optional[int] = None
-    retry_max: Optional[int] = None
-    root_cause_type: Optional[str] = None
-    root_cause_message: Optional[str] = None
-    tool_args_keys: Optional[str] = None  # JSON list of arg keys
-    extra_json: Optional[str] = None
+    timeout_read_s: float | None = None
+    timeout_write_s: float | None = None
+    timeout_connect_s: float | None = None
+    timeout_pool_s: float | None = None
+    retry_attempt: int | None = None
+    retry_max: int | None = None
+    root_cause_type: str | None = None
+    root_cause_message: str | None = None
+    tool_args_keys: str | None = None  # JSON list of arg keys
+    extra_json: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return asdict(self)
 
@@ -341,12 +342,12 @@ class ErrorStore:
 
     def query(
         self,
-        session_id: Optional[str] = None,
-        category: Optional[str] = None,
-        component: Optional[str] = None,
-        since_minutes: Optional[int] = None,
+        session_id: str | None = None,
+        category: str | None = None,
+        component: str | None = None,
+        since_minutes: int | None = None,
         limit: int = DEFAULT_QUERY_LIMIT,
-    ) -> List[ErrorRecord]:
+    ) -> list[ErrorRecord]:
         """
         Query errors with filters.
 
@@ -358,7 +359,7 @@ class ErrorStore:
             limit: Maximum results
 
         Returns:
-            List of ErrorRecord
+            list of ErrorRecord
         """
         try:
             with self._get_connection() as conn:
@@ -394,7 +395,7 @@ class ErrorStore:
             logger.error(f"[FAIL] Failed to query errors: {e}")
             return []
 
-    def count_by_category(self, since_minutes: Optional[int] = None) -> Dict[str, int]:
+    def count_by_category(self, since_minutes: int | None = None) -> dict[str, int]:
         """
         Count errors by category.
 
@@ -402,7 +403,7 @@ class ErrorStore:
             since_minutes: Filter to last N minutes
 
         Returns:
-            Dict mapping category to count
+            dict mapping category to count
         """
         try:
             with self._get_connection() as conn:
@@ -423,7 +424,7 @@ class ErrorStore:
             logger.error(f"[FAIL] Failed to count errors: {e}")
             return {}
 
-    def get_recent(self, count: int = 10) -> List[ErrorRecord]:
+    def get_recent(self, count: int = 10) -> list[ErrorRecord]:
         """
         Get most recent errors.
 
@@ -431,7 +432,7 @@ class ErrorStore:
             count: Number of errors to return
 
         Returns:
-            List of ErrorRecord
+            list of ErrorRecord
         """
         return self.query(limit=count)
 
@@ -465,7 +466,7 @@ class ErrorStore:
 # GLOBAL INSTANCE
 # =============================================================================
 
-_error_store_instance: Optional[ErrorStore] = None
+_error_store_instance: ErrorStore | None = None
 _error_store_lock = threading.Lock()
 
 

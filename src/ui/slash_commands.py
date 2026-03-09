@@ -6,7 +6,8 @@ handler functions. The actual handler implementations stay on CodingAgentApp
 since they need access to Textual widget state.
 """
 
-from typing import Callable, Awaitable, Optional
+from collections.abc import Awaitable, Callable
+from typing import Optional
 
 from src.observability import get_logger
 
@@ -31,7 +32,7 @@ class SlashCommandDispatcher:
     def __init__(
         self,
         commands: dict[str, Callable[..., Awaitable[None]]],
-        prefix_commands: Optional[dict[str, Callable[..., Awaitable[None]]]] = None,
+        prefix_commands: dict[str, Callable[..., Awaitable[None]]] | None = None,
     ):
         """
         Args:

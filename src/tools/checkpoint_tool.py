@@ -1,6 +1,7 @@
 """Checkpoint tool for long-running agent sessions."""
 
-from typing import Any, List, Optional
+from typing import Any, Optional
+
 from .base import Tool, ToolResult, ToolStatus
 
 
@@ -17,7 +18,7 @@ class CreateCheckpointTool(Tool):
     completing a module, passing tests, or before risky changes).
     """
 
-    def __init__(self, controller: Optional[Any] = None):
+    def __init__(self, controller: Any | None = None):
         """Initialize checkpoint tool.
 
         Args:
@@ -45,8 +46,8 @@ class CreateCheckpointTool(Tool):
     def execute(
         self,
         description: str,
-        current_phase: Optional[str] = None,
-        pending_tasks: Optional[List[str]] = None,
+        current_phase: str | None = None,
+        pending_tasks: list[str] | None = None,
         **kwargs: Any
     ) -> ToolResult:
         """Create a checkpoint of the current agent state.
@@ -144,7 +145,7 @@ class CreateCheckpointTool(Tool):
                 "pending_tasks": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Optional: List of tasks remaining to complete"
+                    "description": "Optional: list of tasks remaining to complete"
                 }
             },
             "required": ["description"]

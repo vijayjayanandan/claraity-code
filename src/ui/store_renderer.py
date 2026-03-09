@@ -6,20 +6,21 @@ messages, assistant messages (with segment-based rendering), tool results,
 and system messages (clarify requests, plan approvals, compaction boundaries).
 """
 
-from typing import TYPE_CHECKING, Any, Callable, Awaitable, Optional
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Optional
 
-from src.observability import get_logger
 from src.core.tool_status import ToolStatus as CoreToolStatus
+from src.observability import get_logger
 
 logger = get_logger(__name__)
 
 if TYPE_CHECKING:
-    from ..session.store.memory_store import MessageStore
     from ..session.models.message import Message
-    from .widgets.message import MessageWidget, UserMessage, AssistantMessage
-    from .widgets.tool_card import ToolCard
-    from .segment_renderer import SegmentRenderer
+    from ..session.store.memory_store import MessageStore
     from .events import ToolStatus
+    from .segment_renderer import SegmentRenderer
+    from .widgets.message import AssistantMessage, MessageWidget, UserMessage
+    from .widgets.tool_card import ToolCard
 
 
 class StoreRenderer:
@@ -96,8 +97,8 @@ class StoreRenderer:
         Returns:
             The pre_mounted_user_widget (may be consumed/cleared) or None
         """
-        from .widgets.message import UserMessage, AssistantMessage
         from .events import ToolStatus
+        from .widgets.message import AssistantMessage, UserMessage
 
         if not message:
             return pre_mounted_user_widget

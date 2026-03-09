@@ -19,8 +19,10 @@ Features:
 """
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional, Callable
+from typing import Any, Optional
+
 import tiktoken
 
 from src.observability import get_logger
@@ -77,7 +79,7 @@ class PrioritizedSummarizer:
         self,
         token_budget: int = SUMMARY_TOKEN_BUDGET,
         encoding_name: str = "cl100k_base",
-        llm_caller: Optional[Callable[[str], str]] = None
+        llm_caller: Callable[[str], str] | None = None
     ):
         """
         Initialize summarizer.
@@ -100,7 +102,7 @@ class PrioritizedSummarizer:
 
     def generate_summary(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         use_llm: bool = True
     ) -> str:
         """
@@ -129,7 +131,7 @@ class PrioritizedSummarizer:
         # Fallback to deterministic summarization
         return self._generate_deterministic_summary(messages)
 
-    def _generate_llm_summary(self, messages: List[Dict[str, Any]]) -> str:
+    def _generate_llm_summary(self, messages: list[dict[str, Any]]) -> str:
         """
         Use LLM to generate high-quality summary.
 
@@ -184,7 +186,7 @@ Output the summary in clean markdown format."""
 
         return self.llm_caller(prompt)
 
-    def _generate_deterministic_summary(self, messages: List[Dict[str, Any]]) -> str:
+    def _generate_deterministic_summary(self, messages: list[dict[str, Any]]) -> str:
         """
         Fallback deterministic summarizer - always works, never fails.
 
@@ -194,7 +196,7 @@ Output the summary in clean markdown format."""
         Returns:
             Deterministic summary
         """
-        sections: List[SummarySection] = []
+        sections: list[SummarySection] = []
         remaining_budget = self.token_budget
 
         # Priority 1: Goal and decisions
@@ -244,7 +246,7 @@ Output the summary in clean markdown format."""
 
     # ==================== Section Extractors ====================
 
-    def _extract_goal_section(self, messages: List[Dict[str, Any]]) -> Optional[SummarySection]:
+    def _extract_goal_section(self, messages: list[dict[str, Any]]) -> SummarySection | None:
         """Extract goal and key decisions.
 
         Captures the first user message as the goal, and extracts FULL
@@ -305,9 +307,9 @@ Output the summary in clean markdown format."""
 
     def _extract_user_messages_section(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         budget: int
-    ) -> Optional[SummarySection]:
+    ) -> SummarySection | None:
         """Extract ALL user messages."""
         user_messages = []
         for msg in messages:
@@ -362,9 +364,9 @@ Output the summary in clean markdown format."""
 
     def _extract_code_section(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         budget: int
-    ) -> Optional[SummarySection]:
+    ) -> SummarySection | None:
         """Extract code snippets from messages.
 
         Filters out diagram formats (mermaid, plantuml) and plain text/data
@@ -462,9 +464,9 @@ Output the summary in clean markdown format."""
 
     def _extract_error_section(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         budget: int
-    ) -> Optional[SummarySection]:
+    ) -> SummarySection | None:
         """Extract error mentions and fixes.
 
         Uses specific patterns to avoid false positives from generic prose
@@ -515,9 +517,9 @@ Output the summary in clean markdown format."""
 
     def _extract_files_section(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         budget: int
-    ) -> Optional[SummarySection]:
+    ) -> SummarySection | None:
         """Extract file paths mentioned."""
         files = set()
 
@@ -581,9 +583,9 @@ Output the summary in clean markdown format."""
 
     def _extract_current_state_section(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         budget: int
-    ) -> Optional[SummarySection]:
+    ) -> SummarySection | None:
         """Extract current state from recent messages.
 
         Takes the last few complete sentences from the last assistant message
@@ -640,11 +642,11 @@ Output the summary in clean markdown format."""
 
     def _extract_tool_summary_section(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         budget: int
-    ) -> Optional[SummarySection]:
+    ) -> SummarySection | None:
         """Extract summary of tools used."""
-        tool_counts: Dict[str, int] = {}
+        tool_counts: dict[str, int] = {}
 
         for msg in messages:
             tool_calls = msg.get("tool_calls", [])
@@ -697,7 +699,7 @@ Output the summary in clean markdown format."""
             return "\n".join(parts)
         return str(content) if content else ""
 
-    def _format_messages_for_llm(self, messages: List[Dict[str, Any]]) -> str:
+    def _format_messages_for_llm(self, messages: list[dict[str, Any]]) -> str:
         """Format messages for LLM prompt."""
         formatted = []
         for i, msg in enumerate(messages):
@@ -718,7 +720,7 @@ Output the summary in clean markdown format."""
 
         return "\n\n".join(formatted)
 
-    def get_section_stats(self, summary: str) -> Dict[str, Any]:
+    def get_section_stats(self, summary: str) -> dict[str, Any]:
         """
         Get statistics about a generated summary.
 
@@ -726,7 +728,7 @@ Output the summary in clean markdown format."""
             summary: Generated summary
 
         Returns:
-            Dict with token count, section counts, etc.
+            dict with token count, section counts, etc.
         """
         sections_found = []
         section_headers = [

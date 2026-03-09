@@ -8,19 +8,21 @@ This is the top-level application that:
 - Coordinates with UIProtocol for approvals
 """
 
-from textual.app import App, ComposeResult, SystemCommand
-from textual.containers import ScrollableContainer, Vertical
-from textual.widgets import Footer, Header, TextArea, Static
-from textual.widgets.text_area import Selection
-from textual.binding import Binding
-from textual.css.query import NoMatches
-from textual.worker import Worker
-from textual.events import Paste
-from typing import TYPE_CHECKING, AsyncIterator, Callable, Any, Optional, Literal, List
-from pathlib import Path
 import asyncio
-import time
 import os
+import time
+from collections.abc import AsyncIterator, Callable
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Literal, Optional
+
+from textual.app import App, ComposeResult, SystemCommand
+from textual.binding import Binding
+from textual.containers import ScrollableContainer, Vertical
+from textual.css.query import NoMatches
+from textual.events import Paste
+from textual.widgets import Footer, Header, Static, TextArea
+from textual.widgets.text_area import Selection
+from textual.worker import Worker
 
 from src.observability import get_logger
 
@@ -28,46 +30,69 @@ from src.observability import get_logger
 logger = get_logger(__name__)
 
 from src.core.attachment import Attachment
-from src.core.tool_status import ToolStatus as CoreToolStatus
 from src.core.render_meta import RenderMetaRegistry
-from .events import (
-    UIEvent, StreamStart, StreamEnd,
-    TextDelta, CodeBlockStart, CodeBlockDelta, CodeBlockEnd,
-    ThinkingStart, ThinkingDelta, ThinkingEnd,
-    PausePromptStart, PausePromptEnd,
-    ContextUpdated, ContextCompacting, ContextCompacted,
-    FileReadEvent,
-    ErrorEvent, ToolStatus,
-)
-from .messages import (
-    ApprovalResponseMessage, StreamInterruptMessage,
-    RetryRequestMessage, InputSubmittedMessage,
-    PauseResponseMessage, ClarifyResponseMessage,
-    PlanApprovalResponseMessage,
-)
-from .protocol import UIProtocol, ApprovalResult, InterruptSignal, RetrySignal, PauseResult, ClarifyResult, PlanApprovalResult
-from .widgets.message import MessageWidget, UserMessage, AssistantMessage
-from .widgets.code_block import CodeBlock
-from .widgets.tool_card import ToolCard
-from .widgets.thinking import ThinkingBlock
-from .widgets.status_bar import StatusBar
-from .widgets.autocomplete_dropdown import AutocompleteDropdown
-from .widgets.attachment_bar import AttachmentBar
-from .widgets.todo_bar import TodoBar
-from .widgets.pause_widget import PausePromptWidget
-from .widgets.clarify_widget import ClarifyWidget
-from .widgets.plan_approval_widget import PlanApprovalWidget
-from .widgets.subagent_card import SubAgentCard
+from src.core.tool_status import ToolStatus as CoreToolStatus
+
 from .autocomplete import FileAutocomplete
 from .clipboard_handler import ClipboardHandler
+from .events import (
+    CodeBlockDelta,
+    CodeBlockEnd,
+    CodeBlockStart,
+    ContextCompacted,
+    ContextCompacting,
+    ContextUpdated,
+    ErrorEvent,
+    FileReadEvent,
+    PausePromptEnd,
+    PausePromptStart,
+    StreamEnd,
+    StreamStart,
+    TextDelta,
+    ThinkingDelta,
+    ThinkingEnd,
+    ThinkingStart,
+    ToolStatus,
+    UIEvent,
+)
+from .messages import (
+    ApprovalResponseMessage,
+    ClarifyResponseMessage,
+    InputSubmittedMessage,
+    PauseResponseMessage,
+    PlanApprovalResponseMessage,
+    RetryRequestMessage,
+    StreamInterruptMessage,
+)
+from .protocol import (
+    ApprovalResult,
+    ClarifyResult,
+    InterruptSignal,
+    PauseResult,
+    PlanApprovalResult,
+    RetrySignal,
+    UIProtocol,
+)
 from .segment_renderer import SegmentRenderer
 from .store_renderer import StoreRenderer
 from .subagent_coordinator import SubagentCoordinator
+from .widgets.attachment_bar import AttachmentBar
+from .widgets.autocomplete_dropdown import AutocompleteDropdown
+from .widgets.clarify_widget import ClarifyWidget
+from .widgets.code_block import CodeBlock
+from .widgets.message import AssistantMessage, MessageWidget, UserMessage
+from .widgets.pause_widget import PausePromptWidget
+from .widgets.plan_approval_widget import PlanApprovalWidget
+from .widgets.status_bar import StatusBar
+from .widgets.subagent_card import SubAgentCard
+from .widgets.thinking import ThinkingBlock
+from .widgets.todo_bar import TodoBar
+from .widgets.tool_card import ToolCard
 
 if TYPE_CHECKING:
     from ..core.agent import CodingAgent  # For type hints
-    from ..session.store.memory_store import MessageStore, StoreNotification
     from ..session.models.message import Message
+    from ..session.store.memory_store import MessageStore, StoreNotification
     from .store_adapter import StoreAdapter
     from .subagent_registry import SubagentRegistry
 
@@ -99,9 +124,9 @@ class ConversationContainer(ScrollableContainer):
 # =============================================================================
 from .error_helpers import (
     _classify_error,
-    _generate_error_reference,
     _extract_user_content_text,
     _format_user_error,
+    _generate_error_reference,
 )
 
 
@@ -499,7 +524,7 @@ class ChatInput(TextArea):
         """Attach files from clipboard file list."""
         from pathlib import Path
         valid_count = 0
-        
+
         for file_path in files[:5]:  # Limit to 5 files
             if isinstance(file_path, str) and Path(file_path).exists() and Path(file_path).is_file():
                 try:
@@ -509,13 +534,13 @@ class ChatInput(TextArea):
                     else:
                         self.app.notify(f"Attached: {att.filename}")
                     valid_count += 1
-                except (ValueError, FileNotFoundError, IOError) as e:
+                except (OSError, ValueError, FileNotFoundError) as e:
                     logger.error(f"Failed to attach {file_path}: {e}", exc_info=True)
                     self.app.notify(f"Failed: {e}", severity="error")
-        
+
         if valid_count == 0 and files:
             self.app.notify("No valid files found in clipboard", severity="warning")
-        
+
         self._update_attachment_indicator()
 
     def _update_attachment_indicator(self) -> None:
@@ -660,7 +685,7 @@ class CodingAgentApp(App):
 
         # Retry state
         self._last_user_input: str = ""
-        self._last_attachments: List[Attachment] = []
+        self._last_attachments: list[Attachment] = []
         self._retry_count: int = 0
 
         # Track pending approvals to manage focus
@@ -691,14 +716,14 @@ class CodingAgentApp(App):
         # Phase 6: Store-driven rendering
         # TUI renders from MessageStore notifications. UIEvents are forwarded
         # to StoreAdapter for persistence; store notifications handle rendering.
-        self._message_store: Optional["MessageStore"] = None
-        self._store_adapter: Optional["StoreAdapter"] = None  # Bridges UIEvents to store
-        self._store_unsubscribe: Optional[Callable[[], None]] = None
+        self._message_store: 'MessageStore' | None = None
+        self._store_adapter: 'StoreAdapter' | None = None  # Bridges UIEvents to store
+        self._store_unsubscribe: Callable[[], None] | None = None
         self._store_message_widgets: dict[str, MessageWidget] = {}  # stream_id -> widget
         self._store_rendered_segment_idx: dict[str, int] = {}  # stream_id -> last rendered segment index
         self._is_replaying: bool = False  # True during BULK_LOAD (replay mode)
-        self._pre_mounted_user_widget: Optional[MessageWidget] = None  # Eagerly-mounted UserMessage
-        self._session_id: Optional[str] = None  # Current session ID for persistence
+        self._pre_mounted_user_widget: MessageWidget | None = None  # Eagerly-mounted UserMessage
+        self._session_id: str | None = None  # Current session ID for persistence
         self._session_writer = None  # SessionWriter, opened in on_mount
 
         # PR4: Store update coalescing (prevents UI flicker during streaming)
@@ -708,12 +733,12 @@ class CodingAgentApp(App):
         # is mounted (store notification chain is async). We buffer them and flush
         # when StreamStart arrives, by which point UserMessage is guaranteed mounted.
         self._pending_file_read_events: list = []
-        self._store_update_timer: Optional[asyncio.TimerHandle] = None
+        self._store_update_timer: asyncio.TimerHandle | None = None
         self._store_update_interval_sec: float = 0.15  # Coalesce updates within 150ms
 
         # Render metadata registry (ephemeral approval policy hints)
         # Injected via set_render_meta_registry(), queried when creating tool cards
-        self._render_meta: Optional[RenderMetaRegistry] = None
+        self._render_meta: RenderMetaRegistry | None = None
 
         # Segmented streaming: accumulate text until boundary (tool/code/thinking/end)
         self._segment_chunks: list[str] = []  # Current segment accumulator
@@ -723,7 +748,7 @@ class CodingAgentApp(App):
         self._segment_flush_running: bool = False  # Prevent overlapping flushes (Fix #4)
 
         # Subagent visibility: registry + coordinator (extracted Phase 5)
-        self._subagent_registry: Optional["SubagentRegistry"] = subagent_registry
+        self._subagent_registry: 'SubagentRegistry' | None = subagent_registry
         self._subagent_coordinator = SubagentCoordinator(
             tool_cards=self._tool_cards,
             mount_callback=self.call_later,
@@ -760,7 +785,7 @@ class CodingAgentApp(App):
     def _create_agent_stream_handler(
         self,
         agent: "CodingAgent"
-    ) -> Callable[[str, UIProtocol, Optional[List[Attachment]]], AsyncIterator[UIEvent]]:
+    ) -> Callable[[str, UIProtocol, list[Attachment] | None], AsyncIterator[UIEvent]]:
         """
         Create a stream_handler function that wraps agent.stream_response().
 
@@ -776,7 +801,7 @@ class CodingAgentApp(App):
         async def handler(
             user_input: str,
             ui: UIProtocol,
-            attachments: Optional[List[Attachment]] = None
+            attachments: list[Attachment] | None = None
         ) -> AsyncIterator[UIEvent]:
             async for event in agent.stream_response(user_input, ui, attachments):
                 yield event
@@ -908,7 +933,6 @@ class CodingAgentApp(App):
         Args:
             config: LLMConfigData from the wizard
         """
-        import os
         from src.core.agent import CodingAgent
 
         try:
@@ -961,8 +985,9 @@ class CodingAgentApp(App):
 
         # Install asyncio exception handler to capture unhandled task exceptions
         try:
-            from src.observability.logging_config import install_asyncio_handler
             import asyncio
+
+            from src.observability.logging_config import install_asyncio_handler
             loop = asyncio.get_running_loop()
             install_asyncio_handler(loop)
         except Exception:
@@ -987,6 +1012,10 @@ class CodingAgentApp(App):
 
         # Register todos callback for TodoBar and StatusBar updates
         self.ui_protocol.set_todos_callback(self._on_todos_updated)
+
+        # Register background task completion callback for StatusBar BG badge
+        if self.agent:
+            self.agent._bg_registry.set_completion_callback(self._on_bg_task_update)
 
         # Create and wire subagent registry for live visibility
         self._setup_subagent_registry()
@@ -1040,7 +1069,7 @@ class CodingAgentApp(App):
 
     async def _on_subagent_pause_requested(
         self, reason: str, reason_code: str,
-        pending_todos: Optional[list], stats: Optional[dict],
+        pending_todos: list | None, stats: dict | None,
     ) -> None:
         """Mount PausePromptWidget when a subagent requests a pause."""
         try:
@@ -1342,7 +1371,7 @@ class CodingAgentApp(App):
             )
         except TimeoutError:
             self.notify(
-                f"Jira connection timed out (120s). Is mcp-atlassian installed?",
+                "Jira connection timed out (120s). Is mcp-atlassian installed?",
                 severity="error",
             )
         except Exception as e:
@@ -1413,7 +1442,7 @@ class CodingAgentApp(App):
             self.notify(f"Session not found: {session_id}", severity="error")
             return
 
-        self.notify(f"Loading session...", severity="information")
+        self.notify("Loading session...", severity="information")
 
         try:
             # Close current writer if active
@@ -1489,8 +1518,9 @@ class CodingAgentApp(App):
         import uuid as _uuid
         from datetime import datetime
         from pathlib import Path
-        from src.session.store.memory_store import MessageStore
+
         from src.session.persistence.writer import SessionWriter
+        from src.session.store.memory_store import MessageStore
 
         if not self.agent:
             self.notify("No agent available", severity="error")
@@ -1546,7 +1576,7 @@ class CodingAgentApp(App):
     async def _stream_response(
         self,
         user_input: str,
-        attachments: Optional[List[Attachment]] = None
+        attachments: list[Attachment] | None = None
     ) -> None:
         """
         Stream agent response and render events.
@@ -1676,7 +1706,7 @@ class CodingAgentApp(App):
         self,
         user_input: str,
         conversation: ScrollableContainer,
-        attachments: Optional[List[Attachment]] = None
+        attachments: list[Attachment] | None = None
     ) -> None:
         """Process the event stream from the agent."""
         # Increment stream ID to invalidate any stale event handlers from previous stream
@@ -1880,7 +1910,7 @@ class CodingAgentApp(App):
             except NoMatches:
                 pass
 
-    def _finalize_current_message(self, msg: Optional[MessageWidget] = None) -> None:
+    def _finalize_current_message(self, msg: MessageWidget | None = None) -> None:
         """Finalize current message and reset state.
 
         Args:
@@ -2040,7 +2070,6 @@ class CodingAgentApp(App):
         widget owns the error display. For other errors, status bar shows briefly.
         Full debug info is in logs/SQLite keyed by error_id.
         """
-        import os
         try:
             status_bar = self.query_one("#status", StatusBar)
         except NoMatches:
@@ -2425,7 +2454,7 @@ class CodingAgentApp(App):
                         ))
                     except Exception as e:
                         logger.error(f"Error submitting approval cancellation for {call_id}: {e}", exc_info=True)
-                    
+
                     # DIRECT UI CLEANUP: Update card status immediately
                     # Don't wait for async store notification - user expects immediate feedback
                     try:
@@ -2433,7 +2462,7 @@ class CodingAgentApp(App):
                             self._tool_cards[call_id].status = ToolStatus.CANCELLED
                     except Exception as e:
                         logger.error(f"Error updating tool card status for {call_id}: {e}", exc_info=True)
-                
+
                 # Clear pending approvals
                 self._pending_approval_ids.clear()
                 self.notify("Approval cancelled", severity="information", timeout=2)
@@ -2446,7 +2475,7 @@ class CodingAgentApp(App):
 
                 # DIRECT UI CLEANUP: Cancel any approval widgets immediately
                 # This handles cases where _pending_approval_ids might be out of sync
-                for call_id, card in self._tool_cards.items():
+                for _call_id, card in self._tool_cards.items():
                     if card.status == ToolStatus.AWAITING_APPROVAL:
                         card.status = ToolStatus.CANCELLED  # triggers watch_status()
                 self._pending_approval_ids.clear()
@@ -2547,9 +2576,9 @@ class CodingAgentApp(App):
 
     def action_debug_widgets(self) -> None:
         """Debug action: count and log all widgets in the DOM."""
+        from .widgets.code_block import CodeBlock
         from .widgets.message import MessageWidget, UserMessage
         from .widgets.tool_card import ToolCard
-        from .widgets.code_block import CodeBlock
 
         try:
             conversation = self.query_one("#conversation", ScrollableContainer)
@@ -2597,11 +2626,23 @@ class CodingAgentApp(App):
         except NoMatches:
             pass
 
+    def _on_bg_task_update(self, active_count: int) -> None:
+        """Handle background task completion callback.
+
+        Updates the StatusBar BG badge count. Called from the asyncio
+        event loop by BackgroundTaskRegistry on task completion.
+        """
+        try:
+            status = self.query_one("#status", StatusBar)
+            status.set_bg_task_count(active_count)
+        except NoMatches:
+            pass
+
     # -------------------------------------------------------------------------
     # Phase 6: Store-Driven Rendering
     # -------------------------------------------------------------------------
 
-    def bind_store(self, store: "MessageStore", session_id: Optional[str] = None) -> None:
+    def bind_store(self, store: "MessageStore", session_id: str | None = None) -> None:
         """
         Bind a MessageStore for session persistence and store-driven rendering.
 
@@ -2942,8 +2983,15 @@ class CodingAgentApp(App):
 
         # Render post-compaction messages only (get_transcript_view filters
         # out pre-compaction messages when a compact boundary exists).
+        #
+        # Hide conversation during bulk load to prevent "reel loading" effect.
+        # Each await mount()/add_text() yields to the event loop, letting
+        # Textual flush intermediate frames. By hiding the container, all
+        # mounts happen invisibly — then a single paint on reveal.
         messages = []
         try:
+            conversation.styles.visibility = "hidden"
+
             messages = self._message_store.get_transcript_view()
 
             for message in messages:
@@ -2955,6 +3003,8 @@ class CodingAgentApp(App):
             logger.error(f"Error rendering bulk-loaded messages: {e}\n{traceback.format_exc()}")
             # Show UI banner so user knows resume failed
             await self._show_resume_error_banner(str(e))
+        finally:
+            conversation.styles.visibility = "visible"
 
         # Clear replay mode
         self._is_replaying = False
@@ -3036,7 +3086,7 @@ class CodingAgentApp(App):
         tool_name: str,
         approved: bool,
         action: str,
-        feedback: Optional[str] = None
+        feedback: str | None = None
     ) -> None:
         """
         Persist a tool approval decision to the MessageStore.

@@ -10,20 +10,21 @@ Features:
 - Windows ANSI compatibility
 """
 
-from textual.widgets import Static
-from rich.text import Text
-from rich.console import RenderableType
-from typing import Optional, List
-from dataclasses import dataclass
 import difflib
 import re
+from dataclasses import dataclass
+from typing import Optional
+
+from rich.console import RenderableType
+from rich.text import Text
+from textual.widgets import Static
 
 
 @dataclass
 class DiffLine:
     """Single diff line with metadata."""
-    line_num_old: Optional[int]  # Line number in old file (None for additions)
-    line_num_new: Optional[int]  # Line number in new file (None for deletions)
+    line_num_old: int | None  # Line number in old file (None for additions)
+    line_num_new: int | None  # Line number in new file (None for deletions)
     marker: str  # '+' for addition, '-' for deletion, ' ' for context
     content: str  # Line content (without the marker prefix)
 
@@ -68,7 +69,7 @@ class DiffWidget(Static):
         self,
         file_path: str,
         new_content: str,
-        old_content: Optional[str] = None,
+        old_content: str | None = None,
         max_lines: int = 30,
         context_lines: int = 3,
         start_line: int = 1,
@@ -95,7 +96,7 @@ class DiffWidget(Static):
         self.start_line = start_line
 
         # Pre-compute diff lines for rendering
-        self._diff_lines: List[DiffLine] = []
+        self._diff_lines: list[DiffLine] = []
         self._additions = 0
         self._deletions = 0
         self._truncated = False

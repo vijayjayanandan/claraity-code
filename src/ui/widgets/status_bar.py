@@ -14,13 +14,14 @@ Performance Optimizations:
 - Debug counters available via TUI_PERF_DEBUG=1
 """
 
-from textual.widgets import Static
-from textual.reactive import reactive
-from textual.timer import Timer
-from rich.text import Text
-from rich.console import RenderableType
 import os
 import time
+
+from rich.console import RenderableType
+from rich.text import Text
+from textual.reactive import reactive
+from textual.timer import Timer
+from textual.widgets import Static
 
 # Performance debug flag - set TUI_PERF_DEBUG=1 to enable
 TUI_PERF_DEBUG = os.getenv("TUI_PERF_DEBUG", "").lower() in ("1", "true", "yes")
@@ -85,6 +86,7 @@ class StatusBar(Static):
     current_mode = reactive("normal")  # Permission mode: plan, normal, auto
     director_phase = reactive("")  # Director phase (empty = inactive)
     current_task_name = reactive("")  # activeForm of in_progress todo task
+    bg_task_count = reactive(0)  # Number of active background tasks
 
     # Context window tracking (values set by agent, not hardcoded)
     context_used = reactive(0)  # Tokens currently used in context
@@ -145,6 +147,13 @@ class StatusBar(Static):
                 result.append(
                     f" DIRECTOR: {self.director_phase} ",
                     style="bold #1e1e1e on #b392f0",
+                )
+            if self.bg_task_count > 0:
+                if result.plain:
+                    result.append(" ", style="")
+                result.append(
+                    f" BG:{self.bg_task_count} ",
+                    style="bold #1e1e1e on #3794ff",
                 )
             return result if result.plain else Text("")
 
@@ -211,6 +220,14 @@ class StatusBar(Static):
             result.append(
                 f" DIRECTOR: {self.director_phase} ",
                 style="bold #1e1e1e on #b392f0",
+            )
+
+        # Background tasks indicator
+        if self.bg_task_count > 0:
+            result.append(" ", style="")
+            result.append(
+                f" BG:{self.bg_task_count} ",
+                style="bold #1e1e1e on #3794ff",
             )
 
         # Context window progress bar (right-aligned)
@@ -527,6 +544,14 @@ class StatusBar(Static):
         """Clear current task name."""
         self.current_task_name = ""
 
+    def set_bg_task_count(self, count: int) -> None:
+        """Update background task count for BG badge.
+
+        Args:
+            count: Number of active background tasks.
+        """
+        self.bg_task_count = max(0, count)
+
     def reset(self) -> None:
         """Reset all state (except context limit which persists)."""
         self.token_count = 0
@@ -539,6 +564,7 @@ class StatusBar(Static):
         self.current_tool = ""
         self.director_phase = ""
         self.current_task_name = ""
+        self.bg_task_count = 0
         self._stream_start_time = 0
         # Note: context_limit is NOT reset (set once at startup)
         # context_used will be updated when context is built

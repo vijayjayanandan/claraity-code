@@ -4,23 +4,21 @@ The script for each act of the movie -- tells the LLM what phase
 it's in, what to focus on, and what tools are available.
 """
 
-from typing import Dict, Optional
+from typing import Optional
 
+# Reuse the read-only tools set from plan_mode to avoid duplication
+from src.core.plan_mode import READ_ONLY_TOOLS
 from src.director.models import (
     ContextDocument,
     DirectorPhase,
     DirectorPlan,
 )
 
-# Reuse the read-only tools set from plan_mode to avoid duplication
-from src.core.plan_mode import READ_ONLY_TOOLS
-
-
 # =============================================================================
 # Phase Prompts -- system prompt injection per phase
 # =============================================================================
 
-PHASE_PROMPTS: Dict[DirectorPhase, str] = {
+PHASE_PROMPTS: dict[DirectorPhase, str] = {
 
     DirectorPhase.UNDERSTAND: """\
 <director-mode phase="UNDERSTAND">
@@ -236,7 +234,7 @@ _INTEGRATE_TOOLS = READ_ONLY_TOOLS | frozenset({
 _AWAITING_APPROVAL_TOOLS = READ_ONLY_TOOLS
 
 
-PHASE_ALLOWED_TOOLS: Dict[DirectorPhase, frozenset] = {
+PHASE_ALLOWED_TOOLS: dict[DirectorPhase, frozenset] = {
     DirectorPhase.UNDERSTAND: _UNDERSTAND_TOOLS,
     DirectorPhase.PLAN: _PLAN_TOOLS,
     DirectorPhase.AWAITING_APPROVAL: _AWAITING_APPROVAL_TOOLS,
@@ -252,10 +250,10 @@ PHASE_ALLOWED_TOOLS: Dict[DirectorPhase, frozenset] = {
 def get_director_phase_prompt(
     phase: DirectorPhase,
     task_description: str,
-    context: Optional[ContextDocument] = None,
-    plan: Optional[DirectorPlan] = None,
-    current_slice_id: Optional[int] = None,
-) -> Optional[str]:
+    context: ContextDocument | None = None,
+    plan: DirectorPlan | None = None,
+    current_slice_id: int | None = None,
+) -> str | None:
     """Build the complete system prompt injection for the current phase.
 
     Returns None for phases that don't need injection (IDLE, COMPLETE, FAILED).

@@ -3,7 +3,7 @@
 This module provides comprehensive session persistence allowing users to:
 - Save current coding session with all context
 - Resume previous sessions seamlessly
-- List, manage, and organize saved sessions
+- list, manage, and organize saved sessions
 - Share sessions with team members
 
 Session Storage Structure:
@@ -19,13 +19,13 @@ Session Storage Structure:
 """
 
 import json
+import logging
 import shutil
 import uuid
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict, Any
-import logging
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -47,13 +47,13 @@ class SessionMetadata:
         permission_mode: Permission mode when session was saved (plan/normal/auto)
     """
     session_id: str
-    name: Optional[str]
+    name: str | None
     created_at: str  # ISO format
     updated_at: str  # ISO format
     task_description: str
     model_name: str
     message_count: int
-    tags: List[str]
+    tags: list[str]
     duration_minutes: float
     permission_mode: str = "normal"  # Default to normal mode for backward compatibility
 
@@ -72,12 +72,12 @@ class SessionMetadata:
         """Get updated_at as datetime object."""
         return datetime.fromisoformat(self.updated_at)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "SessionMetadata":
+    def from_dict(cls, data: dict[str, Any]) -> "SessionMetadata":
         """Create from dictionary."""
         return cls(**data)
 
@@ -101,7 +101,7 @@ class SessionManager:
         >>> # Apply state to agent
     """
 
-    def __init__(self, sessions_dir: Optional[Path] = None):
+    def __init__(self, sessions_dir: Path | None = None):
         """Initialize session manager.
 
         Args:
@@ -124,10 +124,10 @@ class SessionManager:
 
     def save_session(
         self,
-        name: Optional[str],
-        state: Dict[str, Any],
+        name: str | None,
+        state: dict[str, Any],
         task_description: str = "",
-        tags: Optional[List[str]] = None,
+        tags: list[str] | None = None,
     ) -> str:
         """Save a session with complete state.
 
@@ -209,7 +209,7 @@ class SessionManager:
         logger.info(f"Saved session: {metadata.short_id} ({name})")
         return session_id
 
-    def load_session(self, session_id: str) -> Dict[str, Any]:
+    def load_session(self, session_id: str) -> dict[str, Any]:
         """Load a session by ID.
 
         Args:
@@ -236,7 +236,7 @@ class SessionManager:
         if not metadata_path.exists():
             raise ValueError(f"Session metadata not found: {session_id}")
 
-        with open(metadata_path, "r") as f:
+        with open(metadata_path) as f:
             metadata = SessionMetadata.from_dict(json.load(f))
 
         # Load state components
@@ -244,35 +244,35 @@ class SessionManager:
 
         working_memory_path = session_dir / "working_memory.json"
         if working_memory_path.exists():
-            with open(working_memory_path, "r") as f:
+            with open(working_memory_path) as f:
                 state["working_memory"] = json.load(f)
 
         episodic_memory_path = session_dir / "episodic_memory.json"
         if episodic_memory_path.exists():
-            with open(episodic_memory_path, "r") as f:
+            with open(episodic_memory_path) as f:
                 state["episodic_memory"] = json.load(f)
 
         task_context_path = session_dir / "task_context.json"
         if task_context_path.exists():
-            with open(task_context_path, "r") as f:
+            with open(task_context_path) as f:
                 state["task_context"] = json.load(f)
 
         file_memories_path = session_dir / "file_memories.txt"
         if file_memories_path.exists():
-            with open(file_memories_path, "r") as f:
+            with open(file_memories_path) as f:
                 state["file_memories"] = f.read()
 
         logger.info(f"Loaded session: {metadata.short_id} ({metadata.name})")
         return state
 
-    def list_sessions(self, tags: Optional[List[str]] = None) -> List[SessionMetadata]:
-        """List all saved sessions.
+    def list_sessions(self, tags: list[str] | None = None) -> list[SessionMetadata]:
+        """list all saved sessions.
 
         Args:
             tags: Optional filter by tags (sessions with ANY of these tags)
 
         Returns:
-            List of SessionMetadata objects, sorted by updated_at (newest first)
+            list of SessionMetadata objects, sorted by updated_at (newest first)
 
         Example:
             >>> sessions = manager.list_sessions()
@@ -327,7 +327,7 @@ class SessionManager:
         logger.info(f"Deleted session: {session_id[:8]}")
         return True
 
-    def get_session_info(self, session_id: str) -> Optional[SessionMetadata]:
+    def get_session_info(self, session_id: str) -> SessionMetadata | None:
         """Get session metadata without loading full state.
 
         Args:
@@ -348,10 +348,10 @@ class SessionManager:
         if not metadata_path.exists():
             return None
 
-        with open(metadata_path, "r") as f:
+        with open(metadata_path) as f:
             return SessionMetadata.from_dict(json.load(f))
 
-    def find_session_by_name(self, name: str) -> Optional[SessionMetadata]:
+    def find_session_by_name(self, name: str) -> SessionMetadata | None:
         """Find a session by name.
 
         Args:
@@ -373,7 +373,7 @@ class SessionManager:
 
         return None
 
-    def get_latest_session(self) -> Optional[SessionMetadata]:
+    def get_latest_session(self) -> SessionMetadata | None:
         """Get the most recently updated session.
 
         Returns:
@@ -387,7 +387,7 @@ class SessionManager:
         sessions = self.list_sessions()
         return sessions[0] if sessions else None
 
-    def _find_session_dir(self, session_id: str) -> Optional[Path]:
+    def _find_session_dir(self, session_id: str) -> Path | None:
         """Find session directory by full or short ID.
 
         Args:
@@ -424,7 +424,7 @@ class SessionManager:
 
         return None
 
-    def _load_manifest(self) -> Dict[str, Dict[str, Any]]:
+    def _load_manifest(self) -> dict[str, dict[str, Any]]:
         """Load session manifest.
 
         Returns:
@@ -434,13 +434,13 @@ class SessionManager:
             return {}
 
         try:
-            with open(self.manifest_path, "r") as f:
+            with open(self.manifest_path) as f:
                 return json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
+        except (OSError, json.JSONDecodeError) as e:
             logger.error(f"Failed to load manifest: {e}")
             return {}
 
-    def _save_manifest(self, manifest: Dict[str, Dict[str, Any]]) -> None:
+    def _save_manifest(self, manifest: dict[str, dict[str, Any]]) -> None:
         """Save session manifest.
 
         Args:
@@ -449,7 +449,7 @@ class SessionManager:
         try:
             with open(self.manifest_path, "w") as f:
                 json.dump(manifest, f, indent=2)
-        except IOError as e:
+        except OSError as e:
             logger.error(f"Failed to save manifest: {e}")
 
     def _add_to_manifest(self, metadata: SessionMetadata) -> None:

@@ -15,24 +15,26 @@ Architecture:
 - Configurable tool allowlist (config.tools) -- filters available tools
 """
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Any, Optional, Callable, TYPE_CHECKING
-from pathlib import Path
 import time
 import uuid
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Optional
 
-from src.observability import get_logger
+from src.core.cancel_token import CancelledException, CancelToken
 from src.core.events import ToolStatus
-from src.core.cancel_token import CancelToken, CancelledException
 from src.core.tool_metadata import build_tool_metadata
+from src.observability import get_logger
+
 from .sync_writer import SyncJSONLWriter
 
 if TYPE_CHECKING:
     from src.core.agent_interface import AgentInterface
-    from src.subagents.config import SubAgentConfig
     from src.memory.memory_manager import MemoryManager
     from src.session.store.memory_store import MessageStore
     from src.session.subagent_registry import SubAgentSessionInfo
+    from src.subagents.config import SubAgentConfig
 
 logger = get_logger(__name__)
 
@@ -57,9 +59,9 @@ class SubAgentResult:
     success: bool
     subagent_name: str
     output: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    error: Optional[str] = None
-    tool_calls: List[Dict[str, Any]] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
     execution_time: float = 0.0
 
     def __str__(self) -> str:
@@ -118,16 +120,16 @@ class SubAgent:
         self,
         config: 'SubAgentConfig',
         main_agent: Optional['AgentInterface'] = None,
-        transcript_dir: Optional[Path] = None,
+        transcript_dir: Path | None = None,
         *,
-        llm: Optional[Any] = None,
-        tool_executor: Optional[Any] = None,
-        working_directory: Optional[str] = None,
+        llm: Any | None = None,
+        tool_executor: Any | None = None,
+        working_directory: str | None = None,
         permission_mode: str = "normal",
-        approval_callback: Optional[Callable[[str, Dict[str, Any], str], tuple]] = None,
-        auto_approve_tools: Optional[set] = None,
-        pause_callback: Optional[Callable[[str, str, dict], tuple]] = None,
-        max_wall_time: Optional[float] = 300.0,
+        approval_callback: Callable[[str, dict[str, Any], str], tuple] | None = None,
+        auto_approve_tools: set | None = None,
+        pause_callback: Callable[[str, str, dict], tuple] | None = None,
+        max_wall_time: float | None = 300.0,
     ):
         """Initialize subagent with own persistence and configurable LLM/tools.
 
@@ -191,16 +193,16 @@ class SubAgent:
         self._transcript_path = self._transcript_dir / f"{config.name}-{self.session_id}.jsonl"
 
         # Transcript writer (opened during execute())
-        self._transcript_writer: Optional[SyncJSONLWriter] = None
+        self._transcript_writer: SyncJSONLWriter | None = None
 
         # Store subscription unsubscribe function
-        self._store_unsubscribe: Optional[Callable[[], None]] = None
+        self._store_unsubscribe: Callable[[], None] | None = None
 
         # Cancellation support
         self._cancel_token = CancelToken()
 
         # Track execution history
-        self.execution_history: List[SubAgentResult] = []
+        self.execution_history: list[SubAgentResult] = []
 
         # Per-subagent LLM: create separate backend if llm overrides are set
         self._override_llm = None
@@ -245,7 +247,7 @@ class SubAgent:
             LLMBackend instance with overrides applied, or None on failure.
         """
         try:
-            from src.llm import OpenAIBackend, OllamaBackend, LLMConfig
+            from src.llm import LLMConfig, OllamaBackend, OpenAIBackend
 
             llm_overrides = self.config.llm
             main_llm = self._llm_source
@@ -297,7 +299,7 @@ class SubAgent:
             )
             return None
 
-    def _needs_approval(self, tool_name: str, tool_args: Dict[str, Any]) -> bool:
+    def _needs_approval(self, tool_name: str, tool_args: dict[str, Any]) -> bool:
         """Check if a tool call requires user approval before execution.
 
         Mirrors the parent agent's needs_approval() logic:
@@ -342,7 +344,7 @@ class SubAgent:
     def execute(
         self,
         task_description: str,
-        context: Optional[Dict[str, Any]] = None,
+        context: dict[str, Any] | None = None,
         max_iterations: int = 50
     ) -> SubAgentResult:
         """Execute a task with this subagent.
@@ -484,7 +486,7 @@ class SubAgent:
         if self._transcript_writer:
             self._transcript_writer.write_notification(notification)
 
-    def _resolve_tools(self, all_tools: List) -> List:
+    def _resolve_tools(self, all_tools: list) -> list:
         """Build the filtered tool list for this subagent.
 
         1. Exclude tools that subagents must never use (delegation, plan mode)
@@ -549,7 +551,7 @@ class SubAgent:
                 )
         return ""
 
-    def _build_context(self, task_description: str) -> tuple[List[Dict[str, str]], str]:
+    def _build_context(self, task_description: str) -> tuple[list[dict[str, str]], str]:
         """Build fresh LLM context with specialized system prompt.
 
         Assembles the system message from three layers:
@@ -566,8 +568,8 @@ class SubAgent:
         Returns:
             Tuple of (messages for LLM, last message UUID for parent chaining)
         """
-        from src.session.models.message import Message
         from src.prompts.subagents import SUBAGENT_BASE_PROMPT
+        from src.session.models.message import Message
 
         # Layer 1: Universal base prompt + Layer 2: Role-specific prompt
         system_message = SUBAGENT_BASE_PROMPT + "\n\n" + self.config.system_prompt
@@ -619,11 +621,11 @@ class SubAgent:
 
     def _generate_summary(
         self,
-        current_context: List[Dict[str, str]],
-        subagent_tools: List,
+        current_context: list[dict[str, str]],
+        subagent_tools: list,
         parent_uuid: str,
-        all_tool_calls: List[Dict[str, Any]],
-    ) -> tuple[str, List[Dict[str, Any]]]:
+        all_tool_calls: list[dict[str, Any]],
+    ) -> tuple[str, list[dict[str, Any]]]:
         """Generate a forced summary when the subagent must stop.
 
         Appends a summary-request user message, calls the LLM with
@@ -673,8 +675,8 @@ class SubAgent:
         self,
         reason: str,
         reason_code: str,
-        stats: Dict[str, Any],
-    ) -> tuple[bool, Optional[str]]:
+        stats: dict[str, Any],
+    ) -> tuple[bool, str | None]:
         """Handle a pause event when a limit is hit.
 
         Checks the safety cap, then delegates to the pause callback.
@@ -683,7 +685,7 @@ class SubAgent:
         Args:
             reason: Human-readable reason for the pause
             reason_code: Machine-readable code ("iteration_limit" or "wall_time_limit")
-            stats: Dict with iteration/time stats
+            stats: dict with iteration/time stats
 
         Returns:
             Tuple of (continue_work, feedback_or_None)
@@ -724,10 +726,10 @@ class SubAgent:
 
     def _execute_with_tools(
         self,
-        context: List[Dict[str, str]],
+        context: list[dict[str, str]],
         max_iterations: int,
         last_parent_uuid: str = "",
-    ) -> tuple[str, List[Dict[str, Any]]]:
+    ) -> tuple[str, list[dict[str, Any]]]:
         """Execute with tool calling loop using native function calling.
 
         Uses a while-loop with iteration and wall-clock limit checks.
@@ -1080,7 +1082,7 @@ class SubAgent:
             # Increment iteration counter
             iteration += 1
 
-    def get_statistics(self) -> Dict[str, Any]:
+    def get_statistics(self) -> dict[str, Any]:
         """Get subagent statistics.
 
         Returns:

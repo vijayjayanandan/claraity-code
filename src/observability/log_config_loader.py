@@ -19,7 +19,7 @@ import logging
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Optional
 
 # =============================================================================
 # CONSTANTS
@@ -31,7 +31,7 @@ VALID_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 
 # Map short component names to Python logger hierarchy prefixes.
 # Users write "agent: DEBUG" in config; we translate to "src.core.agent".
-COMPONENT_LOGGER_MAP: Dict[str, str] = {
+COMPONENT_LOGGER_MAP: dict[str, str] = {
     "agent": "src.core.agent",
     "tools": "src.tools",
     "llm": "src.llm",
@@ -69,7 +69,7 @@ class RetentionConfig:
 class LoggingConfig:
     """Complete logging configuration loaded from config.yaml."""
     level: str = "INFO"
-    components: Dict[str, str] = field(default_factory=dict)
+    components: dict[str, str] = field(default_factory=dict)
     handlers: HandlerConfig = field(default_factory=HandlerConfig)
     retention: RetentionConfig = field(default_factory=RetentionConfig)
 
@@ -86,7 +86,7 @@ def _safe_stderr(message: str) -> None:
         pass
 
 
-def _validate_level(level: str, context: str) -> Optional[str]:
+def _validate_level(level: str, context: str) -> str | None:
     """Validate a log level string. Returns uppercase level or None if invalid."""
     upper = level.upper()
     if upper in VALID_LEVELS:
@@ -201,8 +201,8 @@ def load_logging_config(
 
 
 def resolve_logging_config(
-    env_level: Optional[str],
-    cli_level: Optional[str],
+    env_level: str | None,
+    cli_level: str | None,
     config: LoggingConfig,
 ) -> LoggingConfig:
     """
@@ -238,7 +238,7 @@ def resolve_logging_config(
     return config
 
 
-def apply_component_levels(components: Dict[str, str]) -> None:
+def apply_component_levels(components: dict[str, str]) -> None:
     """
     Apply per-component log levels to Python loggers.
 
@@ -246,7 +246,7 @@ def apply_component_levels(components: Dict[str, str]) -> None:
     prefixes (e.g. "src.core.agent") and sets their level.
 
     Args:
-        components: Dict of component name -> log level
+        components: dict of component name -> log level
     """
     for comp_name, level_str in components.items():
         logger_prefix = COMPONENT_LOGGER_MAP.get(comp_name)

@@ -1,9 +1,9 @@
 """CRUD task tracking tools backed by TaskState with file persistence."""
 
-from typing import Dict, Any, Optional
+from typing import Any, Optional
+
 from .base import Tool, ToolResult, ToolStatus
 from .task_state import TaskState
-
 
 # ---------------------------------------------------------------------------
 # CRUD Task Tools (backed by TaskState)
@@ -42,7 +42,7 @@ class TaskCreateTool(Tool):
                 error=str(e),
             )
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
@@ -89,7 +89,7 @@ class TaskUpdateTool(Tool):
                 error=str(e),
             )
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
@@ -155,7 +155,7 @@ class TaskListTool(Tool):
             metadata={"tasks": tasks},
         )
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         return {"type": "object", "properties": {}}
 
 
@@ -195,7 +195,7 @@ class TaskGetTool(Tool):
             metadata={"task": task},
         )
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {

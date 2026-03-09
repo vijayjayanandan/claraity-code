@@ -18,16 +18,16 @@ Usage:
 import json
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 
 from src.observability import get_logger
 
 if TYPE_CHECKING:
-    from src.core.plan_mode import PlanModeState
-    from src.core.permission_mode import PermissionManager
     from src.core.error_recovery import ErrorRecoveryTracker
-    from src.mcp.connection_manager import McpConnectionManager
+    from src.core.permission_mode import PermissionManager
+    from src.core.plan_mode import PlanModeState
     from src.director.adapter import DirectorAdapter
+    from src.mcp.connection_manager import McpConnectionManager
 
 logger = get_logger(__name__)
 
@@ -51,9 +51,9 @@ class GateResult:
         call_summary: Summary of the blocked call (set for BLOCKED_REPEAT).
     """
     action: GateAction
-    message: Optional[str] = None
-    gate_response: Optional[Dict[str, Any]] = None
-    call_summary: Optional[str] = None
+    message: str | None = None
+    gate_response: dict[str, Any] | None = None
+    call_summary: str | None = None
 
 
 class ToolGatingService:
@@ -103,7 +103,7 @@ class ToolGatingService:
     # Category auto-approve
     # ------------------------------------------------------------------
 
-    def set_auto_approve_categories(self, categories: Dict[str, bool]) -> Dict[str, bool]:
+    def set_auto_approve_categories(self, categories: dict[str, bool]) -> dict[str, bool]:
         """Set category auto-approve flags. Returns confirmed state."""
         for cat, enabled in categories.items():
             if cat in self.VALID_CATEGORIES:
@@ -113,7 +113,7 @@ class ToolGatingService:
                     self._auto_approve_categories.discard(cat)
         return self.get_auto_approve_categories()
 
-    def get_auto_approve_categories(self) -> Dict[str, bool]:
+    def get_auto_approve_categories(self) -> dict[str, bool]:
         """Return all categories with their current auto-approve state."""
         return {cat: cat in self._auto_approve_categories for cat in sorted(self.VALID_CATEGORIES)}
 
@@ -127,8 +127,8 @@ class ToolGatingService:
     # ------------------------------------------------------------------
 
     def check_repeat(
-        self, tool_name: str, tool_args: Dict[str, Any]
-    ) -> Optional[GateResult]:
+        self, tool_name: str, tool_args: dict[str, Any]
+    ) -> GateResult | None:
         """Check if this exact call has failed before.
 
         Returns GateResult with BLOCKED_REPEAT if repeated, else None.
@@ -148,8 +148,8 @@ class ToolGatingService:
         return None
 
     def check_plan_mode_gate(
-        self, tool_name: str, tool_args: Dict[str, Any]
-    ) -> Optional[GateResult]:
+        self, tool_name: str, tool_args: dict[str, Any]
+    ) -> GateResult | None:
         """Check if tool is restricted by plan mode.
 
         Returns GateResult with DENY if gated, else None.
@@ -209,8 +209,8 @@ class ToolGatingService:
         return None  # Allowed
 
     def check_director_gate(
-        self, tool_name: str, tool_args: Dict[str, Any]
-    ) -> Optional[GateResult]:
+        self, tool_name: str, tool_args: dict[str, Any]
+    ) -> GateResult | None:
         """Check if tool is restricted by director phase.
 
         Returns GateResult with DENY if gated, else None.
@@ -243,7 +243,7 @@ class ToolGatingService:
         return None  # Allowed
 
     def needs_approval(
-        self, tool_name: str, tool_args: Optional[Dict[str, Any]] = None
+        self, tool_name: str, tool_args: dict[str, Any] | None = None
     ) -> bool:
         """Determine if a tool call requires user approval.
 
@@ -289,7 +289,7 @@ class ToolGatingService:
     # ------------------------------------------------------------------
 
     def evaluate(
-        self, tool_name: str, tool_args: Dict[str, Any]
+        self, tool_name: str, tool_args: dict[str, Any]
     ) -> GateResult:
         """Run all gating checks in priority order.
 
@@ -323,6 +323,6 @@ class ToolGatingService:
     # Helpers
     # ------------------------------------------------------------------
 
-    def format_gate_response(self, gate_response: Dict[str, Any]) -> str:
+    def format_gate_response(self, gate_response: dict[str, Any]) -> str:
         """Format a gate response dict as JSON string for LLM feedback."""
         return json.dumps(gate_response, indent=2)

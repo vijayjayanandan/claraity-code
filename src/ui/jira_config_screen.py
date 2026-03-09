@@ -11,16 +11,15 @@ Follows the ConfigLLMScreen pattern (ModalScreen with dismiss).
 """
 
 from pathlib import Path
-from typing import Optional, List
 
 from textual.app import ComposeResult
-from textual.screen import ModalScreen
-from textual.widgets import Static, Input, Button, Select
-from textual.containers import Vertical, Horizontal
 from textual.binding import Binding
+from textual.containers import Horizontal, Vertical
+from textual.screen import ModalScreen
+from textual.widgets import Button, Input, Select, Static
 
+from src.integrations.jira.connection import DEFAULT_CONFIG_DIR, JiraConnection
 from src.observability import get_logger
-from src.integrations.jira.connection import JiraConnection, DEFAULT_CONFIG_DIR
 
 logger = get_logger("ui.jira_config_screen")
 
@@ -43,7 +42,7 @@ class JiraConfigResult:
         self.disconnect = disconnect
 
 
-class ConfigJiraScreen(ModalScreen[Optional[JiraConfigResult]]):
+class ConfigJiraScreen(ModalScreen[JiraConfigResult | None]):
     """Modal screen for configuring a Jira connection profile.
 
     Fields:
@@ -129,11 +128,11 @@ class ConfigJiraScreen(ModalScreen[Optional[JiraConfigResult]]):
 
     def __init__(
         self,
-        profile: Optional[str] = None,
-        connected_profile: Optional[str] = None,
-        name: Optional[str] = None,
-        id: Optional[str] = None,
-        classes: Optional[str] = None,
+        profile: str | None = None,
+        connected_profile: str | None = None,
+        name: str | None = None,
+        id: str | None = None,
+        classes: str | None = None,
     ):
         super().__init__(name=name, id=id, classes=classes)
         self._initial_profile = profile or connected_profile

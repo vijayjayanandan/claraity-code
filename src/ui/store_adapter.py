@@ -24,22 +24,37 @@ Phase 6 Design:
 
 import json
 from dataclasses import dataclass, field
-from typing import Optional, List, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from src.observability import get_logger
+from src.session.models.base import generate_stream_id, generate_uuid, now_iso
 from src.session.models.message import (
-    Message, MessageMeta, ToolCall, ToolCallFunction,
-    TextSegment, ToolCallSegment, ThinkingSegment, Segment,
-    TokenUsage
+    Message,
+    MessageMeta,
+    Segment,
+    TextSegment,
+    ThinkingSegment,
+    TokenUsage,
+    ToolCall,
+    ToolCallFunction,
+    ToolCallSegment,
 )
-from src.session.models.base import generate_uuid, now_iso, generate_stream_id
 
 from .events import (
-    UIEvent, StreamStart, StreamEnd, TextDelta,
-    CodeBlockStart, CodeBlockDelta, CodeBlockEnd,
-    ToolCallStart, ToolCallStatus, ToolCallResult,
-    ThinkingStart, ThinkingDelta, ThinkingEnd,
-    ErrorEvent
+    CodeBlockDelta,
+    CodeBlockEnd,
+    CodeBlockStart,
+    ErrorEvent,
+    StreamEnd,
+    StreamStart,
+    TextDelta,
+    ThinkingDelta,
+    ThinkingEnd,
+    ThinkingStart,
+    ToolCallResult,
+    ToolCallStart,
+    ToolCallStatus,
+    UIEvent,
 )
 
 if TYPE_CHECKING:
@@ -53,7 +68,7 @@ class StreamingState:
     """Tracks state of the current streaming message."""
     stream_id: str
     session_id: str
-    parent_uuid: Optional[str]
+    parent_uuid: str | None
 
     # Content accumulation
     text_content: str = ""
@@ -62,10 +77,10 @@ class StreamingState:
     code_language: str = ""
 
     # Segments for interleaving order
-    segments: List[Segment] = field(default_factory=list)
+    segments: list[Segment] = field(default_factory=list)
 
     # Tool calls
-    tool_calls: List[ToolCall] = field(default_factory=list)
+    tool_calls: list[ToolCall] = field(default_factory=list)
 
     # State tracking
     in_code_block: bool = False
@@ -73,9 +88,9 @@ class StreamingState:
     current_text_segment_start: int = 0  # Track where current text segment starts
 
     # Metrics
-    total_tokens: Optional[int] = None
-    duration_ms: Optional[int] = None
-    thinking_tokens: Optional[int] = None
+    total_tokens: int | None = None
+    duration_ms: int | None = None
+    thinking_tokens: int | None = None
 
 
 class StoreAdapter:
@@ -103,7 +118,7 @@ class StoreAdapter:
         self,
         store: "MessageStore",
         session_id: str,
-        parent_uuid: Optional[str] = None,
+        parent_uuid: str | None = None,
         flush_on_boundary: bool = True
     ):
         """
@@ -122,7 +137,7 @@ class StoreAdapter:
         self._flush_on_boundary = flush_on_boundary
 
         # Current streaming state (None when not streaming)
-        self._state: Optional[StreamingState] = None
+        self._state: StreamingState | None = None
 
     @property
     def is_streaming(self) -> bool:
@@ -130,11 +145,11 @@ class StoreAdapter:
         return self._state is not None
 
     @property
-    def current_stream_id(self) -> Optional[str]:
+    def current_stream_id(self) -> str | None:
         """Get current stream_id if streaming."""
         return self._state.stream_id if self._state else None
 
-    def set_parent_uuid(self, parent_uuid: Optional[str]) -> None:
+    def set_parent_uuid(self, parent_uuid: str | None) -> None:
         """Update parent UUID for next message."""
         self._parent_uuid = parent_uuid
 
@@ -211,8 +226,8 @@ class StoreAdapter:
 
     def _handle_stream_end(
         self,
-        total_tokens: Optional[int],
-        duration_ms: Optional[int]
+        total_tokens: int | None,
+        duration_ms: int | None
     ) -> None:
         """Finalize the streaming message."""
         if self._state is None:
@@ -364,8 +379,8 @@ class StoreAdapter:
         call_id: str,
         status,  # ToolStatus enum
         result,
-        error: Optional[str],
-        duration_ms: Optional[int]
+        error: str | None,
+        duration_ms: int | None
     ) -> None:
         """
         Handle tool result by persisting as a separate role="tool" message.
@@ -406,8 +421,8 @@ class StoreAdapter:
         tool_call_id: str,
         content: str,
         status: str = "success",
-        duration_ms: Optional[int] = None,
-        exit_code: Optional[int] = None
+        duration_ms: int | None = None,
+        exit_code: int | None = None
     ) -> Message:
         """
         Add a tool result as a separate message.
@@ -458,7 +473,7 @@ class StoreAdapter:
 
         self._state.thinking_content += text
 
-    def _handle_thinking_end(self, token_count: Optional[int]) -> None:
+    def _handle_thinking_end(self, token_count: int | None) -> None:
         """End thinking block."""
         if self._state is None or not self._state.in_thinking:
             return

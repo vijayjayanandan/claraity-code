@@ -18,9 +18,10 @@ Lifecycle:
 6. Registry cleans up, TUI receives on_unregistered
 """
 
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 import threading
+from collections.abc import Callable
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Optional
 
 from src.observability import get_logger
 
@@ -57,18 +58,18 @@ class SubagentRegistry:
         # Active subagent instances: subagent_id -> instance
         # In subprocess mode, instance is asyncio.Process (has .terminate())
         # In in-process mode, instance is SubAgent (has .cancel())
-        self._instances: Dict[str, Any] = {}
+        self._instances: dict[str, Any] = {}
 
         # Store unsubscribe handles: subagent_id -> unsubscribe callable
-        self._store_unsubscribes: Dict[str, Callable] = {}
+        self._store_unsubscribes: dict[str, Callable] = {}
 
         # Track which subagents are subprocess-based (no call_from_thread needed)
         self._subprocess_ids: set = set()
 
         # Subscriber callbacks
-        self._on_registered: List[RegisteredCallback] = []
-        self._on_unregistered: List[UnregisteredCallback] = []
-        self._on_notification: List[NotificationCallback] = []
+        self._on_registered: list[RegisteredCallback] = []
+        self._on_unregistered: list[UnregisteredCallback] = []
+        self._on_notification: list[NotificationCallback] = []
 
     # -------------------------------------------------------------------------
     # Subscription API (called by TUI on event loop)

@@ -19,8 +19,8 @@ All logging goes to JSONL file via get_logger() framework.
 
 import json
 import os
-import sys
 import signal
+import sys
 import traceback
 from pathlib import Path
 
@@ -34,13 +34,13 @@ if _project_root not in sys.path:
 
 from src.observability import get_logger
 from src.subagents.ipc import (
+    ApprovalRequest,
     IPCEventType,
     emit_event,
+    read_approval_response_from_stdin,
     read_input_from_stdin,
     serialize_notification,
     serialize_result,
-    ApprovalRequest,
-    read_approval_response_from_stdin,
 )
 
 logger = get_logger("subagents.runner")
@@ -56,7 +56,7 @@ def _create_llm_backend(llm_config_dict, api_key):
     Returns:
         LLMBackend instance
     """
-    from src.llm import LLMConfig, OpenAIBackend, OllamaBackend
+    from src.llm import LLMConfig, OllamaBackend, OpenAIBackend
 
     config = LLMConfig.model_validate(llm_config_dict)
     backend_type = config.backend_type
@@ -84,14 +84,18 @@ def _create_tool_executor(tools_allowlist=None):
         ToolExecutor instance with registered tools
     """
     from src.tools.base import ToolExecutor
-    from src.tools.file_operations import (
-        ReadFileTool, WriteFileTool, EditFileTool,
-        AppendToFileTool, ListDirectoryTool, RunCommandTool,
-    )
-    from src.tools.search_tools import GrepTool, GlobTool
-    from src.tools.lsp_tools import GetFileOutlineTool, GetSymbolContextTool
-    from src.tools.knowledge_tools import KBDetectChangesTool, KBUpdateManifestTool
     from src.tools.clarify_tool import ClarifyTool
+    from src.tools.file_operations import (
+        AppendToFileTool,
+        EditFileTool,
+        ListDirectoryTool,
+        ReadFileTool,
+        RunCommandTool,
+        WriteFileTool,
+    )
+    from src.tools.knowledge_tools import KBDetectChangesTool, KBUpdateManifestTool
+    from src.tools.lsp_tools import GetFileOutlineTool, GetSymbolContextTool
+    from src.tools.search_tools import GlobTool, GrepTool
 
     executor = ToolExecutor(hook_manager=None)
 

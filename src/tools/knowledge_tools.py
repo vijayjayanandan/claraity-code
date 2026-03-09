@@ -14,7 +14,7 @@ import subprocess
 from datetime import datetime, timezone
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Any, Optional
 
 from .base import Tool, ToolResult, ToolStatus
 
@@ -60,11 +60,11 @@ def _ensure_scan_config(root: Path) -> None:
     config_path.write_text(_SCAN_CONFIG_TEMPLATE, encoding="utf-8")
 
 
-def _read_kb_config(root: Path) -> Dict[str, List[str]]:
+def _read_kb_config(root: Path) -> dict[str, list[str]]:
     """Read knowledge include/exclude patterns from scan_config.yaml.
 
     Returns:
-        Dict with 'include' and 'exclude' lists of glob patterns.
+        dict with 'include' and 'exclude' lists of glob patterns.
         Defaults to include=[] (all files), exclude=[].
     """
     config_path = root / SCAN_CONFIG_PATH
@@ -85,7 +85,7 @@ def _read_kb_config(root: Path) -> Dict[str, List[str]]:
     return result
 
 
-def _git_ls_files(root: Path) -> Optional[List[str]]:
+def _git_ls_files(root: Path) -> list[str] | None:
     """Get list of git-tracked files. Returns None if not a git repo."""
     try:
         result = subprocess.run(
@@ -107,14 +107,14 @@ def _git_ls_files(root: Path) -> Optional[List[str]]:
 
 
 def _apply_filters(
-    file_paths: List[str],
-    include: List[str],
-    exclude: List[str],
-) -> List[str]:
+    file_paths: list[str],
+    include: list[str],
+    exclude: list[str],
+) -> list[str]:
     """Apply include/exclude glob patterns to a file list.
 
     Args:
-        file_paths: List of relative file paths (forward slashes)
+        file_paths: list of relative file paths (forward slashes)
         include: If non-empty, only files matching at least one pattern are kept
         exclude: Files matching any pattern are removed
 
@@ -134,7 +134,7 @@ def _apply_filters(
     return result
 
 
-def _scan_project_files(root: Path) -> Dict[str, Dict[str, Any]]:
+def _scan_project_files(root: Path) -> dict[str, dict[str, Any]]:
     """Scan project for source files and collect stats.
 
     Uses git ls-files when available (filters untracked files automatically).
@@ -145,7 +145,7 @@ def _scan_project_files(root: Path) -> Dict[str, Dict[str, Any]]:
         root: Project root directory
 
     Returns:
-        Dict mapping relative file paths (forward slashes) to {size, mtime}
+        dict mapping relative file paths (forward slashes) to {size, mtime}
     """
     # Read user config for include/exclude patterns
     kb_config = _read_kb_config(root)
@@ -209,7 +209,7 @@ def _scan_project_files(root: Path) -> Dict[str, Dict[str, Any]]:
     return files
 
 
-def _read_manifest(manifest_path: Path) -> Optional[Dict]:
+def _read_manifest(manifest_path: Path) -> dict | None:
     """Read manifest file, return None if missing or invalid."""
     try:
         if manifest_path.exists():
@@ -219,7 +219,7 @@ def _read_manifest(manifest_path: Path) -> Optional[Dict]:
     return None
 
 
-def _match_coverage(file_path: str, patterns: List[str]) -> bool:
+def _match_coverage(file_path: str, patterns: list[str]) -> bool:
     """Check if a file path matches any coverage pattern.
 
     Supports glob-like patterns via fnmatch:
@@ -249,7 +249,7 @@ class KBDetectChangesTool(Tool):
             )
         )
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {},
@@ -270,10 +270,10 @@ class KBDetectChangesTool(Tool):
                 current_files = _scan_project_files(root)
                 file_list = sorted(current_files.keys())
                 lines = [
-                    f"Mode: FULL (no manifest found)",
+                    "Mode: FULL (no manifest found)",
                     f"Scanned {len(file_list)} source files.",
-                    f"",
-                    f"Files to analyze:",
+                    "",
+                    "Files to analyze:",
                 ]
                 for f in file_list:
                     lines.append(f"  {f}")
@@ -353,12 +353,12 @@ class KBDetectChangesTool(Tool):
 
             # Build human-readable report
             lines = [
-                f"Mode: INCREMENTAL",
+                "Mode: INCREMENTAL",
                 f"Last run: {last_run}",
-                f"",
+                "",
                 f"Changes: {len(changed)} changed, {len(new_files)} new, "
                 f"{len(deleted)} deleted, {unchanged} unchanged",
-                f"",
+                "",
             ]
 
             if changed:
@@ -436,7 +436,7 @@ class KBUpdateManifestTool(Tool):
             )
         )
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
@@ -444,7 +444,7 @@ class KBUpdateManifestTool(Tool):
                     "type": "array",
                     "items": {"type": "string"},
                     "description": (
-                        "List of source file paths analyzed in this run "
+                        "list of source file paths analyzed in this run "
                         "(relative to project root, e.g. 'src/api/main.py')"
                     )
                 },
@@ -470,8 +470,8 @@ class KBUpdateManifestTool(Tool):
 
     def execute(
         self,
-        analyzed_files: List[str],
-        knowledge_coverage: Dict[str, List[str]],
+        analyzed_files: list[str],
+        knowledge_coverage: dict[str, list[str]],
         mode: str = "full",
         **kwargs: Any
     ) -> ToolResult:

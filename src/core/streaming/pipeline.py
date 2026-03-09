@@ -10,16 +10,23 @@ The TUI renders segments directly - it does ZERO parsing.
 """
 
 import re
-from typing import Optional, List
+from typing import Optional
 
-from src.observability import get_logger
-from src.session.models.message import (
-    Message, MessageMeta, Segment,
-    TextSegment, CodeBlockSegment, ToolCallRefSegment, ThinkingSegment,
-    ToolCall, ToolCallFunction, TokenUsage
-)
-from src.session.models.base import generate_uuid, now_iso, generate_stream_id
 from src.llm.base import ProviderDelta, ToolCallDelta
+from src.observability import get_logger
+from src.session.models.base import generate_stream_id, generate_uuid, now_iso
+from src.session.models.message import (
+    CodeBlockSegment,
+    Message,
+    MessageMeta,
+    Segment,
+    TextSegment,
+    ThinkingSegment,
+    TokenUsage,
+    ToolCall,
+    ToolCallFunction,
+    ToolCallRefSegment,
+)
 
 from .state import StreamingState, ToolCallAccumulator
 
@@ -55,9 +62,9 @@ class StreamingPipeline:
     def __init__(
         self,
         session_id: str,
-        parent_uuid: Optional[str] = None,
-        provider: Optional[str] = None,
-        model: Optional[str] = None
+        parent_uuid: str | None = None,
+        provider: str | None = None,
+        model: str | None = None
     ):
         """
         Initialize the streaming pipeline.
@@ -70,7 +77,7 @@ class StreamingPipeline:
         """
         self._session_id = session_id
         self._parent_uuid = parent_uuid
-        self._state: Optional[StreamingState] = None
+        self._state: StreamingState | None = None
         self._provider = provider
         self._model = model
 
@@ -80,11 +87,11 @@ class StreamingPipeline:
         return self._state is not None
 
     @property
-    def current_stream_id(self) -> Optional[str]:
+    def current_stream_id(self) -> str | None:
         """Get current stream_id if streaming."""
         return self._state.stream_id if self._state else None
 
-    def process_delta(self, delta: ProviderDelta) -> Optional[Message]:
+    def process_delta(self, delta: ProviderDelta) -> Message | None:
         """
         Process a single provider delta.
 
@@ -131,7 +138,7 @@ class StreamingPipeline:
 
         return None
 
-    def get_current_state(self) -> Optional[Message]:
+    def get_current_state(self) -> Message | None:
         """
         Get current in-flight message state for live UI updates.
 

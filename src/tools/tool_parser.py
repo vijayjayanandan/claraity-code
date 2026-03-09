@@ -5,15 +5,15 @@ Supports JSON format optimized for Qwen3-Coder 30B.
 
 import json
 import re
-from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
+from typing import Any, Optional
 
 
 @dataclass
 class ToolCall:
     """Represents a single tool call."""
     tool: str
-    arguments: Dict[str, Any]
+    arguments: dict[str, Any]
 
     def __repr__(self) -> str:
         return f"ToolCall(tool='{self.tool}', arguments={self.arguments})"
@@ -23,10 +23,10 @@ class ToolCall:
 class ParsedResponse:
     """Result of parsing an LLM response for tool calls."""
     has_tool_calls: bool
-    tool_calls: List[ToolCall]
-    thoughts: Optional[str] = None
-    raw_text: Optional[str] = None
-    error: Optional[str] = None
+    tool_calls: list[ToolCall]
+    thoughts: str | None = None
+    raw_text: str | None = None
+    error: str | None = None
 
     def __repr__(self) -> str:
         if self.has_tool_calls:
@@ -95,7 +95,7 @@ class ToolCallParser:
                 raw_text=llm_response
             )
 
-    def _extract_json(self, text: str) -> Optional[str]:
+    def _extract_json(self, text: str) -> str | None:
         """
         Extract JSON from text, trying multiple strategies.
 
@@ -119,7 +119,7 @@ class ToolCallParser:
                     data = json.loads(match)
                     if isinstance(data, dict) and ("tool_calls" in data or "thoughts" in data):
                         return match
-                except:
+                except Exception:
                     continue
 
         # Strategy 3: Try to find JSON between { and } manually
@@ -131,12 +131,12 @@ class ToolCallParser:
                 # Validate it's parseable
                 json.loads(potential_json)
                 return potential_json
-        except:
+        except Exception:
             pass
 
         return None
 
-    def _parse_json_response(self, data: Dict[str, Any], original_text: str) -> ParsedResponse:
+    def _parse_json_response(self, data: dict[str, Any], original_text: str) -> ParsedResponse:
         """
         Parse a JSON response object into a ParsedResponse.
 
@@ -188,7 +188,7 @@ class ToolCallParser:
             thoughts=thoughts
         )
 
-    def _parse_tool_call(self, call_data: Dict[str, Any], index: int) -> ToolCall:
+    def _parse_tool_call(self, call_data: dict[str, Any], index: int) -> ToolCall:
         """
         Parse a single tool call from JSON data.
 
@@ -218,16 +218,16 @@ class ToolCallParser:
 
         return ToolCall(tool=tool_name, arguments=arguments)
 
-    def validate_tool_call(self, tool_call: ToolCall, available_tools: List[str]) -> Tuple[bool, Optional[str]]:
+    def validate_tool_call(self, tool_call: ToolCall, available_tools: list[str]) -> tuple[bool, str | None]:
         """
         Validate that a tool call is valid and the tool exists.
 
         Args:
             tool_call: The ToolCall to validate
-            available_tools: List of available tool names
+            available_tools: list of available tool names
 
         Returns:
-            Tuple of (is_valid, error_message)
+            tuple of (is_valid, error_message)
         """
         if tool_call.tool not in available_tools:
             return False, f"Unknown tool: '{tool_call.tool}'. Available tools: {', '.join(available_tools)}"

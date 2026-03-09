@@ -31,9 +31,9 @@ import sys
 import threading
 import traceback
 from contextvars import ContextVar
-from typing import Any, Dict, Optional, Set
+from typing import Any, Optional
 
-from .error_store import ErrorStore, ErrorCategory, get_error_store, MAX_TRACEBACK_LENGTH
+from .error_store import MAX_TRACEBACK_LENGTH, ErrorCategory, ErrorStore, get_error_store
 
 # =============================================================================
 # CONSTANTS
@@ -53,7 +53,7 @@ WRITER_SHUTDOWN_TIMEOUT = 5.0
 # =============================================================================
 
 # Track registered handler instances for atexit cleanup
-_registered_handlers: Set["SQLiteErrorHandler"] = set()
+_registered_handlers: set["SQLiteErrorHandler"] = set()
 _atexit_registered: bool = False
 _atexit_lock = threading.Lock()
 
@@ -243,7 +243,7 @@ class SQLiteErrorHandler(logging.Handler):
             # Reset re-entry guard to previous state
             _in_emit.reset(token)
 
-    def _extract_record_data(self, record: logging.LogRecord) -> Dict[str, Any]:
+    def _extract_record_data(self, record: logging.LogRecord) -> dict[str, Any]:
         """
         Extract structured data from log record.
 
@@ -255,7 +255,7 @@ class SQLiteErrorHandler(logging.Handler):
             record: Log record
 
         Returns:
-            Dict of fields for ErrorStore.record_from_dict()
+            dict of fields for ErrorStore.record_from_dict()
         """
         # Base fields
         data = {

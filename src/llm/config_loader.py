@@ -21,7 +21,7 @@ import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Optional
 
 # =============================================================================
 # CONSTANTS
@@ -46,11 +46,11 @@ class SubAgentLLMOverride:
     All fields are optional. ``None`` means "inherit from the main agent".
     """
 
-    model: Optional[str] = None
-    backend_type: Optional[str] = None
-    base_url: Optional[str] = None
-    api_key_env: Optional[str] = None
-    context_window: Optional[int] = None
+    model: str | None = None
+    backend_type: str | None = None
+    base_url: str | None = None
+    api_key_env: str | None = None
+    context_window: int | None = None
 
 
 @dataclass
@@ -78,8 +78,8 @@ class LLMConfigData:
     temperature: float = 0.2
     max_tokens: int = 16384
     top_p: float = 0.95
-    thinking_budget: Optional[int] = None  # Extended thinking token budget (Claude, etc.)
-    subagents: Dict[str, SubAgentLLMOverride] = field(default_factory=dict)
+    thinking_budget: int | None = None  # Extended thinking token budget (Claude, etc.)
+    subagents: dict[str, SubAgentLLMOverride] = field(default_factory=dict)
 
 
 # =============================================================================
@@ -94,7 +94,7 @@ def _safe_stderr(message: str) -> None:
         pass
 
 
-def _validate_backend(backend: str, context: str) -> Optional[str]:
+def _validate_backend(backend: str, context: str) -> str | None:
     """Validate backend type string. Returns lowercase or None if invalid."""
     lower = backend.lower()
     if lower in VALID_BACKEND_TYPES:
@@ -369,8 +369,8 @@ def save_llm_config(
 # =============================================================================
 
 def resolve_llm_config(
-    env_vars: Dict[str, Optional[str]],
-    cli_args: Dict[str, Optional[str]],
+    env_vars: dict[str, str | None],
+    cli_args: dict[str, str | None],
     config: LLMConfigData,
 ) -> LLMConfigData:
     """
@@ -403,7 +403,7 @@ def resolve_llm_config(
 
 
 def _apply_overrides(
-    overrides: Dict[str, Optional[str]],
+    overrides: dict[str, str | None],
     config: LLMConfigData,
     source: str,
 ) -> None:

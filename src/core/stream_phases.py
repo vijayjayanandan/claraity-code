@@ -12,7 +12,7 @@ Functions:
 """
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from src.observability import get_logger
 
@@ -21,11 +21,11 @@ logger = get_logger(__name__)
 
 def build_assistant_context_message(
     response_content: str,
-    tool_calls: Optional[List] = None,
-    reasoning_content: Optional[str] = None,
-    thinking: Optional[str] = None,
-    thinking_signature: Optional[str] = None,
-) -> Dict[str, Any]:
+    tool_calls: list | None = None,
+    reasoning_content: str | None = None,
+    thinking: str | None = None,
+    thinking_signature: str | None = None,
+) -> dict[str, Any]:
     """Build the assistant message dict to append to LLM context.
 
     This is the message that tells the LLM what it said and which tools
@@ -35,16 +35,16 @@ def build_assistant_context_message(
 
     Args:
         response_content: Text content from the LLM response.
-        tool_calls: List of ToolCall objects (or None if no tool calls).
+        tool_calls: list of ToolCall objects (or None if no tool calls).
         reasoning_content: Optional reasoning/thinking content to echo back
             (required by Kimi K2.5 and other reasoning models).
         thinking: Optional thinking block content (Anthropic extended thinking).
         thinking_signature: Optional thinking block signature for round-tripping.
 
     Returns:
-        Dict in OpenAI message format with role="assistant".
+        dict in OpenAI message format with role="assistant".
     """
-    msg: Dict[str, Any] = {
+    msg: dict[str, Any] = {
         "role": "assistant",
         "content": response_content or "",
     }
@@ -75,8 +75,8 @@ def build_assistant_context_message(
 
 
 def inject_controller_constraint(
-    context: List[Dict[str, Any]],
-    blocked_calls: List[str],
+    context: list[dict[str, Any]],
+    blocked_calls: list[str],
 ) -> None:
     """Inject a controller constraint message when calls were blocked.
 
@@ -87,7 +87,7 @@ def inject_controller_constraint(
 
     Args:
         context: The LLM conversation context (mutated).
-        blocked_calls: List of human-readable blocked call summaries.
+        blocked_calls: list of human-readable blocked call summaries.
     """
     if not blocked_calls:
         return
@@ -110,10 +110,10 @@ def inject_controller_constraint(
 
 
 def fill_skipped_tool_results(
-    tool_calls: List,
+    tool_calls: list,
     processed_call_ids: set,
     reason: str = "Tool execution was skipped.",
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Generate tool_result messages for tool calls that were not executed.
 
     When the user rejects a tool or the loop breaks mid-iteration, some
@@ -127,7 +127,7 @@ def fill_skipped_tool_results(
         reason: The reason text to include in skipped results.
 
     Returns:
-        List of tool_result message dicts for unprocessed calls.
+        list of tool_result message dicts for unprocessed calls.
     """
     skipped = []
     for tc in tool_calls:
@@ -146,8 +146,8 @@ def build_pause_stats(
     tool_call_count: int,
     elapsed_seconds: float,
     iteration: int,
-    error: Optional[str] = None,
-) -> Dict[str, Any]:
+    error: str | None = None,
+) -> dict[str, Any]:
     """Build the stats dict for PausePromptStart events.
 
     Args:
@@ -159,7 +159,7 @@ def build_pause_stats(
     Returns:
         Stats dict for the pause widget.
     """
-    stats: Dict[str, Any] = {
+    stats: dict[str, Any] = {
         "tool_calls": tool_call_count,
         "elapsed_s": elapsed_seconds,
         "iterations": iteration,

@@ -16,9 +16,9 @@ Child -> Parent (stdout, one JSON line per event):
 
 import json
 import sys
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Dict, Any, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from src.session.store.memory_store import StoreNotification, ToolExecutionState
@@ -42,16 +42,16 @@ class SubprocessInput:
         max_iterations: Maximum tool-calling iterations
         transcript_path: Path for JSONL transcript file
     """
-    config: Dict[str, Any]
-    llm_config: Dict[str, Any]
+    config: dict[str, Any]
+    llm_config: dict[str, Any]
     api_key: str
     task_description: str
     working_directory: str
     max_iterations: int = 50
-    max_wall_time: Optional[float] = 300.0
+    max_wall_time: float | None = 300.0
     transcript_path: str = ""
     permission_mode: str = "normal"
-    auto_approve_tools: List[str] = field(default_factory=list)
+    auto_approve_tools: list[str] = field(default_factory=list)
     delegation_depth: int = 0
 
     def __repr__(self) -> str:
@@ -90,7 +90,7 @@ class IPCEventType(str, Enum):
 # Serialization Helpers
 # ============================================================================
 
-def serialize_notification(notification: "StoreNotification") -> Dict[str, Any]:
+def serialize_notification(notification: "StoreNotification") -> dict[str, Any]:
     """Serialize a StoreNotification for IPC transport.
 
     Converts Message objects via to_dict(), enums via .value,
@@ -102,7 +102,7 @@ def serialize_notification(notification: "StoreNotification") -> Dict[str, Any]:
     Returns:
         JSON-serializable dict
     """
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "event": notification.event.value,
     }
 
@@ -128,23 +128,25 @@ def serialize_notification(notification: "StoreNotification") -> Dict[str, Any]:
     return result
 
 
-def deserialize_notification(data: Dict[str, Any]) -> "StoreNotification":
+def deserialize_notification(data: dict[str, Any]) -> "StoreNotification":
     """Deserialize a StoreNotification from IPC transport.
 
     Reconstructs Message via from_dict(), StoreEvent from string,
     and ToolExecutionState from dict.
 
     Args:
-        data: Dict from JSON-parsed IPC event
+        data: dict from JSON-parsed IPC event
 
     Returns:
         StoreNotification instance
     """
-    from src.session.store.memory_store import (
-        StoreNotification, StoreEvent, ToolExecutionState,
-    )
-    from src.session.models.message import Message
     from src.core.events import ToolStatus
+    from src.session.models.message import Message
+    from src.session.store.memory_store import (
+        StoreEvent,
+        StoreNotification,
+        ToolExecutionState,
+    )
 
     # Reconstruct event enum
     event = StoreEvent(data["event"])
@@ -198,7 +200,7 @@ def _resolve_tool_status(status_str: str):
         return ToolStatus.PENDING
 
 
-def serialize_result(result: "SubAgentResult") -> Dict[str, Any]:
+def serialize_result(result: "SubAgentResult") -> dict[str, Any]:
     """Serialize SubAgentResult for IPC transport.
 
     Args:
@@ -210,11 +212,11 @@ def serialize_result(result: "SubAgentResult") -> Dict[str, Any]:
     return asdict(result)
 
 
-def deserialize_result(data: Dict[str, Any]) -> "SubAgentResult":
+def deserialize_result(data: dict[str, Any]) -> "SubAgentResult":
     """Deserialize SubAgentResult from IPC transport.
 
     Args:
-        data: Dict from JSON-parsed IPC event
+        data: dict from JSON-parsed IPC event
 
     Returns:
         SubAgentResult instance
@@ -245,23 +247,23 @@ class ApprovalRequest:
     """
     tool_call_id: str
     tool_name: str
-    tool_args: Dict[str, Any]
+    tool_args: dict[str, Any]
     subagent_name: str
     args_summary: str
     request_type: str = "tool_approval"
     # Clarify-specific fields (only when request_type="clarify")
-    questions: Optional[List[Dict[str, Any]]] = None
-    context: Optional[str] = None
+    questions: list[dict[str, Any]] | None = None
+    context: str | None = None
     # Pause-specific fields (only when request_type="pause")
-    pause_reason: Optional[str] = None
-    pause_reason_code: Optional[str] = None
-    pause_stats: Optional[Dict[str, Any]] = None
+    pause_reason: str | None = None
+    pause_reason_code: str | None = None
+    pause_stats: dict[str, Any] | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'ApprovalRequest':
+    def from_dict(cls, data: dict[str, Any]) -> 'ApprovalRequest':
         known = {f.name for f in cls.__dataclass_fields__.values()}
         return cls(**{k: v for k, v in data.items() if k in known})
 
@@ -277,9 +279,9 @@ class ApprovalResponse:
     tool_call_id: str
     approved: bool
     auto_approve_future: bool = False
-    feedback: Optional[str] = None
+    feedback: str | None = None
     # Clarify-specific: structured response from ClarifyWidget
-    clarify_result: Optional[Dict[str, Any]] = None
+    clarify_result: dict[str, Any] | None = None
 
     def to_json_line(self) -> str:
         return json.dumps(asdict(self), ensure_ascii=True)
