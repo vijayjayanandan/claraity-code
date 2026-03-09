@@ -80,11 +80,7 @@ class ErrorRecoveryTracker:
         "search_code": {"pattern": "strip"},
     }
 
-    def __init__(
-        self,
-        max_same_tool_error_failures: int = 4,
-        max_total_failures: int = 10
-    ):
+    def __init__(self, max_same_tool_error_failures: int = 4, max_total_failures: int = 10):
         """
         Initialize ErrorRecoveryTracker.
 
@@ -130,11 +126,11 @@ class ErrorRecoveryTracker:
             if isinstance(value, str) and key in field_rules:
                 rule = field_rules[key]
                 if rule == "collapse_whitespace":
-                    value = re.sub(r'\s+', ' ', value.strip())
+                    value = re.sub(r"\s+", " ", value.strip())
                 elif rule == "normalize_path":
                     value = value.strip()
                     # Normalize path separators (Windows/Unix)
-                    value = re.sub(r'[\\/]+', '/', value)
+                    value = re.sub(r"[\\/]+", "/", value)
                 elif rule == "strip":
                     value = value.strip()
             # Don't normalize fields not in rules (e.g., patch content, file content)
@@ -186,9 +182,7 @@ class ErrorRecoveryTracker:
         return tool_name
 
     def is_repeated_failed_call(
-        self,
-        tool_name: str,
-        tool_args: dict[str, Any]
+        self, tool_name: str, tool_args: dict[str, Any]
     ) -> tuple[bool, str]:
         """
         Check if this exact call has FAILED before.
@@ -220,11 +214,7 @@ class ErrorRecoveryTracker:
 
         return is_repeat, summary
 
-    def should_allow_retry(
-        self,
-        tool_name: str,
-        error_type: str
-    ) -> tuple[bool, str]:
+    def should_allow_retry(self, tool_name: str, error_type: str) -> tuple[bool, str]:
         """
         Check if retry should be allowed for this tool+error_type.
 
@@ -264,7 +254,7 @@ class ErrorRecoveryTracker:
         exit_code: int | None = None,
         stdout: str | None = None,
         stderr: str | None = None,
-        working_dir: str | None = None
+        working_dir: str | None = None,
     ) -> ErrorContext:
         """
         Record a FAILURE and return structured context for LLM.
@@ -297,12 +287,14 @@ class ErrorRecoveryTracker:
 
         # Add to approach history (for LLM context)
         args_summary = self._get_key_args(tool_name, tool_args)
-        self._approach_history.append({
-            "tool": tool_name,
-            "args_summary": args_summary,
-            "error_type": error_type,
-            "result_summary": error_message[:100]
-        })
+        self._approach_history.append(
+            {
+                "tool": tool_name,
+                "args_summary": args_summary,
+                "error_type": error_type,
+                "result_summary": error_message[:100],
+            }
+        )
 
         # Cap history size to prevent unbounded memory growth
         if len(self._approach_history) > 10:
@@ -318,7 +310,7 @@ class ErrorRecoveryTracker:
             stderr_tail=stderr[-500:] if stderr else None,
             working_dir=working_dir,
             attempt_number=self._failed_tool_error_counts[key],
-            previous_attempts=self._approach_history[-3:]  # Cap at 3 for context
+            previous_attempts=self._approach_history[-3:],  # Cap at 3 for context
         )
 
     def get_stats(self) -> dict[str, Any]:
@@ -378,4 +370,4 @@ class ErrorRecoveryTracker:
 
 
 # Export
-__all__ = ['ErrorRecoveryTracker']
+__all__ = ["ErrorRecoveryTracker"]

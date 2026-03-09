@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 class TestStatus(Enum):
     """Test execution status."""
+
     PASSED = "passed"
     FAILED = "failed"
     ERROR = "error"
@@ -111,5 +112,5 @@ class TestSuiteResult:
                     "line_number": tc.line_number,
                 }
                 for tc in self.test_cases
-            ]
+            ],
         }

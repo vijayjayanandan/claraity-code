@@ -17,6 +17,7 @@ from typing import Any, Optional
 
 try:
     from src.observability import get_logger
+
     logger = get_logger("integrations.mcp.policy")
 except ImportError:
     logger = logging.getLogger(__name__)
@@ -33,6 +34,7 @@ class ToolPolicy:
         is_destructive: Whether this tool performs destructive operations.
         description_override: Optional override for MCP-provided description.
     """
+
     allowed: bool = True
     requires_approval: bool = False
     is_write: bool = False

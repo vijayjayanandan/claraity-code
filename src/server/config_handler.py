@@ -26,6 +26,7 @@ def _validate_list_models_url(base_url: str) -> tuple:
     """Validate that a list_models URL doesn't target internal/private networks."""
     try:
         from urllib.parse import urlparse
+
         parsed = urlparse(base_url)
         hostname = parsed.hostname
         if not hostname:
@@ -123,15 +124,22 @@ def save_config_from_request(data: dict, config_path: str) -> dict:
         api_key = raw.get("api_key", "")
         if api_key:
             from src.llm.credential_store import save_api_key
+
             save_api_key(str(api_key))
 
         ok = save_llm_config(cfg, config_path)
         if ok:
-            return {"type": "config_saved", "success": True,
-                    "message": "Configuration saved. Restart server to apply changes."}
+            return {
+                "type": "config_saved",
+                "success": True,
+                "message": "Configuration saved. Restart server to apply changes.",
+            }
         else:
-            return {"type": "config_saved", "success": False,
-                    "message": "Failed to write config file."}
+            return {
+                "type": "config_saved",
+                "success": False,
+                "message": "Failed to write config file.",
+            }
 
     except Exception as exc:
         logger.error(f"[CONFIG] Save error: {exc}")
@@ -155,6 +163,7 @@ def list_models_from_request(data: dict) -> dict:
         # (the config form intentionally never pre-fills the key field)
         if not api_key:
             from src.llm.credential_store import load_api_key
+
             api_key = load_api_key()
 
         # SSRF protection: validate URL before making outbound request
@@ -171,6 +180,7 @@ def list_models_from_request(data: dict) -> dict:
 
 
 # -- numeric coercion helpers --
+
 
 def _int_or(val, default: int) -> int:
     if val is None or val == "":

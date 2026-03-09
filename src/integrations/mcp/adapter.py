@@ -18,6 +18,7 @@ from .config import McpServerConfig
 
 try:
     from src.observability import get_logger
+
     logger = get_logger("integrations.mcp.adapter")
 except ImportError:
     logger = logging.getLogger(__name__)
@@ -161,5 +162,5 @@ class McpToolAdapter:
         e.g. "jira_searchJiraIssuesUsingJql" -> "searchJiraIssuesUsingJql"
         """
         if self._prefix and prefixed_name.startswith(f"{self._prefix}_"):
-            return prefixed_name[len(self._prefix) + 1:]
+            return prefixed_name[len(self._prefix) + 1 :]
         return prefixed_name

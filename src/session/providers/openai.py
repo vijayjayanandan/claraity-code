@@ -67,9 +67,9 @@ def from_openai(
             id=tc.get("id", ""),
             function=ToolCallFunction(
                 name=tc.get("function", {}).get("name", ""),
-                arguments=tc.get("function", {}).get("arguments", "{}")
+                arguments=tc.get("function", {}).get("arguments", "{}"),
             ),
-            type=tc.get("type", "function")
+            type=tc.get("type", "function"),
         )
         for tc in raw_tool_calls
     ]
@@ -79,7 +79,7 @@ def from_openai(
     if content and tool_calls:
         segments = [
             TextSegment(content=content),
-            *[ToolCallSegment(tool_call_index=i) for i in range(len(tool_calls))]
+            *[ToolCallSegment(tool_call_index=i) for i in range(len(tool_calls))],
         ]
 
     # Parse usage
@@ -89,7 +89,7 @@ def from_openai(
         usage = TokenUsage(
             input_tokens=usage_data.get("prompt_tokens", 0),
             output_tokens=usage_data.get("completion_tokens", 0),
-            reasoning_tokens=usage_data.get("reasoning_tokens")
+            reasoning_tokens=usage_data.get("reasoning_tokens"),
         )
 
     # Build message
@@ -111,7 +111,7 @@ def from_openai(
             usage=usage,
             segments=segments,
             provider_message_id=response.get("id"),
-        )
+        ),
     )
 
     # Store raw response for runtime debugging (NOT persisted)
@@ -166,10 +166,7 @@ def from_openai_stream_chunk(
             # Extend list if needed
             while len(accumulated_tool_calls) <= index:
                 accumulated_tool_calls.append(
-                    ToolCall(
-                        id="",
-                        function=ToolCallFunction(name="", arguments="")
-                    )
+                    ToolCall(id="", function=ToolCallFunction(name="", arguments=""))
                 )
 
             tc = accumulated_tool_calls[index]
@@ -177,9 +174,7 @@ def from_openai_stream_chunk(
             # Update fields
             if tc_delta.get("id"):
                 accumulated_tool_calls[index] = ToolCall(
-                    id=tc_delta["id"],
-                    function=tc.function,
-                    type=tc_delta.get("type", tc.type)
+                    id=tc_delta["id"], function=tc.function, type=tc_delta.get("type", tc.type)
                 )
                 tc = accumulated_tool_calls[index]
 
@@ -189,9 +184,9 @@ def from_openai_stream_chunk(
                     id=tc.id,
                     function=ToolCallFunction(
                         name=tc.function.name + func.get("name", ""),
-                        arguments=tc.function.arguments + func.get("arguments", "")
+                        arguments=tc.function.arguments + func.get("arguments", ""),
                     ),
-                    type=tc.type
+                    type=tc.type,
                 )
 
     # Build segments if both present
@@ -199,7 +194,7 @@ def from_openai_stream_chunk(
     if accumulated_content and accumulated_tool_calls:
         segments = [
             TextSegment(content=accumulated_content),
-            *[ToolCallSegment(tool_call_index=i) for i in range(len(accumulated_tool_calls))]
+            *[ToolCallSegment(tool_call_index=i) for i in range(len(accumulated_tool_calls))],
         ]
 
     # Determine stop reason
@@ -224,7 +219,7 @@ def from_openai_stream_chunk(
             stop_reason=stop_reason,
             segments=segments,
             provider_message_id=chunk.get("id"),
-        )
+        ),
     )
 
 

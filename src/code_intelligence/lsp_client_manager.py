@@ -25,12 +25,20 @@ from src.code_intelligence.cache import LSPCache
 # On Windows, pip --user installs scripts to a directory not in system PATH
 def _ensure_user_scripts_in_path():
     """Add Python user Scripts directory to PATH if not present."""
-    if sys.platform == 'win32':
-        user_scripts = Path.home() / 'AppData' / 'Roaming' / 'Python' / f'Python{sys.version_info.major}{sys.version_info.minor}' / 'Scripts'
+    if sys.platform == "win32":
+        user_scripts = (
+            Path.home()
+            / "AppData"
+            / "Roaming"
+            / "Python"
+            / f"Python{sys.version_info.major}{sys.version_info.minor}"
+            / "Scripts"
+        )
         if user_scripts.exists():
             user_scripts_str = str(user_scripts)
-            if user_scripts_str not in os.environ.get('PATH', ''):
-                os.environ['PATH'] = user_scripts_str + os.pathsep + os.environ.get('PATH', '')
+            if user_scripts_str not in os.environ.get("PATH", ""):
+                os.environ["PATH"] = user_scripts_str + os.pathsep + os.environ.get("PATH", "")
+
 
 _ensure_user_scripts_in_path()
 
@@ -39,6 +47,7 @@ try:
     from multilspy import LanguageServer
     from multilspy.multilspy_config import Language, MultilspyConfig
     from multilspy.multilspy_logger import MultilspyLogger
+
     MULTILSPY_AVAILABLE = True
 except ImportError:
     MULTILSPY_AVAILABLE = False
@@ -51,26 +60,31 @@ except ImportError:
 # Custom Exceptions
 class LSPError(Exception):
     """Base exception for LSP-related errors."""
+
     pass
 
 
 class LSPServerNotFoundError(LSPError):
     """Language server binary not found."""
+
     pass
 
 
 class LSPServerStartupError(LSPError):
     """Failed to start language server."""
+
     pass
 
 
 class LSPQueryError(LSPError):
     """LSP query failed."""
+
     pass
 
 
 class LSPTimeoutError(LSPError):
     """LSP query timed out."""
+
     pass
 
 
@@ -143,7 +157,7 @@ class LSPClientManager:
         repo_root: str | None = None,
         cache: LSPCache | None = None,
         max_servers: int = 3,
-        query_timeout: float = 5.0
+        query_timeout: float = 5.0,
     ):
         """
         Initialize LSP Client Manager.
@@ -163,6 +177,7 @@ class LSPClientManager:
 
         # Log repo_root at init (helps debug path issues)
         from src.code_intelligence.path_utils import normalize_path
+
         self.logger.info(
             f"LSPClientManager init: repo_root={self.repo_root}, "
             f"normalized={normalize_path(self.repo_root)}"
@@ -190,10 +205,7 @@ class LSPClientManager:
         self.logger.debug(f"[PERF] Manager init: {init_ms:.1f}ms")
 
     async def request_definition(
-        self,
-        file_path: str,
-        line: int,
-        column: int
+        self, file_path: str, line: int, column: int
     ) -> dict[str, Any] | None:
         """
         Request symbol definition location.
@@ -229,11 +241,7 @@ class LSPClientManager:
 
         # Make LSP request (with retry)
         result = await self._query_with_retry(
-            server,
-            "textDocument/definition",
-            file_path,
-            line,
-            column
+            server, "textDocument/definition", file_path, line, column
         )
 
         # Cache result
@@ -242,10 +250,7 @@ class LSPClientManager:
         return result
 
     async def request_references(
-        self,
-        file_path: str,
-        line: int,
-        column: int
+        self, file_path: str, line: int, column: int
     ) -> list[dict[str, Any]]:
         """
         Request all references to a symbol.
@@ -275,11 +280,7 @@ class LSPClientManager:
             server = await self._get_server(file_path)
 
             result = await self._query_with_retry(
-                server,
-                "textDocument/references",
-                file_path,
-                line,
-                column
+                server, "textDocument/references", file_path, line, column
             )
 
             # Cache result
@@ -291,12 +292,7 @@ class LSPClientManager:
             self.logger.error(f"References query failed: {e}")
             raise LSPQueryError(f"Failed to get references: {e}") from e
 
-    async def request_hover(
-        self,
-        file_path: str,
-        line: int,
-        column: int
-    ) -> dict[str, Any] | None:
+    async def request_hover(self, file_path: str, line: int, column: int) -> dict[str, Any] | None:
         """
         Request hover information (type signature, docstring).
 
@@ -325,11 +321,7 @@ class LSPClientManager:
             server = await self._get_server(file_path)
 
             result = await self._query_with_retry(
-                server,
-                "textDocument/hover",
-                file_path,
-                line,
-                column
+                server, "textDocument/hover", file_path, line, column
             )
 
             # Cache result
@@ -341,10 +333,7 @@ class LSPClientManager:
             self.logger.error(f"Hover query failed: {e}")
             raise LSPQueryError(f"Failed to get hover info: {e}") from e
 
-    async def request_document_symbols(
-        self,
-        file_path: str
-    ) -> list[dict[str, Any]]:
+    async def request_document_symbols(self, file_path: str) -> list[dict[str, Any]]:
         """
         Request document symbols (file outline).
 
@@ -381,11 +370,7 @@ class LSPClientManager:
             get_server_ms = (time.perf_counter() - get_server_start) * 1000
 
             query_start = time.perf_counter()
-            result = await self._query_with_retry(
-                server,
-                "textDocument/documentSymbol",
-                file_path
-            )
+            result = await self._query_with_retry(server, "textDocument/documentSymbol", file_path)
             query_ms = (time.perf_counter() - query_start) * 1000
 
             # Cache result
@@ -402,15 +387,11 @@ class LSPClientManager:
 
         except Exception as e:
             total_ms = (time.perf_counter() - total_start) * 1000
-            self.logger.error(
-                f"Document symbols query failed: {e} (total_ms={total_ms:.1f})"
-            )
+            self.logger.error(f"Document symbols query failed: {e} (total_ms={total_ms:.1f})")
             raise LSPQueryError(f"Failed to get document symbols: {e}") from e
 
     async def request_workspace_symbols(
-        self,
-        query: str,
-        repo_root: str | None = None
+        self, query: str, repo_root: str | None = None
     ) -> list[dict[str, Any]]:
         """
         Search for symbols across workspace.
@@ -536,13 +517,10 @@ class LSPClientManager:
         # Check server limit
         if len(self.servers) >= self.max_servers:
             self.logger.warning(
-                f"Max servers ({self.max_servers}) reached. "
-                f"Active: {list(self.servers.keys())}"
+                f"Max servers ({self.max_servers}) reached. Active: {list(self.servers.keys())}"
             )
             # For now, raise error. Later: could implement LRU eviction
-            raise LSPServerStartupError(
-                f"Max servers ({self.max_servers}) already running"
-            )
+            raise LSPServerStartupError(f"Max servers ({self.max_servers}) already running")
 
         # Use lock to prevent duplicate startup
         if language not in self._server_locks:
@@ -580,9 +558,7 @@ class LSPClientManager:
 
             except Exception as e:
                 self.logger.error(f"Failed to start {language} server: {e}")
-                raise LSPServerStartupError(
-                    f"Failed to start {language} server: {e}"
-                ) from e
+                raise LSPServerStartupError(f"Failed to start {language} server: {e}") from e
 
     async def _start_server(self, language: str) -> ServerWrapper:
         """
@@ -617,16 +593,16 @@ class LSPClientManager:
                 raise LSPServerStartupError(f"Language {language} not supported")
 
             # Create multilspy config
-            config = MultilspyConfig.from_dict({
-                "code_language": language_map[language],
-                "trace_lsp_communication": False,  # Set to True for debugging
-            })
+            config = MultilspyConfig.from_dict(
+                {
+                    "code_language": language_map[language],
+                    "trace_lsp_communication": False,  # Set to True for debugging
+                }
+            )
 
             # Create language server
             lsp_server = LanguageServer.create(
-                config=config,
-                logger=self.multilspy_logger,
-                repository_root_path=self.repo_root
+                config=config, logger=self.multilspy_logger, repository_root_path=self.repo_root
             )
 
             # Wrap in ServerWrapper to manage async context
@@ -648,7 +624,7 @@ class LSPClientManager:
         method: str,
         file_path: str,
         line: int | None = None,
-        column: int | None = None
+        column: int | None = None,
     ) -> Any:
         """
         Query LSP server with retry logic.
@@ -672,7 +648,7 @@ class LSPClientManager:
                 # Make query with timeout
                 result = await asyncio.wait_for(
                     self._make_lsp_query(server, method, file_path, line, column),
-                    timeout=self.query_timeout
+                    timeout=self.query_timeout,
                 )
                 return result
 
@@ -696,7 +672,7 @@ class LSPClientManager:
         method: str,
         file_path: str,
         line: int | None = None,
-        column: int | None = None
+        column: int | None = None,
     ) -> Any:
         """
         Make LSP query using multilspy.
@@ -765,7 +741,7 @@ class LSPClientManager:
                             "uri": loc.get("uri", ""),
                             "range": loc.get("range", {}),
                             "absolutePath": loc.get("absolutePath", ""),
-                            "relativePath": loc.get("relativePath", "")
+                            "relativePath": loc.get("relativePath", ""),
                         }
                     else:
                         result = None
@@ -779,7 +755,7 @@ class LSPClientManager:
                             "uri": loc.get("uri", ""),
                             "range": loc.get("range", {}),
                             "absolutePath": loc.get("absolutePath", ""),
-                            "relativePath": loc.get("relativePath", "")
+                            "relativePath": loc.get("relativePath", ""),
                         }
                         for loc in (locations or [])
                     ]
@@ -790,7 +766,7 @@ class LSPClientManager:
                     if hover:
                         result = {
                             "contents": hover.get("contents", ""),
-                            "range": hover.get("range", {})
+                            "range": hover.get("range", {}),
                         }
                     else:
                         result = None
@@ -804,7 +780,7 @@ class LSPClientManager:
                             "name": sym.get("name", ""),
                             "kind": sym.get("kind", ""),
                             "location": sym.get("location", {}),
-                            "range": sym.get("range", {})
+                            "range": sym.get("range", {}),
                         }
                         for sym in (symbols or [])
                     ]
@@ -815,16 +791,13 @@ class LSPClientManager:
             # [PERF] Log query timing
             query_ms = (time.perf_counter() - query_start) * 1000
             self.logger.debug(
-                f"[PERF] LSP query: method={method}, file={relative_path}, "
-                f"query_ms={query_ms:.1f}"
+                f"[PERF] LSP query: method={method}, file={relative_path}, query_ms={query_ms:.1f}"
             )
             return result
 
         except Exception as e:
             query_ms = (time.perf_counter() - query_start) * 1000
-            self.logger.error(
-                f"LSP query failed: {method} - {e} (query_ms={query_ms:.1f})"
-            )
+            self.logger.error(f"LSP query failed: {method} - {e} (query_ms={query_ms:.1f})")
             raise LSPQueryError(f"LSP query failed: {e}") from e
 
     async def _query_workspace_symbols(self, server: Any, query: str) -> list[dict[str, Any]]:
@@ -837,7 +810,7 @@ class LSPClientManager:
                 {
                     "name": f"Mock{query}",
                     "kind": "class",
-                    "location": {"uri": "mock.py", "range": {"start": {"line": 0}}}
+                    "location": {"uri": "mock.py", "range": {"start": {"line": 0}}},
                 }
             ]
 
@@ -859,7 +832,7 @@ class LSPClientManager:
                 {
                     "name": sym.get("name", ""),
                     "kind": sym.get("kind", ""),
-                    "location": sym.get("location", {})
+                    "location": sym.get("location", {}),
                 }
                 for sym in symbols
             ]
@@ -888,10 +861,7 @@ class LSPClientManager:
         if isinstance(server, ServerWrapper):
             try:
                 # Exit async context manager with timeout (prevents hanging)
-                await asyncio.wait_for(
-                    server.__aexit__(None, None, None),
-                    timeout=timeout
-                )
+                await asyncio.wait_for(server.__aexit__(None, None, None), timeout=timeout)
                 self.logger.debug(f"Closed {server.language} server")
             except asyncio.TimeoutError:
                 self.logger.error(f"Server shutdown timed out after {timeout}s")
@@ -941,11 +911,7 @@ class LSPClientManager:
         return "python"
 
     def _cache_key(
-        self,
-        operation: str,
-        file_path: str,
-        line: int | None = None,
-        column: int | None = None
+        self, operation: str, file_path: str, line: int | None = None, column: int | None = None
     ) -> str:
         """
         Generate cache key for LSP query.

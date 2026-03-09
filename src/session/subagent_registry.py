@@ -8,6 +8,7 @@ from typing import Any, Optional
 @dataclass
 class SubAgentSessionInfo:
     """Public session info for a subagent, used by delegation tool and UI."""
+
     subagent_id: str
     store: Any  # MessageStore instance
     transcript_path: Path | None = None

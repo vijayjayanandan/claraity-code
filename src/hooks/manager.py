@@ -27,11 +27,13 @@ logger = logging.getLogger(__name__)
 
 class HookLoadError(Exception):
     """Raised when hooks file cannot be loaded."""
+
     pass
 
 
 class HookBlockedError(Exception):
     """Raised when hook blocks an operation."""
+
     pass
 
 
@@ -45,11 +47,7 @@ class HookManager:
     Performance: <1ms per hook execution
     """
 
-    def __init__(
-        self,
-        hooks_file: Path | None = None,
-        session_id: str | None = None
-    ):
+    def __init__(self, hooks_file: Path | None = None, session_id: str | None = None):
         """
         Initialize hook manager.
 
@@ -58,9 +56,7 @@ class HookManager:
             session_id: Session identifier (generated if not provided)
         """
         self.session_id = session_id or str(uuid.uuid4())
-        self.hooks: dict[HookEvent, dict[str, list[Callable]]] = {
-            event: {} for event in HookEvent
-        }
+        self.hooks: dict[HookEvent, dict[str, list[Callable]]] = {event: {} for event in HookEvent}
         self.logger = logging.getLogger(__name__)
 
         # Load hooks
@@ -72,8 +68,8 @@ class HookManager:
     def _load_default_hooks(self) -> None:
         """Load hooks from default locations."""
         hooks_paths = [
-            Path("./.clarity/hooks.py"),              # Project level
-            Path.home() / ".clarity" / "hooks.py",    # User level
+            Path("./.clarity/hooks.py"),  # Project level
+            Path.home() / ".clarity" / "hooks.py",  # User level
         ]
 
         for path in hooks_paths:
@@ -117,7 +113,7 @@ class HookManager:
             spec.loader.exec_module(module)
 
             # Get HOOKS dict
-            if not hasattr(module, 'HOOKS'):
+            if not hasattr(module, "HOOKS"):
                 raise HookLoadError(f"No HOOKS dict found in {hooks_file}")
 
             hooks_config = module.HOOKS
@@ -145,11 +141,11 @@ class HookManager:
             hook_funcs: list of hook functions
         """
         # Parse pattern
-        if ':' in pattern:
-            event_str, tool_pattern = pattern.split(':', 1)
+        if ":" in pattern:
+            event_str, tool_pattern = pattern.split(":", 1)
         else:
             event_str = pattern
-            tool_pattern = '*'
+            tool_pattern = "*"
 
         # Get event enum
         try:
@@ -161,10 +157,11 @@ class HookManager:
                 event = HookEvent[event_str]
             else:
                 # Try converting to uppercase with underscores
-                event_name_upper = event_str.upper().replace(' ', '_')
+                event_name_upper = event_str.upper().replace(" ", "_")
                 # Convert camelCase to SCREAMING_SNAKE_CASE
                 import re
-                event_name_upper = re.sub(r'(?<!^)(?=[A-Z])', '_', event_str).upper()
+
+                event_name_upper = re.sub(r"(?<!^)(?=[A-Z])", "_", event_str).upper()
                 event = HookEvent[event_name_upper]
         except KeyError:
             self.logger.error(f"Unknown event type: {event_str}")
@@ -195,8 +192,8 @@ class HookManager:
         matching = []
 
         # Check wildcard hooks (*) first
-        if '*' in self.hooks[event]:
-            matching.extend(self.hooks[event]['*'])
+        if "*" in self.hooks[event]:
+            matching.extend(self.hooks[event]["*"])
 
         # Check tool-specific hooks
         if tool and tool in self.hooks[event]:
@@ -207,10 +204,7 @@ class HookManager:
     # ========== EVENT EMISSION METHODS (SYNCHRONOUS) ==========
 
     def emit_pre_tool_use(
-        self,
-        tool: str,
-        arguments: dict[str, Any],
-        step_id: int | None = None
+        self, tool: str, arguments: dict[str, Any], step_id: int | None = None
     ) -> tuple[HookDecision, dict[str, Any]]:
         """
         Emit PreToolUse hook (synchronous, <1ms).
@@ -239,7 +233,7 @@ class HookManager:
             event_type=HookEvent.PRE_TOOL_USE.value,
             tool=tool,
             arguments=arguments.copy(),
-            step_id=step_id
+            step_id=step_id,
         )
 
         modified_args = arguments.copy()
@@ -282,7 +276,7 @@ class HookManager:
         result: Any,
         success: bool,
         duration: float,
-        error: str | None = None
+        error: str | None = None,
     ) -> Any | None:
         """
         Emit PostToolUse hook (synchronous, <1ms).
@@ -313,7 +307,7 @@ class HookManager:
             result=result,
             success=success,
             duration=duration,
-            error=error
+            error=error,
         )
 
         modified_result = None
@@ -333,9 +327,7 @@ class HookManager:
         return modified_result
 
     def emit_user_prompt_submit(
-        self,
-        prompt: str,
-        metadata: dict[str, Any] | None = None
+        self, prompt: str, metadata: dict[str, Any] | None = None
     ) -> tuple[HookContinue, str]:
         """
         Emit UserPromptSubmit hook.
@@ -359,7 +351,7 @@ class HookManager:
             session_id=self.session_id,
             event_type=HookEvent.USER_PROMPT_SUBMIT.value,
             prompt=prompt,
-            metadata=metadata or {}
+            metadata=metadata or {},
         )
 
         modified_prompt = prompt
@@ -386,7 +378,7 @@ class HookManager:
         notification_type: str,
         message: str,
         step_info: dict[str, Any] | None = None,
-        risk_level: str | None = None
+        risk_level: str | None = None,
     ) -> HookApproval:
         """
         Emit Notification hook.
@@ -411,7 +403,7 @@ class HookManager:
             notification_type=notification_type,
             message=message,
             step_info=step_info,
-            risk_level=risk_level
+            risk_level=risk_level,
         )
 
         for hook_func in hooks:
@@ -428,10 +420,7 @@ class HookManager:
         return HookApproval.APPROVE
 
     def emit_session_start(
-        self,
-        working_directory: str,
-        model_name: str,
-        config: dict[str, Any] | None = None
+        self, working_directory: str, model_name: str, config: dict[str, Any] | None = None
     ) -> None:
         """Emit SessionStart hook."""
         hooks = self._get_matching_hooks(HookEvent.SESSION_START)
@@ -444,7 +433,7 @@ class HookManager:
             event_type=HookEvent.SESSION_START.value,
             working_directory=working_directory,
             model_name=model_name,
-            config=config or {}
+            config=config or {},
         )
 
         for hook_func in hooks:
@@ -454,10 +443,7 @@ class HookManager:
                 self.logger.error(f"SessionStart hook error: {e}", exc_info=True)
 
     def emit_session_end(
-        self,
-        duration: float,
-        statistics: dict[str, Any] | None = None,
-        exit_reason: str = "normal"
+        self, duration: float, statistics: dict[str, Any] | None = None, exit_reason: str = "normal"
     ) -> None:
         """Emit SessionEnd hook."""
         hooks = self._get_matching_hooks(HookEvent.SESSION_END)
@@ -470,7 +456,7 @@ class HookManager:
             event_type=HookEvent.SESSION_END.value,
             duration=duration,
             statistics=statistics or {},
-            exit_reason=exit_reason
+            exit_reason=exit_reason,
         )
 
         for hook_func in hooks:
@@ -480,10 +466,7 @@ class HookManager:
                 self.logger.error(f"SessionEnd hook error: {e}", exc_info=True)
 
     def emit_pre_compact(
-        self,
-        current_tokens: int,
-        target_tokens: int,
-        messages_to_drop: list[str] | None = None
+        self, current_tokens: int, target_tokens: int, messages_to_drop: list[str] | None = None
     ) -> None:
         """Emit PreCompact hook."""
         hooks = self._get_matching_hooks(HookEvent.PRE_COMPACT)
@@ -496,7 +479,7 @@ class HookManager:
             event_type=HookEvent.PRE_COMPACT.value,
             current_tokens=current_tokens,
             target_tokens=target_tokens,
-            messages_to_drop=messages_to_drop or []
+            messages_to_drop=messages_to_drop or [],
         )
 
         for hook_func in hooks:
@@ -509,7 +492,7 @@ class HookManager:
         self,
         response: str,
         tool_calls: list[dict[str, Any]] | None = None,
-        execution_time: float = 0.0
+        execution_time: float = 0.0,
     ) -> None:
         """Emit Stop hook."""
         hooks = self._get_matching_hooks(HookEvent.STOP)
@@ -522,7 +505,7 @@ class HookManager:
             event_type=HookEvent.STOP.value,
             response=response,
             tool_calls=tool_calls or [],
-            execution_time=execution_time
+            execution_time=execution_time,
         )
 
         for hook_func in hooks:
@@ -531,12 +514,7 @@ class HookManager:
             except Exception as e:
                 self.logger.error(f"Stop hook error: {e}", exc_info=True)
 
-    def emit_subagent_stop(
-        self,
-        subagent_name: str,
-        result: Any,
-        duration: float
-    ) -> None:
+    def emit_subagent_stop(self, subagent_name: str, result: Any, duration: float) -> None:
         """Emit SubagentStop hook."""
         hooks = self._get_matching_hooks(HookEvent.SUBAGENT_STOP)
 
@@ -548,7 +526,7 @@ class HookManager:
             event_type=HookEvent.SUBAGENT_STOP.value,
             subagent_name=subagent_name,
             result=result,
-            duration=duration
+            duration=duration,
         )
 
         for hook_func in hooks:

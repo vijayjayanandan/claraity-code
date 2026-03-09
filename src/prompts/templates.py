@@ -260,8 +260,6 @@ Generate documentation:""",
         return templates.get(task_type, cls.IMPLEMENT_FEATURE)
 
     @classmethod
-    def create_custom_template(
-        cls, template_str: str, task_type: TaskType
-    ) -> PromptTemplate:
+    def create_custom_template(cls, template_str: str, task_type: TaskType) -> PromptTemplate:
         """Create a custom template."""
         return PromptTemplate(template=template_str, task_type=task_type)

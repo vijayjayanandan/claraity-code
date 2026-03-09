@@ -101,6 +101,7 @@ def _normalize_value(value):
 # UIEvent -> JSON
 # ============================================================================
 
+
 def serialize_event(event: UIEvent) -> dict | None:
     """Convert UIEvent to JSON-serializable dict.
 
@@ -126,6 +127,7 @@ def serialize_event(event: UIEvent) -> dict | None:
 # ============================================================================
 # StoreNotification -> JSON
 # ============================================================================
+
 
 def serialize_tool_status(status) -> str:
     """Convert ToolStatus enum to wire string.
@@ -188,7 +190,7 @@ def serialize_store_notification(notification: StoreNotification) -> dict | None
             return None
 
         # Detect interactive system events (clarify, plan approval)
-        if (msg.is_system and msg.meta and msg.meta.event_type):
+        if msg.is_system and msg.meta and msg.meta.event_type:
             event_type = msg.meta.event_type
             extra = msg.meta.extra or {}
 
@@ -271,6 +273,7 @@ def serialize_store_notification(notification: StoreNotification) -> dict | None
 # ============================================================================
 # JSON -> UserAction
 # ============================================================================
+
 
 def deserialize_action(data: dict) -> UserAction | None:
     """Convert JSON dict to UserAction. Returns None for unknown types."""

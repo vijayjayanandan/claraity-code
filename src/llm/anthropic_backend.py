@@ -19,22 +19,23 @@ try:
     import anthropic
     from anthropic import Anthropic, AsyncAnthropic
 except ImportError:
-    raise ImportError(
-        "Anthropic SDK not installed. Install with: pip install anthropic"
-    )
+    raise ImportError("Anthropic SDK not installed. Install with: pip install anthropic")
 
 # Try to import structured logging with get_logger
 try:
     from src.observability import ErrorCategory, get_logger
+
     logger = get_logger("llm.anthropic_backend")
     STRUCTURED_LOGGING = True
 except ImportError:
     # Fallback to stdlib logger
     logger = logging.getLogger(__name__)
     STRUCTURED_LOGGING = False
+
     class ErrorCategory:
-        PROVIDER_TIMEOUT = 'provider_timeout'
-        PROVIDER_ERROR = 'provider_error'
+        PROVIDER_TIMEOUT = "provider_timeout"
+        PROVIDER_ERROR = "provider_error"
+
 
 # Timeout constants (in seconds)
 DEFAULT_CONNECT_TIMEOUT = 10.0
@@ -100,6 +101,7 @@ class AnthropicBackend(LLMBackend):
             api_key_env: Environment variable name for API key
         """
         import os
+
         super().__init__(config)
 
         self.api_key = api_key or os.getenv(api_key_env, "")
@@ -145,9 +147,7 @@ class AnthropicBackend(LLMBackend):
     # Message Translation (OpenAI format -> Anthropic format)
     # =========================================================================
 
-    def _translate_messages(
-        self, messages: list[dict[str, Any]]
-    ) -> tuple:
+    def _translate_messages(self, messages: list[dict[str, Any]]) -> tuple:
         """Convert OpenAI-format messages to Anthropic API format.
 
         Handles:
@@ -190,11 +190,13 @@ class AnthropicBackend(LLMBackend):
                 thinking = msg.get("thinking")
                 thinking_signature = msg.get("thinking_signature")
                 if thinking and thinking_signature:
-                    content_blocks.append({
-                        "type": "thinking",
-                        "thinking": thinking,
-                        "signature": thinking_signature,
-                    })
+                    content_blocks.append(
+                        {
+                            "type": "thinking",
+                            "thinking": thinking,
+                            "signature": thinking_signature,
+                        }
+                    )
 
                 # Add text content
                 if isinstance(content, str) and content:
@@ -222,16 +224,20 @@ class AnthropicBackend(LLMBackend):
 
                         # Parse arguments from JSON string to dict
                         try:
-                            input_dict = json.loads(tc_args) if isinstance(tc_args, str) else tc_args
+                            input_dict = (
+                                json.loads(tc_args) if isinstance(tc_args, str) else tc_args
+                            )
                         except (json.JSONDecodeError, TypeError):
                             input_dict = {}
 
-                        content_blocks.append({
-                            "type": "tool_use",
-                            "id": tc_id,
-                            "name": tc_name,
-                            "input": input_dict,
-                        })
+                        content_blocks.append(
+                            {
+                                "type": "tool_use",
+                                "id": tc_id,
+                                "name": tc_name,
+                                "input": input_dict,
+                            }
+                        )
 
                 # Anthropic requires non-empty content
                 if not content_blocks:
@@ -256,10 +262,12 @@ class AnthropicBackend(LLMBackend):
                 if msg.get("is_error"):
                     tool_result_block["is_error"] = True
 
-                translated.append({
-                    "role": "user",
-                    "content": [tool_result_block],
-                })
+                translated.append(
+                    {
+                        "role": "user",
+                        "content": [tool_result_block],
+                    }
+                )
                 continue
 
             # 4. Regular user messages
@@ -278,28 +286,34 @@ class AnthropicBackend(LLMBackend):
                             if url.startswith("data:") and ";base64," in url:
                                 header, b64_data = url.split(";base64,", 1)
                                 media_type = header.replace("data:", "")
-                                anthropic_blocks.append({
-                                    "type": "image",
-                                    "source": {
-                                        "type": "base64",
-                                        "media_type": media_type,
-                                        "data": b64_data,
-                                    },
-                                })
+                                anthropic_blocks.append(
+                                    {
+                                        "type": "image",
+                                        "source": {
+                                            "type": "base64",
+                                            "media_type": media_type,
+                                            "data": b64_data,
+                                        },
+                                    }
+                                )
                             else:
                                 # URL-based image (not data URL) - use url source
-                                anthropic_blocks.append({
-                                    "type": "image",
-                                    "source": {
-                                        "type": "url",
-                                        "url": url,
-                                    },
-                                })
+                                anthropic_blocks.append(
+                                    {
+                                        "type": "image",
+                                        "source": {
+                                            "type": "url",
+                                            "url": url,
+                                        },
+                                    }
+                                )
                         elif isinstance(block, dict) and block.get("type") == "text":
-                            anthropic_blocks.append({
-                                "type": "text",
-                                "text": block.get("text", ""),
-                            })
+                            anthropic_blocks.append(
+                                {
+                                    "type": "text",
+                                    "text": block.get("text", ""),
+                                }
+                            )
                         elif isinstance(block, dict):
                             # Pass through other block types (e.g. already in Anthropic format)
                             anthropic_blocks.append(block)
@@ -398,7 +412,9 @@ class AnthropicBackend(LLMBackend):
         """
         tool_calls = []
         for block in content_blocks:
-            block_type = getattr(block, "type", None) or (block.get("type") if isinstance(block, dict) else None)
+            block_type = getattr(block, "type", None) or (
+                block.get("type") if isinstance(block, dict) else None
+            )
 
             if block_type == "tool_use":
                 # Handle both SDK objects and dicts
@@ -433,9 +449,7 @@ class AnthropicBackend(LLMBackend):
     # Prompt Caching
     # =========================================================================
 
-    def _apply_cache_control(
-        self, system_text: str, messages: list[dict[str, Any]]
-    ) -> tuple:
+    def _apply_cache_control(self, system_text: str, messages: list[dict[str, Any]]) -> tuple:
         """Apply Anthropic prompt caching breakpoints.
 
         BP1: System prompt (static across session)
@@ -635,7 +649,9 @@ class AnthropicBackend(LLMBackend):
             params["system"] = system_param
 
         try:
-            with self.client.messages.stream(**{k: v for k, v in params.items() if k != "stream"}) as stream:
+            with self.client.messages.stream(
+                **{k: v for k, v in params.items() if k != "stream"}
+            ) as stream:
                 for event in stream:
                     event_type = getattr(event, "type", "")
 
@@ -753,9 +769,7 @@ class AnthropicBackend(LLMBackend):
             # Detect truncation
             finish_reason = self._map_stop_reason(response.stop_reason)
             if finish_reason == "length":
-                logger.warning(
-                    "[TRUNCATION DETECTED] Response exceeded max_tokens limit."
-                )
+                logger.warning("[TRUNCATION DETECTED] Response exceeded max_tokens limit.")
 
             return LLMResponse(
                 content=content,
@@ -933,7 +947,9 @@ class AnthropicBackend(LLMBackend):
                     total_tokens=(
                         (usage_dict.get("input_tokens", 0) or 0)
                         + (usage_dict.get("output_tokens", 0) or 0)
-                    ) if usage_dict else None,
+                    )
+                    if usage_dict
+                    else None,
                     cached_tokens=usage_dict.get("cached_tokens") if usage_dict else None,
                 ),
                 tool_calls,
@@ -943,7 +959,9 @@ class AnthropicBackend(LLMBackend):
             error_type = type(e).__name__
             error_msg = str(e).strip() or repr(e)
             is_timeout = "timeout" in error_type.lower()
-            category = ErrorCategory.PROVIDER_TIMEOUT if is_timeout else ErrorCategory.PROVIDER_ERROR
+            category = (
+                ErrorCategory.PROVIDER_TIMEOUT if is_timeout else ErrorCategory.PROVIDER_ERROR
+            )
 
             root_cause = e
             while root_cause.__cause__ is not None:
@@ -1105,7 +1123,9 @@ class AnthropicBackend(LLMBackend):
                     total_tokens=(
                         (usage_dict.get("input_tokens", 0) or 0)
                         + (usage_dict.get("output_tokens", 0) or 0)
-                    ) if usage_dict else None,
+                    )
+                    if usage_dict
+                    else None,
                     cached_tokens=usage_dict.get("cached_tokens") if usage_dict else None,
                 ),
                 tool_calls,
@@ -1115,7 +1135,9 @@ class AnthropicBackend(LLMBackend):
             error_type = type(e).__name__
             error_msg = str(e).strip() or repr(e)
             is_timeout = "timeout" in error_type.lower()
-            category = ErrorCategory.PROVIDER_TIMEOUT if is_timeout else ErrorCategory.PROVIDER_ERROR
+            category = (
+                ErrorCategory.PROVIDER_TIMEOUT if is_timeout else ErrorCategory.PROVIDER_ERROR
+            )
 
             root_cause = e
             while root_cause.__cause__ is not None:
@@ -1282,10 +1304,10 @@ class AnthropicBackend(LLMBackend):
 
             # Extract thinking signature from final message for round-tripping
             thinking_signature = None
-            if final_message and hasattr(final_message, 'content'):
+            if final_message and hasattr(final_message, "content"):
                 for block in final_message.content:
-                    if getattr(block, 'type', '') == 'thinking':
-                        thinking_signature = getattr(block, 'signature', None)
+                    if getattr(block, "type", "") == "thinking":
+                        thinking_signature = getattr(block, "signature", None)
                         break
 
             # Emit final delta with finish_reason and usage
@@ -1304,9 +1326,7 @@ class AnthropicBackend(LLMBackend):
                 error_type=error_type,
                 model=self.config.model_name,
             )
-            raise RuntimeError(
-                f"Anthropic provider delta error: {error_type}: {error_msg}"
-            ) from e
+            raise RuntimeError(f"Anthropic provider delta error: {error_type}: {error_msg}") from e
 
     async def generate_provider_deltas_async(
         self,
@@ -1433,10 +1453,10 @@ class AnthropicBackend(LLMBackend):
 
             # Extract thinking signature from final message for round-tripping
             thinking_signature = None
-            if final_message and hasattr(final_message, 'content'):
+            if final_message and hasattr(final_message, "content"):
                 for block in final_message.content:
-                    if getattr(block, 'type', '') == 'thinking':
-                        thinking_signature = getattr(block, 'signature', None)
+                    if getattr(block, "type", "") == "thinking":
+                        thinking_signature = getattr(block, "signature", None)
                         break
 
             yield ProviderDelta(

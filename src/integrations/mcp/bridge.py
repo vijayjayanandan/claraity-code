@@ -14,6 +14,7 @@ Event loop strategy:
   the httpx loop-mismatch pitfall (httpx connection pool is bound to the
   loop it was created on).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -30,6 +31,7 @@ from .client import McpClient, McpError
 
 try:
     from src.observability import get_logger
+
     logger = get_logger("integrations.mcp.bridge")
 except ImportError:
     logger = logging.getLogger(__name__)
@@ -133,8 +135,7 @@ class McpBridgeTool(Tool):
                 # Cancel the orphaned coroutine so it releases stdout.readline()
                 future.cancel()
                 raise TimeoutError(
-                    f"MCP tool '{self.name}' timed out after "
-                    f"{self._client.config.invoke_timeout}s"
+                    f"MCP tool '{self.name}' timed out after {self._client.config.invoke_timeout}s"
                 )
 
         # Fallback: no original loop (testing or pure-sync context)

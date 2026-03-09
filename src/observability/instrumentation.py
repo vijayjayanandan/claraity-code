@@ -55,6 +55,7 @@ def observe_agent_method(name: str, capture_input: bool = True, capture_output: 
         def execute_autonomous(self, task: str):
             ...
     """
+
     def decorator(func: Callable) -> Callable:
         # Skip if observability disabled or Langfuse not available
         if not is_observability_enabled() or not LANGFUSE_AVAILABLE or not _langfuse_observe:
@@ -66,7 +67,7 @@ def observe_agent_method(name: str, capture_input: bool = True, capture_output: 
                 name=name,
                 as_type="span",  # Agent methods are spans (not generations)
                 capture_input=capture_input,
-                capture_output=capture_output
+                capture_output=capture_output,
             )(func)
 
             # Preserve function metadata (if Langfuse doesn't do it)
@@ -100,6 +101,7 @@ def observe_tool_execution(tool_name: str, capture_args: bool = True):
         def write_file(file_path: str, content: str):
             ...
     """
+
     def decorator(func: Callable) -> Callable:
         # Skip if observability disabled or Langfuse not available
         if not is_observability_enabled() or not LANGFUSE_AVAILABLE or not _langfuse_observe:
@@ -111,7 +113,7 @@ def observe_tool_execution(tool_name: str, capture_args: bool = True):
                 name=tool_name,
                 as_type="tool",  # Tool execution
                 capture_input=capture_args,
-                capture_output=True
+                capture_output=True,
             )(func)
 
             # Preserve function metadata (if Langfuse doesn't do it)
@@ -145,6 +147,7 @@ def observe_llm_call(model_name: str | None = None):
 
     Note: Response should have .usage attribute with prompt_tokens and completion_tokens
     """
+
     def decorator(func: Callable) -> Callable:
         # Skip if observability disabled or Langfuse not available
         if not is_observability_enabled() or not LANGFUSE_AVAILABLE or not _langfuse_observe:
@@ -156,7 +159,7 @@ def observe_llm_call(model_name: str | None = None):
                 name="llm_call",
                 as_type="generation",  # LLM calls are generations
                 capture_input=True,
-                capture_output=True
+                capture_output=True,
             )(func)
 
             # Preserve function metadata (if Langfuse doesn't do it)
@@ -174,7 +177,9 @@ def observe_llm_call(model_name: str | None = None):
     return decorator
 
 
-def start_trace(name: str, user_id: str | None = None, session_id: str | None = None, tags: list | None = None):
+def start_trace(
+    name: str, user_id: str | None = None, session_id: str | None = None, tags: list | None = None
+):
     """
     Manually start a trace (for top-level operations) using Langfuse v3 API.
 
@@ -198,12 +203,7 @@ def start_trace(name: str, user_id: str | None = None, session_id: str | None = 
         langfuse = get_client()
 
         # Create trace directly (not via context manager for manual control)
-        trace = langfuse.trace(
-            name=name,
-            user_id=user_id,
-            session_id=session_id,
-            tags=tags or []
-        )
+        trace = langfuse.trace(name=name, user_id=user_id, session_id=session_id, tags=tags or [])
 
         return trace.id
 

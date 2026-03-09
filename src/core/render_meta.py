@@ -24,6 +24,7 @@ class ToolApprovalMeta:
         requires_approval: Whether this tool call needs user approval
         permission_mode: Mode at creation time (plan/normal/auto)
     """
+
     requires_approval: bool = False
     permission_mode: str = "normal"
 

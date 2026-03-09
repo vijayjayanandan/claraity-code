@@ -21,6 +21,7 @@ SCHEMA_VERSION = 1
 # Utility Functions
 # =============================================================================
 
+
 def generate_uuid() -> str:
     """Generate a new UUID string."""
     return str(uuid_lib.uuid4())
@@ -51,9 +52,11 @@ def generate_tool_call_id() -> str:
 # Session Context
 # =============================================================================
 
+
 @dataclass
 class SessionContext:
     """Common session context fields."""
+
     session_id: str
     cwd: str
     git_branch: str
@@ -82,5 +85,5 @@ class SessionContext:
             git_branch=data.get("git_branch", ""),
             version=data.get("version", ""),
             slug=data.get("slug"),
-            user_type=data.get("user_type", "external")
+            user_type=data.get("user_type", "external"),
         )

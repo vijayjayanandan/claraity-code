@@ -61,13 +61,7 @@ class CodeBlock(Static):
     }
     """
 
-    def __init__(
-        self,
-        code: str = "",
-        language: str = "text",
-        is_streaming: bool = True,
-        **kwargs
-    ):
+    def __init__(self, code: str = "", language: str = "text", is_streaming: bool = True, **kwargs):
         """
         Initialize CodeBlock.
 
@@ -164,4 +158,4 @@ class CodeBlock(Static):
         """Get number of lines in the code."""
         if not self.code:
             return 0
-        return self.code.count('\n') + (1 if not self.code.endswith('\n') else 0)
+        return self.code.count("\n") + (1 if not self.code.endswith("\n") else 0)

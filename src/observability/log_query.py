@@ -61,9 +61,11 @@ from .log_store import LogRecord, get_log_store
 # JSONL SCANNER
 # =============================================================================
 
+
 @dataclass
 class JsonlEntry:
     """Parsed JSONL log entry."""
+
     ts: str = ""
     level: str = ""
     event: str = ""
@@ -132,13 +134,11 @@ def scan_jsonl_files(
     # Time cutoff
     cutoff_ts = None
     if minutes:
-        cutoff_ts = (
-            datetime.utcnow() - timedelta(minutes=minutes)
-        ).isoformat() + 'Z'
+        cutoff_ts = (datetime.utcnow() - timedelta(minutes=minutes)).isoformat() + "Z"
 
     for file_path in files:
         try:
-            with open(file_path, encoding='utf-8') as f:
+            with open(file_path, encoding="utf-8") as f:
                 for line in f:
                     if not line.strip():
                         continue
@@ -156,35 +156,35 @@ def scan_jsonl_files(
                         corrupted_count += 1
                         continue
 
-                    entry_level = data.get('level', '').upper()
-                    entry_ts = data.get('timestamp', data.get('ts', ''))
-                    entry_event = data.get('event', '')
-                    entry_session = data.get('session_id', '')
-                    entry_component = data.get(
-                        'component', data.get('logger', '')
-                    )
+                    entry_level = data.get("level", "").upper()
+                    entry_ts = data.get("timestamp", data.get("ts", ""))
+                    entry_event = data.get("event", "")
+                    entry_session = data.get("session_id", "")
+                    entry_component = data.get("component", data.get("logger", ""))
 
                     # Apply structured filters
                     if level_filter and entry_level != level_filter:
                         continue
                     if cutoff_ts and entry_ts < cutoff_ts:
                         continue
-                    if session_id and session_id not in (entry_session or ''):
+                    if session_id and session_id not in (entry_session or ""):
                         continue
-                    if component and component not in (entry_component or ''):
+                    if component and component not in (entry_component or ""):
                         continue
-                    if event and event not in (entry_event or ''):
+                    if event and event not in (entry_event or ""):
                         continue
 
-                    results.append(JsonlEntry(
-                        ts=entry_ts,
-                        level=entry_level,
-                        event=entry_event,
-                        logger=data.get('logger'),
-                        session_id=entry_session or None,
-                        component=entry_component or None,
-                        raw=data,
-                    ))
+                    results.append(
+                        JsonlEntry(
+                            ts=entry_ts,
+                            level=entry_level,
+                            event=entry_event,
+                            logger=data.get("logger"),
+                            session_id=entry_session or None,
+                            component=entry_component or None,
+                            raw=data,
+                        )
+                    )
 
         except Exception:
             corrupted_count += 1
@@ -194,10 +194,7 @@ def scan_jsonl_files(
     results.sort(key=lambda e: e.ts, reverse=True)
 
     if corrupted_count > 0:
-        print(
-            f"[WARN] Skipped {corrupted_count} corrupted "
-            f"lines/files during JSONL scan"
-        )
+        print(f"[WARN] Skipped {corrupted_count} corrupted lines/files during JSONL scan")
 
     return results[:limit]
 
@@ -205,6 +202,7 @@ def scan_jsonl_files(
 # =============================================================================
 # FORMATTERS
 # =============================================================================
+
 
 def format_log(log: LogRecord, verbose: bool = False) -> str:
     """
@@ -220,7 +218,7 @@ def format_log(log: LogRecord, verbose: bool = False) -> str:
     lines = []
 
     # Header
-    ts = log.ts[:19].replace('T', ' ') if log.ts else 'Unknown'
+    ts = log.ts[:19].replace("T", " ") if log.ts else "Unknown"
     lines.append(f"[{log.level}] {ts} - {log.event}")
 
     # Logger
@@ -258,12 +256,12 @@ def format_log(log: LogRecord, verbose: bool = False) -> str:
             for key, value in extra.items():
                 val_str = str(value)
                 if len(val_str) > 200:
-                    val_str = val_str[:200] + '...'
+                    val_str = val_str[:200] + "..."
                 lines.append(f"  {key}: {val_str}")
         except (json.JSONDecodeError, TypeError):
             lines.append(f"  extra: {log.extra_json[:200]}")
 
-    return '\n'.join(lines)
+    return "\n".join(lines)
 
 
 def format_error(error: ErrorRecord, verbose: bool = False) -> str:
@@ -280,14 +278,14 @@ def format_error(error: ErrorRecord, verbose: bool = False) -> str:
     lines = []
 
     # Header with timestamp and level
-    ts = error.ts[:19].replace('T', ' ') if error.ts else 'Unknown'
+    ts = error.ts[:19].replace("T", " ") if error.ts else "Unknown"
     lines.append(f"[{error.level}] {ts} - {error.category}")
 
     # Error type and message
     lines.append(f"  Type: {error.error_type}")
     msg = error.message
     if len(msg) > 200:
-        msg = msg[:200] + '...'
+        msg = msg[:200] + "..."
     lines.append(f"  Message: {msg}")
 
     # Context
@@ -326,12 +324,12 @@ def format_error(error: ErrorRecord, verbose: bool = False) -> str:
     # Traceback (truncated unless verbose)
     if error.traceback and verbose:
         lines.append("  Traceback:")
-        for tb_line in error.traceback.split('\n')[:20]:
+        for tb_line in error.traceback.split("\n")[:20]:
             lines.append(f"    {tb_line}")
-        if error.traceback.count('\n') > 20:
+        if error.traceback.count("\n") > 20:
             lines.append("    ... (truncated)")
 
-    return '\n'.join(lines)
+    return "\n".join(lines)
 
 
 def format_jsonl(entry: JsonlEntry, verbose: bool = False) -> str:
@@ -348,7 +346,7 @@ def format_jsonl(entry: JsonlEntry, verbose: bool = False) -> str:
     lines = []
 
     # Header
-    ts = entry.ts[:19].replace('T', ' ') if entry.ts else 'Unknown'
+    ts = entry.ts[:19].replace("T", " ") if entry.ts else "Unknown"
     lines.append(f"[{entry.level}] {ts} - {entry.event}")
 
     # Logger
@@ -367,23 +365,29 @@ def format_jsonl(entry: JsonlEntry, verbose: bool = False) -> str:
     # Verbose: show all raw fields
     if verbose:
         skip_keys = {
-            'event', 'level', 'logger', 'timestamp', 'ts',
-            'session_id', 'component',
+            "event",
+            "level",
+            "logger",
+            "timestamp",
+            "ts",
+            "session_id",
+            "component",
         }
         for key, value in entry.raw.items():
             if key in skip_keys:
                 continue
             val_str = str(value)
             if len(val_str) > 200:
-                val_str = val_str[:200] + '...'
+                val_str = val_str[:200] + "..."
             lines.append(f"  {key}: {val_str}")
 
-    return '\n'.join(lines)
+    return "\n".join(lines)
 
 
 # =============================================================================
 # PROGRAMMATIC API
 # =============================================================================
+
 
 def query_session_logs(
     session_id: str,
@@ -408,9 +412,7 @@ def query_session_logs(
         return store.query(session_id=session_id, level=level, limit=limit)
     except Exception:
         # Fallback to JSONL scanning
-        entries = scan_jsonl_files(
-            session_id=session_id, level=level, limit=limit
-        )
+        entries = scan_jsonl_files(session_id=session_id, level=level, limit=limit)
         return [_jsonl_to_log_record(e) for e in entries]
 
 
@@ -431,9 +433,7 @@ def query_session_errors(
         list of ErrorRecord objects
     """
     store = get_error_store()
-    return store.query(
-        session_id=session_id, category=category, limit=limit
-    )
+    return store.query(session_id=session_id, category=category, limit=limit)
 
 
 def _jsonl_to_log_record(entry: JsonlEntry) -> LogRecord:
@@ -441,25 +441,36 @@ def _jsonl_to_log_record(entry: JsonlEntry) -> LogRecord:
     raw = entry.raw
 
     # Extract source location
-    source = raw.get('source', {})
-    source_file = source.get('file') if isinstance(source, dict) else None
-    source_line = source.get('line') if isinstance(source, dict) else None
-    source_func = source.get('function') if isinstance(source, dict) else None
+    source = raw.get("source", {})
+    source_file = source.get("file") if isinstance(source, dict) else None
+    source_line = source.get("line") if isinstance(source, dict) else None
+    source_func = source.get("function") if isinstance(source, dict) else None
 
     # Fallback to flat fields
     if not source_file:
-        source_file = raw.get('filename')
+        source_file = raw.get("filename")
     if not source_line:
-        source_line = raw.get('lineno')
+        source_line = raw.get("lineno")
     if not source_func:
-        source_func = raw.get('func_name')
+        source_func = raw.get("func_name")
 
     # Build extra_json from remaining fields
     skip_keys = {
-        'event', 'level', 'logger', 'timestamp', 'ts',
-        'run_id', 'session_id', 'stream_id', 'request_id',
-        'component', 'operation',
-        'source', 'filename', 'lineno', 'func_name',
+        "event",
+        "level",
+        "logger",
+        "timestamp",
+        "ts",
+        "run_id",
+        "session_id",
+        "stream_id",
+        "request_id",
+        "component",
+        "operation",
+        "source",
+        "filename",
+        "lineno",
+        "func_name",
     }
     extras = {k: v for k, v in raw.items() if k not in skip_keys}
     extra_json = json.dumps(extras, default=str) if extras else None
@@ -470,12 +481,12 @@ def _jsonl_to_log_record(entry: JsonlEntry) -> LogRecord:
         level=entry.level,
         event=entry.event,
         logger=entry.logger,
-        run_id=raw.get('run_id'),
+        run_id=raw.get("run_id"),
         session_id=entry.session_id,
-        stream_id=raw.get('stream_id'),
-        request_id=raw.get('request_id'),
+        stream_id=raw.get("stream_id"),
+        request_id=raw.get("request_id"),
         component=entry.component,
-        operation=raw.get('operation'),
+        operation=raw.get("operation"),
         source_file=source_file,
         source_line=source_line,
         source_function=source_func,
@@ -486,6 +497,7 @@ def _jsonl_to_log_record(entry: JsonlEntry) -> LogRecord:
 # =============================================================================
 # LEGACY QUERY FUNCTIONS (preserved for backward compatibility)
 # =============================================================================
+
 
 def query_errors(
     session_id: str | None = None,
@@ -532,6 +544,7 @@ def show_summary(minutes: int | None = None) -> None:
 # =============================================================================
 # CLI DISPATCH
 # =============================================================================
+
 
 def _query_logs_db(args) -> None:
     """Query logs.db (all logs)."""
@@ -657,9 +670,7 @@ def _query_jsonl(args) -> None:
     print(f"Showing {len(entries)} of {args.limit} max results")
 
 
-def _show_level_summary(
-    counts: dict[str, int], minutes: int | None = None
-) -> None:
+def _show_level_summary(counts: dict[str, int], minutes: int | None = None) -> None:
     """Show log summary by level."""
     if not counts:
         print("No logs found.")
@@ -671,7 +682,7 @@ def _show_level_summary(
     print("-" * 40)
 
     # Order by severity
-    level_order = ['CRITICAL', 'ERROR', 'WARNING', 'INFO', 'DEBUG']
+    level_order = ["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"]
     total = 0
 
     for level in level_order:
@@ -692,6 +703,7 @@ def _show_level_summary(
 # =============================================================================
 # CLI ENTRY POINT
 # =============================================================================
+
 
 def main():
     """CLI entry point."""
@@ -748,45 +760,30 @@ Error Categories (--source errors only):
         "--source",
         choices=["logs", "errors", "jsonl"],
         default="logs",
-        help="Query source: logs (all levels), errors (ERROR+), jsonl (fallback)"
+        help="Query source: logs (all levels), errors (ERROR+), jsonl (fallback)",
     )
 
     # Common filters
-    parser.add_argument(
-        "--session", "-s",
-        help="Filter by session ID"
-    )
+    parser.add_argument("--session", "-s", help="Filter by session ID")
 
     parser.add_argument(
         "--level",
         choices=["debug", "info", "warning", "error", "critical"],
-        help="Filter by log level"
+        help="Filter by log level",
     )
 
-    parser.add_argument(
-        "--component",
-        help="Filter by component/logger (substring match)"
-    )
+    parser.add_argument("--component", help="Filter by component/logger (substring match)")
 
-    parser.add_argument(
-        "--event",
-        help="Filter by event name (substring match)"
-    )
+    parser.add_argument("--event", help="Filter by event name (substring match)")
 
-    parser.add_argument(
-        "--text", "-t",
-        help="Full-text search in event/message content"
-    )
+    parser.add_argument("--text", "-t", help="Full-text search in event/message content")
 
-    parser.add_argument(
-        "--minutes", "-m",
-        type=int,
-        help="Filter to last N minutes"
-    )
+    parser.add_argument("--minutes", "-m", type=int, help="Filter to last N minutes")
 
     # Error-source-specific
     parser.add_argument(
-        "--category", "-c",
+        "--category",
+        "-c",
         choices=[
             ErrorCategory.PROVIDER_TIMEOUT,
             ErrorCategory.PROVIDER_ERROR,
@@ -796,40 +793,25 @@ Error Categories (--source errors only):
             ErrorCategory.BUDGET_PAUSE,
             ErrorCategory.UNEXPECTED,
         ],
-        help="Error category filter (--source errors only)"
+        help="Error category filter (--source errors only)",
     )
 
     # Output controls
+    parser.add_argument("--tail", "-n", type=int, help="Show last N entries (alias for --limit)")
+
     parser.add_argument(
-        "--tail", "-n",
-        type=int,
-        help="Show last N entries (alias for --limit)"
+        "--limit", "-l", type=int, default=20, help="Maximum number of results (default: 20)"
     )
 
     parser.add_argument(
-        "--limit", "-l",
-        type=int,
-        default=20,
-        help="Maximum number of results (default: 20)"
+        "--verbose", "-v", action="store_true", help="Show full details (tracebacks, extra fields)"
     )
 
     parser.add_argument(
-        "--verbose", "-v",
-        action="store_true",
-        help="Show full details (tracebacks, extra fields)"
+        "--summary", action="store_true", help="Show count summary by level or category"
     )
 
-    parser.add_argument(
-        "--summary",
-        action="store_true",
-        help="Show count summary by level or category"
-    )
-
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Output as JSON"
-    )
+    parser.add_argument("--json", action="store_true", help="Output as JSON")
 
     args = parser.parse_args()
 

@@ -31,7 +31,7 @@ class CreateCheckpointTool(Tool):
                 "Use at logical stopping points: module complete, tests passing, major "
                 "milestone achieved, before risky changes, etc. This allows resuming work "
                 "later if interrupted."
-            )
+            ),
         )
         self.controller = controller
 
@@ -48,7 +48,7 @@ class CreateCheckpointTool(Tool):
         description: str,
         current_phase: str | None = None,
         pending_tasks: list[str] | None = None,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> ToolResult:
         """Create a checkpoint of the current agent state.
 
@@ -68,7 +68,7 @@ class CreateCheckpointTool(Tool):
                     tool_name=self.name,
                     status=ToolStatus.ERROR,
                     output=None,
-                    error="description cannot be empty"
+                    error="description cannot be empty",
                 )
 
             if not self.controller:
@@ -76,22 +76,17 @@ class CreateCheckpointTool(Tool):
                     tool_name=self.name,
                     status=ToolStatus.ERROR,
                     output=None,
-                    error="Controller not initialized. Cannot create checkpoint."
+                    error="Controller not initialized. Cannot create checkpoint.",
                 )
 
             # Create checkpoint using controller
             checkpoint_id = self.controller.create_checkpoint(
-                description=description,
-                current_phase=current_phase,
-                pending_tasks=pending_tasks
+                description=description, current_phase=current_phase, pending_tasks=pending_tasks
             )
 
             if checkpoint_id:
                 # Success
-                output = (
-                    f"Checkpoint created: {checkpoint_id}\n"
-                    f"Description: {description}"
-                )
+                output = f"Checkpoint created: {checkpoint_id}\nDescription: {description}"
                 if current_phase:
                     output += f"\nPhase: {current_phase}"
                 if pending_tasks:
@@ -105,8 +100,8 @@ class CreateCheckpointTool(Tool):
                         "checkpoint_id": checkpoint_id,
                         "description": description,
                         "current_phase": current_phase,
-                        "pending_tasks_count": len(pending_tasks) if pending_tasks else 0
-                    }
+                        "pending_tasks_count": len(pending_tasks) if pending_tasks else 0,
+                    },
                 )
             else:
                 # Checkpoint creation failed
@@ -114,7 +109,7 @@ class CreateCheckpointTool(Tool):
                     tool_name=self.name,
                     status=ToolStatus.ERROR,
                     output=None,
-                    error="Failed to create checkpoint (controller returned None)"
+                    error="Failed to create checkpoint (controller returned None)",
                 )
 
         except Exception as e:
@@ -122,7 +117,7 @@ class CreateCheckpointTool(Tool):
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 output=None,
-                error=f"Checkpoint creation failed: {str(e)}"
+                error=f"Checkpoint creation failed: {str(e)}",
             )
 
     def _get_parameters(self) -> dict:
@@ -136,17 +131,17 @@ class CreateCheckpointTool(Tool):
             "properties": {
                 "description": {
                     "type": "string",
-                    "description": "What was accomplished in this session"
+                    "description": "What was accomplished in this session",
                 },
                 "current_phase": {
                     "type": "string",
-                    "description": "Optional: Current development phase (e.g., 'Phase 1')"
+                    "description": "Optional: Current development phase (e.g., 'Phase 1')",
                 },
                 "pending_tasks": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Optional: list of tasks remaining to complete"
-                }
+                    "description": "Optional: list of tasks remaining to complete",
+                },
             },
-            "required": ["description"]
+            "required": ["description"],
         }

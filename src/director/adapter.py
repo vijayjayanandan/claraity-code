@@ -29,6 +29,7 @@ logger = get_logger(__name__)
 
 class DirectorGateDecision(Enum):
     """Decision from tool gating in director mode."""
+
     ALLOW = "allow"
     DENY = "deny"
 
@@ -75,7 +76,9 @@ class DirectorAdapter:
     # -- Tool Gating --
 
     def gate_tool(
-        self, tool_name: str, tool_args: dict[str, Any] | None = None,
+        self,
+        tool_name: str,
+        tool_args: dict[str, Any] | None = None,
     ) -> DirectorGateDecision:
         """Check if a tool is allowed in the current phase.
 
@@ -104,11 +107,7 @@ class DirectorAdapter:
             return DirectorGateDecision.ALLOW
 
         # Path-based exception: write_file allowed in PLAN for plan docs
-        if (
-            tool_name == "write_file"
-            and self._protocol.phase == DirectorPhase.PLAN
-            and tool_args
-        ):
+        if tool_name == "write_file" and self._protocol.phase == DirectorPhase.PLAN and tool_args:
             file_path = tool_args.get("file_path", "")
             # Normalize path separators for cross-platform
             normalized = file_path.replace("\\", "/")
@@ -172,6 +171,7 @@ class DirectorAdapter:
             for s in self._protocol.plan.slices:
                 if s.id == slice_id:
                     from .models import SliceStatus
+
                     s.status = SliceStatus.COMPLETED
                     break
 

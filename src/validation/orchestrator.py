@@ -43,7 +43,7 @@ class ValidationOrchestrator:
     def __init__(
         self,
         output_dir: str = "./validation-results",
-        agent_timeout_seconds: int = 14400  # 4 hours default
+        agent_timeout_seconds: int = 14400,  # 4 hours default
     ):
         """
         Initialize orchestrator.
@@ -57,9 +57,7 @@ class ValidationOrchestrator:
         self.agent_timeout = agent_timeout_seconds
 
     async def run_scenario(
-        self,
-        scenario: ValidationScenario,
-        verbose: bool = True
+        self, scenario: ValidationScenario, verbose: bool = True
     ) -> ValidationResult:
         """
         Run a complete validation scenario end-to-end.
@@ -85,12 +83,12 @@ class ValidationOrchestrator:
         start_time = datetime.now()
 
         if verbose:
-            safe_print(f"\n{'='*70}")
+            safe_print(f"\n{'=' * 70}")
             safe_print(f"[TEST] Validation: {scenario.name}")
             safe_print(f"📋 ID: {scenario.id}")
             safe_print(f"[TIME]  Estimated: {scenario.estimated_hours} hours")
             safe_print(f"[TARGET] Difficulty: {scenario.difficulty.value.upper()}")
-            safe_print(f"{'='*70}\n")
+            safe_print(f"{'=' * 70}\n")
 
         # Initialize result
         result = ValidationResult(
@@ -99,7 +97,7 @@ class ValidationOrchestrator:
             run_id=run_id,
             success=False,
             overall_score=0.0,
-            start_time=start_time
+            start_time=start_time,
         )
 
         try:
@@ -159,7 +157,9 @@ class ValidationOrchestrator:
                 safe_print("\n[REPORT] Validation checks complete!")
                 safe_print(f"   Files created: {len(result.files_created)}")
                 safe_print(f"   Lines of code: {result.lines_of_code}")
-                safe_print(f"   Tests passed: {result.tests_passed}/{result.tests_passed + result.tests_failed}")
+                safe_print(
+                    f"   Tests passed: {result.tests_passed}/{result.tests_passed + result.tests_failed}"
+                )
 
             result.end_time = datetime.now()
 
@@ -214,7 +214,7 @@ class ValidationOrchestrator:
             scenario.initial_setup,
             cwd=workspace / "code",
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            stderr=asyncio.subprocess.PIPE,
         )
 
         stdout, stderr = await process.communicate()
@@ -226,10 +226,7 @@ class ValidationOrchestrator:
             )
 
     async def _run_agent(
-        self,
-        scenario: ValidationScenario,
-        workspace: Path,
-        verbose: bool
+        self, scenario: ValidationScenario, workspace: Path, verbose: bool
     ) -> dict[str, Any]:
         """
         Spawn agent in subprocess and monitor execution.
@@ -355,56 +352,58 @@ except Exception as e:
     sys.exit(1)
 '''
 
-        agent_script.write_text(agent_script_content, encoding='utf-8')
+        agent_script.write_text(agent_script_content, encoding="utf-8")
 
         # Run agent script
         log_file = workspace / "agent.log"
 
         process = await asyncio.create_subprocess_exec(
-            sys.executable, str(agent_script.absolute()),
+            sys.executable,
+            str(agent_script.absolute()),
             cwd=workspace / "code",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env={**os.environ, "VALIDATION_MODE": "1", "DASHSCOPE_API_KEY": os.environ.get("DASHSCOPE_API_KEY", "")}
+            env={
+                **os.environ,
+                "VALIDATION_MODE": "1",
+                "DASHSCOPE_API_KEY": os.environ.get("DASHSCOPE_API_KEY", ""),
+            },
         )
 
         try:
             # Wait with timeout
             stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
-                timeout=self.agent_timeout
+                process.communicate(), timeout=self.agent_timeout
             )
 
             # Save logs
-            with open(log_file, "w", encoding='utf-8') as f:
+            with open(log_file, "w", encoding="utf-8") as f:
                 f.write("=== STDOUT ===\n")
-                f.write(stdout.decode('utf-8', errors='replace'))
+                f.write(stdout.decode("utf-8", errors="replace"))
                 f.write("\n\n=== STDERR ===\n")
-                f.write(stderr.decode('utf-8', errors='replace'))
+                f.write(stderr.decode("utf-8", errors="replace"))
 
             if verbose:
-                safe_print(stdout.decode('utf-8', errors='replace'))
+                safe_print(stdout.decode("utf-8", errors="replace"))
 
         except asyncio.TimeoutError:
             process.kill()
-            raise RuntimeError(
-                f"Agent execution timed out after {self.agent_timeout}s"
-            )
+            raise RuntimeError(f"Agent execution timed out after {self.agent_timeout}s")
 
         # Load result
         result_file = workspace / "code" / "result.json"
         if result_file.exists():
-            with open(result_file, encoding='utf-8') as f:
+            with open(result_file, encoding="utf-8") as f:
                 result = json.load(f)
         else:
             result = {
                 "success": False,
                 "error": "Agent did not produce result.json",
-                "stdout": stdout.decode('utf-8', errors='replace'),
-                "stderr": stderr.decode('utf-8', errors='replace'),
+                "stdout": stdout.decode("utf-8", errors="replace"),
+                "stderr": stderr.decode("utf-8", errors="replace"),
                 "errors": ["No result file produced"],
                 "warnings": [],
-                "human_interventions": 0
+                "human_interventions": 0,
             }
 
         return result
@@ -414,7 +413,7 @@ except Exception as e:
         scenario: ValidationScenario,
         workspace: Path,
         agent_result: dict[str, Any],
-        verbose: bool
+        verbose: bool,
     ) -> dict[str, Any]:
         """
         Run automated validation checks.
@@ -441,7 +440,9 @@ except Exception as e:
             results["required_files"] = {
                 "success": len(missing_files) == 0,
                 "missing": missing_files,
-                "found": [f for f in scenario.success_criteria.required_files if f not in missing_files]
+                "found": [
+                    f for f in scenario.success_criteria.required_files if f not in missing_files
+                ],
             }
 
             if verbose:
@@ -457,7 +458,9 @@ except Exception as e:
 
             if verbose:
                 if test_result["success"]:
-                    safe_print(f"   [OK] Tests passed: {test_result['passed']}/{test_result['total']}")
+                    safe_print(
+                        f"   [OK] Tests passed: {test_result['passed']}/{test_result['total']}"
+                    )
                 else:
                     safe_print(f"   [FAIL] Tests failed: {test_result['failed']} failures")
 
@@ -478,11 +481,7 @@ except Exception as e:
 
         return results
 
-    async def _install_dependencies(
-        self,
-        code_dir: Path,
-        verbose: bool
-    ) -> dict[str, Any]:
+    async def _install_dependencies(self, code_dir: Path, verbose: bool) -> dict[str, Any]:
         """
         Install dependencies from requirements.txt if it exists.
 
@@ -500,15 +499,21 @@ except Exception as e:
 
         try:
             process = await asyncio.create_subprocess_exec(
-                sys.executable, "-m", "pip", "install", "-r", "requirements.txt", "--quiet",
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "-r",
+                "requirements.txt",
+                "--quiet",
                 cwd=code_dir,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
             )
 
             stdout, stderr = await asyncio.wait_for(
                 process.communicate(),
-                timeout=300  # 5 minutes for installation
+                timeout=300,  # 5 minutes for installation
             )
 
             if process.returncode == 0:
@@ -516,14 +521,10 @@ except Exception as e:
                     print("   [OK] Dependencies installed successfully")
                 return {"success": True, "skipped": False}
             else:
-                error_msg = stderr.decode('utf-8', errors='replace')
+                error_msg = stderr.decode("utf-8", errors="replace")
                 if verbose:
                     print(f"   [WARN] Dependency installation failed: {error_msg[:200]}")
-                return {
-                    "success": False,
-                    "skipped": False,
-                    "error": error_msg
-                }
+                return {"success": False, "skipped": False, "error": error_msg}
 
         except asyncio.TimeoutError:
             if verbose:
@@ -534,11 +535,7 @@ except Exception as e:
                 print(f"   [WARN] Dependency installation error: {str(e)}")
             return {"success": False, "error": str(e)}
 
-    async def _run_tests(
-        self,
-        code_dir: Path,
-        verbose: bool
-    ) -> dict[str, Any]:
+    async def _run_tests(self, code_dir: Path, verbose: bool) -> dict[str, Any]:
         """
         Run tests using pytest or unittest.
 
@@ -561,19 +558,23 @@ except Exception as e:
                 print("   [TEST] Running tests with pytest...")
 
             process = await asyncio.create_subprocess_exec(
-                sys.executable, "-m", "pytest", "-v", "--tb=short",
+                sys.executable,
+                "-m",
+                "pytest",
+                "-v",
+                "--tb=short",
                 cwd=code_dir,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
             )
 
             stdout, stderr = await asyncio.wait_for(
                 process.communicate(),
-                timeout=120  # 2 minutes for tests
+                timeout=120,  # 2 minutes for tests
             )
 
-            output = stdout.decode('utf-8', errors='replace')
-            stderr_text = stderr.decode('utf-8', errors='replace')
+            output = stdout.decode("utf-8", errors="replace")
+            stderr_text = stderr.decode("utf-8", errors="replace")
 
             # Parse pytest output
             passed = output.count(" PASSED")
@@ -593,7 +594,7 @@ except Exception as e:
                 "total": total,
                 "output": output,
                 "framework": "pytest",
-                "exit_code": process.returncode
+                "exit_code": process.returncode,
             }
 
         except asyncio.TimeoutError:
@@ -603,7 +604,7 @@ except Exception as e:
                 "passed": 0,
                 "failed": 0,
                 "total": 0,
-                "framework": "pytest"
+                "framework": "pytest",
             }
         except Exception as e:
             # If pytest fails, try unittest
@@ -611,11 +612,7 @@ except Exception as e:
                 print(f"   [INFO] Pytest failed ({str(e)}), trying unittest...")
             return await self._run_unittest(code_dir, verbose)
 
-    async def _run_unittest(
-        self,
-        code_dir: Path,
-        verbose: bool
-    ) -> dict[str, Any]:
+    async def _run_unittest(self, code_dir: Path, verbose: bool) -> dict[str, Any]:
         """Run tests using unittest discovery."""
 
         try:
@@ -623,33 +620,35 @@ except Exception as e:
                 print("   [TEST] Running tests with unittest...")
 
             process = await asyncio.create_subprocess_exec(
-                sys.executable, "-m", "unittest", "discover", "-v",
+                sys.executable,
+                "-m",
+                "unittest",
+                "discover",
+                "-v",
                 cwd=code_dir,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
             )
 
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
-                timeout=120
-            )
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=120)
 
-            output = stdout.decode('utf-8', errors='replace')
-            stderr_text = stderr.decode('utf-8', errors='replace')
+            output = stdout.decode("utf-8", errors="replace")
+            stderr_text = stderr.decode("utf-8", errors="replace")
             combined = output + "\n" + stderr_text
 
             # Parse unittest output (tests appear in stderr for unittest)
             # Look for patterns like "test_xxx ... ok" or "test_xxx ... FAIL"
             import re
-            ok_pattern = re.compile(r'\.{3,}\s+ok', re.IGNORECASE)
-            fail_pattern = re.compile(r'\.{3,}\s+(FAIL|ERROR)', re.IGNORECASE)
+
+            ok_pattern = re.compile(r"\.{3,}\s+ok", re.IGNORECASE)
+            fail_pattern = re.compile(r"\.{3,}\s+(FAIL|ERROR)", re.IGNORECASE)
 
             passed = len(ok_pattern.findall(combined))
             failed = len(fail_pattern.findall(combined))
             total = passed + failed
 
             # Also check summary line like "Ran 14 tests"
-            ran_match = re.search(r'Ran (\d+) test', combined)
+            ran_match = re.search(r"Ran (\d+) test", combined)
             if ran_match and total == 0:
                 total = int(ran_match.group(1))
                 # If we got total but no pass/fail breakdown, assume all passed if returncode == 0
@@ -658,8 +657,8 @@ except Exception as e:
                     failed = 0
                 else:
                     # Parse for failures
-                    fail_match = re.search(r'FAILED \(.*?failures=(\d+)', combined)
-                    error_match = re.search(r'errors=(\d+)', combined)
+                    fail_match = re.search(r"FAILED \(.*?failures=(\d+)", combined)
+                    error_match = re.search(r"errors=(\d+)", combined)
                     if fail_match:
                         failed = int(fail_match.group(1))
                     if error_match:
@@ -673,7 +672,7 @@ except Exception as e:
                 "total": total,
                 "output": combined,
                 "framework": "unittest",
-                "exit_code": process.returncode
+                "exit_code": process.returncode,
             }
 
         except asyncio.TimeoutError:
@@ -683,7 +682,7 @@ except Exception as e:
                 "passed": 0,
                 "failed": 0,
                 "total": 0,
-                "framework": "unittest"
+                "framework": "unittest",
             }
         except Exception as e:
             return {
@@ -692,14 +691,11 @@ except Exception as e:
                 "passed": 0,
                 "failed": 0,
                 "total": 0,
-                "framework": "unittest"
+                "framework": "unittest",
             }
 
     async def _run_validation_step(
-        self,
-        step: ValidationStep,
-        code_dir: Path,
-        verbose: bool
+        self, step: ValidationStep, code_dir: Path, verbose: bool
     ) -> dict[str, Any]:
         """Run a single validation step"""
 
@@ -712,11 +708,7 @@ except Exception as e:
         else:
             return {"success": False, "error": f"Unknown step type: {step.type}"}
 
-    async def _run_bash_step(
-        self,
-        step: ValidationStep,
-        code_dir: Path
-    ) -> dict[str, Any]:
+    async def _run_bash_step(self, step: ValidationStep, code_dir: Path) -> dict[str, Any]:
         """Run a bash command validation step"""
 
         try:
@@ -724,12 +716,11 @@ except Exception as e:
                 step.command,
                 cwd=code_dir,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
             )
 
             stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
-                timeout=step.timeout_seconds
+                process.communicate(), timeout=step.timeout_seconds
             )
 
             success = process.returncode == step.expected_exit_code
@@ -738,34 +729,21 @@ except Exception as e:
                 "success": success,
                 "exit_code": process.returncode,
                 "expected_exit_code": step.expected_exit_code,
-                "stdout": stdout.decode('utf-8', errors='replace'),
-                "stderr": stderr.decode('utf-8', errors='replace')
+                "stdout": stdout.decode("utf-8", errors="replace"),
+                "stderr": stderr.decode("utf-8", errors="replace"),
             }
 
         except asyncio.TimeoutError:
-            return {
-                "success": False,
-                "error": f"Command timed out after {step.timeout_seconds}s"
-            }
+            return {"success": False, "error": f"Command timed out after {step.timeout_seconds}s"}
         except Exception as e:
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "error": str(e)}
 
-    def _run_inspect_step(
-        self,
-        step: ValidationStep,
-        code_dir: Path
-    ) -> dict[str, Any]:
+    def _run_inspect_step(self, step: ValidationStep, code_dir: Path) -> dict[str, Any]:
         """Inspect file contents"""
 
         file_path = code_dir / step.file_path
         if not file_path.exists():
-            return {
-                "success": False,
-                "error": f"File not found: {step.file_path}"
-            }
+            return {"success": False, "error": f"File not found: {step.file_path}"}
 
         try:
             content = file_path.read_text()
@@ -779,17 +757,10 @@ except Exception as e:
 
             success = all(checks.values()) if checks else True
 
-            return {
-                "success": success,
-                "checks": checks,
-                "file_size": len(content)
-            }
+            return {"success": success, "checks": checks, "file_size": len(content)}
 
         except Exception as e:
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "error": str(e)}
 
     def _get_created_files(self, workspace: Path) -> list[str]:
         """Get list of all files created in workspace"""

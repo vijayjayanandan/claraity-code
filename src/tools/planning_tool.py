@@ -9,18 +9,20 @@ from .task_state import TaskState
 # CRUD Task Tools (backed by TaskState)
 # ---------------------------------------------------------------------------
 
+
 class TaskCreateTool(Tool):
     """Create a new task in the task list."""
 
     def __init__(self, task_state: TaskState):
         super().__init__(
             name="task_create",
-            description="Create a new task to track work. Returns the created task with its ID."
+            description="Create a new task to track work. Returns the created task with its ID.",
         )
         self.task_state = task_state
 
-    def execute(self, subject: str, description: str = "",
-                activeForm: str = "", **kwargs: Any) -> ToolResult:
+    def execute(
+        self, subject: str, description: str = "", activeForm: str = "", **kwargs: Any
+    ) -> ToolResult:
         try:
             task = self.task_state.create(
                 subject=subject,
@@ -48,7 +50,10 @@ class TaskCreateTool(Tool):
             "properties": {
                 "subject": {"type": "string", "description": "Brief task title (imperative form)"},
                 "description": {"type": "string", "description": "Detailed description"},
-                "activeForm": {"type": "string", "description": "Present continuous form for spinner"},
+                "activeForm": {
+                    "type": "string",
+                    "description": "Present continuous form for spinner",
+                },
             },
             "required": ["subject"],
         }
@@ -60,7 +65,7 @@ class TaskUpdateTool(Tool):
     def __init__(self, task_state: TaskState):
         super().__init__(
             name="task_update",
-            description="Update a task's status, subject, description, or dependencies."
+            description="Update a task's status, subject, description, or dependencies.",
         )
         self.task_state = task_state
 
@@ -128,8 +133,7 @@ class TaskListTool(Tool):
 
     def __init__(self, task_state: TaskState):
         super().__init__(
-            name="task_list",
-            description="List all tasks with their status and dependencies."
+            name="task_list", description="List all tasks with their status and dependencies."
         )
         self.task_state = task_state
 
@@ -163,10 +167,7 @@ class TaskGetTool(Tool):
     """Get a single task by ID."""
 
     def __init__(self, task_state: TaskState):
-        super().__init__(
-            name="task_get",
-            description="Get full details of a task by its ID."
-        )
+        super().__init__(name="task_get", description="Get full details of a task by its ID.")
         self.task_state = task_state
 
     def execute(self, taskId: str, **kwargs: Any) -> ToolResult:

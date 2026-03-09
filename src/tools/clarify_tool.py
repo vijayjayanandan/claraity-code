@@ -20,13 +20,13 @@ class ClarifyTool(Tool):
 
     def __init__(self):
         super().__init__(
-            name="clarify",
-            description="Ask the user clarifying questions before proceeding"
+            name="clarify", description="Ask the user clarifying questions before proceeding"
         )
 
     def _get_parameters(self) -> dict[str, Any]:
         """Get parameter schema."""
         from .tool_schemas import CLARIFY_TOOL
+
         return CLARIFY_TOOL.parameters
 
     def execute(self, **kwargs) -> ToolResult:
@@ -43,25 +43,20 @@ class ClarifyTool(Tool):
 
         # Validate
         if not questions:
-            return ToolResult(
-                success=False,
-                output="",
-                error="clarify.questions is empty"
-            )
+            return ToolResult(success=False, output="", error="clarify.questions is empty")
 
         if len(questions) > 4:
             return ToolResult(
                 success=False,
                 output="",
-                error="clarify.questions has more than 4 questions (max: 4)"
+                error="clarify.questions has more than 4 questions (max: 4)",
             )
 
         # Non-interactive: return questions as-is for the caller to handle
         return ToolResult(
-            success=True,
-            output=str({"questions": questions, "needs_interactive_response": True})
+            success=True, output=str({"questions": questions, "needs_interactive_response": True})
         )
 
 
 # Export
-__all__ = ['ClarifyTool']
+__all__ = ["ClarifyTool"]

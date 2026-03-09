@@ -42,7 +42,7 @@ class DelegateToSubagentTool(Tool):
     Uses execute_async() to launch a subprocess so the event loop stays unblocked.
     """
 
-    def __init__(self, subagent_manager: 'SubAgentManager'):
+    def __init__(self, subagent_manager: "SubAgentManager"):
         """Initialize delegation tool.
 
         Args:
@@ -55,10 +55,7 @@ class DelegateToSubagentTool(Tool):
         # Generate dynamic description with available subagents
         description = self._generate_description()
 
-        super().__init__(
-            name="delegate_to_subagent",
-            description=description
-        )
+        super().__init__(name="delegate_to_subagent", description=description)
 
     def set_registry(self, registry) -> None:
         """Wire up SubagentRegistry for TUI visibility.
@@ -144,11 +141,11 @@ Use this tool proactively when appropriate!"""
             deserialize_result,
         )
 
-        parent_tool_call_id = kwargs.pop('_tool_call_id', '')
+        parent_tool_call_id = kwargs.pop("_tool_call_id", "")
         logger.info(f"Tool [async]: Delegating to subagent '{subagent}': {task[:100]}...")
 
         # Check delegation depth limit (prevents infinite recursion)
-        current_depth = getattr(self, '_delegation_depth', 0)
+        current_depth = getattr(self, "_delegation_depth", 0)
         if current_depth >= MAX_DELEGATION_DEPTH:
             return ToolResult(
                 tool_name=self.name,
@@ -170,7 +167,7 @@ Use this tool proactively when appropriate!"""
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 output=None,
-                error=f"Subagent '{subagent}' not found. Available: {', '.join(available)}"
+                error=f"Subagent '{subagent}' not found. Available: {', '.join(available)}",
             )
 
         # Resolve LLM config and API key for the subprocess
@@ -180,7 +177,7 @@ Use this tool proactively when appropriate!"""
         # main_agent.working_directory is often Path(".") which is relative.
         # The subprocess starts with cwd=_AGENT_PROJECT_ROOT (for correct imports),
         # so a relative "." would resolve to the wrong directory in the subprocess.
-        working_dir = getattr(self.subagent_manager.main_agent, 'working_directory', Path.cwd())
+        working_dir = getattr(self.subagent_manager.main_agent, "working_directory", Path.cwd())
         working_directory = str(Path(working_dir).resolve())
 
         # Build subprocess input
@@ -189,13 +186,17 @@ Use this tool proactively when appropriate!"""
         # switches to the target project, a relative path would resolve there instead
         # of in the agent's own .clarity directory.
         transcript_path = str(
-            Path(working_directory) / ".clarity" / "sessions" / "subagents" / f"{config.name}-{session_id}.jsonl"
+            Path(working_directory)
+            / ".clarity"
+            / "sessions"
+            / "subagents"
+            / f"{config.name}-{session_id}.jsonl"
         )
 
         # Resolve permission mode and auto-approve set from parent agent
         main_agent = self.subagent_manager.main_agent
         permission_mode = "normal"
-        if hasattr(main_agent, 'permission_manager') and main_agent.permission_manager:
+        if hasattr(main_agent, "permission_manager") and main_agent.permission_manager:
             permission_mode = main_agent.permission_manager.get_mode().value
         # Don't forward parent's auto-approve to subagents (principle of least privilege)
         auto_approve_tools = []  # Subagents start with no auto-approvals
@@ -218,7 +219,9 @@ Use this tool proactively when appropriate!"""
         input_json = subprocess_input.to_json()
 
         process = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", "src.subagents.runner",
+            sys.executable,
+            "-m",
+            "src.subagents.runner",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -230,7 +233,7 @@ Use this tool proactively when appropriate!"""
         )
 
         # Send input (keep stdin open for approval responses)
-        process.stdin.write(input_json.encode('utf-8') + b'\n')
+        process.stdin.write(input_json.encode("utf-8") + b"\n")
         await process.stdin.drain()
 
         # Drain stderr in background to prevent deadlock.
@@ -260,7 +263,9 @@ Use this tool proactively when appropriate!"""
                 # Check for interrupt between lines — allows the Stop button
                 # to terminate the subagent without waiting for it to finish
                 if self._ui_protocol and self._ui_protocol.check_interrupted():
-                    logger.info("Tool [async]: Interrupt detected — terminating subagent subprocess")
+                    logger.info(
+                        "Tool [async]: Interrupt detected — terminating subagent subprocess"
+                    )
                     if process.returncode is None:
                         process.terminate()
                     result = ToolResult(
@@ -271,7 +276,7 @@ Use this tool proactively when appropriate!"""
                     )
                     break
 
-                line_str = line.decode('utf-8').strip()
+                line_str = line.decode("utf-8").strip()
                 if not line_str:
                     continue
 
@@ -301,21 +306,13 @@ Use this tool proactively when appropriate!"""
                 elif event_type == IPCEventType.NOTIFICATION:
                     if subagent_id and self._registry:
                         try:
-                            notification = deserialize_notification(
-                                event.get("notification", {})
-                            )
-                            self._registry.push_notification(
-                                subagent_id, notification
-                            )
+                            notification = deserialize_notification(event.get("notification", {}))
+                            self._registry.push_notification(subagent_id, notification)
                         except Exception as e:
-                            logger.error(
-                                f"Failed to deserialize notification: {e}"
-                            )
+                            logger.error(f"Failed to deserialize notification: {e}")
 
                 elif event_type == IPCEventType.APPROVAL_REQUEST:
-                    await self._handle_approval_request(
-                        event, process, subagent_id
-                    )
+                    await self._handle_approval_request(event, process, subagent_id)
 
                 elif event_type == IPCEventType.DONE:
                     result_data = event.get("result", {})
@@ -388,13 +385,13 @@ Use this tool proactively when appropriate!"""
 
         # If we never got a result (e.g., process crashed without emitting DONE)
         if result is None:
-            stderr_output = b"".join(stderr_chunks).decode('utf-8', errors='replace')
+            stderr_output = b"".join(stderr_chunks).decode("utf-8", errors="replace")
             result = ToolResult(
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 output=None,
                 error=f"Subagent subprocess exited without result (code={process.returncode}). "
-                      f"stderr: {stderr_output[:500]}",
+                f"stderr: {stderr_output[:500]}",
             )
 
         return result
@@ -428,12 +425,12 @@ Use this tool proactively when appropriate!"""
             response = await self._handle_tool_approval(request)
 
         try:
-            process.stdin.write(response.to_json_line().encode('utf-8') + b'\n')
+            process.stdin.write(response.to_json_line().encode("utf-8") + b"\n")
             await process.stdin.drain()
         except (BrokenPipeError, ConnectionResetError):
             logger.warning("Subprocess stdin closed before response could be sent")
 
-    async def _handle_tool_approval(self, request) -> 'ApprovalResponse':
+    async def _handle_tool_approval(self, request) -> "ApprovalResponse":
         """Handle tool_approval request type."""
         from src.subagents.ipc import ApprovalResponse
 
@@ -458,7 +455,7 @@ Use this tool proactively when appropriate!"""
             feedback=feedback,
         )
 
-    async def _handle_clarify_request(self, request) -> 'ApprovalResponse':
+    async def _handle_clarify_request(self, request) -> "ApprovalResponse":
         """Handle clarify request type."""
         from src.subagents.ipc import ApprovalResponse
 
@@ -466,7 +463,7 @@ Use this tool proactively when appropriate!"""
 
         if self._ui_protocol:
             # Send clarify form to client (WebSocket only -- TUI uses SubAgentCard)
-            if hasattr(self._ui_protocol, 'send_clarify_request'):
+            if hasattr(self._ui_protocol, "send_clarify_request"):
                 await self._ui_protocol.send_clarify_request(
                     call_id=request.tool_call_id,
                     questions=request.questions,
@@ -490,7 +487,7 @@ Use this tool proactively when appropriate!"""
             clarify_result=clarify_result,
         )
 
-    async def _handle_pause_request(self, request) -> 'ApprovalResponse':
+    async def _handle_pause_request(self, request) -> "ApprovalResponse":
         """Handle pause request type - relay to TUI PausePromptWidget."""
         from src.subagents.ipc import ApprovalResponse
 
@@ -524,7 +521,7 @@ Use this tool proactively when appropriate!"""
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 output=None,
-                error="Subagent name is required and cannot be empty"
+                error="Subagent name is required and cannot be empty",
             )
 
         if not task or not task.strip():
@@ -532,7 +529,7 @@ Use this tool proactively when appropriate!"""
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 output=None,
-                error="Task description is required and cannot be empty"
+                error="Task description is required and cannot be empty",
             )
 
         return None
@@ -571,7 +568,7 @@ Use this tool proactively when appropriate!"""
         api_key = ""
         if config.llm and config.llm.api_key:
             api_key = config.llm.api_key
-        elif hasattr(main_llm, 'api_key'):
+        elif hasattr(main_llm, "api_key"):
             api_key = main_llm.api_key or ""
         else:
             # Fall back to environment
@@ -579,9 +576,7 @@ Use this tool proactively when appropriate!"""
 
         return llm_config_dict, api_key
 
-    def _build_tool_result(
-        self, subagent_name: str, result
-    ) -> ToolResult:
+    def _build_tool_result(self, subagent_name: str, result) -> ToolResult:
         """Build ToolResult from SubAgentResult.
 
         Args:
@@ -596,7 +591,7 @@ Use this tool proactively when appropriate!"""
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 output=None,
-                error=f"Subagent '{subagent_name}' execution failed. Check logs for details."
+                error=f"Subagent '{subagent_name}' execution failed. Check logs for details.",
             )
 
         if result.success:
@@ -618,8 +613,8 @@ Use this tool proactively when appropriate!"""
                             "success": tc.get("success") if isinstance(tc, dict) else True,
                         }
                         for tc in result.tool_calls
-                    ]
-                }
+                    ],
+                },
             )
         else:
             logger.error(f"Tool: Subagent '{subagent_name}' failed: {result.error}")
@@ -627,7 +622,7 @@ Use this tool proactively when appropriate!"""
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 output=None,
-                error=result.error or f"Subagent '{subagent_name}' execution failed"
+                error=result.error or f"Subagent '{subagent_name}' execution failed",
             )
 
     def _get_parameters(self) -> dict[str, Any]:
@@ -637,12 +632,12 @@ Use this tool proactively when appropriate!"""
             "properties": {
                 "subagent": {
                     "type": "string",
-                    "description": "Name of the subagent to use (e.g., 'code-reviewer', 'test-writer', 'doc-writer', 'code-writer', 'explore', 'planner', 'general-purpose')"
+                    "description": "Name of the subagent to use (e.g., 'code-reviewer', 'test-writer', 'doc-writer', 'code-writer', 'explore', 'planner', 'general-purpose')",
                 },
                 "task": {
                     "type": "string",
-                    "description": "Clear, detailed description of the task to delegate to the subagent"
-                }
+                    "description": "Clear, detailed description of the task to delegate to the subagent",
+                },
             },
-            "required": ["subagent", "task"]
+            "required": ["subagent", "task"],
         }

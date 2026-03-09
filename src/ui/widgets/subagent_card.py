@@ -44,20 +44,21 @@ logger = get_logger("ui.widgets.subagent_card")
 
 
 # Tools that should not be rendered (same as app.py SILENT_TOOLS)
-SILENT_TOOLS = {'task_create', 'task_update', 'task_list', 'task_get', 'enter_plan_mode'}
+SILENT_TOOLS = {"task_create", "task_update", "task_list", "task_get", "enter_plan_mode"}
 
 # Status badge config for the header
 HEADER_ICONS: dict[str, tuple[str, str, str]] = {
-    "running":           ("*", "#1e1e1e", "#cca700"),
+    "running": ("*", "#1e1e1e", "#cca700"),
     "awaiting_approval": ("?", "#1e1e1e", "#ff8c00"),
-    "done":              ("+", "#1e1e1e", "#73c991"),
-    "failed":            ("!", "#ffffff", "#f14c4c"),
+    "done": ("+", "#1e1e1e", "#73c991"),
+    "failed": ("!", "#ffffff", "#f14c4c"),
 }
 
 
 # =============================================================================
 # Helper widgets
 # =============================================================================
+
 
 class _SubagentHeader(Static):
     """Clickable header: status badge + subagent name + tool count + duration.
@@ -105,14 +106,14 @@ class _SubagentHeader(Static):
         self.refresh()
 
     def render(self) -> RenderableType:
-        icon, fg, bg = HEADER_ICONS.get(
-            self._status, ("*", "#1e1e1e", "#cca700")
-        )
+        icon, fg, bg = HEADER_ICONS.get(self._status, ("*", "#1e1e1e", "#cca700"))
 
         collapse_indicator = "[+]" if self._collapsed else "[-]"
 
         t = Text()
-        t.append(collapse_indicator, style="bold #73c991" if not self._collapsed else "bold #cca700")
+        t.append(
+            collapse_indicator, style="bold #73c991" if not self._collapsed else "bold #cca700"
+        )
         t.append(" ", style="")
         icon_style = f"bold {fg} on {bg}"
         if self._status == "awaiting_approval":
@@ -173,6 +174,7 @@ class _SubagentBody(ScrollableContainer):
 # =============================================================================
 # Main SubAgentCard
 # =============================================================================
+
 
 class SubAgentCard(Container):
     """Displays subagent execution as a collapsible mini-session.
@@ -249,7 +251,12 @@ class SubAgentCard(Container):
         self._body: _SubagentBody | None = None
 
     def compose(self):
-        yield _SubagentHeader(self.subagent_id, model_name=self.model_name, subagent_name=self.subagent_name, id="sa-header")
+        yield _SubagentHeader(
+            self.subagent_id,
+            model_name=self.model_name,
+            subagent_name=self.subagent_name,
+            id="sa-header",
+        )
         yield _SubagentBody(id="sa-body")
 
     async def on_mount(self) -> None:
@@ -477,7 +484,9 @@ class SubAgentCard(Container):
                     if tc.function.name in SILENT_TOOLS:
                         continue
                     args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-                    card = widget.add_tool_card(tc.id, tc.function.name, args, requires_approval=False)
+                    card = widget.add_tool_card(
+                        tc.id, tc.function.name, args, requires_approval=False
+                    )
                     self._register_tool_card(tc.id, card)
                     if store:
                         self._hydrate_tool_card(card, tc.id, store)
@@ -546,7 +555,9 @@ class SubAgentCard(Container):
                     if tc.id in self._tool_cards:
                         continue
                     args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-                    card = widget.add_tool_card(tc.id, tc.function.name, args, requires_approval=False)
+                    card = widget.add_tool_card(
+                        tc.id, tc.function.name, args, requires_approval=False
+                    )
                     self._register_tool_card(tc.id, card)
                     # Hydrate from store if available (session resume)
                     if store:
@@ -568,7 +579,7 @@ class SubAgentCard(Container):
         if result_msg:
             result_content = (
                 result_msg.get_text_content()
-                if hasattr(result_msg, 'get_text_content')
+                if hasattr(result_msg, "get_text_content")
                 else (result_msg.content or "")
             )
             status = result_msg.meta.status if result_msg.meta else None
@@ -589,7 +600,7 @@ class SubAgentCard(Container):
         """Apply a tool result message to the corresponding ToolCard."""
         if not msg.meta:
             return
-        tool_call_id = msg.meta.tool_call_id if hasattr(msg.meta, 'tool_call_id') else None
+        tool_call_id = msg.meta.tool_call_id if hasattr(msg.meta, "tool_call_id") else None
         if not tool_call_id:
             return
 
@@ -648,6 +659,4 @@ class SubAgentCard(Container):
                     if card.status == ToolStatus.AWAITING_APPROVAL:
                         display_status = "awaiting_approval"
                         break
-            self._header.update_status(
-                display_status, self._tool_count, self._duration_ms
-            )
+            self._header.update_status(display_status, self._tool_count, self._duration_ms)

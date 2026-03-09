@@ -3,6 +3,7 @@
 Session-scoped: one registry per agent instance. Handles discovery,
 caching, and provides the merged tool list for LLM requests.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -23,6 +24,7 @@ from .policy import McpPolicyGate
 
 try:
     from src.observability import get_logger
+
     logger = get_logger("integrations.mcp.registry")
 except ImportError:
     logger = logging.getLogger(__name__)

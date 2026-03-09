@@ -36,7 +36,7 @@ class DirectorCompleteUnderstandTool(Tool):
     describe the task context. Transitions UNDERSTAND -> PLAN.
     """
 
-    def __init__(self, adapter: 'DirectorAdapter'):
+    def __init__(self, adapter: "DirectorAdapter"):
         self._adapter = adapter
         super().__init__(
             name="director_complete_understand",
@@ -77,15 +77,15 @@ class DirectorCompleteUnderstandTool(Tool):
         affected_files = []
         for f in affected_files_raw:
             if isinstance(f, str):
-                affected_files.append(
-                    FileMapping(path=f, role="unknown", description="")
-                )
+                affected_files.append(FileMapping(path=f, role="unknown", description=""))
             elif isinstance(f, dict):
-                affected_files.append(FileMapping(
-                    path=f.get("path", ""),
-                    role=f.get("role", "unknown"),
-                    description=f.get("description", ""),
-                ))
+                affected_files.append(
+                    FileMapping(
+                        path=f.get("path", ""),
+                        role=f.get("role", "unknown"),
+                        description=f.get("description", ""),
+                    )
+                )
 
         context = ContextDocument(
             task_description=task_description,
@@ -169,7 +169,7 @@ class DirectorCompletePlanTool(Tool):
     Transitions PLAN -> AWAITING_APPROVAL.
     """
 
-    def __init__(self, adapter: 'DirectorAdapter'):
+    def __init__(self, adapter: "DirectorAdapter"):
         self._adapter = adapter
         super().__init__(
             name="director_complete_plan",
@@ -218,6 +218,7 @@ class DirectorCompletePlanTool(Tool):
 
         # Verify the plan file exists
         import os
+
         if not os.path.isfile(plan_document):
             return ToolResult(
                 tool_name=self.name,
@@ -245,6 +246,7 @@ class DirectorCompletePlanTool(Tool):
         # Handle string input (LLM may send JSON string)
         if isinstance(slices_raw, str):
             import json as _json
+
             try:
                 slices_raw = _json.loads(slices_raw)
             except (ValueError, TypeError):
@@ -268,21 +270,24 @@ class DirectorCompletePlanTool(Tool):
         slices = []
         for i, s in enumerate(slices_raw, start=1):
             if isinstance(s, dict):
-                slices.append(VerticalSlice(
-                    id=s.get("id", i),
-                    title=s.get("title", f"Slice {i}"),
-                    description=s.get("description", ""),
-                    files_to_create=s.get("files_to_create", []),
-                    files_to_modify=s.get("files_to_modify", []),
-                    test_criteria=s.get("test_criteria", []),
-                    depends_on=s.get("depends_on", []),
-                ))
+                slices.append(
+                    VerticalSlice(
+                        id=s.get("id", i),
+                        title=s.get("title", f"Slice {i}"),
+                        description=s.get("description", ""),
+                        files_to_create=s.get("files_to_create", []),
+                        files_to_modify=s.get("files_to_modify", []),
+                        test_criteria=s.get("test_criteria", []),
+                        depends_on=s.get("depends_on", []),
+                    )
+                )
             elif isinstance(s, str):
                 slices.append(VerticalSlice(id=i, title=s))
             else:
                 logger.warning(
                     "director_complete_plan: skipping slice %d, type: %s",
-                    i, type(s).__name__,
+                    i,
+                    type(s).__name__,
                 )
 
         if not slices:
@@ -302,9 +307,7 @@ class DirectorCompletePlanTool(Tool):
 
         try:
             self._adapter.complete_plan(plan)
-            slice_summary = ", ".join(
-                f"Slice {s.id}: {s.title}" for s in slices
-            )
+            slice_summary = ", ".join(f"Slice {s.id}: {s.title}" for s in slices)
             return ToolResult(
                 tool_name=self.name,
                 status=ToolStatus.SUCCESS,
@@ -364,7 +367,7 @@ class DirectorCompleteSliceTool(Tool):
     Stays in EXECUTE if more slices remain, transitions to INTEGRATE when all done.
     """
 
-    def __init__(self, adapter: 'DirectorAdapter'):
+    def __init__(self, adapter: "DirectorAdapter"):
         self._adapter = adapter
         super().__init__(
             name="director_complete_slice",
@@ -472,7 +475,7 @@ class DirectorCompleteIntegrationTool(Tool):
     cross-slice coherence. Transitions INTEGRATE -> COMPLETE.
     """
 
-    def __init__(self, adapter: 'DirectorAdapter'):
+    def __init__(self, adapter: "DirectorAdapter"):
         self._adapter = adapter
         super().__init__(
             name="director_complete_integration",

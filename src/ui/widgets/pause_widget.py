@@ -56,12 +56,7 @@ class PausePromptWidget(Static, can_focus=True):
     """
 
     def __init__(
-        self,
-        reason: str,
-        reason_code: str,
-        pending_todos: list[str],
-        stats: dict,
-        **kwargs
+        self, reason: str, reason_code: str, pending_todos: list[str], stats: dict, **kwargs
     ):
         """
         Initialize pause prompt widget.
@@ -126,8 +121,8 @@ class PausePromptWidget(Static, can_focus=True):
         lines = []
 
         # Header with reason - bright cyan for visibility
-        tool_calls = self.stats.get('tool_calls', '?')
-        elapsed_s = self.stats.get('elapsed_s', 0)
+        tool_calls = self.stats.get("tool_calls", "?")
+        elapsed_s = self.stats.get("elapsed_s", 0)
         lines.append(Text(f"[PAUSED] {self.reason}\n", style="bold bright_cyan"))
 
         # Stats line - light gray
@@ -187,4 +182,4 @@ class PausePromptWidget(Static, can_focus=True):
 
 
 # Export
-__all__ = ['PausePromptWidget']
+__all__ = ["PausePromptWidget"]

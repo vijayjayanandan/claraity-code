@@ -36,10 +36,7 @@ class AutonomousScenarioRunner:
     """
 
     def __init__(
-        self,
-        orchestrator: AgentOrchestrator,
-        verbose: bool = True,
-        save_results: bool = True
+        self, orchestrator: AgentOrchestrator, verbose: bool = True, save_results: bool = True
     ):
         """
         Initialize Scenario Runner.
@@ -79,13 +76,15 @@ class AutonomousScenarioRunner:
 
         # Initialize Testing Agent (AI Test Engineer)
         testing_agent = TestingAgent(scenario)
-        self._safe_print(f"[green][OK][/green] Testing Agent initialized (model: {testing_agent.model_name})")
+        self._safe_print(
+            f"[green][OK][/green] Testing Agent initialized (model: {testing_agent.model_name})"
+        )
 
         # Start conversation session with Coding Agent
-        session = self.orchestrator.start_conversation(
-            task_description=scenario.name
+        session = self.orchestrator.start_conversation(task_description=scenario.name)
+        self._safe_print(
+            f"[green][OK][/green] Coding Agent session started (workspace: {session.working_directory})"
         )
-        self._safe_print(f"[green][OK][/green] Coding Agent session started (workspace: {session.working_directory})")
         self._safe_print()
 
         # Multi-turn conversation loop
@@ -117,7 +116,7 @@ class AutonomousScenarioRunner:
                     coding_agent_response=coding_agent_response,
                     files_generated=files_generated,
                     tools_called=tools_called,
-                    turn_number=turn
+                    turn_number=turn,
                 )
 
                 user_message = decision["user_message"]
@@ -129,11 +128,15 @@ class AutonomousScenarioRunner:
             self._display_turn_header(turn, scenario.max_turns)
 
             # Display Testing Agent's message and assessment
-            self._display_testing_agent_message(user_message, assessment, should_continue, reasoning)
+            self._display_testing_agent_message(
+                user_message, assessment, should_continue, reasoning
+            )
 
             # Check if Testing Agent wants to stop
             if not should_continue:
-                self._safe_print("\n[yellow][INFO][/yellow] Testing Agent decided to end conversation")
+                self._safe_print(
+                    "\n[yellow][INFO][/yellow] Testing Agent decided to end conversation"
+                )
                 break
 
             # Send message to Coding Agent
@@ -146,7 +149,7 @@ class AutonomousScenarioRunner:
 
             coding_agent_response = response.content
             files_generated = response.files_generated
-            tools_called = [tool.get('tool', 'unknown') for tool in response.tool_calls]
+            tools_called = [tool.get("tool", "unknown") for tool in response.tool_calls]
 
             # Track all files and tools
             files_generated_all.extend(files_generated)
@@ -154,10 +157,7 @@ class AutonomousScenarioRunner:
 
             # Display Coding Agent's response
             self._display_coding_agent_response(
-                response.content,
-                files_generated,
-                tools_called,
-                elapsed
+                response.content, files_generated, tools_called, elapsed
             )
 
             # Record turn result
@@ -168,7 +168,7 @@ class AutonomousScenarioRunner:
                 files_generated=files_generated,
                 tools_called=tools_called,
                 assessment=assessment,
-                should_continue=should_continue
+                should_continue=should_continue,
             )
             turn_results.append(turn_result)
 
@@ -188,7 +188,7 @@ class AutonomousScenarioRunner:
         verdict_result = testing_agent.generate_final_verdict(
             conversation_log=conversation_log,
             workspace_files=workspace_files,
-            workspace_path=session.working_directory
+            workspace_path=session.working_directory,
         )
 
         # Display final verdict
@@ -207,12 +207,15 @@ class AutonomousScenarioRunner:
             workspace_path=str(session.working_directory),
             started_at=start_time,
             ended_at=end_time,
-            total_turns=turn
+            total_turns=turn,
         )
 
         # Save results if configured
         if self.save_results:
-            result_path = self.orchestrator.output_dir / f"scenario_result_{scenario.scenario_id}_{start_time.strftime('%Y%m%d_%H%M%S')}.json"
+            result_path = (
+                self.orchestrator.output_dir
+                / f"scenario_result_{scenario.scenario_id}_{start_time.strftime('%Y%m%d_%H%M%S')}.json"
+            )
             saved_path = result.save(str(result_path))
             self._safe_print(f"\n[green][OK][/green] Results saved to: {saved_path}")
 
@@ -234,7 +237,9 @@ class AutonomousScenarioRunner:
         info_table.add_row("Max Turns", str(scenario.max_turns))
         info_table.add_row("Success Criteria", str(len(scenario.success_criteria)))
 
-        self._safe_print(Panel(info_table, title="[bold]Scenario Configuration[/bold]", border_style="cyan"))
+        self._safe_print(
+            Panel(info_table, title="[bold]Scenario Configuration[/bold]", border_style="cyan")
+        )
         self._safe_print()
 
     def _display_turn_header(self, turn: int, max_turns: int):
@@ -244,11 +249,7 @@ class AutonomousScenarioRunner:
         self._safe_print()
 
     def _display_testing_agent_message(
-        self,
-        message: str,
-        assessment: str,
-        should_continue: bool,
-        reasoning: str
+        self, message: str, assessment: str, should_continue: bool, reasoning: str
     ):
         """Display Testing Agent's message and assessment"""
         # User message
@@ -256,7 +257,7 @@ class AutonomousScenarioRunner:
             message,
             title="[bold cyan]USER MESSAGE[/bold cyan]",
             border_style="cyan",
-            padding=(1, 2)
+            padding=(1, 2),
         )
         self._safe_print(user_panel)
 
@@ -268,16 +269,12 @@ class AutonomousScenarioRunner:
                 f"[bold]Reasoning:[/bold] {reasoning}",
                 title="[bold yellow]TESTING AGENT ASSESSMENT[/bold yellow]",
                 border_style="yellow",
-                padding=(1, 2)
+                padding=(1, 2),
             )
             self._safe_print(assessment_panel)
 
     def _display_coding_agent_response(
-        self,
-        response: str,
-        files_generated: list,
-        tools_called: list,
-        elapsed: float
+        self, response: str, files_generated: list, tools_called: list, elapsed: float
     ):
         """Display Coding Agent's response"""
         try:
@@ -290,7 +287,7 @@ class AutonomousScenarioRunner:
                 display_response,
                 title=f"[bold green]CODING AGENT RESPONSE[/bold green] (took {elapsed:.1f}s)",
                 border_style="green",
-                padding=(1, 2)
+                padding=(1, 2),
             )
             self._safe_print(response_panel)
 
@@ -306,7 +303,7 @@ class AutonomousScenarioRunner:
                     metadata,
                     title="[bold magenta]ACTIONS TAKEN[/bold magenta]",
                     border_style="magenta",
-                    padding=(0, 2)
+                    padding=(0, 2),
                 )
                 self._safe_print(meta_panel)
         except (ValueError, OSError) as e:
@@ -336,12 +333,14 @@ class AutonomousScenarioRunner:
         checks_table.add_column("Evidence", style="dim")
 
         for i, check in enumerate(verdict_result["validation_checks"], 1):
-            result_symbol = "[green]:heavy_check_mark:[/green]" if check.passed else "[red]:x:[/red]"
+            result_symbol = (
+                "[green]:heavy_check_mark:[/green]" if check.passed else "[red]:x:[/red]"
+            )
             checks_table.add_row(
                 str(i),
                 check.expectation,
                 result_symbol,
-                check.evidence[:100] + "..." if len(check.evidence) > 100 else check.evidence
+                check.evidence[:100] + "..." if len(check.evidence) > 100 else check.evidence,
             )
 
         self._safe_print(checks_table)
@@ -352,7 +351,7 @@ class AutonomousScenarioRunner:
             verdict_result["reasoning"],
             title="[bold]Reasoning[/bold]",
             border_style="yellow",
-            padding=(1, 2)
+            padding=(1, 2),
         )
         self._safe_print(reasoning_panel)
         self._safe_print()

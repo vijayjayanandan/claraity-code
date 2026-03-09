@@ -9,30 +9,43 @@ from typing import Any
 
 # Patterns that match common secret formats
 SECRET_PATTERNS: list[re.Pattern] = [
-    re.compile(r'(sk-[a-zA-Z0-9_-]{20,})'),                          # OpenAI API keys
-    re.compile(r'(sk-ant-[a-zA-Z0-9_-]{20,})'),                      # Anthropic API keys
-    re.compile(r'(AKIA[0-9A-Z]{16})'),                                # AWS access key IDs
-    re.compile(r'(ghp_[a-zA-Z0-9]{36,})'),                            # GitHub personal tokens
-    re.compile(r'(gho_[a-zA-Z0-9]{36,})'),                            # GitHub OAuth tokens
-    re.compile(r'(glpat-[a-zA-Z0-9_-]{20,})'),                        # GitLab tokens
-    re.compile(r'(xoxb-[a-zA-Z0-9-]+)'),                              # Slack bot tokens
-    re.compile(r'(xoxp-[a-zA-Z0-9-]+)'),                              # Slack user tokens
-    re.compile(r'(Bearer\s+[a-zA-Z0-9_.\-]{20,})'),                   # Bearer tokens
-    re.compile(r'(eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,})'),  # JWTs
-    re.compile(r'(?i)(api[_-]?key\s*[=:]\s*)["\']?([a-zA-Z0-9_\-]{16,})["\']?'),     # Generic api_key=value
-    re.compile(r'(?i)(password\s*[=:]\s*)["\']?([^\s"\']{8,})["\']?'),                # password=value
-    re.compile(r'(?i)(secret\s*[=:]\s*)["\']?([a-zA-Z0-9_\-]{16,})["\']?'),           # secret=value
+    re.compile(r"(sk-[a-zA-Z0-9_-]{20,})"),  # OpenAI API keys
+    re.compile(r"(sk-ant-[a-zA-Z0-9_-]{20,})"),  # Anthropic API keys
+    re.compile(r"(AKIA[0-9A-Z]{16})"),  # AWS access key IDs
+    re.compile(r"(ghp_[a-zA-Z0-9]{36,})"),  # GitHub personal tokens
+    re.compile(r"(gho_[a-zA-Z0-9]{36,})"),  # GitHub OAuth tokens
+    re.compile(r"(glpat-[a-zA-Z0-9_-]{20,})"),  # GitLab tokens
+    re.compile(r"(xoxb-[a-zA-Z0-9-]+)"),  # Slack bot tokens
+    re.compile(r"(xoxp-[a-zA-Z0-9-]+)"),  # Slack user tokens
+    re.compile(r"(Bearer\s+[a-zA-Z0-9_.\-]{20,})"),  # Bearer tokens
+    re.compile(r"(eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,})"),  # JWTs
+    re.compile(
+        r'(?i)(api[_-]?key\s*[=:]\s*)["\']?([a-zA-Z0-9_\-]{16,})["\']?'
+    ),  # Generic api_key=value
+    re.compile(r'(?i)(password\s*[=:]\s*)["\']?([^\s"\']{8,})["\']?'),  # password=value
+    re.compile(r'(?i)(secret\s*[=:]\s*)["\']?([a-zA-Z0-9_\-]{16,})["\']?'),  # secret=value
 ]
 
 # Keys in dicts that should have their values redacted
-SENSITIVE_KEYS = frozenset({
-    "api_key", "apiKey", "api-key",
-    "password", "passwd", "secret",
-    "token", "access_token", "refresh_token",
-    "authorization", "auth",
-    "private_key", "privateKey",
-    "credential", "credentials",
-})
+SENSITIVE_KEYS = frozenset(
+    {
+        "api_key",
+        "apiKey",
+        "api-key",
+        "password",
+        "passwd",
+        "secret",
+        "token",
+        "access_token",
+        "refresh_token",
+        "authorization",
+        "auth",
+        "private_key",
+        "privateKey",
+        "credential",
+        "credentials",
+    }
+)
 
 REDACTED = "[REDACTED]"
 
@@ -82,8 +95,10 @@ def redact_dict(data: dict[str, Any], depth: int = 0, max_depth: int = 10) -> di
             result[key] = redact_dict(value, depth + 1, max_depth)
         elif isinstance(value, list):
             result[key] = [
-                redact_dict(item, depth + 1, max_depth) if isinstance(item, dict)
-                else redact_secrets(item) if isinstance(item, str)
+                redact_dict(item, depth + 1, max_depth)
+                if isinstance(item, dict)
+                else redact_secrets(item)
+                if isinstance(item, str)
                 else item
                 for item in value
             ]

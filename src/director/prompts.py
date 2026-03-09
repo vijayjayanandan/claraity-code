@@ -19,7 +19,6 @@ from src.director.models import (
 # =============================================================================
 
 PHASE_PROMPTS: dict[DirectorPhase, str] = {
-
     DirectorPhase.UNDERSTAND: """\
 <director-mode phase="UNDERSTAND">
 You are in UNDERSTAND mode. Your job is to explore the codebase and build
@@ -44,7 +43,6 @@ IMPORTANT: You MUST eventually call `director_complete_understand` to advance.
 Do not end your turn with only text output -- always finish with the tool call.
 Keep your text responses brief. Save detailed findings for the tool call.
 </director-mode>""",
-
     DirectorPhase.PLAN: """\
 <director-mode phase="PLAN">
 You are in PLAN mode. Your job is to design the implementation as a series
@@ -96,14 +94,12 @@ RULES:
 IMPORTANT: You MUST end this phase by calling `director_complete_plan`.
 Do not end your turn with only text output.
 </director-mode>""",
-
     DirectorPhase.AWAITING_APPROVAL: """\
 <director-mode phase="AWAITING_APPROVAL">
 Your plan has been submitted and is awaiting user approval.
 Wait for the user to approve, reject with feedback, or cancel.
 Do not proceed with any code changes until the plan is approved.
 </director-mode>""",
-
     DirectorPhase.EXECUTE: """\
 <director-mode phase="EXECUTE">
 You are in EXECUTE mode. You are the DIRECTOR -- you orchestrate, you do
@@ -153,7 +149,6 @@ DELEGATE to a subagent.
 IMPORTANT: Begin now. Delegate the first failing test for the current
 slice to the test-writer subagent as your very next action.
 </director-mode>""",
-
     DirectorPhase.INTEGRATE: """\
 <director-mode phase="INTEGRATE">
 You are in INTEGRATE mode. All slices are complete. Verify everything
@@ -177,12 +172,14 @@ Do not end your turn with only text output.
 # Director Tool Names -- referenced by prompts and allowlists
 # =============================================================================
 
-DIRECTOR_TOOLS = frozenset({
-    "director_complete_understand",
-    "director_complete_plan",
-    "director_complete_slice",
-    "director_complete_integration",
-})
+DIRECTOR_TOOLS = frozenset(
+    {
+        "director_complete_understand",
+        "director_complete_plan",
+        "director_complete_slice",
+        "director_complete_integration",
+    }
+)
 
 
 # =============================================================================
@@ -190,45 +187,57 @@ DIRECTOR_TOOLS = frozenset({
 # =============================================================================
 
 # UNDERSTAND and PLAN: read-only exploration + clarify + web research + checkpoint
-_UNDERSTAND_TOOLS = READ_ONLY_TOOLS | frozenset({
-    "director_complete_understand",
-    "clarify",
-    "web_search",
-    "web_fetch",
-    "list_directory",
-})
+_UNDERSTAND_TOOLS = READ_ONLY_TOOLS | frozenset(
+    {
+        "director_complete_understand",
+        "clarify",
+        "web_search",
+        "web_fetch",
+        "list_directory",
+    }
+)
 
-_PLAN_TOOLS = READ_ONLY_TOOLS | frozenset({
-    "director_complete_plan",
-    "clarify",
-    "web_search",
-    "web_fetch",
-    "list_directory",
-    "delegate_to_subagent",
-    # NOTE: write_file is NOT in this set. The adapter handles it
-    # with path-based gating (only .clarity/plans/ allowed).
-})
+_PLAN_TOOLS = READ_ONLY_TOOLS | frozenset(
+    {
+        "director_complete_plan",
+        "clarify",
+        "web_search",
+        "web_fetch",
+        "list_directory",
+        "delegate_to_subagent",
+        # NOTE: write_file is NOT in this set. The adapter handles it
+        # with path-based gating (only .clarity/plans/ allowed).
+    }
+)
 
 # EXECUTE: all tools (read + write + delegation + run + director)
-_EXECUTE_TOOLS = READ_ONLY_TOOLS | frozenset({
-    "write_file",
-    "edit_file",
-    "append_to_file",
-    "run_command",
-    "git_commit",
-    "git_status",
-    "git_diff",
-    "delegate_to_subagent",
-    "director_complete_slice",
-    "list_directory",
-})
+_EXECUTE_TOOLS = READ_ONLY_TOOLS | frozenset(
+    {
+        "write_file",
+        "edit_file",
+        "append_to_file",
+        "run_command",
+        "git_commit",
+        "git_status",
+        "git_diff",
+        "delegate_to_subagent",
+        "director_complete_slice",
+        "list_directory",
+    }
+)
 
 # INTEGRATE: read-only + test execution + git (no file writes)
-_INTEGRATE_TOOLS = READ_ONLY_TOOLS | frozenset({
-    "run_command",
-    "list_directory",
-    "git_commit",
-}) | DIRECTOR_TOOLS
+_INTEGRATE_TOOLS = (
+    READ_ONLY_TOOLS
+    | frozenset(
+        {
+            "run_command",
+            "list_directory",
+            "git_commit",
+        }
+    )
+    | DIRECTOR_TOOLS
+)
 
 # AWAITING_APPROVAL: read-only only (waiting for user)
 _AWAITING_APPROVAL_TOOLS = READ_ONLY_TOOLS
@@ -246,6 +255,7 @@ PHASE_ALLOWED_TOOLS: dict[DirectorPhase, frozenset] = {
 # =============================================================================
 # Dynamic Prompt Generator
 # =============================================================================
+
 
 def get_director_phase_prompt(
     phase: DirectorPhase,
@@ -285,23 +295,15 @@ def get_director_phase_prompt(
     ):
         context_lines = []
         if context.existing_patterns:
-            context_lines.append(
-                f"Existing patterns: {', '.join(context.existing_patterns)}"
-            )
+            context_lines.append(f"Existing patterns: {', '.join(context.existing_patterns)}")
         if context.constraints:
-            context_lines.append(
-                f"Constraints: {', '.join(context.constraints)}"
-            )
+            context_lines.append(f"Constraints: {', '.join(context.constraints)}")
         if context.affected_files:
             file_paths = [f.path for f in context.affected_files]
-            context_lines.append(
-                f"Affected files: {', '.join(file_paths)}"
-            )
+            context_lines.append(f"Affected files: {', '.join(file_paths)}")
         if context_lines:
             parts.append(
-                "\n<director-context>\n"
-                + "\n".join(context_lines)
-                + "\n</director-context>"
+                "\n<director-context>\n" + "\n".join(context_lines) + "\n</director-context>"
             )
 
     # Include plan summary in EXECUTE and INTEGRATE phases
@@ -309,13 +311,9 @@ def get_director_phase_prompt(
         plan_lines = [f"Plan: {plan.summary}"]
         plan_lines.append(f"Total slices: {plan.total_slices}")
         for s in plan.slices:
-            status = s.status.name if hasattr(s.status, 'name') else str(s.status)
+            status = s.status.name if hasattr(s.status, "name") else str(s.status)
             plan_lines.append(f"  Slice {s.id}: {s.title} [{status}]")
-        parts.append(
-            "\n<director-plan>\n"
-            + "\n".join(plan_lines)
-            + "\n</director-plan>"
-        )
+        parts.append("\n<director-plan>\n" + "\n".join(plan_lines) + "\n</director-plan>")
 
     # Include current slice details in EXECUTE phase
     if plan and current_slice_id is not None and phase == DirectorPhase.EXECUTE:
@@ -329,17 +327,11 @@ def get_director_phase_prompt(
                 f"Current slice: {current_slice.id} - {current_slice.title}",
             ]
             if current_slice.files_to_create:
-                slice_lines.append(
-                    f"Files to create: {', '.join(current_slice.files_to_create)}"
-                )
+                slice_lines.append(f"Files to create: {', '.join(current_slice.files_to_create)}")
             if current_slice.files_to_modify:
-                slice_lines.append(
-                    f"Files to modify: {', '.join(current_slice.files_to_modify)}"
-                )
+                slice_lines.append(f"Files to modify: {', '.join(current_slice.files_to_modify)}")
             if current_slice.test_criteria:
-                slice_lines.append(
-                    f"Test criteria: {', '.join(current_slice.test_criteria)}"
-                )
+                slice_lines.append(f"Test criteria: {', '.join(current_slice.test_criteria)}")
             parts.append(
                 "\n<director-current-slice>\n"
                 + "\n".join(slice_lines)

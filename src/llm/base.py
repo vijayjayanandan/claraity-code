@@ -28,6 +28,7 @@ class LLMBackendType(str, Enum):
 
 class LLMConfig(BaseModel):
     """Configuration for LLM backend. All values should come from .env file."""
+
     model_config = ConfigDict(protected_namespaces=(), use_enum_values=True)
 
     backend_type: LLMBackendType
@@ -39,7 +40,9 @@ class LLMConfig(BaseModel):
     max_tokens: int
     top_p: float
     top_k: int = Field(default_factory=lambda: int(os.getenv("LLM_TOP_K", "40")))
-    repeat_penalty: float = Field(default_factory=lambda: float(os.getenv("LLM_REPEAT_PENALTY", "1.1")))
+    repeat_penalty: float = Field(
+        default_factory=lambda: float(os.getenv("LLM_REPEAT_PENALTY", "1.1"))
+    )
 
     # Extended thinking (Claude, etc.)
     thinking_budget: int | None = None  # Token budget for thinking blocks
@@ -54,9 +57,13 @@ class LLMConfig(BaseModel):
     num_thread: int | None = None
 
     # Streaming
-    stream: bool = Field(default_factory=lambda: os.getenv("ENABLE_STREAMING", "true").lower() == "true")
+    stream: bool = Field(
+        default_factory=lambda: os.getenv("ENABLE_STREAMING", "true").lower() == "true"
+    )
     # Stream usage tracking (OpenAI-specific, may not work with all providers)
-    stream_usage: bool = Field(default_factory=lambda: os.getenv("STREAM_USAGE", "true").lower() == "true")
+    stream_usage: bool = Field(
+        default_factory=lambda: os.getenv("STREAM_USAGE", "true").lower() == "true"
+    )
 
     # Timeout
     timeout: float = Field(default_factory=lambda: float(os.getenv("REQUEST_TIMEOUT", "300")))
@@ -89,17 +96,11 @@ class ToolDefinition(BaseModel):
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "file_path": {
-                            "type": "string",
-                            "description": "Path to file"
-                        },
-                        "content": {
-                            "type": "string",
-                            "description": "File content"
-                        }
+                        "file_path": {"type": "string", "description": "Path to file"},
+                        "content": {"type": "string", "description": "File content"},
                     },
-                    "required": ["file_path", "content"]
-                }
+                    "required": ["file_path", "content"],
+                },
             }
         }
 
@@ -150,6 +151,7 @@ class StreamChunk(BaseModel):
 # Provider Delta Contract (Unified Persistence Architecture)
 # =============================================================================
 
+
 class ToolCallDelta(BaseModel):
     """
     Incremental tool call data from provider.
@@ -157,10 +159,11 @@ class ToolCallDelta(BaseModel):
     Used during streaming to accumulate tool call information
     before the full tool call is complete.
     """
-    index: int                         # Tool call index in current message
-    id: str | None = None           # Tool call ID (first delta only)
-    name: str | None = None         # Function name (first delta only)
-    arguments_delta: str = ""          # JSON arguments chunk (accumulated)
+
+    index: int  # Tool call index in current message
+    id: str | None = None  # Tool call ID (first delta only)
+    name: str | None = None  # Function name (first delta only)
+    arguments_delta: str = ""  # JSON arguments chunk (accumulated)
 
 
 class ProviderDelta(BaseModel):
@@ -177,13 +180,14 @@ class ProviderDelta(BaseModel):
     The StreamingPipeline is the ONLY place that converts these raw deltas
     into structured segments (TextSegment, CodeBlockSegment, etc.).
     """
-    stream_id: str                              # Self-describing, stable across deltas
-    text_delta: str | None = None            # Raw text chunk
+
+    stream_id: str  # Self-describing, stable across deltas
+    text_delta: str | None = None  # Raw text chunk
     tool_call_delta: ToolCallDelta | None = None  # Incremental tool call
-    thinking_delta: str | None = None        # Native thinking (if provider supports)
-    thinking_signature: str | None = None    # Thinking block signature (Anthropic)
-    finish_reason: str | None = None         # "stop", "tool_calls", etc.
-    usage: dict[str, Any] | None = None      # Token counts as dict (on finish)
+    thinking_delta: str | None = None  # Native thinking (if provider supports)
+    thinking_signature: str | None = None  # Thinking block signature (Anthropic)
+    finish_reason: str | None = None  # "stop", "tool_calls", etc.
+    usage: dict[str, Any] | None = None  # Token counts as dict (on finish)
 
     class Config:
         arbitrary_types_allowed = True
@@ -202,11 +206,7 @@ class LLMBackend(ABC):
         self.config = config
 
     @abstractmethod
-    def generate(
-        self,
-        messages: list[dict[str, str]],
-        **kwargs: Any
-    ) -> LLMResponse:
+    def generate(self, messages: list[dict[str, str]], **kwargs: Any) -> LLMResponse:
         """
         Generate completion from messages.
 
@@ -221,9 +221,7 @@ class LLMBackend(ABC):
 
     @abstractmethod
     def generate_stream(
-        self,
-        messages: list[dict[str, str]],
-        **kwargs: Any
+        self, messages: list[dict[str, str]], **kwargs: Any
     ) -> Iterator[StreamChunk]:
         """
         Generate streaming completion.
@@ -242,7 +240,7 @@ class LLMBackend(ABC):
         messages: list[dict[str, str]],
         tools: list[ToolDefinition],
         tool_choice: str = "auto",
-        **kwargs: Any
+        **kwargs: Any,
     ) -> LLMResponse:
         """
         Generate completion with tool calling support.

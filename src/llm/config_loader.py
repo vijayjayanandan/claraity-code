@@ -39,6 +39,7 @@ VALID_BACKEND_TYPES = {"openai", "ollama", "vllm", "localai", "llamacpp", "anthr
 # DATA MODEL
 # =============================================================================
 
+
 @dataclass
 class SubAgentLLMOverride:
     """Per-subagent LLM overrides from config.yaml.
@@ -71,7 +72,7 @@ class LLMConfigData:
 
     backend_type: str = "openai"
     base_url: str = ""
-    api_key: str = ""          # Runtime only -- loaded from keyring/env, never saved to YAML
+    api_key: str = ""  # Runtime only -- loaded from keyring/env, never saved to YAML
     api_key_env: str = "OPENAI_API_KEY"
     model: str = ""
     context_window: int = 131072
@@ -85,6 +86,7 @@ class LLMConfigData:
 # =============================================================================
 # HELPERS
 # =============================================================================
+
 
 def _safe_stderr(message: str) -> None:
     """Write warning to stderr without going through logging (avoids recursion)."""
@@ -112,6 +114,7 @@ def _migrate_api_key_to_keyring(api_key: str, config_path: str) -> None:
     """
     try:
         from src.llm.credential_store import _get_keyring
+
         kr = _get_keyring()
         if kr is None:
             # No keyring -- config.yaml IS the storage, don't remove it
@@ -127,6 +130,7 @@ def _remove_api_key_from_yaml(config_path: str) -> None:
     """Remove the api_key field from config.yaml after migration."""
     try:
         import yaml
+
         path = Path(config_path)
         if not path.exists():
             return
@@ -145,6 +149,7 @@ def _remove_api_key_from_yaml(config_path: str) -> None:
 # =============================================================================
 # LOADER
 # =============================================================================
+
 
 def load_llm_config(config_path: str = DEFAULT_CONFIG_PATH) -> LLMConfigData:
     """
@@ -249,15 +254,14 @@ def load_llm_config(config_path: str = DEFAULT_CONFIG_PATH) -> LLMConfigData:
                 try:
                     override.context_window = int(overrides["context_window"])
                 except (TypeError, ValueError):
-                    _safe_stderr(
-                        f"Invalid context_window for subagent '{name}', ignoring"
-                    )
+                    _safe_stderr(f"Invalid context_window for subagent '{name}', ignoring")
 
             config.subagents[str(name)] = override
 
     # Populate api_key from credential store (runtime only, never saved to YAML)
     try:
         from src.llm.credential_store import load_api_key
+
         config.api_key = load_api_key(api_key_env=config.api_key_env)
     except Exception:
         pass  # Graceful degradation
@@ -268,6 +272,7 @@ def load_llm_config(config_path: str = DEFAULT_CONFIG_PATH) -> LLMConfigData:
 # =============================================================================
 # SAVE (YAML merge)
 # =============================================================================
+
 
 def save_llm_config(
     config: LLMConfigData,
@@ -368,6 +373,7 @@ def save_llm_config(
 # RESOLVE (priority layering)
 # =============================================================================
 
+
 def resolve_llm_config(
     env_vars: dict[str, str | None],
     cli_args: dict[str, str | None],
@@ -446,6 +452,7 @@ def _apply_overrides(
 # =============================================================================
 # CONVENIENCE
 # =============================================================================
+
 
 def is_llm_configured(config_path: str = DEFAULT_CONFIG_PATH) -> bool:
     """

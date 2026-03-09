@@ -52,6 +52,7 @@ class AgentServer:
         self._api_key = api_key
         self._agent_kwargs = agent_kwargs  # Legacy fallback
         from src.llm.config_loader import SYSTEM_CONFIG_PATH
+
         self._config_path = config_path or SYSTEM_CONFIG_PATH
 
         self._app: web.Application | None = None
@@ -70,7 +71,7 @@ class AgentServer:
             self._agent = CodingAgent(**self._agent_kwargs)
             self._session_id = str(uuid.uuid4())
             llm_config = load_llm_config(self._config_path)
-            if llm_config.subagents and hasattr(self._agent, 'subagent_manager'):
+            if llm_config.subagents and hasattr(self._agent, "subagent_manager"):
                 self._agent.subagent_manager.config_loader.apply_llm_overrides(llm_config)
             self._message_store = MessageStore()
             self._agent.set_session_id(self._session_id, is_new_session=True)
@@ -112,8 +113,10 @@ class AgentServer:
 
         if self._host != "127.0.0.1":
             print("\n  [WARNING] Server bound to non-localhost address!")
-            print("  This exposes the agent to the network. Ensure authentication is enforced.",
-                  flush=True)
+            print(
+                "  This exposes the agent to the network. Ensure authentication is enforced.",
+                flush=True,
+            )
 
         # Prime the HTTP connection pool (TCP+TLS) to the LLM API
         # so the first user message doesn't pay connection setup cost.
@@ -127,18 +130,18 @@ class AgentServer:
         which primes the async_client's connection pool. The first real
         LLM call then skips the TCP handshake + TLS negotiation.
         """
-        client = getattr(self._agent.llm, 'async_client', None)
+        client = getattr(self._agent.llm, "async_client", None)
         if client is None:
             return
 
         try:
             # Access the underlying httpx client to prime its connection pool.
             # Both OpenAI and Anthropic SDKs expose ._client (httpx.AsyncClient).
-            http_client = getattr(client, '_client', None)
+            http_client = getattr(client, "_client", None)
             if http_client is None:
                 return
 
-            base_url = str(getattr(http_client, 'base_url', ''))
+            base_url = str(getattr(http_client, "base_url", ""))
             if not base_url:
                 return
 
@@ -168,10 +171,12 @@ class AgentServer:
 
     async def _handle_health(self, request: web.Request) -> web.Response:
         """GET /health -- returns server status."""
-        return web.json_response({
-            "status": "ok",
-            "has_active_connection": self._active_ws is not None,
-        })
+        return web.json_response(
+            {
+                "status": "ok",
+                "has_active_connection": self._active_ws is not None,
+            }
+        )
 
     async def _handle_websocket(self, request: web.Request) -> web.WebSocketResponse:
         """Handle a new WebSocket connection.
@@ -191,12 +196,14 @@ class AgentServer:
             logger.warning(f"[SERVER] Rejected WebSocket from disallowed origin: {origin}")
             ws = web.WebSocketResponse()
             await ws.prepare(request)
-            await ws.send_json({
-                "type": "error",
-                "error_type": "origin_rejected",
-                "user_message": "Connection from this origin is not allowed.",
-                "recoverable": False,
-            })
+            await ws.send_json(
+                {
+                    "type": "error",
+                    "error_type": "origin_rejected",
+                    "user_message": "Connection from this origin is not allowed.",
+                    "recoverable": False,
+                }
+            )
             await ws.close()
             return ws
 
@@ -212,16 +219,20 @@ class AgentServer:
             else:
                 ws = web.WebSocketResponse()
                 await ws.prepare(request)
-                await ws.send_json({
-                    "type": "error",
-                    "error_type": "connection_limit",
-                    "user_message": "Another client is already connected",
-                    "recoverable": False,
-                })
+                await ws.send_json(
+                    {
+                        "type": "error",
+                        "error_type": "connection_limit",
+                        "user_message": "Another client is already connected",
+                        "recoverable": False,
+                    }
+                )
                 await ws.close()
                 return ws
 
-        ws = web.WebSocketResponse(heartbeat=30.0, max_msg_size=20 * 1024 * 1024)  # 20MB for image attachments
+        ws = web.WebSocketResponse(
+            heartbeat=30.0, max_msg_size=20 * 1024 * 1024
+        )  # 20MB for image attachments
         await ws.prepare(request)
 
         # --- FIRST-MESSAGE AUTH HANDSHAKE ---
@@ -230,12 +241,14 @@ class AgentServer:
             auth_msg = await ws.receive(timeout=10.0)
         except asyncio.TimeoutError:
             logger.warning(f"[SERVER] Auth handshake timed out from {request.remote}")
-            await ws.send_json({
-                "type": "error",
-                "error_type": "auth_failed",
-                "user_message": "Authentication timed out.",
-                "recoverable": False,
-            })
+            await ws.send_json(
+                {
+                    "type": "error",
+                    "error_type": "auth_failed",
+                    "user_message": "Authentication timed out.",
+                    "recoverable": False,
+                }
+            )
             await ws.close()
             return ws
 
@@ -243,12 +256,14 @@ class AgentServer:
             logger.warning(f"[SERVER] Expected text auth message, got {auth_msg.type}")
             if not ws.closed:
                 try:
-                    await ws.send_json({
-                        "type": "error",
-                        "error_type": "auth_failed",
-                        "user_message": "Authentication failed.",
-                        "recoverable": False,
-                    })
+                    await ws.send_json(
+                        {
+                            "type": "error",
+                            "error_type": "auth_failed",
+                            "user_message": "Authentication failed.",
+                            "recoverable": False,
+                        }
+                    )
                 except Exception:
                     pass
                 await ws.close()
@@ -264,12 +279,14 @@ class AgentServer:
 
         if auth_type != "auth" or not hmac.compare_digest(str(client_token), self._auth_token):
             logger.warning(f"[SERVER] Rejected unauthenticated WebSocket from {request.remote}")
-            await ws.send_json({
-                "type": "error",
-                "error_type": "auth_failed",
-                "user_message": "Authentication failed.",
-                "recoverable": False,
-            })
+            await ws.send_json(
+                {
+                    "type": "error",
+                    "error_type": "auth_failed",
+                    "user_message": "Authentication failed.",
+                    "recoverable": False,
+                }
+            )
             await ws.close()
             return ws
 
@@ -299,7 +316,7 @@ class AgentServer:
 
         try:
             # Send session info (also serves as auth_ok acknowledgment)
-            model_name = getattr(self._agent, 'model_name', 'unknown')
+            model_name = getattr(self._agent, "model_name", "unknown")
 
             permission_mode = self._agent.get_permission_mode() if self._agent else "normal"
             auto_approve_categories = (
@@ -356,7 +373,9 @@ class AgentServer:
                 protocol.reset()
 
                 # Extract content and images from the chat message dict
-                chat_content = chat_msg.get("content", "") if isinstance(chat_msg, dict) else str(chat_msg)
+                chat_content = (
+                    chat_msg.get("content", "") if isinstance(chat_msg, dict) else str(chat_msg)
+                )
                 raw_images = chat_msg.get("images", []) if isinstance(chat_msg, dict) else []
 
                 # Build Attachment objects from images
@@ -365,6 +384,7 @@ class AgentServer:
                     import base64 as b64
 
                     from src.core.attachment import Attachment
+
                     attachments = []
                     for img in raw_images:
                         data_url = img.get("data_url", "")
@@ -372,12 +392,14 @@ class AgentServer:
                         raw_bytes = b""
                         if ";base64," in data_url:
                             raw_bytes = b64.b64decode(data_url.split(";base64,", 1)[1])
-                        attachments.append(Attachment(
-                            kind="image",
-                            data=raw_bytes,
-                            mime=img.get("mime", "image/png"),
-                            filename=img.get("filename", "screenshot.png"),
-                        ))
+                        attachments.append(
+                            Attachment(
+                                kind="image",
+                                data=raw_bytes,
+                                mime=img.get("mime", "image/png"),
+                                filename=img.get("filename", "screenshot.png"),
+                            )
+                        )
 
                 # Stream the response
                 logger.info(f"[SERVER] Processing chat: {chat_content[:80]}...")
@@ -392,12 +414,14 @@ class AgentServer:
                     logger.info("[SERVER] Stream cancelled")
                 except Exception as e:
                     logger.error(f"[SERVER] Stream error: {e}")
-                    await protocol._send_json({
-                        "type": "error",
-                        "error_type": "api_error",
-                        "user_message": "An internal error occurred. Check server logs for details.",
-                        "recoverable": True,
-                    })
+                    await protocol._send_json(
+                        {
+                            "type": "error",
+                            "error_type": "api_error",
+                            "user_message": "An internal error occurred. Check server logs for details.",
+                            "recoverable": True,
+                        }
+                    )
 
         finally:
             receive_task.cancel()
@@ -435,7 +459,7 @@ class AgentServer:
         self._session_id = new_session_id
 
         # 5. Send session_info so client clears chat and shows new session
-        model_name = getattr(self._agent, 'model_name', 'unknown')
+        model_name = getattr(self._agent, "model_name", "unknown")
         permission_mode = self._agent.get_permission_mode()
         auto_approve_categories = self._agent.get_auto_approve_categories()
         await protocol.send_session_info(
@@ -467,30 +491,34 @@ class AgentServer:
                 # Skip the currently active session
                 if s.session_id == self._session_id:
                     continue
-                sessions_data.append({
-                    "session_id": s.session_id,
-                    "first_message": s.display_title,
-                    "message_count": s.message_count,
-                    "updated_at": s.updated_at.isoformat(),
-                    "git_branch": s.git_branch,
-                })
+                sessions_data.append(
+                    {
+                        "session_id": s.session_id,
+                        "first_message": s.display_title,
+                        "message_count": s.message_count,
+                        "updated_at": s.updated_at.isoformat(),
+                        "git_branch": s.git_branch,
+                    }
+                )
 
-            await protocol._send_json({
-                "type": "sessions_list",
-                "sessions": sessions_data,
-            })
+            await protocol._send_json(
+                {
+                    "type": "sessions_list",
+                    "sessions": sessions_data,
+                }
+            )
         except Exception as e:
             logger.error(f"[SERVER] Error listing sessions: {e}")
-            await protocol._send_json({
-                "type": "error",
-                "error_type": "session_list_error",
-                "user_message": f"Failed to list sessions: {e}",
-                "recoverable": True,
-            })
+            await protocol._send_json(
+                {
+                    "type": "error",
+                    "error_type": "session_list_error",
+                    "user_message": f"Failed to list sessions: {e}",
+                    "recoverable": True,
+                }
+            )
 
-    async def _resume_session(
-        self, protocol: WebSocketProtocol, session_id: str
-    ) -> None:
+    async def _resume_session(self, protocol: WebSocketProtocol, session_id: str) -> None:
         """Resume a previous session by session_id.
 
         Finds the JSONL file, hydrates via agent.resume_session_from_jsonl(),
@@ -512,12 +540,14 @@ class AgentServer:
             jsonl_path = flat_path
 
         if not jsonl_path:
-            await protocol._send_json({
-                "type": "error",
-                "error_type": "session_not_found",
-                "user_message": f"Session not found: {session_id}",
-                "recoverable": True,
-            })
+            await protocol._send_json(
+                {
+                    "type": "error",
+                    "error_type": "session_not_found",
+                    "user_message": f"Session not found: {session_id}",
+                    "recoverable": True,
+                }
+            )
             return
 
         try:
@@ -551,7 +581,8 @@ class AgentServer:
                 if isinstance(content, list):
                     # Multimodal: extract text parts only
                     content = " ".join(
-                        p.get("text", "") for p in content
+                        p.get("text", "")
+                        for p in content
                         if isinstance(p, dict) and p.get("type") == "text"
                     )
                 replay_msg = {
@@ -573,7 +604,7 @@ class AgentServer:
                     replay_msg["tool_call_id"] = msg.tool_call_id
                 if msg.meta:
                     meta = {}
-                    if hasattr(msg.meta, 'stop_reason') and msg.meta.stop_reason:
+                    if hasattr(msg.meta, "stop_reason") and msg.meta.stop_reason:
                         meta["status"] = msg.meta.stop_reason
                     if meta:
                         replay_msg["meta"] = meta
@@ -581,7 +612,7 @@ class AgentServer:
 
             # Send session_info FIRST so client clears old chat state
             # and updates currentSessionId before history arrives
-            model_name = getattr(self._agent, 'model_name', 'unknown')
+            model_name = getattr(self._agent, "model_name", "unknown")
             permission_mode = self._agent.get_permission_mode()
             auto_approve_categories = self._agent.get_auto_approve_categories()
             await protocol.send_session_info(
@@ -593,24 +624,25 @@ class AgentServer:
             )
 
             # Then send batch history for the client to render
-            await protocol._send_json({
-                "type": "session_history",
-                "messages": replay_messages,
-            })
-
-            logger.info(
-                f"[SERVER] Session resumed: {session_id} "
-                f"({len(replay_messages)} messages)"
+            await protocol._send_json(
+                {
+                    "type": "session_history",
+                    "messages": replay_messages,
+                }
             )
+
+            logger.info(f"[SERVER] Session resumed: {session_id} ({len(replay_messages)} messages)")
 
         except Exception as e:
             logger.error(f"[SERVER] Error resuming session {session_id}: {e}")
-            await protocol._send_json({
-                "type": "error",
-                "error_type": "session_resume_error",
-                "user_message": f"Failed to resume session: {e}",
-                "recoverable": True,
-            })
+            await protocol._send_json(
+                {
+                    "type": "error",
+                    "error_type": "session_resume_error",
+                    "user_message": f"Failed to resume session: {e}",
+                    "recoverable": True,
+                }
+            )
 
     def _wire_delegation_tool(self, protocol: WebSocketProtocol) -> None:
         """Wire the delegation tool with a ServerSubagentBridge + protocol.

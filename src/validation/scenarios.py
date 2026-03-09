@@ -19,7 +19,6 @@ EASY_CLI_WEATHER = ValidationScenario(
     difficulty=DifficultyLevel.EASY,
     estimated_hours=2.0,
     tags=["cli", "api", "caching", "sqlite"],
-
     prompt="""Build a command-line weather tool with the following features:
 
 **Core Requirements:**
@@ -74,23 +73,20 @@ python weather.py "London" --clear-cache
 - requirements.txt (dependencies)
 
 Work in the current directory and create all files here.""",
-
     context_files=[],
-
     success_criteria=SuccessCriteria(
         required_files=["weather.py", "test_weather.py", "README.md", "requirements.txt"],
         tests_must_pass=True,
         min_test_count=5,
-        must_have_readme=True
+        must_have_readme=True,
     ),
-
     validation_steps=[
         ValidationStep(
             type=StepType.BASH,
             description="Check help text works",
             command="python weather.py --help",
             expected_exit_code=0,
-            timeout_seconds=10
+            timeout_seconds=10,
         ),
         ValidationStep(
             type=StepType.PYTEST,
@@ -100,16 +96,10 @@ Work in the current directory and create all files here.""",
             type=StepType.INSPECT,
             description="Verify error handling exists",
             file_path="weather.py",
-            check_criteria="has_error_handling"
+            check_criteria="has_error_handling",
         ),
     ],
-
-    scoring_weights={
-        "completeness": 0.30,
-        "correctness": 0.35,
-        "quality": 0.20,
-        "autonomy": 0.15
-    }
+    scoring_weights={"completeness": 0.30, "correctness": 0.35, "quality": 0.20, "autonomy": 0.15},
 )
 
 
@@ -123,7 +113,6 @@ MEDIUM_REST_API = ValidationScenario(
     difficulty=DifficultyLevel.MEDIUM,
     estimated_hours=4.0,
     tags=["api", "rest", "authentication", "database", "jwt"],
-
     prompt="""Create a RESTful API for task management with authentication.
 
 **Database Models:**
@@ -214,16 +203,13 @@ MEDIUM_REST_API = ValidationScenario(
 - requirements.txt (dependencies)
 
 Work in the current directory and create all files here.""",
-
     context_files=[],
-
     success_criteria=SuccessCriteria(
         required_files=["app.py", "models.py", "test_api.py", "README.md", "requirements.txt"],
         tests_must_pass=True,
         min_test_count=15,
-        must_have_readme=True
+        must_have_readme=True,
     ),
-
     validation_steps=[
         ValidationStep(
             type=StepType.PYTEST,
@@ -233,16 +219,10 @@ Work in the current directory and create all files here.""",
             type=StepType.INSPECT,
             description="Verify password hashing",
             file_path="auth.py",
-            check_criteria="has_error_handling"
+            check_criteria="has_error_handling",
         ),
     ],
-
-    scoring_weights={
-        "completeness": 0.35,
-        "correctness": 0.35,
-        "quality": 0.20,
-        "autonomy": 0.10
-    }
+    scoring_weights={"completeness": 0.35, "correctness": 0.35, "quality": 0.20, "autonomy": 0.10},
 )
 
 
@@ -256,7 +236,6 @@ HARD_WEB_SCRAPER = ValidationScenario(
     difficulty=DifficultyLevel.HARD,
     estimated_hours=6.0,
     tags=["scraping", "database", "analytics", "scheduling", "reporting"],
-
     prompt="""Build a web scraping system that extracts Hacker News articles and generates analytics.
 
 **Core Features:**
@@ -353,9 +332,7 @@ HARD_WEB_SCRAPER = ValidationScenario(
 - config.json or config.yaml (configuration)
 
 Work in the current directory and create all files here.""",
-
     context_files=[],
-
     success_criteria=SuccessCriteria(
         required_files=[
             "scraper.py",
@@ -366,20 +343,19 @@ Work in the current directory and create all files here.""",
             "test_scraper.py",
             "test_analytics.py",
             "README.md",
-            "requirements.txt"
+            "requirements.txt",
         ],
         tests_must_pass=True,
         min_test_count=20,
-        must_have_readme=True
+        must_have_readme=True,
     ),
-
     validation_steps=[
         ValidationStep(
             type=StepType.BASH,
             description="Check CLI help works",
             command="python cli.py --help",
             expected_exit_code=0,
-            timeout_seconds=10
+            timeout_seconds=10,
         ),
         ValidationStep(
             type=StepType.PYTEST,
@@ -389,16 +365,10 @@ Work in the current directory and create all files here.""",
             type=StepType.INSPECT,
             description="Verify logging exists",
             file_path="scraper.py",
-            check_criteria="has_error_handling"
+            check_criteria="has_error_handling",
         ),
     ],
-
-    scoring_weights={
-        "completeness": 0.40,
-        "correctness": 0.30,
-        "quality": 0.20,
-        "autonomy": 0.10
-    }
+    scoring_weights={"completeness": 0.40, "correctness": 0.30, "quality": 0.20, "autonomy": 0.10},
 )
 
 

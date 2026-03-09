@@ -33,7 +33,7 @@ class ConversationSession:
         working_directory: Path,
         agent: CodingAgent,
         log_file: Path | None = None,
-        controller: Any | None = None
+        controller: Any | None = None,
     ):
         """
         Initialize conversation session.
@@ -74,11 +74,7 @@ class ConversationSession:
             AgentResponse with agent's reply and metadata
         """
         # Add user message to history
-        user_message = AgentMessage(
-            role="user",
-            content=content,
-            timestamp=datetime.now()
-        )
+        user_message = AgentMessage(role="user", content=content, timestamp=datetime.now())
         self.messages.append(user_message)
 
         # Send to agent and capture response
@@ -99,7 +95,7 @@ class ConversationSession:
                 files_generated=[],
                 tool_calls=[],
                 success=False,
-                error=f"{type(e).__name__}: {str(e)}"
+                error=f"{type(e).__name__}: {str(e)}",
             )
 
         # Add assistant message to history
@@ -110,8 +106,8 @@ class ConversationSession:
             metadata={
                 "files_generated": response.files_generated,
                 "tool_calls_count": len(response.tool_calls),
-                "success": response.success
-            }
+                "success": response.success,
+            },
         )
         self.messages.append(assistant_message)
 
@@ -133,7 +129,7 @@ class ConversationSession:
         files = []
 
         # Check if agent has tool execution history
-        if not hasattr(self.agent, 'tool_execution_history'):
+        if not hasattr(self.agent, "tool_execution_history"):
             return files
 
         # Parse tool execution history
@@ -161,7 +157,7 @@ class ConversationSession:
         Returns:
             list of tool call dictionaries with tool name, arguments, and success status
         """
-        if not hasattr(self.agent, 'tool_execution_history'):
+        if not hasattr(self.agent, "tool_execution_history"):
             return []
 
         # Return copy of tool execution history
@@ -197,7 +193,7 @@ class ConversationSession:
 
         # Save to JSON file
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(log_path, 'w', encoding='utf-8') as f:
+        with open(log_path, "w", encoding="utf-8") as f:
             f.write(log.to_json(pretty=True))
 
         return log_path
@@ -218,17 +214,14 @@ class ConversationSession:
             metadata={
                 "working_directory": str(self.working_directory),
                 "log_file": str(self.log_file) if self.log_file else None,
-                "agent_model": getattr(self.agent, 'model_name', 'unknown')
-            }
+                "agent_model": getattr(self.agent, "model_name", "unknown"),
+            },
         )
 
     # Checkpoint API Methods
 
     def save_checkpoint(
-        self,
-        description: str,
-        phase: str | None = None,
-        pending_tasks: list[str] | None = None
+        self, description: str, phase: str | None = None, pending_tasks: list[str] | None = None
     ) -> str:
         """
         Save checkpoint programmatically (API method).
@@ -254,9 +247,7 @@ class ConversationSession:
             )
 
         checkpoint_id = self.controller.create_checkpoint(
-            description=description,
-            current_phase=phase,
-            pending_tasks=pending_tasks
+            description=description, current_phase=phase, pending_tasks=pending_tasks
         )
 
         if not checkpoint_id:
@@ -322,13 +313,15 @@ class ConversationSession:
             # Convert checkpoint working_memory to AgentMessage objects
             for msg_dict in checkpoint.working_memory:
                 timestamp_str = msg_dict.get("timestamp")
-                timestamp = datetime.fromisoformat(timestamp_str) if timestamp_str else datetime.now()
+                timestamp = (
+                    datetime.fromisoformat(timestamp_str) if timestamp_str else datetime.now()
+                )
 
                 message = AgentMessage(
                     role=msg_dict["role"],
                     content=msg_dict["content"],
                     timestamp=timestamp,
-                    metadata=msg_dict.get("metadata", {})
+                    metadata=msg_dict.get("metadata", {}),
                 )
                 self.messages.append(message)
 

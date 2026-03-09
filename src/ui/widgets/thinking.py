@@ -82,12 +82,7 @@ class ThinkingBlock(Static):
     # Preview length when collapsed
     PREVIEW_LENGTH = 100
 
-    def __init__(
-        self,
-        content: str = "",
-        expanded: bool = False,
-        **kwargs
-    ):
+    def __init__(self, content: str = "", expanded: bool = False, **kwargs):
         """
         Initialize ThinkingBlock.
 
@@ -169,7 +164,7 @@ class ThinkingBlock(Static):
             return "..."
 
         # Take first N characters, clean up
-        preview = self.content[:self.PREVIEW_LENGTH]
+        preview = self.content[: self.PREVIEW_LENGTH]
         preview = preview.replace("\n", " ").strip()
 
         if len(self.content) > self.PREVIEW_LENGTH:

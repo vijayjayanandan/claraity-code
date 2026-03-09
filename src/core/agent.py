@@ -89,44 +89,60 @@ try:
         start_trace,
         update_trace,
     )
+
     OBSERVABILITY_AVAILABLE = True
 except ImportError:
     OBSERVABILITY_AVAILABLE = False
+
     # No-op decorators if observability not available
     def observe_agent_method(name, **kwargs):
         def decorator(func):
             return func
+
         return decorator
+
     def observe_tool_execution(name, **kwargs):
         def decorator(func):
             return func
+
         return decorator
+
     def start_trace(*args, **kwargs):
         pass
+
     def update_trace(*args, **kwargs):
         pass
+
     def record_llm_latency(*args, **kwargs):
         pass
+
     def record_token_usage(*args, **kwargs):
         pass
+
     def record_tool_metric(*args, **kwargs):
         pass
+
     def bind_context(**kwargs):
         pass
+
     def clear_context():
         pass
+
     def new_request_id():
-        return ''
+        return ""
+
     def get_logger(name=None):
         # Fallback when observability not available - use standard logging
         import logging
+
         return logging.getLogger(name or __name__)
+
     class ErrorCategory:
-        PROVIDER_TIMEOUT = 'provider_timeout'
-        PROVIDER_ERROR = 'provider_error'
-        TOOL_TIMEOUT = 'tool_timeout'
-        TOOL_ERROR = 'tool_error'
-        UNEXPECTED = 'unexpected'
+        PROVIDER_TIMEOUT = "provider_timeout"
+        PROVIDER_ERROR = "provider_error"
+        TOOL_TIMEOUT = "tool_timeout"
+        TOOL_ERROR = "tool_error"
+        UNEXPECTED = "unexpected"
 
 
 # Module-level logger for agent operations (use structlog if available)
@@ -160,9 +176,9 @@ class CodingAgent(AgentInterface):
     def todo_state(self) -> dict[str, Any]:
         """Backward-compat dict view for context_builder, pause logic, UI."""
         return {
-            'todos': self.task_state.get_todos_list(),
-            'current_todo_id': self.task_state.current_task_id,
-            'last_stop_reason': self.task_state.last_stop_reason,
+            "todos": self.task_state.get_todos_list(),
+            "current_todo_id": self.task_state.current_task_id,
+            "last_stop_reason": self.task_state.last_stop_reason,
         }
 
     @property
@@ -190,7 +206,7 @@ class CodingAgent(AgentInterface):
         thinking_budget: int | None = None,
         load_file_memories: bool = True,
         permission_mode: str = "normal",
-        hook_manager: Optional['HookManager'] = None,
+        hook_manager: Optional["HookManager"] = None,
     ):
         """
         Initialize coding agent.
@@ -226,8 +242,12 @@ class CodingAgent(AgentInterface):
             base_url=base_url,
             context_window=context_window,
             num_ctx=context_window,
-            temperature=temperature if temperature is not None else float(os.getenv("LLM_TEMPERATURE", "0.2")),
-            max_tokens=max_tokens if max_tokens is not None else int(os.getenv("LLM_MAX_TOKENS", "16384")),
+            temperature=temperature
+            if temperature is not None
+            else float(os.getenv("LLM_TEMPERATURE", "0.2")),
+            max_tokens=max_tokens
+            if max_tokens is not None
+            else int(os.getenv("LLM_MAX_TOKENS", "16384")),
             top_p=top_p if top_p is not None else float(os.getenv("LLM_TOP_P", "0.95")),
             thinking_budget=thinking_budget,
         )
@@ -236,12 +256,11 @@ class CodingAgent(AgentInterface):
             self.llm: LLMBackend = OllamaBackend(llm_config)
         elif backend == "openai":
             self.llm: LLMBackend = OpenAIBackend(
-                llm_config,
-                api_key=api_key,
-                api_key_env=api_key_env
+                llm_config, api_key=api_key, api_key_env=api_key_env
             )
         elif backend == "anthropic":
             from src.llm.anthropic_backend import AnthropicBackend
+
             self.llm: LLMBackend = AnthropicBackend(
                 llm_config,
                 api_key=api_key,
@@ -278,15 +297,14 @@ class CodingAgent(AgentInterface):
 
         # Initialize plan mode state (Claude Code-style planning workflow)
         # Must be initialized before tools registration since plan mode tools need it
-        self.plan_mode_state = PlanModeState(
-            clarity_dir=self.working_directory / ".clarity"
-        )
+        self.plan_mode_state = PlanModeState(clarity_dir=self.working_directory / ".clarity")
 
         # Session ID for plan mode (will be set when session starts)
         self._session_id: str | None = None
 
         # Initialize director adapter (disciplined workflow mode)
         from src.director.adapter import DirectorAdapter
+
         self.director_adapter = DirectorAdapter()
 
         # Initialize background task registry (always available)
@@ -299,11 +317,13 @@ class CodingAgent(AgentInterface):
         # MCP connection manager (lazy - no connections at init time)
         # Connections added via enable_mcp_integration()
         from src.integrations.mcp.manager import McpConnectionManager
+
         self._mcp_manager = McpConnectionManager()
         self._tools_cache = None  # Invalidated when tools are registered/unregistered
 
         # Set workspace root on file operation tools so path validation works
         from src.tools.file_operations import FileOperationTool
+
         FileOperationTool._workspace_root = self.working_directory
 
         # Initialize tool parser
@@ -322,7 +342,7 @@ class CodingAgent(AgentInterface):
         # Initialize file reference parser
         self.file_reference_parser = FileReferenceParser(
             base_dir=self.working_directory,
-            max_file_size=100_000  # 100K chars max
+            max_file_size=100_000,  # 100K chars max
         )
 
         # Initialize permission manager
@@ -335,6 +355,7 @@ class CodingAgent(AgentInterface):
 
         # Centralized tool gating service (used by both sync and async tool loops)
         from src.core.tool_gating import ToolGatingService
+
         self._gating = ToolGatingService(
             plan_mode_state=self.plan_mode_state,
             director_adapter=self.director_adapter,
@@ -345,6 +366,7 @@ class CodingAgent(AgentInterface):
 
         # Special tool handlers (clarify, plan approval, director plan approval)
         from src.core.special_tool_handlers import SpecialToolHandlers
+
         self._special_handlers = SpecialToolHandlers(
             memory=self.memory,
             plan_mode_state=self.plan_mode_state,
@@ -355,20 +377,19 @@ class CodingAgent(AgentInterface):
 
         # Initialize subagent manager (lazy import to avoid circular dependency)
         from src.subagents import SubAgentManager
+
         self.subagent_manager = SubAgentManager(
             main_agent=self,
             working_directory=self.working_directory,
             max_parallel_workers=4,
-            enable_auto_delegation=True
+            enable_auto_delegation=True,
         )
 
         # Discover available subagents
         self.subagent_manager.discover_subagents()
 
         # Register delegation tool (now that subagent_manager is initialized)
-        self.tool_executor.register_tool(
-            DelegateToSubagentTool(self.subagent_manager)
-        )
+        self.tool_executor.register_tool(DelegateToSubagentTool(self.subagent_manager))
 
         # Register director checkpoint tools
         from src.director.tools import (
@@ -377,6 +398,7 @@ class CodingAgent(AgentInterface):
             DirectorCompleteSliceTool,
             DirectorCompleteUnderstandTool,
         )
+
         self.tool_executor.register_tool(DirectorCompleteUnderstandTool(self.director_adapter))
         self.tool_executor.register_tool(DirectorCompletePlanTool(self.director_adapter))
         self.tool_executor.register_tool(DirectorCompleteSliceTool(self.director_adapter))
@@ -391,8 +413,8 @@ class CodingAgent(AgentInterface):
                     config={
                         "backend": backend,
                         "context_window": context_window,
-                        "permission_mode": permission_mode
-                    }
+                        "permission_mode": permission_mode,
+                    },
                 )
 
             except Exception as e:
@@ -465,8 +487,7 @@ class CodingAgent(AgentInterface):
         # 3. Generate session ID if not provided
         if session_id is None:
             session_id = (
-                f"session-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-                f"-{uuid.uuid4().hex[:8]}"
+                f"session-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
             )
 
         # 4. Create MessageStore if not provided
@@ -478,7 +499,7 @@ class CodingAgent(AgentInterface):
         agent.memory.set_message_store(message_store, session_id)
 
         # 6. Apply subagent LLM overrides from config
-        if config.subagents and hasattr(agent, 'subagent_manager'):
+        if config.subagents and hasattr(agent, "subagent_manager"):
             agent.subagent_manager.config_loader.apply_llm_overrides(config)
 
         return agent
@@ -510,11 +531,11 @@ class CodingAgent(AgentInterface):
         self._session_id = session_id
 
         # Reset plan mode state for new sessions to avoid stale state
-        if is_new_session and hasattr(self, 'plan_mode_state'):
+        if is_new_session and hasattr(self, "plan_mode_state"):
             self.plan_mode_state.reset()
 
         # Update the plan mode tool with the session ID
-        if hasattr(self, '_enter_plan_mode_tool'):
+        if hasattr(self, "_enter_plan_mode_tool"):
             self._enter_plan_mode_tool.session_id = session_id
 
         # Enable task state file persistence for this session
@@ -691,11 +712,13 @@ class CodingAgent(AgentInterface):
 
         # Testing & Validation tools
         from src.testing.validation_tool import DetectTestFrameworkTool, RunTestsTool
+
         self.tool_executor.register_tool(RunTestsTool())
         self.tool_executor.register_tool(DetectTestFrameworkTool())
 
         # Web tools (search and fetch)
         from src.tools.web_tools import RunBudget, WebFetchTool, WebSearchTool
+
         self._web_run_budget = RunBudget(max_searches=3, max_fetches=5)
         self._web_search_tool = WebSearchTool()
         self._web_fetch_tool = WebFetchTool()
@@ -706,10 +729,12 @@ class CodingAgent(AgentInterface):
 
         # Background task tools (check status/output of background commands)
         from src.tools.background_tools import CheckBackgroundTaskTool
+
         self.tool_executor.register_tool(CheckBackgroundTaskTool(self._bg_registry))
 
         # Clarify tool (interactive questions handled by SpecialToolHandlers)
         from src.tools.clarify_tool import ClarifyTool
+
         self.tool_executor.register_tool(ClarifyTool())
 
         # Plan mode tools (Claude Code-style planning workflow)
@@ -717,7 +742,7 @@ class CodingAgent(AgentInterface):
         # They are registered here but the state is passed during execution
         self._enter_plan_mode_tool = EnterPlanModeTool(
             plan_mode_state=self.plan_mode_state,
-            session_id=None  # Will be set when session starts
+            session_id=None,  # Will be set when session starts
         )
         self._request_plan_approval_tool = RequestPlanApprovalTool(
             plan_mode_state=self.plan_mode_state
@@ -740,6 +765,7 @@ class CodingAgent(AgentInterface):
             return self._tools_cache
         from src.integrations.mcp.bridge import McpBridgeTool
         from src.llm.base import ToolDefinition
+
         native_defs = [
             ToolDefinition(**t.get_schema())
             for t in self.tool_executor.tools.values()
@@ -808,6 +834,7 @@ class CodingAgent(AgentInterface):
         """
         from src.core.tool_status import ToolStatus as CoreToolStatus
         from src.observability import get_logger
+
         logger = get_logger("agent")
 
         logger.debug(f"[ORPHAN_CHECK] Scanning context with {len(context)} messages")
@@ -849,7 +876,7 @@ class CodingAgent(AgentInterface):
                 "role": "tool",
                 "tool_call_id": tc_id,
                 "name": tc_name,
-                "content": "Tool call rejected by user."
+                "content": "Tool call rejected by user.",
             }
             existing_tool_results[tc_id] = synthetic_msg
 
@@ -878,7 +905,7 @@ class CodingAgent(AgentInterface):
             if self.memory.message_store:
                 self.memory.message_store.update_tool_state(
                     tc_id,
-                    CoreToolStatus.ERROR  # Mark as error since it was interrupted
+                    CoreToolStatus.ERROR,  # Mark as error since it was interrupted
                 )
 
         # CRITICAL: Rebuild context with tool_results in correct positions
@@ -916,8 +943,15 @@ class CodingAgent(AgentInterface):
     # -> SpecialToolHandlers (Phase 3 refactor)
 
     async def _handle_error_budget_pause(
-        self, reason, tool_name, call_id, error_context_block,
-        tool_call_count, elapsed_seconds, ui, max_resumes
+        self,
+        reason,
+        tool_name,
+        call_id,
+        error_context_block,
+        tool_call_count,
+        elapsed_seconds,
+        ui,
+        max_resumes,
     ):
         """Handle error budget exceeded pause flow.
 
@@ -935,74 +969,82 @@ class CodingAgent(AgentInterface):
         )
 
         result = {
-            'action': 'break',
-            'events': [],
-            'context_additions': [],
-            'tool_message': None,
-            'user_rejected': False,
+            "action": "break",
+            "events": [],
+            "context_additions": [],
+            "tool_message": None,
+            "user_rejected": False,
         }
 
         # Check approval precedence (don't show pause during approval wait)
         if self._awaiting_approval:
             logger.debug("error budget exceeded but approval pending; deferring pause")
-            result['action'] = 'defer'
-            result['tool_message'] = {
+            result["action"] = "defer"
+            result["tool_message"] = {
                 "role": "tool",
                 "tool_call_id": call_id,
                 "name": tool_name,
-                "content": error_context_block
+                "content": error_context_block,
             }
             return result
 
         # Set state for potential resumption
-        self.task_state.last_stop_reason = 'error_budget'
+        self.task_state.last_stop_reason = "error_budget"
 
         # Check resume cap (prevent infinite Continue loops)
         resume_count = self.task_state.error_budget_resume_count
         progress_since_resume = self.task_state.successful_tools_since_resume
 
         if resume_count >= max_resumes:
-            result['events'].append(TextDelta(content=(
-                f"\n[ERROR] Reached maximum error recovery attempts "
-                f"({max_resumes}). "
-                "Please provide guidance on how to proceed."
-            )))
-            result['user_rejected'] = True
+            result["events"].append(
+                TextDelta(
+                    content=(
+                        f"\n[ERROR] Reached maximum error recovery attempts "
+                        f"({max_resumes}). "
+                        "Please provide guidance on how to proceed."
+                    )
+                )
+            )
+            result["user_rejected"] = True
             return result
 
         # Check for no-progress (resumed but still failing)
-        pause_reason_code = 'error_budget'
+        pause_reason_code = "error_budget"
         if resume_count > 0 and progress_since_resume == 0:
-            pause_reason_code = 'error_budget_no_progress'
+            pause_reason_code = "error_budget_no_progress"
             reason = f"{reason} (no progress since last resume)"
 
         # Check if UI supports interactive pause
-        if hasattr(ui, 'has_pause_capability') and ui.has_pause_capability():
+        if hasattr(ui, "has_pause_capability") and ui.has_pause_capability():
             pending_todos = self.task_state.get_pending_summary()
             error_stats = self._error_tracker.get_stats()
             stats = {
-                'tool_calls': tool_call_count,
-                'elapsed_s': elapsed_seconds,
-                'errors_total': error_stats['total_failures'],
-                'error_reason': reason,
+                "tool_calls": tool_call_count,
+                "elapsed_s": elapsed_seconds,
+                "errors_total": error_stats["total_failures"],
+                "error_reason": reason,
             }
 
-            result['events'].append(PausePromptStart(
-                reason=f"Error budget: {reason}",
-                reason_code=pause_reason_code,
-                pending_todos=pending_todos,
-                stats=stats,
-            ))
+            result["events"].append(
+                PausePromptStart(
+                    reason=f"Error budget: {reason}",
+                    reason_code=pause_reason_code,
+                    pending_todos=pending_todos,
+                    stats=stats,
+                )
+            )
 
             try:
                 pause_result = await ui.wait_for_pause_response(timeout=None)
-                result['events'].append(PausePromptEnd(
-                    continue_work=pause_result.continue_work,
-                    feedback=pause_result.feedback,
-                ))
+                result["events"].append(
+                    PausePromptEnd(
+                        continue_work=pause_result.continue_work,
+                        feedback=pause_result.feedback,
+                    )
+                )
 
                 if not pause_result.continue_work:
-                    result['user_rejected'] = True
+                    result["user_rejected"] = True
                     return result
 
                 # User chose to continue - partial reset
@@ -1010,41 +1052,42 @@ class CodingAgent(AgentInterface):
                 self.task_state.successful_tools_since_resume = 0
                 self._error_tracker.reset_tool_error_counts(tool_name=tool_name)
 
-                result['context_additions'].append({
-                    "role": "system",
-                    "content": "<notice>Continuing after error budget pause. Try a different approach; repeated identical calls are blocked.</notice>"
-                })
+                result["context_additions"].append(
+                    {
+                        "role": "system",
+                        "content": "<notice>Continuing after error budget pause. Try a different approach; repeated identical calls are blocked.</notice>",
+                    }
+                )
 
                 if pause_result.feedback:
-                    result['context_additions'].append({
-                        "role": "user",
-                        "content": f"[User guidance: {pause_result.feedback}]"
-                    })
+                    result["context_additions"].append(
+                        {"role": "user", "content": f"[User guidance: {pause_result.feedback}]"}
+                    )
 
-                result['tool_message'] = {
+                result["tool_message"] = {
                     "role": "tool",
                     "tool_call_id": call_id,
                     "name": tool_name,
-                    "content": error_context_block
+                    "content": error_context_block,
                 }
-                result['action'] = 'continue'
+                result["action"] = "continue"
                 return result
 
             except asyncio.CancelledError:
-                result['user_rejected'] = True
+                result["user_rejected"] = True
                 return result
         else:
             # Fallback - no interactive pause available
-            result['events'].append(TextDelta(content=self._build_pause_message('error_budget')))
-            result['user_rejected'] = False
+            result["events"].append(TextDelta(content=self._build_pause_message("error_budget")))
+            result["user_rejected"] = False
             return result
 
     async def stream_response(
         self,
         user_input: str,
-        ui: 'UIProtocol',
-        attachments: 'list | None' = None,
-    ) -> 'AsyncIterator[UIEvent]':
+        ui: "UIProtocol",
+        attachments: "list | None" = None,
+    ) -> "AsyncIterator[UIEvent]":
         """
         Stream response to UI as typed UIEvent objects.
 
@@ -1096,11 +1139,11 @@ class CodingAgent(AgentInterface):
         # Bind context for logging correlation
         stream_id = str(uuid.uuid4())[:8]
         bind_context(
-            session=self.memory.session_id if hasattr(self.memory, 'session_id') else None,
+            session=self.memory.session_id if hasattr(self.memory, "session_id") else None,
             stream=stream_id,
             request=new_request_id(),
-            comp='core.agent',
-            op='stream_response',
+            comp="core.agent",
+            op="stream_response",
         )
 
         # Reset error tracker at start of each user request
@@ -1138,7 +1181,7 @@ class CodingAgent(AgentInterface):
             file_references = self.file_reference_parser.parse_and_load(user_input)
 
             # Emit FileReadEvent for each loaded file (TUI shows subtle confirmation)
-            for ref in (file_references or []):
+            for ref in file_references or []:
                 if ref.is_loaded:
                     yield FileReadEvent(
                         path=ref.display_path,
@@ -1162,7 +1205,7 @@ class CodingAgent(AgentInterface):
                 task_type="chat",
                 language="python",
                 file_references=file_references if file_references else None,
-                agent_state=self.todo_state if self.todo_state.get('todos') else None,
+                agent_state=self.todo_state if self.todo_state.get("todos") else None,
                 plan_mode_state=self.plan_mode_state,
                 director_adapter=self.director_adapter,
             )
@@ -1199,29 +1242,35 @@ class CodingAgent(AgentInterface):
 
                 if tool_call_count >= MAX_TOOL_CALLS:
                     pause_reason = f"Tool limit reached ({tool_call_count}/{MAX_TOOL_CALLS})"
-                    pause_reason_code = 'max_tool_calls'
+                    pause_reason_code = "max_tool_calls"
                 elif MAX_WALL_TIME_SECONDS and elapsed_seconds >= MAX_WALL_TIME_SECONDS:
-                    pause_reason = f"Time limit reached ({elapsed_seconds:.0f}s/{MAX_WALL_TIME_SECONDS}s)"
-                    pause_reason_code = 'max_wall_time'
+                    pause_reason = (
+                        f"Time limit reached ({elapsed_seconds:.0f}s/{MAX_WALL_TIME_SECONDS}s)"
+                    )
+                    pause_reason_code = "max_wall_time"
                 elif iteration >= ABSOLUTE_MAX_ITERATIONS:
-                    pause_reason = f"Iteration limit reached ({iteration}/{ABSOLUTE_MAX_ITERATIONS})"
-                    pause_reason_code = 'max_iterations'
+                    pause_reason = (
+                        f"Iteration limit reached ({iteration}/{ABSOLUTE_MAX_ITERATIONS})"
+                    )
+                    pause_reason_code = "max_iterations"
                 elif ui.check_interrupted():
                     pause_reason = "User interrupted"
-                    pause_reason_code = 'user_interrupt'
+                    pause_reason_code = "user_interrupt"
 
                 # Handle pause if limit was hit
                 if pause_reason_code:
                     # Check if we've exceeded max continues (safety cap)
                     if pause_continue_count >= MAX_PAUSE_CONTINUES:
-                        yield TextDelta(content=f"\n\n---\n**Stopped**: Maximum continues ({MAX_PAUSE_CONTINUES}) reached. Start a new message to continue.\n")
+                        yield TextDelta(
+                            content=f"\n\n---\n**Stopped**: Maximum continues ({MAX_PAUSE_CONTINUES}) reached. Start a new message to continue.\n"
+                        )
                         break
 
                     # Set state for potential resumption
                     self.task_state.last_stop_reason = pause_reason_code
 
                     # Check if UI supports interactive pause
-                    if hasattr(ui, 'has_pause_capability') and ui.has_pause_capability():
+                    if hasattr(ui, "has_pause_capability") and ui.has_pause_capability():
                         # TUI mode - use interactive widget
                         pending_todos = self.task_state.get_pending_summary()
 
@@ -1253,10 +1302,12 @@ class CodingAgent(AgentInterface):
 
                             # Inject feedback into context if provided
                             if result.feedback:
-                                current_context.append({
-                                    "role": "user",
-                                    "content": f"[User guidance after pause: {result.feedback}]"
-                                })
+                                current_context.append(
+                                    {
+                                        "role": "user",
+                                        "content": f"[User guidance after pause: {result.feedback}]",
+                                    }
+                                )
 
                             # Continue the loop instead of breaking
                             continue
@@ -1286,8 +1337,7 @@ class CodingAgent(AgentInterface):
                     # === UNIFIED ARCHITECTURE: Use ProviderDelta + StreamingPipeline ===
                     # 1. Start assistant stream through MemoryManager
                     self.memory.start_assistant_stream(
-                        provider=self.backend_name,
-                        model=self.model_name
+                        provider=self.backend_name, model=self.model_name
                     )
 
                     # 2. Get LLM stream - yields ProviderDelta objects
@@ -1343,7 +1393,11 @@ class CodingAgent(AgentInterface):
                         tool_calls = finalized_message.tool_calls
 
                     # Derive response_content from pipeline (single source of truth)
-                    response_content = (finalized_message.content or "") if finalized_message else self.memory.get_partial_text()
+                    response_content = (
+                        (finalized_message.content or "")
+                        if finalized_message
+                        else self.memory.get_partial_text()
+                    )
 
                     response_reasoning = (
                         finalized_message.meta.reasoning_content
@@ -1362,9 +1416,12 @@ class CodingAgent(AgentInterface):
                     )
 
                     # Emit context usage update with real token count from LLM
-                    if (last_usage and last_usage.get("input_tokens") is not None
+                    if (
+                        last_usage
+                        and last_usage.get("input_tokens") is not None
                         and self.context_builder
-                        and self.context_builder.max_context_tokens > 0):
+                        and self.context_builder.max_context_tokens > 0
+                    ):
                         input_tokens = last_usage.get("input_tokens")
                         pressure_level = self._get_pressure_level(input_tokens)
 
@@ -1406,8 +1463,12 @@ class CodingAgent(AgentInterface):
                                         user_query=user_input,
                                         task_type="chat",
                                         language="python",
-                                        file_references=file_references if file_references else None,
-                                        agent_state=self.todo_state if self.todo_state.get('todos') else None,
+                                        file_references=file_references
+                                        if file_references
+                                        else None,
+                                        agent_state=self.todo_state
+                                        if self.todo_state.get("todos")
+                                        else None,
                                         plan_mode_state=self.plan_mode_state,
                                         director_adapter=self.director_adapter,
                                     )
@@ -1433,8 +1494,12 @@ class CodingAgent(AgentInterface):
                     error_msg = str(e).strip() or repr(e)
 
                     # Determine error category
-                    is_timeout = 'timeout' in error_type.lower()
-                    category = ErrorCategory.PROVIDER_TIMEOUT if is_timeout else ErrorCategory.PROVIDER_ERROR
+                    is_timeout = "timeout" in error_type.lower()
+                    category = (
+                        ErrorCategory.PROVIDER_TIMEOUT
+                        if is_timeout
+                        else ErrorCategory.PROVIDER_ERROR
+                    )
 
                     # Find root cause in exception chain
                     root_cause = e
@@ -1451,6 +1516,7 @@ class CodingAgent(AgentInterface):
 
                     from src.observability.error_store import ErrorCategory as StoreCategory
                     from src.observability.error_store import get_error_store
+
                     error_store = get_error_store()
                     error_id = error_store.record_from_dict(
                         level="ERROR",
@@ -1492,12 +1558,13 @@ class CodingAgent(AgentInterface):
                     # Emit ErrorEvent for TUI visibility (recoverable)
                     # Use root_cause_type (not error_type) to correctly classify wrapped exceptions
                     from src.core.events import ErrorEvent
+
                     yield ErrorEvent(
                         error_type="provider_timeout" if is_timeout else "network",
                         user_message=user_message,
                         error_id=error_id,
                         recoverable=True,
-                        retry_after=None
+                        retry_after=None,
                     )
 
                     # Set provider_error for pause flow (also user-friendly)
@@ -1506,14 +1573,14 @@ class CodingAgent(AgentInterface):
                 # Handle provider error by transitioning to pause state
                 if provider_error:
                     pause_reason = provider_error  # Already user-friendly, no prefix needed
-                    pause_reason_code = 'provider_error'
+                    pause_reason_code = "provider_error"
 
                     # Store any partial response
                     if response_content:
                         self.memory.add_assistant_message(response_content)
 
                     # Transition to pause state (same as other limits)
-                    if hasattr(ui, 'has_pause_capability') and ui.has_pause_capability():
+                    if hasattr(ui, "has_pause_capability") and ui.has_pause_capability():
                         # TUI mode - emit PausePromptStart and wait
                         pending_todos = self.task_state.get_pending_summary()
 
@@ -1522,8 +1589,10 @@ class CodingAgent(AgentInterface):
                             reason_code=pause_reason_code,
                             pending_todos=pending_todos,
                             stats=build_pause_stats(
-                                tool_call_count, time.monotonic() - loop_start_time,
-                                iteration, error=provider_error
+                                tool_call_count,
+                                time.monotonic() - loop_start_time,
+                                iteration,
+                                error=provider_error,
                             ),
                         )
 
@@ -1531,8 +1600,7 @@ class CodingAgent(AgentInterface):
                         try:
                             result = await ui.wait_for_pause_response(timeout=300.0)
                             yield PausePromptEnd(
-                                continue_work=result.continue_work,
-                                feedback=result.feedback
+                                continue_work=result.continue_work, feedback=result.feedback
                             )
                             if not result.continue_work:
                                 # Save partial response to memory so next message has context
@@ -1543,7 +1611,8 @@ class CodingAgent(AgentInterface):
                                         partial = partial[:4000] + "..."
                                     # Tag as timed out for clarity in conversation history
                                     self.memory.add_assistant_message(
-                                        partial + "\n\n[TIMED OUT: Response was cut off due to provider timeout. User chose to stop.]"
+                                        partial
+                                        + "\n\n[TIMED OUT: Response was cut off due to provider timeout. User chose to stop.]"
                                     )
                                 break
                             # User chose to retry - add partial response context so LLM can continue
@@ -1553,15 +1622,19 @@ class CodingAgent(AgentInterface):
                                 if len(partial) > 2000:
                                     partial = "..." + partial[-2000:]
                                 # Add assistant's partial response with anchor delimiter
-                                current_context.append({
-                                    "role": "assistant",
-                                    "content": partial + "\n\n[END OF PARTIAL RESPONSE]"
-                                })
+                                current_context.append(
+                                    {
+                                        "role": "assistant",
+                                        "content": partial + "\n\n[END OF PARTIAL RESPONSE]",
+                                    }
+                                )
                                 # Add continuation instruction (plain text, no fake system prefix)
-                                current_context.append({
-                                    "role": "user",
-                                    "content": "Your previous response was cut off by a timeout. Continue AFTER [END OF PARTIAL RESPONSE]. Do not repeat anything above. If unsure where to resume, ask."
-                                })
+                                current_context.append(
+                                    {
+                                        "role": "user",
+                                        "content": "Your previous response was cut off by a timeout. Continue AFTER [END OF PARTIAL RESPONSE]. Do not repeat anything above. If unsure where to resume, ask.",
+                                    }
+                                )
                                 # Add visual separator in UI so continuation is clearly appended
                                 yield TextDelta(content="\n\n")
                             continue
@@ -1599,9 +1672,9 @@ class CodingAgent(AgentInterface):
                 # ----------------------------------------------------------
                 # Phase A: Gate, Approve, Classify
                 # ----------------------------------------------------------
-                resolved = []       # (idx, call_id, tc, tool_msg_dict)
-                interactive = []    # (idx, call_id, tc, tool_args)
-                executable = []     # (idx, call_id, tc, tool_args)
+                resolved = []  # (idx, call_id, tc, tool_msg_dict)
+                interactive = []  # (idx, call_id, tc, tool_args)
+                executable = []  # (idx, call_id, tc, tool_args)
 
                 from src.core.tool_gating import GateAction
 
@@ -1616,54 +1689,82 @@ class CodingAgent(AgentInterface):
                         blocked_calls.append(gate_result.call_summary)
                         if self.memory.message_store:
                             self.memory.message_store.update_tool_state(
-                                call_id, CoreToolStatus.SKIPPED,
+                                call_id,
+                                CoreToolStatus.SKIPPED,
                                 tool_name=tc.function.name,
                                 extra_metadata=build_tool_metadata(tc.function.name, tool_args),
                             )
-                        resolved.append((idx, call_id, tc, {
-                            "role": "tool", "tool_call_id": call_id,
-                            "name": tc.function.name, "content": gate_result.message,
-                        }))
+                        resolved.append(
+                            (
+                                idx,
+                                call_id,
+                                tc,
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": call_id,
+                                    "name": tc.function.name,
+                                    "content": gate_result.message,
+                                },
+                            )
+                        )
                         continue
 
                     if gate_result.action == GateAction.DENY:
                         if self.memory.message_store:
                             self.memory.message_store.update_tool_state(
-                                call_id, CoreToolStatus.ERROR,
+                                call_id,
+                                CoreToolStatus.ERROR,
                                 error=gate_result.message,
                                 tool_name=tc.function.name,
                                 extra_metadata=build_tool_metadata(tc.function.name, tool_args),
                             )
                         gated_output = self._gating.format_gate_response(gate_result.gate_response)
                         self.memory.add_tool_result(
-                            tool_call_id=call_id, content=gated_output,
-                            tool_name=tc.function.name, status="gated",
+                            tool_call_id=call_id,
+                            content=gated_output,
+                            tool_name=tc.function.name,
+                            status="gated",
                         )
-                        resolved.append((idx, call_id, tc, {
-                            "role": "tool", "tool_call_id": call_id,
-                            "name": tc.function.name, "content": gated_output,
-                        }))
+                        resolved.append(
+                            (
+                                idx,
+                                call_id,
+                                tc,
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": call_id,
+                                    "name": tc.function.name,
+                                    "content": gated_output,
+                                },
+                            )
+                        )
                         continue
 
                     requires_approval = gate_result.action == GateAction.NEEDS_APPROVAL
 
                     # Freeze approval policy in render meta
-                    mode = self.permission_manager.get_mode() if self.permission_manager else PermissionMode.NORMAL
+                    mode = (
+                        self.permission_manager.get_mode()
+                        if self.permission_manager
+                        else PermissionMode.NORMAL
+                    )
                     self.memory.render_meta.set_approval_meta(
                         call_id,
                         ToolApprovalMeta(
                             requires_approval=requires_approval,
-                            permission_mode=mode.value if hasattr(mode, 'value') else str(mode)
-                        )
+                            permission_mode=mode.value if hasattr(mode, "value") else str(mode),
+                        ),
                     )
 
                     # Initialize tool state (TUI rendering)
                     if self.memory.message_store:
                         self.memory.message_store.update_tool_state(
-                            call_id, CoreToolStatus.PENDING,
+                            call_id,
+                            CoreToolStatus.PENDING,
                             tool_name=tc.function.name,
                             extra_metadata=build_tool_metadata(
-                                tc.function.name, tool_args,
+                                tc.function.name,
+                                tool_args,
                                 requires_approval=requires_approval,
                             ),
                         )
@@ -1676,61 +1777,117 @@ class CodingAgent(AgentInterface):
                                 call_id, CoreToolStatus.AWAITING_APPROVAL
                             )
                         try:
-                            approval_result = await ui.wait_for_approval(call_id, tc.function.name, timeout=None)
+                            approval_result = await ui.wait_for_approval(
+                                call_id, tc.function.name, timeout=None
+                            )
 
                             if not approval_result.approved:
                                 if approval_result.feedback:
-                                    rejection_msg = f"User rejected with feedback: {approval_result.feedback}"
-                                    if self.memory.message_store:
-                                        self.memory.message_store.update_tool_state(call_id, CoreToolStatus.REJECTED)
-                                    self.memory.add_tool_result(
-                                        tool_call_id=call_id, content=rejection_msg,
-                                        tool_name=tc.function.name, status="rejected",
+                                    rejection_msg = (
+                                        f"User rejected with feedback: {approval_result.feedback}"
                                     )
-                                    resolved.append((idx, call_id, tc, {
-                                        "role": "tool", "tool_call_id": call_id,
-                                        "name": tc.function.name, "content": rejection_msg,
-                                    }))
+                                    if self.memory.message_store:
+                                        self.memory.message_store.update_tool_state(
+                                            call_id, CoreToolStatus.REJECTED
+                                        )
+                                    self.memory.add_tool_result(
+                                        tool_call_id=call_id,
+                                        content=rejection_msg,
+                                        tool_name=tc.function.name,
+                                        status="rejected",
+                                    )
+                                    resolved.append(
+                                        (
+                                            idx,
+                                            call_id,
+                                            tc,
+                                            {
+                                                "role": "tool",
+                                                "tool_call_id": call_id,
+                                                "name": tc.function.name,
+                                                "content": rejection_msg,
+                                            },
+                                        )
+                                    )
                                     continue
                                 else:
                                     rejection_msg = "Tool call rejected by user"
                                     if self.memory.message_store:
-                                        self.memory.message_store.update_tool_state(call_id, CoreToolStatus.REJECTED)
+                                        self.memory.message_store.update_tool_state(
+                                            call_id, CoreToolStatus.REJECTED
+                                        )
                                     self.memory.add_tool_result(
-                                        tool_call_id=call_id, content=rejection_msg,
-                                        tool_name=tc.function.name, status="rejected",
+                                        tool_call_id=call_id,
+                                        content=rejection_msg,
+                                        tool_name=tc.function.name,
+                                        status="rejected",
                                     )
-                                    resolved.append((idx, call_id, tc, {
-                                        "role": "tool", "tool_call_id": call_id,
-                                        "name": tc.function.name, "content": rejection_msg,
-                                    }))
+                                    resolved.append(
+                                        (
+                                            idx,
+                                            call_id,
+                                            tc,
+                                            {
+                                                "role": "tool",
+                                                "tool_call_id": call_id,
+                                                "name": tc.function.name,
+                                                "content": rejection_msg,
+                                            },
+                                        )
+                                    )
                                     user_rejected = True
                                     break
 
                             if self.memory.message_store:
-                                self.memory.message_store.update_tool_state(call_id, CoreToolStatus.APPROVED)
+                                self.memory.message_store.update_tool_state(
+                                    call_id, CoreToolStatus.APPROVED
+                                )
 
                         except asyncio.TimeoutError:
                             if self.memory.message_store:
-                                self.memory.message_store.update_tool_state(call_id, CoreToolStatus.CANCELLED)
-                            resolved.append((idx, call_id, tc, {
-                                "role": "tool", "tool_call_id": call_id,
-                                "name": tc.function.name, "content": "Tool call approval timed out",
-                            }))
+                                self.memory.message_store.update_tool_state(
+                                    call_id, CoreToolStatus.CANCELLED
+                                )
+                            resolved.append(
+                                (
+                                    idx,
+                                    call_id,
+                                    tc,
+                                    {
+                                        "role": "tool",
+                                        "tool_call_id": call_id,
+                                        "name": tc.function.name,
+                                        "content": "Tool call approval timed out",
+                                    },
+                                )
+                            )
                             continue
 
                         except asyncio.CancelledError:
                             cancelled_msg = "Tool call cancelled by user (stream interrupted)"
                             if self.memory.message_store:
-                                self.memory.message_store.update_tool_state(call_id, CoreToolStatus.CANCELLED)
+                                self.memory.message_store.update_tool_state(
+                                    call_id, CoreToolStatus.CANCELLED
+                                )
                             self.memory.add_tool_result(
-                                tool_call_id=call_id, content=cancelled_msg,
-                                tool_name=tc.function.name, status="cancelled",
+                                tool_call_id=call_id,
+                                content=cancelled_msg,
+                                tool_name=tc.function.name,
+                                status="cancelled",
                             )
-                            resolved.append((idx, call_id, tc, {
-                                "role": "tool", "tool_call_id": call_id,
-                                "name": tc.function.name, "content": cancelled_msg,
-                            }))
+                            resolved.append(
+                                (
+                                    idx,
+                                    call_id,
+                                    tc,
+                                    {
+                                        "role": "tool",
+                                        "tool_call_id": call_id,
+                                        "name": tc.function.name,
+                                        "content": cancelled_msg,
+                                    },
+                                )
+                            )
                             user_rejected = True
                             break
 
@@ -1745,13 +1902,14 @@ class CodingAgent(AgentInterface):
 
                 # If user rejected during Phase A, skip execution phases
                 if not user_rejected:
-
                     # ----------------------------------------------------------
                     # Phase B1: Interactive tools (serial - block on user input)
                     # ----------------------------------------------------------
                     for idx, call_id, tc, tool_args in interactive:
                         if self.memory.message_store:
-                            self.memory.message_store.update_tool_state(call_id, CoreToolStatus.RUNNING)
+                            self.memory.message_store.update_tool_state(
+                                call_id, CoreToolStatus.RUNNING
+                            )
                         start_time = time.monotonic()
                         tool_call_count += 1
 
@@ -1762,41 +1920,69 @@ class CodingAgent(AgentInterface):
                             duration_ms = int((time.monotonic() - start_time) * 1000)
                             if self.memory.message_store:
                                 self.memory.message_store.update_tool_state(
-                                    call_id, CoreToolStatus.SUCCESS,
-                                    result=clarify_result, duration_ms=duration_ms
+                                    call_id,
+                                    CoreToolStatus.SUCCESS,
+                                    result=clarify_result,
+                                    duration_ms=duration_ms,
                                 )
                             self.memory.add_tool_result(
-                                tool_call_id=call_id, content=json.dumps(clarify_result),
-                                tool_name=tc.function.name, status="success",
+                                tool_call_id=call_id,
+                                content=json.dumps(clarify_result),
+                                tool_name=tc.function.name,
+                                status="success",
                                 duration_ms=duration_ms,
                             )
-                            resolved.append((idx, call_id, tc, {
-                                "role": "tool", "tool_call_id": call_id,
-                                "name": tc.function.name,
-                                "content": json.dumps(clarify_result),
-                            }))
+                            resolved.append(
+                                (
+                                    idx,
+                                    call_id,
+                                    tc,
+                                    {
+                                        "role": "tool",
+                                        "tool_call_id": call_id,
+                                        "name": tc.function.name,
+                                        "content": json.dumps(clarify_result),
+                                    },
+                                )
+                            )
 
                         elif tc.function.name == "request_plan_approval":
-                            approval_result, plan_rejected = await self._special_handlers.handle_plan_approval(
-                                call_id, ui
-                            )
+                            (
+                                approval_result,
+                                plan_rejected,
+                            ) = await self._special_handlers.handle_plan_approval(call_id, ui)
                             duration_ms = int((time.monotonic() - start_time) * 1000)
-                            tool_status = CoreToolStatus.REJECTED if plan_rejected else CoreToolStatus.SUCCESS
+                            tool_status = (
+                                CoreToolStatus.REJECTED if plan_rejected else CoreToolStatus.SUCCESS
+                            )
                             result_status = "rejected" if plan_rejected else "success"
                             if self.memory.message_store:
                                 self.memory.message_store.update_tool_state(
-                                    call_id, tool_status,
-                                    result=approval_result, duration_ms=duration_ms
+                                    call_id,
+                                    tool_status,
+                                    result=approval_result,
+                                    duration_ms=duration_ms,
                                 )
                             self.memory.add_tool_result(
-                                tool_call_id=call_id, content=approval_result,
-                                tool_name=tc.function.name, status=result_status,
+                                tool_call_id=call_id,
+                                content=approval_result,
+                                tool_name=tc.function.name,
+                                status=result_status,
                                 duration_ms=duration_ms,
                             )
-                            resolved.append((idx, call_id, tc, {
-                                "role": "tool", "tool_call_id": call_id,
-                                "name": tc.function.name, "content": approval_result,
-                            }))
+                            resolved.append(
+                                (
+                                    idx,
+                                    call_id,
+                                    tc,
+                                    {
+                                        "role": "tool",
+                                        "tool_call_id": call_id,
+                                        "name": tc.function.name,
+                                        "content": approval_result,
+                                    },
+                                )
+                            )
                             if plan_rejected:
                                 user_rejected = True
                                 break
@@ -1805,7 +1991,10 @@ class CodingAgent(AgentInterface):
                             try:
                                 dcp_kwargs = tc.function.get_parsed_arguments()
                             except Exception as parse_err:
-                                logger.error("director_complete_plan: failed to parse arguments: %s", parse_err)
+                                logger.error(
+                                    "director_complete_plan: failed to parse arguments: %s",
+                                    parse_err,
+                                )
                                 dcp_kwargs = {}
                             result = await self.tool_executor.execute_tool_async(
                                 tc.function.name, **dcp_kwargs
@@ -1818,26 +2007,46 @@ class CodingAgent(AgentInterface):
                                     extra={"phase": "AWAITING_APPROVAL"},
                                     include_in_llm_context=False,
                                 )
-                                approval_result, plan_rejected = await self._special_handlers.handle_director_plan_approval(
+                                (
+                                    approval_result,
+                                    plan_rejected,
+                                ) = await self._special_handlers.handle_director_plan_approval(
                                     call_id, result, ui
                                 )
                                 duration_ms = int((time.monotonic() - start_time) * 1000)
-                                tool_status = CoreToolStatus.REJECTED if plan_rejected else CoreToolStatus.SUCCESS
+                                tool_status = (
+                                    CoreToolStatus.REJECTED
+                                    if plan_rejected
+                                    else CoreToolStatus.SUCCESS
+                                )
                                 result_status = "rejected" if plan_rejected else "success"
                                 if self.memory.message_store:
                                     self.memory.message_store.update_tool_state(
-                                        call_id, tool_status,
-                                        result=approval_result, duration_ms=duration_ms
+                                        call_id,
+                                        tool_status,
+                                        result=approval_result,
+                                        duration_ms=duration_ms,
                                     )
                                 self.memory.add_tool_result(
-                                    tool_call_id=call_id, content=approval_result,
-                                    tool_name=tc.function.name, status=result_status,
+                                    tool_call_id=call_id,
+                                    content=approval_result,
+                                    tool_name=tc.function.name,
+                                    status=result_status,
                                     duration_ms=duration_ms,
                                 )
-                                resolved.append((idx, call_id, tc, {
-                                    "role": "tool", "tool_call_id": call_id,
-                                    "name": tc.function.name, "content": approval_result,
-                                }))
+                                resolved.append(
+                                    (
+                                        idx,
+                                        call_id,
+                                        tc,
+                                        {
+                                            "role": "tool",
+                                            "tool_call_id": call_id,
+                                            "name": tc.function.name,
+                                            "content": approval_result,
+                                        },
+                                    )
+                                )
                                 new_phase = self.director_adapter.phase.name
                                 self.memory.persist_system_event(
                                     event_type="director_phase_changed",
@@ -1855,18 +2064,31 @@ class CodingAgent(AgentInterface):
                                 error_msg = result.error or "director_complete_plan failed"
                                 if self.memory.message_store:
                                     self.memory.message_store.update_tool_state(
-                                        call_id, CoreToolStatus.ERROR,
-                                        error=error_msg, duration_ms=duration_ms
+                                        call_id,
+                                        CoreToolStatus.ERROR,
+                                        error=error_msg,
+                                        duration_ms=duration_ms,
                                     )
                                 self.memory.add_tool_result(
-                                    tool_call_id=call_id, content=error_msg,
-                                    tool_name=tc.function.name, status="error",
+                                    tool_call_id=call_id,
+                                    content=error_msg,
+                                    tool_name=tc.function.name,
+                                    status="error",
                                     duration_ms=duration_ms,
                                 )
-                                resolved.append((idx, call_id, tc, {
-                                    "role": "tool", "tool_call_id": call_id,
-                                    "name": tc.function.name, "content": error_msg,
-                                }))
+                                resolved.append(
+                                    (
+                                        idx,
+                                        call_id,
+                                        tc,
+                                        {
+                                            "role": "tool",
+                                            "tool_call_id": call_id,
+                                            "name": tc.function.name,
+                                            "content": error_msg,
+                                        },
+                                    )
+                                )
 
                 if not user_rejected and executable:
                     # ----------------------------------------------------------
@@ -1880,38 +2102,44 @@ class CodingAgent(AgentInterface):
                     # ----------------------------------------------------------
                     for p_idx, p_call_id, p_tc, p_outcome in parallel_results:
                         # Deferred side effects: task notifications
-                        tool_name = p_outcome.get('_tool_name', '')
-                        if tool_name in ('task_create', 'task_update'):
+                        tool_name = p_outcome.get("_tool_name", "")
+                        if tool_name in ("task_create", "task_update"):
                             ui.notify_todos_updated(self.task_state.get_todos_list())
                         # Deferred side effects: director context refresh
-                        if tool_name in ('director_complete_understand', 'director_complete_slice', 'director_complete_integration'):
+                        if tool_name in (
+                            "director_complete_understand",
+                            "director_complete_slice",
+                            "director_complete_integration",
+                        ):
                             self._refresh_director_context(current_context)
 
                         # Handle error budget pause (needs await + yield)
-                        if p_outcome.get('_needs_error_budget_pause'):
+                        if p_outcome.get("_needs_error_budget_pause"):
                             elapsed_seconds = time.monotonic() - loop_start_time
                             pause = await self._handle_error_budget_pause(
-                                p_outcome['_pause_reason'],
-                                p_outcome['_pause_tool_name'],
-                                p_outcome['_pause_call_id'],
-                                p_outcome['_pause_error_content'],
-                                tool_call_count, elapsed_seconds, ui,
-                                MAX_ERROR_BUDGET_RESUMES
+                                p_outcome["_pause_reason"],
+                                p_outcome["_pause_tool_name"],
+                                p_outcome["_pause_call_id"],
+                                p_outcome["_pause_error_content"],
+                                tool_call_count,
+                                elapsed_seconds,
+                                ui,
+                                MAX_ERROR_BUDGET_RESUMES,
                             )
-                            for evt in pause['events']:
+                            for evt in pause["events"]:
                                 yield evt
-                            if pause['tool_message']:
+                            if pause["tool_message"]:
                                 # Override the tool_msg with the pause handler's version
-                                p_outcome['tool_msg'] = pause['tool_message']
-                            current_context.extend(pause['context_additions'])
-                            if pause['user_rejected'] or pause['action'] == 'break':
-                                if p_outcome.get('tool_msg'):
-                                    resolved.append((p_idx, p_call_id, p_tc, p_outcome['tool_msg']))
-                                user_rejected = pause.get('user_rejected', False)
+                                p_outcome["tool_msg"] = pause["tool_message"]
+                            current_context.extend(pause["context_additions"])
+                            if pause["user_rejected"] or pause["action"] == "break":
+                                if p_outcome.get("tool_msg"):
+                                    resolved.append((p_idx, p_call_id, p_tc, p_outcome["tool_msg"]))
+                                user_rejected = pause.get("user_rejected", False)
                                 break
 
-                        if p_outcome.get('tool_msg'):
-                            resolved.append((p_idx, p_call_id, p_tc, p_outcome['tool_msg']))
+                        if p_outcome.get("tool_msg"):
+                            resolved.append((p_idx, p_call_id, p_tc, p_outcome["tool_msg"]))
 
                 # ----------------------------------------------------------
                 # Merge results in original call order
@@ -1923,9 +2151,15 @@ class CodingAgent(AgentInterface):
                 # If user rejected, fill skipped results for unprocessed calls
                 if user_rejected:
                     from src.core.stream_phases import fill_skipped_tool_results
-                    processed_call_ids = {msg.get("tool_call_id") for msg in tool_messages if msg.get("role") == "tool"}
+
+                    processed_call_ids = {
+                        msg.get("tool_call_id")
+                        for msg in tool_messages
+                        if msg.get("role") == "tool"
+                    }
                     skipped_msgs = fill_skipped_tool_results(
-                        tool_calls, processed_call_ids,
+                        tool_calls,
+                        processed_call_ids,
                         reason="Tool call skipped (previous tool rejected by user)",
                     )
                     for msg in skipped_msgs:
@@ -1943,9 +2177,12 @@ class CodingAgent(AgentInterface):
                             )
 
                     from src.core.stream_phases import build_assistant_context_message
+
                     current_context.append(
                         build_assistant_context_message(
-                            response_content, tool_calls, response_reasoning,
+                            response_content,
+                            tool_calls,
+                            response_reasoning,
                             thinking=response_thinking,
                             thinking_signature=response_thinking_signature,
                         )
@@ -1955,9 +2192,12 @@ class CodingAgent(AgentInterface):
 
                 # Add assistant's response with tool calls to context
                 from src.core.stream_phases import build_assistant_context_message
+
                 current_context.append(
                     build_assistant_context_message(
-                        response_content, tool_calls, response_reasoning,
+                        response_content,
+                        tool_calls,
+                        response_reasoning,
                         thinking=response_thinking,
                         thinking_signature=response_thinking_signature,
                     )
@@ -1968,21 +2208,20 @@ class CodingAgent(AgentInterface):
 
                 # Inject controller constraint for blocked calls
                 from src.core.stream_phases import inject_controller_constraint
+
                 inject_controller_constraint(current_context, blocked_calls)
 
                 # Inject background task completion notifications
                 completed = self._bg_registry.drain_completed()
                 if completed:
                     from src.core.background_context import inject_background_task_completions
+
                     inject_background_task_completions(current_context, completed)
 
         except Exception as e:
             # Outer exception handler - catches any exceptions not handled by inner handlers
             # Log full stack trace for debugging
-            logger.error(
-                f"Unhandled exception in stream_response:\n"
-                f"{traceback.format_exc()}"
-            )
+            logger.error(f"Unhandled exception in stream_response:\n{traceback.format_exc()}")
 
             # Format error message properly (handles empty str(e))
             error_type = type(e).__name__
@@ -2031,7 +2270,7 @@ class CodingAgent(AgentInterface):
         temperature: float = 0.7,
         max_tokens: int = 4096,
         stream: bool = False,
-        **kwargs
+        **kwargs,
     ) -> str:
         """
         Call LLM with conversation messages, returns response text.
@@ -2065,12 +2304,12 @@ class CodingAgent(AgentInterface):
                 tools=[],  # No tools for simple LLM call
                 temperature=temperature,
                 max_tokens=max_tokens,
-                **kwargs
+                **kwargs,
             )
 
             # Extract text from response
             if isinstance(response, dict):
-                return response.get('content', str(response))
+                return response.get("content", str(response))
             return str(response)
         except (LLMError, RateLimitError, TimeoutError):
             # Re-raise properly typed LLM exceptions
@@ -2187,9 +2426,12 @@ class CodingAgent(AgentInterface):
         # caller (e.g. app._load_session).
 
         from src.observability import get_logger
+
         logger = get_logger(__name__)
-        logger.info(f"Session resumed: {result.report.context_messages} context messages, "
-                   f"using MessageStore")
+        logger.info(
+            f"Session resumed: {result.report.context_messages} context messages, "
+            f"using MessageStore"
+        )
 
         return result
 
@@ -2283,9 +2525,7 @@ class CodingAgent(AgentInterface):
             Pressure level string: 'green', 'yellow', 'orange', or 'red'
         """
         if self.context_builder.max_context_tokens <= 0:
-            logger.warning(
-                f"Invalid max_context_tokens: {self.context_builder.max_context_tokens}"
-            )
+            logger.warning(f"Invalid max_context_tokens: {self.context_builder.max_context_tokens}")
             return "green"
 
         utilization = used_tokens / self.context_builder.max_context_tokens
@@ -2303,9 +2543,7 @@ class CodingAgent(AgentInterface):
     # Parallel Tool Execution
     # -------------------------------------------------------------------------
 
-    async def _execute_tools_parallel(
-        self, executable: list[tuple]
-    ) -> list[tuple]:
+    async def _execute_tools_parallel(self, executable: list[tuple]) -> list[tuple]:
         """Run normal (non-interactive) tools concurrently via asyncio.gather.
 
         Args:
@@ -2326,8 +2564,8 @@ class CodingAgent(AgentInterface):
             start = time.monotonic()
             try:
                 kwargs = dict(tool_args)
-                if tc.function.name == 'delegate_to_subagent':
-                    kwargs['_tool_call_id'] = call_id
+                if tc.function.name == "delegate_to_subagent":
+                    kwargs["_tool_call_id"] = call_id
                 result = await self.tool_executor.execute_tool_async(tc.function.name, **kwargs)
                 duration_ms = int((time.monotonic() - start) * 1000)
                 return (idx, call_id, tc, result, duration_ms, None)
@@ -2357,9 +2595,7 @@ class CodingAgent(AgentInterface):
                 continue
 
             idx, call_id, tc, result, duration_ms, exc = raw
-            outcome = self._process_parallel_tool_result(
-                idx, call_id, tc, result, duration_ms, exc
-            )
+            outcome = self._process_parallel_tool_result(idx, call_id, tc, result, duration_ms, exc)
             outcomes.append((idx, call_id, tc, outcome))
 
         return outcomes
@@ -2382,24 +2618,25 @@ class CodingAgent(AgentInterface):
         if exc is not None:
             if self.memory.message_store:
                 self.memory.message_store.update_tool_state(
-                    call_id, CoreToolStatus.ERROR,
-                    error=str(exc), duration_ms=duration_ms
+                    call_id, CoreToolStatus.ERROR, error=str(exc), duration_ms=duration_ms
                 )
             error_type = self._classify_tool_error(str(exc))
             error_context = self._error_tracker.record_failure(
                 error_type=error_type,
                 tool_name=tc.function.name,
                 tool_args=tc.function.get_parsed_arguments(),
-                error_message=str(exc)
+                error_message=str(exc),
             )
             self.memory.add_tool_result(
                 tool_call_id=call_id,
                 content=error_context.to_prompt_block(),
                 tool_name=tc.function.name,
-                status="error", duration_ms=duration_ms,
+                status="error",
+                duration_ms=duration_ms,
             )
-            outcome['tool_msg'] = {
-                "role": "tool", "tool_call_id": call_id,
+            outcome["tool_msg"] = {
+                "role": "tool",
+                "tool_call_id": call_id,
                 "name": tc.function.name,
                 "content": error_context.to_prompt_block(),
             }
@@ -2412,35 +2649,36 @@ class CodingAgent(AgentInterface):
             # Oversized output check
             if isinstance(output, str) and len(output) > self._max_tool_output_chars:
                 error_msg, tool_msg, history = self._format_oversized_output_error(
-                    len(output), tc.function.name,
-                    tc.function.get_parsed_arguments(), call_id
+                    len(output), tc.function.name, tc.function.get_parsed_arguments(), call_id
                 )
                 if self.memory.message_store:
                     self.memory.message_store.update_tool_state(
-                        call_id, CoreToolStatus.ERROR,
-                        error=error_msg, duration_ms=duration_ms
+                        call_id, CoreToolStatus.ERROR, error=error_msg, duration_ms=duration_ms
                     )
                 self.memory.add_tool_result(
-                    tool_call_id=call_id, content=error_msg,
-                    tool_name=tc.function.name, status="error",
+                    tool_call_id=call_id,
+                    content=error_msg,
+                    tool_name=tc.function.name,
+                    status="error",
                     duration_ms=duration_ms,
                 )
                 self.tool_execution_history.append(history)
                 MAX_TOOL_HISTORY = 500
                 if len(self.tool_execution_history) > MAX_TOOL_HISTORY:
                     self.tool_execution_history = self.tool_execution_history[-MAX_TOOL_HISTORY:]
-                outcome['tool_msg'] = tool_msg
+                outcome["tool_msg"] = tool_msg
                 return outcome
 
             # Normal success
             if self.memory.message_store:
                 self.memory.message_store.update_tool_state(
-                    call_id, CoreToolStatus.SUCCESS,
-                    result=output, duration_ms=duration_ms
+                    call_id, CoreToolStatus.SUCCESS, result=output, duration_ms=duration_ms
                 )
             self.memory.add_tool_result(
-                tool_call_id=call_id, content=str(output),
-                tool_name=tc.function.name, status="success",
+                tool_call_id=call_id,
+                content=str(output),
+                tool_name=tc.function.name,
+                status="success",
                 duration_ms=duration_ms,
             )
 
@@ -2451,14 +2689,18 @@ class CodingAgent(AgentInterface):
             # Side effects: task notifications, mode changes, director phases
             # NOTE: ui.notify_todos_updated cannot run here (no ui reference);
             # these are deferred to Phase C in stream_response via _post_exec flags.
-            if tc.function.name == 'enter_plan_mode':
+            if tc.function.name == "enter_plan_mode":
                 self.memory.persist_system_event(
                     event_type="permission_mode_changed",
                     content="Mode: -> plan",
                     extra={"old_mode": "normal", "new_mode": "plan"},
                     include_in_llm_context=False,
                 )
-            if tc.function.name in ('director_complete_understand', 'director_complete_slice', 'director_complete_integration'):
+            if tc.function.name in (
+                "director_complete_understand",
+                "director_complete_slice",
+                "director_complete_integration",
+            ):
                 new_phase = self.director_adapter.phase.name
                 self.memory.persist_system_event(
                     event_type="director_phase_changed",
@@ -2467,20 +2709,20 @@ class CodingAgent(AgentInterface):
                     include_in_llm_context=False,
                 )
 
-            outcome['tool_msg'] = {
-                "role": "tool", "tool_call_id": call_id,
+            outcome["tool_msg"] = {
+                "role": "tool",
+                "tool_call_id": call_id,
                 "name": tc.function.name,
                 "content": _frame_tool_result(str(output), tc.function.name),
             }
             # Flags for deferred side effects
-            outcome['_tool_name'] = tc.function.name
+            outcome["_tool_name"] = tc.function.name
             return outcome
 
         # --- Error path ---
         if self.memory.message_store:
             self.memory.message_store.update_tool_state(
-                call_id, CoreToolStatus.ERROR,
-                error=result.error, duration_ms=duration_ms
+                call_id, CoreToolStatus.ERROR, error=result.error, duration_ms=duration_ms
             )
         error_type = self._classify_tool_error(result.error or "Unknown error")
         error_context = self._error_tracker.record_failure(
@@ -2499,28 +2741,32 @@ class CodingAgent(AgentInterface):
             tool_error_content = error_prompt
 
         self.memory.add_tool_result(
-            tool_call_id=call_id, content=tool_error_content,
-            tool_name=tc.function.name, status="error",
+            tool_call_id=call_id,
+            content=tool_error_content,
+            tool_name=tc.function.name,
+            status="error",
             duration_ms=duration_ms,
         )
 
         # Check retry budget (error budget pause is deferred - can't yield from here)
         allowed, reason = self._error_tracker.should_allow_retry(tc.function.name, error_type)
         if allowed:
-            outcome['tool_msg'] = {
-                "role": "tool", "tool_call_id": call_id,
+            outcome["tool_msg"] = {
+                "role": "tool",
+                "tool_call_id": call_id,
                 "name": tc.function.name,
                 "content": _frame_tool_result(tool_error_content, tc.function.name),
             }
         else:
             # Signal that error budget pause is needed (handled in Phase C)
-            outcome['_needs_error_budget_pause'] = True
-            outcome['_pause_reason'] = reason
-            outcome['_pause_tool_name'] = tc.function.name
-            outcome['_pause_call_id'] = call_id
-            outcome['_pause_error_content'] = tool_error_content
-            outcome['tool_msg'] = {
-                "role": "tool", "tool_call_id": call_id,
+            outcome["_needs_error_budget_pause"] = True
+            outcome["_pause_reason"] = reason
+            outcome["_pause_tool_name"] = tc.function.name
+            outcome["_pause_call_id"] = call_id
+            outcome["_pause_error_content"] = tool_error_content
+            outcome["tool_msg"] = {
+                "role": "tool",
+                "tool_call_id": call_id,
                 "name": tc.function.name,
                 "content": _frame_tool_result(tool_error_content, tc.function.name),
             }
@@ -2531,11 +2777,7 @@ class CodingAgent(AgentInterface):
     # -------------------------------------------------------------------------
 
     def _format_oversized_output_error(
-        self,
-        output_size: int,
-        tool_name: str,
-        tool_args: dict[str, Any],
-        tool_call_id: str
+        self, output_size: int, tool_name: str, tool_args: dict[str, Any], tool_call_id: str
     ) -> tuple:
         """
         Format error response for oversized tool output.
@@ -2565,14 +2807,14 @@ class CodingAgent(AgentInterface):
             "role": "tool",
             "tool_call_id": tool_call_id,
             "name": tool_name,
-            "content": error_msg
+            "content": error_msg,
         }
 
         history_entry = {
             "tool": tool_name,
             "arguments": tool_args,
             "success": False,
-            "error": error_msg
+            "error": error_msg,
         }
 
         return error_msg, tool_message, history_entry
@@ -2592,11 +2834,17 @@ class CodingAgent(AgentInterface):
         # File/path errors
         if "not found" in error_lower or "no such file" in error_lower:
             return "file_not_found"
-        if "directory" in error_lower and ("not found" in error_lower or "does not exist" in error_lower):
+        if "directory" in error_lower and (
+            "not found" in error_lower or "does not exist" in error_lower
+        ):
             return "directory_not_found"
 
         # Permission errors
-        if "permission" in error_lower or "access denied" in error_lower or "forbidden" in error_lower:
+        if (
+            "permission" in error_lower
+            or "access denied" in error_lower
+            or "forbidden" in error_lower
+        ):
             return "permission_denied"
 
         # Command execution errors
@@ -2642,23 +2890,21 @@ class CodingAgent(AgentInterface):
 
         # Preserve current_task_id if we have an in_progress task
         in_progress = next(
-            (t for t in self.task_state.list_all()
-             if t.get('status') == 'in_progress'),
-            None
+            (t for t in self.task_state.list_all() if t.get("status") == "in_progress"), None
         )
         if in_progress:
-            self.task_state.current_task_id = in_progress.get('id')
+            self.task_state.current_task_id = in_progress.get("id")
 
         # Build user-visible message
         pending = self.task_state.get_pending_summary()
 
         reason_text = {
-            'max_iterations': 'iteration limit',
-            'max_tool_calls': 'tool call limit',
-            'max_wall_time': 'time limit',
-            'user_interrupt': 'user interrupt',
-            'error_budget': 'error limit',
-            'provider_error': 'provider error - retry available',
+            "max_iterations": "iteration limit",
+            "max_tool_calls": "tool call limit",
+            "max_wall_time": "time limit",
+            "user_interrupt": "user interrupt",
+            "error_budget": "error limit",
+            "provider_error": "provider error - retry available",
         }.get(reason, reason)
 
         if pending:
@@ -2676,7 +2922,7 @@ class CodingAgent(AgentInterface):
         Emits SessionEnd hook if hook_manager is configured.
         """
         # Log prompt cache summary for the session
-        if hasattr(self, 'llm') and hasattr(self.llm, 'log_cache_summary'):
+        if hasattr(self, "llm") and hasattr(self.llm, "log_cache_summary"):
             self.llm.log_cache_summary()
 
         # SESSION END HOOK
@@ -2688,7 +2934,7 @@ class CodingAgent(AgentInterface):
                 self.hook_manager.emit_session_end(
                     duration=0.0,  # Would need to track session start time
                     statistics=stats,
-                    exit_reason="normal"
+                    exit_reason="normal",
                 )
 
             except Exception as e:
@@ -2699,7 +2945,7 @@ class CodingAgent(AgentInterface):
 
         # Clean up LLM backend HTTP clients
         try:
-            if hasattr(self.llm, 'client') and hasattr(self.llm.client, 'close'):
+            if hasattr(self.llm, "client") and hasattr(self.llm.client, "close"):
                 self.llm.client.close()
         except Exception:
             pass

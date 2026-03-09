@@ -28,13 +28,14 @@ from src.tools.command_safety import check_command_safety
 logger = get_logger(__name__)
 
 MAX_CONCURRENT_TASKS = 5
-DEFAULT_BG_TIMEOUT = 300   # 5 minutes
-MAX_BG_TIMEOUT = 1800      # 30 minutes
+DEFAULT_BG_TIMEOUT = 300  # 5 minutes
+MAX_BG_TIMEOUT = 1800  # 30 minutes
 MAX_OUTPUT_BYTES = 512_000  # 512 KB capture limit per stream
 
 
 class BackgroundTaskStatus(str, Enum):
     """Status of a background task."""
+
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -45,6 +46,7 @@ class BackgroundTaskStatus(str, Enum):
 @dataclass
 class BackgroundTaskInfo:
     """Information about a background task."""
+
     task_id: str
     command: str
     description: str
@@ -246,8 +248,7 @@ class BackgroundTaskRegistry:
 
     def _active_count(self) -> int:
         return sum(
-            1 for info in self._tasks.values()
-            if info.status == BackgroundTaskStatus.RUNNING
+            1 for info in self._tasks.values() if info.status == BackgroundTaskStatus.RUNNING
         )
 
     def _fire_completion_callback(self) -> None:
@@ -270,7 +271,10 @@ class BackgroundTaskRegistry:
             # Platform-specific subprocess creation
             if platform.system() == "Windows":
                 process = await asyncio.create_subprocess_exec(
-                    "powershell", "-NoProfile", "-Command", command,
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    command,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     cwd=working_dir,

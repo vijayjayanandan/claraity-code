@@ -18,16 +18,16 @@ from src.orchestration import AgentOrchestrator
 def test_multiturn_conversation():
     """Test multi-turn conversation with context preservation"""
 
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("PHASE 2 TEST: Multi-Turn Conversations with Context Preservation")
-    print("="*70 + "\n")
+    print("=" * 70 + "\n")
 
     # Step 1: Initialize orchestrator
     print("[1/8] Initializing orchestrator...")
     try:
         orchestrator = AgentOrchestrator(
             output_dir="./test-orchestration-logs",
-            working_directory="./test-orchestration-workspace"
+            working_directory="./test-orchestration-workspace",
         )
         print("   [OK] Orchestrator initialized")
         print(f"   Model: {orchestrator.model_name}")
@@ -39,9 +39,7 @@ def test_multiturn_conversation():
     # Step 2: Start conversation
     print("[2/8] Starting conversation...")
     try:
-        session = orchestrator.start_conversation(
-            task_description="Multi-turn calculator test"
-        )
+        session = orchestrator.start_conversation(task_description="Multi-turn calculator test")
         print("   [OK] Conversation started")
         print(f"   ID: {session.conversation_id}")
         print(f"   Workspace: {session.working_directory}\n")
@@ -71,7 +69,7 @@ def test_multiturn_conversation():
             return False
 
         # Read and check content
-        with open(calc_file, encoding='utf-8') as f:
+        with open(calc_file, encoding="utf-8") as f:
             content1 = f.read()
 
         has_add = "def add" in content1
@@ -79,7 +77,9 @@ def test_multiturn_conversation():
         has_multiply = "def multiply" in content1
         has_divide = "def divide" in content1
 
-        print(f"   Functions present: add={has_add}, subtract={has_subtract}, multiply={has_multiply}, divide={has_divide}")
+        print(
+            f"   Functions present: add={has_add}, subtract={has_subtract}, multiply={has_multiply}, divide={has_divide}"
+        )
 
         if not (has_add and has_subtract):
             print("   [FAIL] Missing required functions in Turn 1!")
@@ -90,6 +90,7 @@ def test_multiturn_conversation():
     except Exception as e:
         print(f"   [FAIL] Turn 1 failed: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -133,7 +134,7 @@ def test_multiturn_conversation():
             return False
 
         # Read and check content
-        with open(calc_file, encoding='utf-8') as f:
+        with open(calc_file, encoding="utf-8") as f:
             content2 = f.read()
 
         has_add = "def add" in content2
@@ -142,7 +143,9 @@ def test_multiturn_conversation():
         has_divide = "def divide" in content2
         has_zero_check = "ZeroDivisionError" in content2 or "== 0" in content2
 
-        print(f"   Functions present: add={has_add}, subtract={has_subtract}, multiply={has_multiply}, divide={has_divide}")
+        print(
+            f"   Functions present: add={has_add}, subtract={has_subtract}, multiply={has_multiply}, divide={has_divide}"
+        )
         print(f"   Division by zero handling: {has_zero_check}")
 
         # Check context preservation: all 4 functions should exist
@@ -160,6 +163,7 @@ def test_multiturn_conversation():
     except Exception as e:
         print(f"   [FAIL] Turn 2 failed: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -176,7 +180,7 @@ def test_multiturn_conversation():
             print("   [OK] Multi-turn history tracking working")
 
         # Verify messages contain expected content
-        user_messages = [m for m in history if m.role == 'user']
+        user_messages = [m for m in history if m.role == "user"]
         if len(user_messages) >= 2:
             print(f"   Turn 1 message preview: '{user_messages[0].content[:50]}...'")
             print(f"   Turn 2 message preview: '{user_messages[1].content[:50]}...'")
@@ -208,7 +212,7 @@ def test_multiturn_conversation():
             return False
 
         # Read and check content
-        with open(test_file, encoding='utf-8') as f:
+        with open(test_file, encoding="utf-8") as f:
             test_content = f.read()
 
         # Check that test file references all functions
@@ -218,7 +222,9 @@ def test_multiturn_conversation():
         tests_divide = "divide" in test_content.lower()
         tests_zero = "zero" in test_content.lower()
 
-        print(f"   Tests cover: add={tests_add}, subtract={tests_subtract}, multiply={tests_multiply}, divide={tests_divide}, zero_div={tests_zero}")
+        print(
+            f"   Tests cover: add={tests_add}, subtract={tests_subtract}, multiply={tests_multiply}, divide={tests_divide}, zero_div={tests_zero}"
+        )
 
         if not (tests_add and tests_subtract and tests_multiply and tests_divide):
             print("   [WARN] Test file may not cover all functions")
@@ -234,6 +240,7 @@ def test_multiturn_conversation():
     except Exception as e:
         print(f"   [FAIL] Turn 3 failed: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -251,13 +258,14 @@ def test_multiturn_conversation():
             print(f"   [WARN] Expected 3 turns, got {log.total_turns}")
 
         # Verify log file
-        log_path = Path(log.metadata.get('log_path'))
+        log_path = Path(log.metadata.get("log_path"))
         if log_path.exists():
             print(f"   [OK] Log file exists ({log_path.stat().st_size} bytes)")
 
             # Read and parse log to verify structure
             import json
-            with open(log_path, encoding='utf-8') as f:
+
+            with open(log_path, encoding="utf-8") as f:
                 log_data = json.load(f)
 
             print(f"   Log contains {len(log_data['messages'])} messages")
@@ -268,13 +276,14 @@ def test_multiturn_conversation():
     except Exception as e:
         print(f"   [FAIL] Failed to end conversation: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
     # Success summary
-    print("="*70)
+    print("=" * 70)
     print("SUCCESS: Phase 2 Multi-Turn Conversations WORKING!")
-    print("="*70)
+    print("=" * 70)
     print("\nContext Preservation Evidence:")
     print("  - Turn 1: Created calculator.py with add() and subtract()")
     print("  - Turn 2: Added multiply() and divide() WITHOUT recreating file")
@@ -287,7 +296,7 @@ def test_multiturn_conversation():
     print("  - History preserved: YES")
     print(f"  - Log saved: {log.metadata.get('log_path')}")
     print("\nPhase 2 is COMPLETE!")
-    print("="*70 + "\n")
+    print("=" * 70 + "\n")
 
     return True
 
@@ -295,28 +304,32 @@ def test_multiturn_conversation():
 def test_context_independence():
     """Test that separate conversations are independent"""
 
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("BONUS TEST: Context Independence Between Conversations")
-    print("="*70 + "\n")
+    print("=" * 70 + "\n")
 
     print("[1/3] Testing that separate conversations don't share context...")
 
     try:
         orchestrator = AgentOrchestrator(
             output_dir="./test-orchestration-logs",
-            working_directory="./test-orchestration-workspace"
+            working_directory="./test-orchestration-workspace",
         )
 
         # Start first conversation
         print("   [OK] Starting conversation A...")
         session_a = orchestrator.start_conversation()
-        response_a = session_a.send_message("Create a file called file_a.txt with text 'From conversation A'")
+        response_a = session_a.send_message(
+            "Create a file called file_a.txt with text 'From conversation A'"
+        )
         print(f"   [OK] Conversation A: {response_a.files_generated}")
 
         # Start second conversation
         print("   [OK] Starting conversation B...")
         session_b = orchestrator.start_conversation()
-        response_b = session_b.send_message("Create a file called file_b.txt with text 'From conversation B'")
+        response_b = session_b.send_message(
+            "Create a file called file_b.txt with text 'From conversation B'"
+        )
         print(f"   [OK] Conversation B: {response_b.files_generated}")
 
         # Verify both files exist in their respective workspaces
@@ -346,15 +359,16 @@ def test_context_independence():
         print(f"   Conversation A turns: {log_a.total_turns}")
         print(f"   Conversation B turns: {log_b.total_turns}")
 
-        print("\n" + "="*70)
+        print("\n" + "=" * 70)
         print("SUCCESS: Context independence verified!")
-        print("="*70 + "\n")
+        print("=" * 70 + "\n")
 
         return True
 
     except Exception as e:
         print(f"   [FAIL] Test failed: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 

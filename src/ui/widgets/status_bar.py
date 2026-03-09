@@ -31,9 +31,11 @@ _status_bar_counters = {
     "refresh_ticks": 0,
 }
 
+
 def get_status_bar_counters() -> dict:
     """Get current status bar performance counters (for debugging)."""
     return _status_bar_counters.copy()
+
 
 def reset_status_bar_counters() -> None:
     """Reset status bar performance counters."""
@@ -107,11 +109,7 @@ class StatusBar(Static):
     }
     """
 
-    def __init__(
-        self,
-        model_name: str = "claude-3-opus",
-        **kwargs
-    ):
+    def __init__(self, model_name: str = "claude-3-opus", **kwargs):
         """
         Initialize StatusBar.
 
@@ -134,7 +132,12 @@ class StatusBar(Static):
         """
         # PERFORMANCE TEST: Return minimal content when idle
         # This tests if complex status bar rendering is causing performance issues
-        if not self.is_streaming and not self.current_tool and not self.error_message and not self.info_message:
+        if (
+            not self.is_streaming
+            and not self.current_tool
+            and not self.error_message
+            and not self.info_message
+        ):
             # Minimal idle state - show mode and director badges
             result = Text()
             if self.current_mode == "plan":
@@ -473,7 +476,9 @@ class StatusBar(Static):
         # Clamp used to limit (LLM might report slightly over)
         self.context_used = min(used, limit) if limit > 0 else used
         self.context_limit = limit
-        self.context_pressure = pressure if pressure in ("green", "yellow", "orange", "red") else "green"
+        self.context_pressure = (
+            pressure if pressure in ("green", "yellow", "orange", "red") else "green"
+        )
 
     def set_context_limit(self, limit: int) -> None:
         """

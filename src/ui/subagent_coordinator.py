@@ -91,7 +91,9 @@ class SubagentCoordinator:
                 delegation_tool.set_registry(registry)
                 delegation_tool.set_ui_protocol(ui_protocol)
                 ui_protocol.set_pause_requested_callback(pause_callback)
-                logger.info("Wired SubagentRegistry, UIProtocol, and pause callback to delegation tool")
+                logger.info(
+                    "Wired SubagentRegistry, UIProtocol, and pause callback to delegation tool"
+                )
             else:
                 logger.warning(
                     "delegate_to_subagent tool not found or missing set_registry - "
@@ -194,7 +196,7 @@ class SubagentCoordinator:
                 buffered_notifications=buffered,
                 model_name=model_name,
                 subagent_name=subagent_name,
-                id=f"subagent-{subagent_id}"
+                id=f"subagent-{subagent_id}",
             )
 
             if subagent_id in self._subagent_subscriptions:
@@ -203,8 +205,7 @@ class SubagentCoordinator:
             self._mount_callback(parent_tool_card.mount, card)
 
             logger.info(
-                f"TUI: Mounted SubAgentCard {subagent_id} "
-                f"inside ToolCard {parent_tool_call_id}"
+                f"TUI: Mounted SubAgentCard {subagent_id} inside ToolCard {parent_tool_call_id}"
             )
         else:
             self._pending_subagent_mounts[parent_tool_call_id] = {
@@ -265,9 +266,7 @@ class SubagentCoordinator:
             buf = self._buffered_subagent_notifications.setdefault(subagent_id, [])
             if len(buf) < 500:
                 buf.append(notification)
-            logger.debug(
-                f"TUI: Buffered notification for {subagent_id} (total={len(buf)})"
-            )
+            logger.debug(f"TUI: Buffered notification for {subagent_id} (total={len(buf)})")
 
     def find_subagent_tool_card(self, call_id: str):
         """Search active SubAgentCards for a tool card with the given call_id."""

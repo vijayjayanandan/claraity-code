@@ -24,14 +24,18 @@ logger = get_logger(__name__)
 
 # The track map: from each phase, which phases can you reach?
 VALID_TRANSITIONS: dict[DirectorPhase, set[DirectorPhase]] = {
-    DirectorPhase.IDLE:              {DirectorPhase.UNDERSTAND},
-    DirectorPhase.UNDERSTAND:        {DirectorPhase.PLAN, DirectorPhase.FAILED},
-    DirectorPhase.PLAN:              {DirectorPhase.AWAITING_APPROVAL, DirectorPhase.FAILED},
-    DirectorPhase.AWAITING_APPROVAL: {DirectorPhase.PLAN, DirectorPhase.EXECUTE, DirectorPhase.FAILED},
-    DirectorPhase.EXECUTE:           {DirectorPhase.INTEGRATE, DirectorPhase.FAILED},
-    DirectorPhase.INTEGRATE:         {DirectorPhase.COMPLETE, DirectorPhase.FAILED},
-    DirectorPhase.COMPLETE:          {DirectorPhase.IDLE},
-    DirectorPhase.FAILED:            {DirectorPhase.IDLE},
+    DirectorPhase.IDLE: {DirectorPhase.UNDERSTAND},
+    DirectorPhase.UNDERSTAND: {DirectorPhase.PLAN, DirectorPhase.FAILED},
+    DirectorPhase.PLAN: {DirectorPhase.AWAITING_APPROVAL, DirectorPhase.FAILED},
+    DirectorPhase.AWAITING_APPROVAL: {
+        DirectorPhase.PLAN,
+        DirectorPhase.EXECUTE,
+        DirectorPhase.FAILED,
+    },
+    DirectorPhase.EXECUTE: {DirectorPhase.INTEGRATE, DirectorPhase.FAILED},
+    DirectorPhase.INTEGRATE: {DirectorPhase.COMPLETE, DirectorPhase.FAILED},
+    DirectorPhase.COMPLETE: {DirectorPhase.IDLE},
+    DirectorPhase.FAILED: {DirectorPhase.IDLE},
 }
 
 

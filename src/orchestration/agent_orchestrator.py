@@ -39,7 +39,7 @@ class AgentOrchestrator:
         base_url: str | None = None,
         api_key: str | None = None,
         output_dir: str = "./orchestration-logs",
-        working_directory: str = "./orchestration-workspace"
+        working_directory: str = "./orchestration-workspace",
     ):
         """
         Initialize orchestrator.
@@ -62,11 +62,14 @@ class AgentOrchestrator:
 
         # Validate configuration
         if not self.model_name:
-            raise ValueError("No model name found. Set LLM_MODEL in .env or pass model_name parameter.")
+            raise ValueError(
+                "No model name found. Set LLM_MODEL in .env or pass model_name parameter."
+            )
         if not self.base_url:
             raise ValueError("No base URL found. Set LLM_HOST in .env or pass base_url parameter.")
         if not self.api_key:
-            raise ValueError("No API key found. Set OPENAI_API_KEY in .env or pass api_key parameter."
+            raise ValueError(
+                "No API key found. Set OPENAI_API_KEY in .env or pass api_key parameter."
             )
 
         # Create directories
@@ -77,9 +80,7 @@ class AgentOrchestrator:
         self.active_sessions: dict[str, ConversationSession] = {}
 
     def start_conversation(
-        self,
-        task_description: str | None = None,
-        isolated_workspace: bool = True
+        self, task_description: str | None = None, isolated_workspace: bool = True
     ) -> ConversationSession:
         """
         Start new conversation with agent.
@@ -122,9 +123,7 @@ class AgentOrchestrator:
 
         # Initialize Long Running Controller for checkpoints
         controller = LongRunningController(
-            agent=agent,
-            project_dir=str(workspace_abs),
-            max_checkpoints=10
+            agent=agent, project_dir=str(workspace_abs), max_checkpoints=10
         )
 
         # Wire controller to checkpoint tool
@@ -142,7 +141,7 @@ class AgentOrchestrator:
             working_directory=workspace_abs,  # Use absolute path
             agent=agent,
             log_file=log_file,
-            controller=controller  # Pass controller for checkpoint API
+            controller=controller,  # Pass controller for checkpoint API
         )
 
         # Track session
@@ -154,11 +153,7 @@ class AgentOrchestrator:
 
         return session
 
-    def send_message(
-        self,
-        message: str,
-        isolated_workspace: bool = True
-    ) -> AgentResponse:
+    def send_message(self, message: str, isolated_workspace: bool = True) -> AgentResponse:
         """
         Simple API: send single message, get response (no session tracking).
 
@@ -244,7 +239,7 @@ class AgentOrchestrator:
                 "started_at": session.started_at.isoformat(),
                 "working_directory": str(session.working_directory),
                 "message_count": len(session.messages),
-                "turns": len([m for m in session.messages if m.role == "user"])
+                "turns": len([m for m in session.messages if m.role == "user"]),
             }
             for conv_id, session in self.active_sessions.items()
         }

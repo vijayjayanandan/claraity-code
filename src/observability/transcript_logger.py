@@ -32,16 +32,29 @@ SECRET_PATTERNS = [
     re.compile(r'(?i)(api[_-]?key|apikey)\s*[:=]\s*["\']?[\w-]{20,}'),
     re.compile(r'(?i)(password|passwd|pwd)\s*[:=]\s*["\']?[^\s"\']+'),
     re.compile(r'(?i)(secret|token)\s*[:=]\s*["\']?[\w-]{20,}'),
-    re.compile(r'(?i)(bearer)\s+[\w-]{20,}'),
-    re.compile(r'sk-[a-zA-Z0-9]{20,}'),  # OpenAI API keys
+    re.compile(r"(?i)(bearer)\s+[\w-]{20,}"),
+    re.compile(r"sk-[a-zA-Z0-9]{20,}"),  # OpenAI API keys
     re.compile(r'(?i)(aws[_-]?secret|aws[_-]?access)\s*[:=]\s*["\']?[\w/+=]{20,}'),
 ]
 
 # Keys that should always be redacted
 SENSITIVE_KEYS = {
-    'password', 'passwd', 'pwd', 'secret', 'token', 'api_key', 'apikey',
-    'api-key', 'auth', 'authorization', 'credential', 'credentials',
-    'private_key', 'privatekey', 'access_token', 'refresh_token',
+    "password",
+    "passwd",
+    "pwd",
+    "secret",
+    "token",
+    "api_key",
+    "apikey",
+    "api-key",
+    "auth",
+    "authorization",
+    "credential",
+    "credentials",
+    "private_key",
+    "privatekey",
+    "access_token",
+    "refresh_token",
 }
 
 
@@ -60,6 +73,7 @@ class TranscriptEvent:
         level: Log level (info, warn, error)
         data: Event-specific payload
     """
+
     v: int
     session_id: str
     seq: int
@@ -98,15 +112,15 @@ class TranscriptLogger:
     # Configuration
     SCHEMA_VERSION = 1
     MAX_CONTENT_CHARS = 20000  # Truncate content longer than this
-    HEAD_CHARS = 10000         # Keep first N chars when truncating
-    TAIL_CHARS = 5000          # Keep last N chars when truncating
+    HEAD_CHARS = 10000  # Keep first N chars when truncating
+    TAIL_CHARS = 5000  # Keep last N chars when truncating
 
     def __init__(
         self,
         session_id: str,
         base_dir: Path,
         max_content_chars: int = 20000,
-        redact_secrets: bool = True
+        redact_secrets: bool = True,
     ):
         """
         Initialize transcript logger.
@@ -120,7 +134,7 @@ class TranscriptLogger:
         import re as _re
 
         # Validate session_id to prevent path traversal
-        if not _re.match(r'^[0-9a-f\-]{1,36}$', session_id):
+        if not _re.match(r"^[0-9a-f\-]{1,36}$", session_id):
             raise ValueError(f"Invalid session ID format: {session_id!r}")
 
         self.session_id = session_id
@@ -146,12 +160,12 @@ class TranscriptLogger:
         """Initialize sequence number from existing transcript file."""
         if self.transcript_path.exists():
             try:
-                with open(self.transcript_path, encoding='utf-8') as f:
+                with open(self.transcript_path, encoding="utf-8") as f:
                     for line in f:
                         if line.strip():
                             try:
                                 event = json.loads(line)
-                                self._seq = max(self._seq, event.get('seq', 0))
+                                self._seq = max(self._seq, event.get("seq", 0))
                             except json.JSONDecodeError:
                                 continue
             except Exception:
@@ -165,7 +179,7 @@ class TranscriptLogger:
 
     def _now(self) -> str:
         """Get current timestamp in ISO format."""
-        return datetime.utcnow().isoformat(timespec='milliseconds') + 'Z'
+        return datetime.utcnow().isoformat(timespec="milliseconds") + "Z"
 
     def _truncate(self, content: str) -> tuple[str, bool, int]:
         """
@@ -180,15 +194,11 @@ class TranscriptLogger:
             return content, False, original_len
 
         # Keep head and tail
-        head = content[:self.HEAD_CHARS]
-        tail = content[-self.TAIL_CHARS:]
+        head = content[: self.HEAD_CHARS]
+        tail = content[-self.TAIL_CHARS :]
         truncated_chars = original_len - self.HEAD_CHARS - self.TAIL_CHARS
 
-        truncated = (
-            f"{head}\n\n"
-            f"[... {truncated_chars:,} characters truncated ...]\n\n"
-            f"{tail}"
-        )
+        truncated = f"{head}\n\n[... {truncated_chars:,} characters truncated ...]\n\n{tail}"
 
         return truncated, True, original_len
 
@@ -199,7 +209,7 @@ class TranscriptLogger:
 
         redacted = content
         for pattern in SECRET_PATTERNS:
-            redacted = pattern.sub('[REDACTED]', redacted)
+            redacted = pattern.sub("[REDACTED]", redacted)
 
         return redacted
 
@@ -218,7 +228,7 @@ class TranscriptLogger:
         for key, value in data.items():
             # Check for sensitive keys
             if key.lower() in SENSITIVE_KEYS:
-                sanitized[key] = '[REDACTED]'
+                sanitized[key] = "[REDACTED]"
                 continue
 
             # Handle string content
@@ -231,8 +241,8 @@ class TranscriptLogger:
                 sanitized[key] = truncated
 
                 if was_truncated:
-                    sanitized[f'{key}_truncated'] = True
-                    sanitized[f'{key}_original_len'] = original_len
+                    sanitized[f"{key}_truncated"] = True
+                    sanitized[f"{key}_original_len"] = original_len
 
             # Handle nested dicts
             elif isinstance(value, dict):
@@ -241,8 +251,10 @@ class TranscriptLogger:
             # Handle lists
             elif isinstance(value, list):
                 sanitized[key] = [
-                    self._sanitize_data(item) if isinstance(item, dict)
-                    else self._redact(item) if isinstance(item, str)
+                    self._sanitize_data(item)
+                    if isinstance(item, dict)
+                    else self._redact(item)
+                    if isinstance(item, str)
                     else item
                     for item in value
                 ]
@@ -259,7 +271,7 @@ class TranscriptLogger:
         level: str = "info",
         turn_id: str | None = None,
         span_id: str | None = None,
-        parent_span_id: str | None = None
+        parent_span_id: str | None = None,
     ) -> TranscriptEvent:
         """
         Log an event to the transcript.
@@ -287,23 +299,20 @@ class TranscriptLogger:
             turn_id=turn_id,
             span_id=span_id,
             parent_span_id=parent_span_id,
-            data=sanitized_data
+            data=sanitized_data,
         )
 
         # Append to file
         with self._lock:
-            with open(self.transcript_path, 'a', encoding='utf-8') as f:
-                f.write(transcript_event.to_json() + '\n')
+            with open(self.transcript_path, "a", encoding="utf-8") as f:
+                f.write(transcript_event.to_json() + "\n")
 
         return transcript_event
 
     # ==================== Convenience Methods ====================
 
     def log_user_message(
-        self,
-        content: str,
-        turn_id: str | None = None,
-        token_count: int | None = None
+        self, content: str, turn_id: str | None = None, token_count: int | None = None
     ) -> TranscriptEvent:
         """Log a user message."""
         data = {
@@ -319,7 +328,7 @@ class TranscriptLogger:
         content: str,
         tool_calls: list[dict[str, Any]] | None = None,
         turn_id: str | None = None,
-        token_count: int | None = None
+        token_count: int | None = None,
     ) -> TranscriptEvent:
         """Log an assistant message."""
         data = {
@@ -333,18 +342,14 @@ class TranscriptLogger:
         return self.log("assistant_message", data, turn_id=turn_id)
 
     def log_tool_call(
-        self,
-        tool_call_id: str,
-        name: str,
-        arguments: dict[str, Any],
-        turn_id: str | None = None
+        self, tool_call_id: str, name: str, arguments: dict[str, Any], turn_id: str | None = None
     ) -> TranscriptEvent:
         """Log a tool call (before execution)."""
-        return self.log("tool_call", {
-            "tool_call_id": tool_call_id,
-            "name": name,
-            "arguments": arguments
-        }, turn_id=turn_id)
+        return self.log(
+            "tool_call",
+            {"tool_call_id": tool_call_id, "name": name, "arguments": arguments},
+            turn_id=turn_id,
+        )
 
     def log_tool_result(
         self,
@@ -354,7 +359,7 @@ class TranscriptLogger:
         status: str = "ok",
         duration_ms: float | None = None,
         error: str | None = None,
-        turn_id: str | None = None
+        turn_id: str | None = None,
     ) -> TranscriptEvent:
         """Log a tool result (after execution)."""
         data = {
@@ -368,12 +373,7 @@ class TranscriptLogger:
         if error:
             data["error"] = error
 
-        return self.log(
-            "tool_result",
-            data,
-            level="error" if error else "info",
-            turn_id=turn_id
-        )
+        return self.log("tool_result", data, level="error" if error else "info", turn_id=turn_id)
 
     def log_compaction(
         self,
@@ -383,36 +383,37 @@ class TranscriptLogger:
         summary_tokens: int,
         summary_preview: str,
         component: str = "working_memory",
-        reason: str = "token_budget"
+        reason: str = "token_budget",
     ) -> TranscriptEvent:
         """Log a compaction event."""
-        return self.log("compaction", {
-            "component": component,
-            "reason": reason,
-            "tokens_before": tokens_before,
-            "tokens_after": tokens_after,
-            "evicted_message_count": evicted_count,
-            "summary_tokens": summary_tokens,
-            "summary_preview": summary_preview[:500]  # Always truncate preview
-        })
+        return self.log(
+            "compaction",
+            {
+                "component": component,
+                "reason": reason,
+                "tokens_before": tokens_before,
+                "tokens_after": tokens_after,
+                "evicted_message_count": evicted_count,
+                "summary_tokens": summary_tokens,
+                "summary_preview": summary_preview[:500],  # Always truncate preview
+            },
+        )
 
     def log_continuation_injected(
-        self,
-        injected_chars: int,
-        sections_included: list[str]
+        self, injected_chars: int, sections_included: list[str]
     ) -> TranscriptEvent:
         """Log when continuation summary is injected."""
-        return self.log("continuation_injected", {
-            "injected_chars": injected_chars,
-            "sections_included": sections_included
-        })
+        return self.log(
+            "continuation_injected",
+            {"injected_chars": injected_chars, "sections_included": sections_included},
+        )
 
     def log_error(
         self,
         error_type: str,
         message: str,
         traceback: str | None = None,
-        turn_id: str | None = None
+        turn_id: str | None = None,
     ) -> TranscriptEvent:
         """Log an error event."""
         data = {
@@ -425,36 +426,25 @@ class TranscriptLogger:
         return self.log("error", data, level="error", turn_id=turn_id)
 
     def log_file_write(
-        self,
-        file_path: str,
-        bytes_written: int,
-        turn_id: str | None = None
+        self, file_path: str, bytes_written: int, turn_id: str | None = None
     ) -> TranscriptEvent:
         """Log a file write operation."""
-        return self.log("file_write", {
-            "file_path": file_path,
-            "bytes_written": bytes_written
-        }, turn_id=turn_id)
+        return self.log(
+            "file_write", {"file_path": file_path, "bytes_written": bytes_written}, turn_id=turn_id
+        )
 
     def log_file_edit(
-        self,
-        file_path: str,
-        edit_summary: str,
-        turn_id: str | None = None
+        self, file_path: str, edit_summary: str, turn_id: str | None = None
     ) -> TranscriptEvent:
         """Log a file edit operation."""
-        return self.log("file_edit", {
-            "file_path": file_path,
-            "edit_summary": edit_summary
-        }, turn_id=turn_id)
+        return self.log(
+            "file_edit", {"file_path": file_path, "edit_summary": edit_summary}, turn_id=turn_id
+        )
 
     # ==================== Query Methods ====================
 
     def get_events(
-        self,
-        event_types: list[str] | None = None,
-        since_seq: int = 0,
-        limit: int = 1000
+        self, event_types: list[str] | None = None, since_seq: int = 0, limit: int = 1000
     ) -> list[TranscriptEvent]:
         """
         Query events from transcript.
@@ -472,7 +462,7 @@ class TranscriptLogger:
         if not self.transcript_path.exists():
             return events
 
-        with open(self.transcript_path, encoding='utf-8') as f:
+        with open(self.transcript_path, encoding="utf-8") as f:
             for line in f:
                 if not line.strip():
                     continue
@@ -481,9 +471,9 @@ class TranscriptLogger:
                     data = json.loads(line)
 
                     # Apply filters
-                    if data.get('seq', 0) <= since_seq:
+                    if data.get("seq", 0) <= since_seq:
                         continue
-                    if event_types and data.get('event') not in event_types:
+                    if event_types and data.get("event") not in event_types:
                         continue
 
                     events.append(TranscriptEvent(**data))
@@ -508,22 +498,18 @@ class TranscriptLogger:
     def get_stats(self) -> dict[str, Any]:
         """Get transcript statistics."""
         if not self.transcript_path.exists():
-            return {
-                "event_count": 0,
-                "file_size_bytes": 0,
-                "session_id": self.session_id
-            }
+            return {"event_count": 0, "file_size_bytes": 0, "session_id": self.session_id}
 
         event_counts: dict[str, int] = {}
         total_events = 0
 
-        with open(self.transcript_path, encoding='utf-8') as f:
+        with open(self.transcript_path, encoding="utf-8") as f:
             for line in f:
                 if not line.strip():
                     continue
                 try:
                     data = json.loads(line)
-                    event_type = data.get('event', 'unknown')
+                    event_type = data.get("event", "unknown")
                     event_counts[event_type] = event_counts.get(event_type, 0) + 1
                     total_events += 1
                 except json.JSONDecodeError:
@@ -534,5 +520,5 @@ class TranscriptLogger:
             "event_count": total_events,
             "events_by_type": event_counts,
             "file_size_bytes": self.transcript_path.stat().st_size,
-            "transcript_path": str(self.transcript_path)
+            "transcript_path": str(self.transcript_path),
         }

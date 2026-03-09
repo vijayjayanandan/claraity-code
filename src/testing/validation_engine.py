@@ -20,11 +20,7 @@ class ValidationEngine:
     Runs tests, linters, and generates LLM-powered fix suggestions.
     """
 
-    def __init__(
-        self,
-        working_directory: str = ".",
-        llm_backend: LLMBackend | None = None
-    ):
+    def __init__(self, working_directory: str = ".", llm_backend: LLMBackend | None = None):
         """
         Initialize validation engine.
 
@@ -39,10 +35,13 @@ class ValidationEngine:
         if llm_backend is None:
             try:
                 from src.llm.model_config import ModelConfig
+
                 config = ModelConfig.from_env()
                 self.llm_backend = OpenAIBackend(config)
             except Exception as e:
-                logger.warning(f"Failed to initialize LLM backend: {e}. Feedback generation will be basic.")
+                logger.warning(
+                    f"Failed to initialize LLM backend: {e}. Feedback generation will be basic."
+                )
                 self.llm_backend = None
         else:
             self.llm_backend = llm_backend
@@ -78,11 +77,11 @@ class ValidationEngine:
             feedback = f"[OK] All {test_result.total_tests} tests passed"
 
         return {
-            'test_result': test_result,
-            'all_passed': test_result.all_passed,
-            'feedback': feedback,
-            'files_validated': files_changed,
-            'success_rate': test_result.success_rate
+            "test_result": test_result,
+            "all_passed": test_result.all_passed,
+            "feedback": feedback,
+            "files_validated": files_changed,
+            "success_rate": test_result.success_rate,
         }
 
     def _generate_failure_feedback(self, test_result: TestSuiteResult) -> str:
@@ -111,9 +110,9 @@ class ValidationEngine:
                 response = self.llm_backend.generate(
                     prompt=prompt,
                     max_tokens=1000,
-                    temperature=0.3  # Lower temperature for more focused suggestions
+                    temperature=0.3,  # Lower temperature for more focused suggestions
                 )
-                feedback_text = response.get('content', 'No feedback generated')
+                feedback_text = response.get("content", "No feedback generated")
 
             # Prepend summary
             summary = f"""
@@ -181,14 +180,16 @@ Next steps:
         if len(failed_tests) > 3:
             prompt_parts.append(f"\n... and {len(failed_tests) - 3} more failures")
 
-        prompt_parts.extend([
-            "",
-            "Provide:",
-            "1. Root cause analysis (1-2 sentences per failure)",
-            "2. Specific fix suggestions (code changes, imports, logic fixes)",
-            "3. Priority order (fix most critical issues first)",
-            "",
-            "Keep your response concise and actionable."
-        ])
+        prompt_parts.extend(
+            [
+                "",
+                "Provide:",
+                "1. Root cause analysis (1-2 sentences per failure)",
+                "2. Specific fix suggestions (code changes, imports, logic fixes)",
+                "3. Priority order (fix most critical issues first)",
+                "",
+                "Keep your response concise and actionable.",
+            ]
+        )
 
         return "\n".join(prompt_parts)

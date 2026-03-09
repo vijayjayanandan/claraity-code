@@ -46,6 +46,7 @@ class SessionMetadata:
         duration_minutes: Total time spent on session
         permission_mode: Permission mode when session was saved (plan/normal/auto)
     """
+
     session_id: str
     name: str | None
     created_at: str  # ISO format
@@ -399,7 +400,7 @@ class SessionManager:
         import re
 
         # Validate session ID format (UUID or UUID prefix) to prevent path traversal
-        if not re.match(r'^[0-9a-f\-]{1,36}$', session_id):
+        if not re.match(r"^[0-9a-f\-]{1,36}$", session_id):
             logger.warning(f"[SESSION] Invalid session ID format rejected: {session_id!r}")
             return None
 

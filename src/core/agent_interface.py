@@ -42,7 +42,7 @@ class AgentInterface(ABC):
         temperature: float = 0.7,
         max_tokens: int = 4096,
         stream: bool = False,
-        **kwargs
+        **kwargs,
     ) -> str:
         """
         Call LLM with conversation messages, returns response text.
@@ -172,7 +172,7 @@ class MockAgent(AgentInterface):
         self,
         mock_llm_response: str = "Mocked LLM response",
         mock_tool_result: Any = None,
-        mock_context: dict[str, Any] = None
+        mock_context: dict[str, Any] = None,
     ):
         """
         Initialize MockAgent with configurable mock responses.
@@ -195,7 +195,7 @@ class MockAgent(AgentInterface):
             "working_directory": ".",
             "conversation_history": [],
             "active_task": None,
-            "session_id": "mock_session"
+            "session_id": "mock_session",
         }
 
     def call_llm(
@@ -204,7 +204,7 @@ class MockAgent(AgentInterface):
         temperature: float = 0.7,
         max_tokens: int = 4096,
         stream: bool = False,
-        **kwargs
+        **kwargs,
     ) -> str:
         """
         Mock LLM call - records invocation, returns mocked response.

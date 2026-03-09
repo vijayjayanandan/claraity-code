@@ -562,9 +562,7 @@ While in plan mode:
 
 
 def get_plan_mode_injection(
-    plan_path: str,
-    plan_hash: str | None = None,
-    is_awaiting_approval: bool = False
+    plan_path: str, plan_hash: str | None = None, is_awaiting_approval: bool = False
 ) -> str:
     """
     Generate plan mode context to inject into system prompt.
@@ -623,6 +621,7 @@ CONSTRAINTS:
 After user approves the plan, you will have full tool access for implementation.
 </plan-mode>
 """
+
 
 # ---------------------------------------------------------------------------
 # Web Tools
@@ -866,6 +865,7 @@ Do NOT delegate to knowledge-builder until the user confirms. Only committed fil
 # Environment Info
 # ---------------------------------------------------------------------------
 
+
 def _get_environment_info() -> str:
     """Return dynamic environment info (date, platform, git status, cwd)."""
     import os
@@ -879,7 +879,10 @@ def _get_environment_info() -> str:
     try:
         subprocess.run(
             ["git", "rev-parse", "--is-inside-work-tree"],
-            cwd=cwd, capture_output=True, timeout=5, check=True
+            cwd=cwd,
+            capture_output=True,
+            timeout=5,
+            check=True,
         )
         is_git = "Yes"
     except Exception:
@@ -902,11 +905,12 @@ Today's date: {today}
 # Prompt Assembly
 # ---------------------------------------------------------------------------
 
+
 def get_system_prompt(
     language: str = None,
     task_type: str = None,
     context_size: int = 128000,
-    include_architecture: bool = True
+    include_architecture: bool = True,
 ) -> str:
     """
     Returns the complete system prompt for the coding agent.

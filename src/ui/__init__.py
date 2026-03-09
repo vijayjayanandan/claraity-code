@@ -47,13 +47,19 @@ from .widgets import (
 
 __all__ = [
     # Existing (prompt_toolkit)
-    "ToolOutputFormatter", "format_tool_call",
+    "ToolOutputFormatter",
+    "format_tool_call",
     # Events
     "ToolStatus",
-    "StreamStart", "StreamEnd",
+    "StreamStart",
+    "StreamEnd",
     "TextDelta",
-    "CodeBlockStart", "CodeBlockDelta", "CodeBlockEnd",
-    "ThinkingStart", "ThinkingDelta", "ThinkingEnd",
+    "CodeBlockStart",
+    "CodeBlockDelta",
+    "CodeBlockEnd",
+    "ThinkingStart",
+    "ThinkingDelta",
+    "ThinkingEnd",
     "ErrorEvent",
     "UIEvent",
     # Messages

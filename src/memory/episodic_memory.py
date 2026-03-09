@@ -81,9 +81,7 @@ class EpisodicMemory:
 
         # Update state
         self.conversation_turns = recent_turns
-        self.current_token_count = sum(
-            t.token_count or 0 for t in self.conversation_turns
-        )
+        self.current_token_count = sum(t.token_count or 0 for t in self.conversation_turns)
 
         # Add token count for compressed summaries
         for summary in self.compressed_history:
@@ -115,7 +113,9 @@ class EpisodicMemory:
 
                 summaries.append(summary)
 
-        timestamp_range = f"{turns[0].timestamp.strftime('%H:%M')} - {turns[-1].timestamp.strftime('%H:%M')}"
+        timestamp_range = (
+            f"{turns[0].timestamp.strftime('%H:%M')} - {turns[-1].timestamp.strftime('%H:%M')}"
+        )
         return f"[{timestamp_range}] " + " | ".join(summaries)
 
     def get_recent_turns(self, n: int = 5) -> list[ConversationTurn]:
@@ -252,9 +252,7 @@ class EpisodicMemory:
             assistant_msg = Message(
                 role=turn_data["assistant_message"]["role"],
                 content=turn_data["assistant_message"]["content"],
-                timestamp=datetime.fromisoformat(
-                    turn_data["assistant_message"]["timestamp"]
-                ),
+                timestamp=datetime.fromisoformat(turn_data["assistant_message"]["timestamp"]),
                 metadata=turn_data["assistant_message"]["metadata"],
             )
 

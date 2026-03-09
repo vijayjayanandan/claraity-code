@@ -57,10 +57,16 @@ class SubAgentLLMConfig:
     @property
     def has_overrides(self) -> bool:
         """True if any field is set (i.e., not all inherited)."""
-        return any(v is not None for v in [
-            self.backend_type, self.model, self.base_url,
-            self.api_key, self.context_window,
-        ])
+        return any(
+            v is not None
+            for v in [
+                self.backend_type,
+                self.model,
+                self.base_url,
+                self.api_key,
+                self.context_window,
+            ]
+        )
 
     def __post_init__(self):
         if self.backend_type is not None:
@@ -97,7 +103,7 @@ class SubAgentConfig:
     def __post_init__(self):
         """Validate configuration after initialization."""
         # Validate name (lowercase, alphanumeric + hyphens)
-        if not re.match(r'^[a-z0-9]+(?:-[a-z0-9]+)*$', self.name):
+        if not re.match(r"^[a-z0-9]+(?:-[a-z0-9]+)*$", self.name):
             raise ValueError(
                 f"Invalid subagent name '{self.name}': "
                 "must be lowercase alphanumeric with hyphens (e.g., 'code-reviewer')"
@@ -117,7 +123,7 @@ class SubAgentConfig:
             self.tools = [t.strip() for t in self.tools if t and t.strip()]
 
     @classmethod
-    def from_file(cls, file_path: Path) -> 'SubAgentConfig':
+    def from_file(cls, file_path: Path) -> "SubAgentConfig":
         """Load subagent configuration from Markdown file.
 
         Args:
@@ -141,26 +147,24 @@ class SubAgentConfig:
         logger.debug(f"Loading subagent config from {file_path}")
 
         # Read file
-        content = file_path.read_text(encoding='utf-8')
+        content = file_path.read_text(encoding="utf-8")
 
         # Parse YAML frontmatter and Markdown body
         frontmatter, body = cls._parse_markdown_with_frontmatter(content)
 
         # Extract required fields
         try:
-            name = frontmatter['name']
-            description = frontmatter['description']
+            name = frontmatter["name"]
+            description = frontmatter["description"]
         except KeyError as e:
-            raise ValueError(
-                f"Configuration file {file_path} missing required field: {e}"
-            )
+            raise ValueError(f"Configuration file {file_path} missing required field: {e}")
 
         # Extract optional fields
-        tools = frontmatter.get('tools')
+        tools = frontmatter.get("tools")
         if tools:
             # Tools can be comma-separated string or list
             if isinstance(tools, str):
-                tools = [t.strip() for t in tools.split(',') if t.strip()]
+                tools = [t.strip() for t in tools.split(",") if t.strip()]
             elif not isinstance(tools, list):
                 raise ValueError(
                     f"'tools' field must be a comma-separated string or list, got {type(tools)}"
@@ -168,29 +172,28 @@ class SubAgentConfig:
 
         # Parse LLM config (nested section)
         llm_config = None
-        llm_data = frontmatter.get('llm')
+        llm_data = frontmatter.get("llm")
         if isinstance(llm_data, dict):
             # Parse model: "inherit" means None (inherit from main agent)
-            model = llm_data.get('model')
-            if model == 'inherit':
+            model = llm_data.get("model")
+            if model == "inherit":
                 model = None
 
             # Parse context_window
-            context_window = llm_data.get('context_window')
+            context_window = llm_data.get("context_window")
             if context_window is not None:
                 try:
                     context_window = int(context_window)
                 except (ValueError, TypeError):
                     raise ValueError(
-                        f"'llm.context_window' must be an integer, "
-                        f"got {context_window}"
+                        f"'llm.context_window' must be an integer, got {context_window}"
                     )
 
             llm_config = SubAgentLLMConfig(
-                backend_type=llm_data.get('backend_type'),
+                backend_type=llm_data.get("backend_type"),
                 model=model,
-                base_url=llm_data.get('base_url'),
-                api_key=llm_data.get('api_key'),
+                base_url=llm_data.get("base_url"),
+                api_key=llm_data.get("api_key"),
                 context_window=context_window,
             )
             # Treat all-None as no override
@@ -199,8 +202,7 @@ class SubAgentConfig:
 
         # Remove standard fields from metadata
         metadata = {
-            k: v for k, v in frontmatter.items()
-            if k not in {'name', 'description', 'tools', 'llm'}
+            k: v for k, v in frontmatter.items() if k not in {"name", "description", "tools", "llm"}
         }
 
         # Create config
@@ -211,7 +213,7 @@ class SubAgentConfig:
             tools=tools,
             llm=llm_config,
             config_path=file_path,
-            metadata=metadata
+            metadata=metadata,
         )
 
     @staticmethod
@@ -235,13 +237,11 @@ class SubAgentConfig:
             ValueError: If frontmatter format is invalid
         """
         # Match YAML frontmatter (between --- delimiters)
-        pattern = r'^---\s*\n(.*?)\n---\s*\n(.*)$'
+        pattern = r"^---\s*\n(.*?)\n---\s*\n(.*)$"
         match = re.match(pattern, content, re.DOTALL)
 
         if not match:
-            raise ValueError(
-                "Invalid format: Expected YAML frontmatter between --- delimiters"
-            )
+            raise ValueError("Invalid format: Expected YAML frontmatter between --- delimiters")
 
         frontmatter_yaml = match.group(1)
         markdown_body = match.group(2)
@@ -255,9 +255,7 @@ class SubAgentConfig:
             raise ValueError(f"Invalid YAML frontmatter: {e}")
 
         if not isinstance(frontmatter, dict):
-            raise ValueError(
-                f"Frontmatter must be a YAML object (dict), got {type(frontmatter)}"
-            )
+            raise ValueError(f"Frontmatter must be a YAML object (dict), got {type(frontmatter)}")
 
         return frontmatter, markdown_body
 
@@ -281,10 +279,8 @@ class SubAgentConfig:
             ... )
         """
         # Validate name format
-        if not re.match(r'^[a-z0-9]+(?:-[a-z0-9]+)*$', name):
-            raise ValueError(
-                f"Invalid name '{name}': must be lowercase alphanumeric with hyphens"
-            )
+        if not re.match(r"^[a-z0-9]+(?:-[a-z0-9]+)*$", name):
+            raise ValueError(f"Invalid name '{name}': must be lowercase alphanumeric with hyphens")
 
         template = f"""---
 name: {name}
@@ -297,7 +293,7 @@ llm:
   # context_window: null   # Context window size (omit to inherit from main agent)
 ---
 
-# {name.replace('-', ' ').title()} Subagent
+# {name.replace("-", " ").title()} Subagent
 
 You are an expert in [YOUR DOMAIN].
 
@@ -326,7 +322,7 @@ You are an expert in [YOUR DOMAIN].
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Write template
-        output_path.write_text(template, encoding='utf-8')
+        output_path.write_text(template, encoding="utf-8")
 
         logger.info(f"Created subagent template: {output_path}")
 
@@ -372,7 +368,9 @@ class SubAgentConfigLoader:
         builtin_names = set(builtin_configs.keys())  # Track built-in names
         configs.update(builtin_configs)
         if builtin_configs:
-            logger.info(f"Loaded {len(builtin_configs)} built-in subagent(s) from src/prompts/subagents/")
+            logger.info(
+                f"Loaded {len(builtin_configs)} built-in subagent(s) from src/prompts/subagents/"
+            )
 
         # Load from user directory (legacy, lower priority)
         user_dir = Path.home() / ".clarity" / "agents"
@@ -386,7 +384,9 @@ class SubAgentConfigLoader:
                 else:
                     logger.debug(f"Skipping user subagent '{name}' (overridden by built-in)")
             if added_count > 0:
-                logger.warning(f"Loaded {added_count} subagent(s) from legacy user directory (consider migrating to src/prompts/subagents/)")
+                logger.warning(
+                    f"Loaded {added_count} subagent(s) from legacy user directory (consider migrating to src/prompts/subagents/)"
+                )
 
         # Load from project directory (legacy, can override user but not built-in)
         project_dir = self.working_directory / ".clarity" / "agents"
@@ -400,7 +400,9 @@ class SubAgentConfigLoader:
                 else:
                     logger.debug(f"Skipping project subagent '{name}' (overridden by built-in)")
             if added_count > 0:
-                logger.warning(f"Loaded {added_count} subagent(s) from legacy project directory (consider migrating to src/prompts/subagents/)")
+                logger.warning(
+                    f"Loaded {added_count} subagent(s) from legacy project directory (consider migrating to src/prompts/subagents/)"
+                )
 
         # Cache loaded configs
         self.loaded_configs = configs
@@ -435,66 +437,66 @@ class SubAgentConfigLoader:
             # Define subagent configurations
             subagents = [
                 {
-                    'name': 'code-reviewer',
-                    'description': 'Expert code reviewer analyzing code quality, security vulnerabilities, performance issues, and best practices with verification-first methodology',
-                    'prompt': CODE_REVIEWER_PROMPT,
+                    "name": "code-reviewer",
+                    "description": "Expert code reviewer analyzing code quality, security vulnerabilities, performance issues, and best practices with verification-first methodology",
+                    "prompt": CODE_REVIEWER_PROMPT,
                 },
                 {
-                    'name': 'test-writer',
-                    'description': 'Expert test engineer creating comprehensive test suites with unit tests, integration tests, and edge case coverage',
-                    'prompt': TEST_WRITER_PROMPT,
+                    "name": "test-writer",
+                    "description": "Expert test engineer creating comprehensive test suites with unit tests, integration tests, and edge case coverage",
+                    "prompt": TEST_WRITER_PROMPT,
                 },
                 {
-                    'name': 'doc-writer',
-                    'description': 'Expert technical writer creating clear, comprehensive documentation',
-                    'prompt': DOC_WRITER_PROMPT,
+                    "name": "doc-writer",
+                    "description": "Expert technical writer creating clear, comprehensive documentation",
+                    "prompt": DOC_WRITER_PROMPT,
                 },
                 {
-                    'name': 'code-writer',
-                    'description': 'Implementation engineer that writes minimum code to satisfy requirements and tests',
-                    'prompt': CODE_WRITER_PROMPT,
+                    "name": "code-writer",
+                    "description": "Implementation engineer that writes minimum code to satisfy requirements and tests",
+                    "prompt": CODE_WRITER_PROMPT,
                 },
                 {
-                    'name': 'explore',
-                    'description': 'Fast read-only codebase explorer for finding code, tracing execution flows, and answering architecture questions',
-                    'prompt': EXPLORE_PROMPT,
-                    'tools': EXPLORE_TOOLS,
+                    "name": "explore",
+                    "description": "Fast read-only codebase explorer for finding code, tracing execution flows, and answering architecture questions",
+                    "prompt": EXPLORE_PROMPT,
+                    "tools": EXPLORE_TOOLS,
                 },
                 {
-                    'name': 'planner',
-                    'description': 'Implementation planner that explores code and produces detailed step-by-step plans without writing any code',
-                    'prompt': PLANNER_PROMPT,
-                    'tools': PLANNER_TOOLS,
+                    "name": "planner",
+                    "description": "Implementation planner that explores code and produces detailed step-by-step plans without writing any code",
+                    "prompt": PLANNER_PROMPT,
+                    "tools": PLANNER_TOOLS,
                 },
                 {
-                    'name': 'general-purpose',
-                    'description': 'Versatile agent with full tool access for multi-step research and implementation tasks',
-                    'prompt': GENERAL_PURPOSE_PROMPT,
+                    "name": "general-purpose",
+                    "description": "Versatile agent with full tool access for multi-step research and implementation tasks",
+                    "prompt": GENERAL_PURPOSE_PROMPT,
                 },
                 {
-                    'name': 'knowledge-builder',
-                    'description': (
-                        'Codebase analyst that autonomously explores the project and generates '
-                        'structured markdown knowledge base files in .clarity/knowledge/. '
+                    "name": "knowledge-builder",
+                    "description": (
+                        "Codebase analyst that autonomously explores the project and generates "
+                        "structured markdown knowledge base files in .clarity/knowledge/. "
                         'Delegate with a SHORT task like "Build knowledge base for this project" '
                         'or "Update architecture.md". Do NOT specify file contents, structure, '
-                        'or filenames -- the subagent discovers these on its own.'
+                        "or filenames -- the subagent discovers these on its own."
                     ),
-                    'prompt': KNOWLEDGE_BUILDER_PROMPT,
-                    'tools': KNOWLEDGE_BUILDER_TOOLS,
+                    "prompt": KNOWLEDGE_BUILDER_PROMPT,
+                    "tools": KNOWLEDGE_BUILDER_TOOLS,
                 },
             ]
 
             # Create SubAgentConfig objects
             for subagent in subagents:
                 config = SubAgentConfig(
-                    name=subagent['name'],
-                    description=subagent['description'],
-                    system_prompt=subagent['prompt'],
-                    tools=subagent.get('tools'),  # None = inherit all, list = allowlist
+                    name=subagent["name"],
+                    description=subagent["description"],
+                    system_prompt=subagent["prompt"],
+                    tools=subagent.get("tools"),  # None = inherit all, list = allowlist
                     llm=None,  # Inherit LLM config from main agent
                     config_path=None,  # No file path for Python constants
-                    metadata={'source': 'builtin'}
+                    metadata={"source": "builtin"},
                 )
                 configs[config.name] = config
                 logger.debug(f"Loaded built-in subagent: {config.name}")
@@ -584,9 +586,7 @@ class SubAgentConfigLoader:
                     model=override.model,
                     base_url=override.base_url,
                     api_key=(
-                        _os.environ.get(override.api_key_env)
-                        if override.api_key_env
-                        else None
+                        _os.environ.get(override.api_key_env) if override.api_key_env else None
                     ),
                     context_window=override.context_window,
                 )

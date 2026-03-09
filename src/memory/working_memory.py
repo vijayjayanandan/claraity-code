@@ -143,9 +143,7 @@ class WorkingMemory:
         recent_messages = self.messages[-2:]
 
         # Get messages eligible for eviction (excluding system and recent)
-        eviction_candidates = [
-            m for m in self.messages[:-2] if m.role != MessageRole.SYSTEM
-        ]
+        eviction_candidates = [m for m in self.messages[:-2] if m.role != MessageRole.SYSTEM]
 
         # Group tool messages with their assistant messages
         # This ensures we don't orphan tool results from their calls
@@ -159,9 +157,7 @@ class WorkingMemory:
             # Calculate tokens if we kept this group
             flat_retained = [m for g in retained_groups for m in g]
             test_messages = system_messages + flat_retained + group + recent_messages
-            test_tokens = sum(
-                m.token_count or self.count_tokens(m.content) for m in test_messages
-            )
+            test_tokens = sum(m.token_count or self.count_tokens(m.content) for m in test_messages)
 
             if test_tokens <= self.max_tokens * 0.9:  # Keep 10% buffer
                 retained_groups.append(group)
@@ -175,6 +171,7 @@ class WorkingMemory:
             # Get or create summarizer
             if self._summarizer is None:
                 from src.memory.compaction.summarizer import PrioritizedSummarizer
+
                 self._summarizer = PrioritizedSummarizer(token_budget=6000)
 
             summary = self._summarizer.generate_summary(evicted_dicts, use_llm=use_llm)
@@ -184,14 +181,14 @@ class WorkingMemory:
             if self.pending_continuation_summary:
                 # Append new summary to existing
                 self.pending_continuation_summary = (
-                    self.pending_continuation_summary +
-                    "\n\n---\n\n[Additional context from further compaction:]\n\n" +
-                    summary
+                    self.pending_continuation_summary
+                    + "\n\n---\n\n[Additional context from further compaction:]\n\n"
+                    + summary
                 )
                 logger.info(
                     "compaction_merged",
                     evicted_count=len(evicted_messages),
-                    summary_tokens=summary_tokens
+                    summary_tokens=summary_tokens,
                 )
             else:
                 self.pending_continuation_summary = summary
@@ -204,7 +201,7 @@ class WorkingMemory:
                         tokens_after=self.get_current_token_count(),
                         evicted_count=len(evicted_messages),
                         summary_tokens=summary_tokens,
-                        summary_preview=summary[:500]
+                        summary_preview=summary[:500],
                     )
                 except Exception as e:
                     logger.warning("compaction_log_failed", error=str(e))
@@ -213,14 +210,13 @@ class WorkingMemory:
                 "compaction_complete",
                 evicted_count=len(evicted_messages),
                 tokens_before=original_tokens,
-                summary_tokens=summary_tokens
+                summary_tokens=summary_tokens,
             )
 
         # Rebuild messages list
         flat_retained = [m for g in retained_groups for m in g]
         self.messages = sorted(
-            system_messages + flat_retained + recent_messages,
-            key=lambda m: m.timestamp
+            system_messages + flat_retained + recent_messages, key=lambda m: m.timestamp
         )
 
         return original_count - len(self.messages)
@@ -344,11 +340,13 @@ class WorkingMemory:
                 context.append(tool_msg)
             elif msg.role == MessageRole.ASSISTANT and msg.metadata.get("tool_calls"):
                 # Assistant messages with tool_calls need to include them
-                context.append({
-                    "role": "assistant",
-                    "content": msg.content,
-                    "tool_calls": msg.metadata.get("tool_calls")
-                })
+                context.append(
+                    {
+                        "role": "assistant",
+                        "content": msg.content,
+                        "tool_calls": msg.metadata.get("tool_calls"),
+                    }
+                )
             else:
                 # Standard messages (user, system, assistant without tools)
                 context.append({"role": msg.role.value, "content": msg.content})
@@ -371,9 +369,7 @@ class WorkingMemory:
 
         summary_parts.append(f"Messages: {len(self.messages)}")
         summary_parts.append(f"Code Contexts: {len(self.code_contexts)}")
-        summary_parts.append(
-            f"Tokens: {self.get_current_token_count()}/{self.max_tokens}"
-        )
+        summary_parts.append(f"Tokens: {self.get_current_token_count()}/{self.max_tokens}")
 
         return " | ".join(summary_parts)
 
@@ -385,9 +381,11 @@ class WorkingMemory:
             Dictionary with all working memory state
         """
         return {
-            "messages": [msg.model_dump(mode='json') for msg in self.messages],
-            "task_context": self.task_context.model_dump(mode='json') if self.task_context else None,
-            "code_contexts": [ctx.model_dump(mode='json') for ctx in self.code_contexts],
+            "messages": [msg.model_dump(mode="json") for msg in self.messages],
+            "task_context": self.task_context.model_dump(mode="json")
+            if self.task_context
+            else None,
+            "code_contexts": [ctx.model_dump(mode="json") for ctx in self.code_contexts],
             "metadata": self.metadata,
             "max_tokens": self.max_tokens,
         }

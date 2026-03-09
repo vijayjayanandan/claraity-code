@@ -43,10 +43,7 @@ class FileOperationTool(Tool):
     _workspace_root: Path | None = None
 
     def _validate_path(
-        self,
-        file_path: str,
-        must_exist: bool = True,
-        allow_outside_workspace: bool = False
+        self, file_path: str, must_exist: bool = True, allow_outside_workspace: bool = False
     ) -> Path:
         """
         Validate file path with security checks.
@@ -70,7 +67,7 @@ class FileOperationTool(Tool):
         validated_path = validate_path_security(
             file_path,
             workspace_root=workspace,
-            allow_files_outside_workspace=allow_outside_workspace
+            allow_files_outside_workspace=allow_outside_workspace,
         )
 
         # Check existence if required
@@ -95,14 +92,13 @@ class ReadFileTool(FileOperationTool):
     """
 
     # Configuration constants
-    MAX_LINES_DEFAULT = 1000     # Balanced default - read meaningful chunks
-    MAX_LINES_LIMIT = 2000       # Hard cap per request
-    MAX_LINE_LENGTH = 2000       # Truncate lines longer than this
+    MAX_LINES_DEFAULT = 1000  # Balanced default - read meaningful chunks
+    MAX_LINES_LIMIT = 2000  # Hard cap per request
+    MAX_LINE_LENGTH = 2000  # Truncate lines longer than this
 
     def __init__(self):
         super().__init__(
-            name="read_file",
-            description="Read contents of a file with optional line range support"
+            name="read_file", description="Read contents of a file with optional line range support"
         )
 
     def _get_parameters(self) -> dict[str, Any]:
@@ -113,9 +109,9 @@ class ReadFileTool(FileOperationTool):
                 "file_path": {"type": "string", "description": "Path to file"},
                 "start_line": {"type": "integer", "description": "Start line (1-indexed)"},
                 "end_line": {"type": "integer", "description": "End line (exclusive)"},
-                "max_lines": {"type": "integer", "description": "Max lines to return"}
+                "max_lines": {"type": "integer", "description": "Max lines to return"},
             },
-            "required": ["file_path"]
+            "required": ["file_path"],
         }
 
     def execute(
@@ -124,7 +120,7 @@ class ReadFileTool(FileOperationTool):
         start_line: int | None = None,
         end_line: int | None = None,
         max_lines: int | None = None,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> ToolResult:
         """
         Read file contents with streaming (bounded memory).
@@ -149,17 +145,14 @@ class ReadFileTool(FileOperationTool):
                 path = self._validate_path(file_path, must_exist=True)
             except ValueError as e:
                 return ToolResult(
-                    tool_name=self.name,
-                    status=ToolStatus.ERROR,
-                    output=None,
-                    error=str(e)
+                    tool_name=self.name, status=ToolStatus.ERROR, output=None, error=str(e)
                 )
             except FileNotFoundError:
                 return ToolResult(
                     tool_name=self.name,
                     status=ToolStatus.ERROR,
                     output=None,
-                    error=f"File not found: {file_path}"
+                    error=f"File not found: {file_path}",
                 )
 
             if not path.is_file():
@@ -167,15 +160,12 @@ class ReadFileTool(FileOperationTool):
                     tool_name=self.name,
                     status=ToolStatus.ERROR,
                     output=None,
-                    error=f"Path is not a file: {file_path}"
+                    error=f"Path is not a file: {file_path}",
                 )
 
             # Determine bounds
             start = max(1, start_line or 1)  # 1-indexed, minimum 1
-            effective_max = min(
-                max_lines or self.MAX_LINES_DEFAULT,
-                self.MAX_LINES_LIMIT
-            )
+            effective_max = min(max_lines or self.MAX_LINES_DEFAULT, self.MAX_LINES_LIMIT)
 
             # Calculate end_line if not specified
             if end_line is not None:
@@ -210,11 +200,11 @@ class ReadFileTool(FileOperationTool):
                             break
 
                         # Format line with line number (cat -n style)
-                        line_content = line.rstrip('\n\r')
+                        line_content = line.rstrip("\n\r")
 
                         # Truncate long lines
                         if len(line_content) > self.MAX_LINE_LENGTH:
-                            line_content = line_content[:self.MAX_LINE_LENGTH] + "... [truncated]"
+                            line_content = line_content[: self.MAX_LINE_LENGTH] + "... [truncated]"
 
                         # Format: 6-digit line number + tab + content
                         collected_lines.append(f"{lineno:6}\t{line_content}")
@@ -224,14 +214,14 @@ class ReadFileTool(FileOperationTool):
                     tool_name=self.name,
                     status=ToolStatus.ERROR,
                     output=None,
-                    error=f"Permission denied reading file: {file_path}"
+                    error=f"Permission denied reading file: {file_path}",
                 )
             except UnicodeDecodeError as e:
                 return ToolResult(
                     tool_name=self.name,
                     status=ToolStatus.ERROR,
                     output=None,
-                    error=f"Encoding error reading file: {file_path} - {str(e)}"
+                    error=f"Encoding error reading file: {file_path} - {str(e)}",
                 )
 
             # If we stopped early (not at end_line), count remaining lines
@@ -265,8 +255,8 @@ class ReadFileTool(FileOperationTool):
                     "lines_returned": len(collected_lines),
                     "start_line": actual_start,
                     "end_line": actual_end,  # Exclusive
-                    "has_more": has_more
-                }
+                    "has_more": has_more,
+                },
             )
 
         except Exception as e:
@@ -274,7 +264,7 @@ class ReadFileTool(FileOperationTool):
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 output=None,
-                error=f"Failed to read file: {str(e)}"
+                error=f"Failed to read file: {str(e)}",
             )
 
 
@@ -283,8 +273,7 @@ class WriteFileTool(FileOperationTool):
 
     def __init__(self):
         super().__init__(
-            name="write_file",
-            description="Write content to a file (creates or overwrites)"
+            name="write_file", description="Write content to a file (creates or overwrites)"
         )
 
     def _get_parameters(self) -> dict[str, Any]:
@@ -293,9 +282,9 @@ class WriteFileTool(FileOperationTool):
             "type": "object",
             "properties": {
                 "file_path": {"type": "string", "description": "Path to file"},
-                "content": {"type": "string", "description": "Content to write"}
+                "content": {"type": "string", "description": "Content to write"},
             },
-            "required": ["file_path", "content"]
+            "required": ["file_path", "content"],
         }
 
     def execute(self, file_path: str, content: str, **kwargs: Any) -> ToolResult:
@@ -306,10 +295,7 @@ class WriteFileTool(FileOperationTool):
                 path = self._validate_path(file_path, must_exist=False)
             except ValueError as e:
                 return ToolResult(
-                    tool_name=self.name,
-                    status=ToolStatus.ERROR,
-                    output=None,
-                    error=str(e)
+                    tool_name=self.name, status=ToolStatus.ERROR, output=None, error=str(e)
                 )
 
             # Create parent directories if needed
@@ -322,7 +308,7 @@ class WriteFileTool(FileOperationTool):
                 tool_name=self.name,
                 status=ToolStatus.SUCCESS,
                 output=f"Successfully wrote {len(content)} characters to {file_path}",
-                metadata={"file_path": str(path), "size": len(content)}
+                metadata={"file_path": str(path), "size": len(content)},
             )
 
         except Exception as e:
@@ -330,7 +316,7 @@ class WriteFileTool(FileOperationTool):
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 output=None,
-                error=f"Failed to write file: {str(e)}"
+                error=f"Failed to write file: {str(e)}",
             )
 
 
@@ -339,8 +325,7 @@ class ListDirectoryTool(FileOperationTool):
 
     def __init__(self):
         super().__init__(
-            name="list_directory",
-            description="list contents of a directory with file details"
+            name="list_directory", description="list contents of a directory with file details"
         )
 
     def _get_parameters(self) -> dict[str, Any]:
@@ -350,7 +335,7 @@ class ListDirectoryTool(FileOperationTool):
             "properties": {
                 "directory_path": {"type": "string", "description": "Path to directory"}
             },
-            "required": ["directory_path"]
+            "required": ["directory_path"],
         }
 
     def execute(self, directory_path: str, **kwargs: Any) -> ToolResult:
@@ -361,17 +346,14 @@ class ListDirectoryTool(FileOperationTool):
                 path = self._validate_path(directory_path, must_exist=True)
             except ValueError as e:
                 return ToolResult(
-                    tool_name=self.name,
-                    status=ToolStatus.ERROR,
-                    output=None,
-                    error=str(e)
+                    tool_name=self.name, status=ToolStatus.ERROR, output=None, error=str(e)
                 )
             except FileNotFoundError:
                 return ToolResult(
                     tool_name=self.name,
                     status=ToolStatus.ERROR,
                     output=None,
-                    error=f"Directory not found: {directory_path}"
+                    error=f"Directory not found: {directory_path}",
                 )
 
             if not path.is_dir():
@@ -379,15 +361,13 @@ class ListDirectoryTool(FileOperationTool):
                     tool_name=self.name,
                     status=ToolStatus.ERROR,
                     output=None,
-                    error=f"Path is not a directory: {directory_path}"
+                    error=f"Path is not a directory: {directory_path}",
                 )
 
             entries = []
             for entry in path.iterdir():
                 stat = entry.stat()
-                mtime_iso = datetime.fromtimestamp(
-                    stat.st_mtime, tz=timezone.utc
-                ).isoformat()
+                mtime_iso = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
                 entry_info = {
                     "name": entry.name,
                     "type": "directory" if entry.is_dir() else "file",
@@ -417,7 +397,7 @@ class ListDirectoryTool(FileOperationTool):
                     "directory_path": str(path),
                     "entry_count": len(entries),
                     "entries": entries,
-                }
+                },
             )
 
         except Exception as e:
@@ -425,7 +405,7 @@ class ListDirectoryTool(FileOperationTool):
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 output=None,
-                error=f"Failed to list directory: {str(e)}"
+                error=f"Failed to list directory: {str(e)}",
             )
 
 
@@ -434,8 +414,7 @@ class EditFileTool(FileOperationTool):
 
     def __init__(self):
         super().__init__(
-            name="edit_file",
-            description="Edit a file by replacing old text with new text"
+            name="edit_file", description="Edit a file by replacing old text with new text"
         )
 
     def _get_parameters(self) -> dict[str, Any]:
@@ -445,18 +424,12 @@ class EditFileTool(FileOperationTool):
             "properties": {
                 "file_path": {"type": "string", "description": "Path to file"},
                 "old_text": {"type": "string", "description": "Text to find"},
-                "new_text": {"type": "string", "description": "Text to replace with"}
+                "new_text": {"type": "string", "description": "Text to replace with"},
             },
-            "required": ["file_path", "old_text", "new_text"]
+            "required": ["file_path", "old_text", "new_text"],
         }
 
-    def execute(
-        self,
-        file_path: str,
-        old_text: str,
-        new_text: str,
-        **kwargs: Any
-    ) -> ToolResult:
+    def execute(self, file_path: str, old_text: str, new_text: str, **kwargs: Any) -> ToolResult:
         """Edit file with find/replace."""
         try:
             # Validate path security
@@ -464,17 +437,14 @@ class EditFileTool(FileOperationTool):
                 path = self._validate_path(file_path, must_exist=True)
             except ValueError as e:
                 return ToolResult(
-                    tool_name=self.name,
-                    status=ToolStatus.ERROR,
-                    output=None,
-                    error=str(e)
+                    tool_name=self.name, status=ToolStatus.ERROR, output=None, error=str(e)
                 )
             except FileNotFoundError:
                 return ToolResult(
                     tool_name=self.name,
                     status=ToolStatus.ERROR,
                     output=None,
-                    error=f"File not found: {file_path}"
+                    error=f"File not found: {file_path}",
                 )
 
             # Read current content
@@ -487,7 +457,7 @@ class EditFileTool(FileOperationTool):
                     tool_name=self.name,
                     status=ToolStatus.ERROR,
                     output=None,
-                    error="Text to replace not found in file"
+                    error="Text to replace not found in file",
                 )
 
             # Replace
@@ -501,10 +471,7 @@ class EditFileTool(FileOperationTool):
                 tool_name=self.name,
                 status=ToolStatus.SUCCESS,
                 output=f"Successfully edited {file_path}",
-                metadata={
-                    "file_path": str(path),
-                    "replacements": content.count(old_text)
-                }
+                metadata={"file_path": str(path), "replacements": content.count(old_text)},
             )
 
         except Exception as e:
@@ -512,7 +479,7 @@ class EditFileTool(FileOperationTool):
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 output=None,
-                error=f"Failed to edit file: {str(e)}"
+                error=f"Failed to edit file: {str(e)}",
             )
 
 
@@ -522,7 +489,7 @@ class AppendToFileTool(FileOperationTool):
     def __init__(self):
         super().__init__(
             name="append_to_file",
-            description="Append content to an existing file (or create if doesn't exist)"
+            description="Append content to an existing file (or create if doesn't exist)",
         )
 
     def _get_parameters(self) -> dict[str, Any]:
@@ -531,9 +498,9 @@ class AppendToFileTool(FileOperationTool):
             "type": "object",
             "properties": {
                 "file_path": {"type": "string", "description": "Path to file"},
-                "content": {"type": "string", "description": "Content to append"}
+                "content": {"type": "string", "description": "Content to append"},
             },
-            "required": ["file_path", "content"]
+            "required": ["file_path", "content"],
         }
 
     def execute(self, file_path: str, content: str, **kwargs: Any) -> ToolResult:
@@ -544,10 +511,7 @@ class AppendToFileTool(FileOperationTool):
                 path = self._validate_path(file_path, must_exist=False)
             except ValueError as e:
                 return ToolResult(
-                    tool_name=self.name,
-                    status=ToolStatus.ERROR,
-                    output=None,
-                    error=str(e)
+                    tool_name=self.name, status=ToolStatus.ERROR, output=None, error=str(e)
                 )
 
             # Create parent directories if needed
@@ -559,12 +523,12 @@ class AppendToFileTool(FileOperationTool):
                 with open(path, "rb") as f:
                     f.seek(-1, 2)  # Seek to last byte
                     last_byte = f.read(1)
-                    needs_newline = last_byte != b'\n'
+                    needs_newline = last_byte != b"\n"
 
             # Append content
             with open(path, "a", encoding="utf-8") as f:
                 if needs_newline:
-                    f.write('\n')
+                    f.write("\n")
                 f.write(content)
 
             # Get total file stats (efficient line count)
@@ -580,8 +544,8 @@ class AppendToFileTool(FileOperationTool):
                     "file_path": str(path),
                     "appended_size": len(content),
                     "total_size": total_size,
-                    "total_lines": total_lines
-                }
+                    "total_lines": total_lines,
+                },
             )
 
         except Exception as e:
@@ -589,7 +553,7 @@ class AppendToFileTool(FileOperationTool):
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 output=None,
-                error=f"Failed to append to file: {str(e)}"
+                error=f"Failed to append to file: {str(e)}",
             )
 
 
@@ -606,8 +570,7 @@ class RunCommandTool(Tool):
 
     def __init__(self, registry=None):
         super().__init__(
-            name="run_command",
-            description="Execute a shell command and return its output"
+            name="run_command", description="Execute a shell command and return its output"
         )
         self._registry = registry
 
@@ -623,7 +586,7 @@ class RunCommandTool(Tool):
                     "description": (
                         "Timeout in seconds (default: 120). Use higher values for "
                         "long-running commands like test suites or builds (max: 600)"
-                    )
+                    ),
                 },
                 "background": {
                     "type": "boolean",
@@ -631,10 +594,10 @@ class RunCommandTool(Tool):
                         "Run in background (non-blocking). Returns immediately with a task ID. "
                         "You will be automatically notified when the task completes. "
                         "Use for long-running operations like test suites, builds, or linters."
-                    )
-                }
+                    ),
+                },
             },
-            "required": ["command"]
+            "required": ["command"],
         }
 
     async def execute_async(
@@ -721,11 +684,7 @@ class RunCommandTool(Tool):
         )
 
     def execute(
-        self,
-        command: str,
-        working_directory: str | None = None,
-        timeout: int = 120,
-        **kwargs: Any
+        self, command: str, working_directory: str | None = None, timeout: int = 120, **kwargs: Any
     ) -> ToolResult:
         """Execute a shell command."""
         try:
@@ -735,7 +694,7 @@ class RunCommandTool(Tool):
                     tool_name=self.name,
                     status=ToolStatus.ERROR,
                     output=None,
-                    error="Command cannot be empty"
+                    error="Command cannot be empty",
                 )
 
             # --- COMMAND SAFETY CHECK ---
@@ -750,7 +709,7 @@ class RunCommandTool(Tool):
                         "This command matches a pattern that could cause irreversible damage "
                         "or data exfiltration. If this command is legitimately needed, the user "
                         "must run it manually in their terminal."
-                    )
+                    ),
                 )
 
             # --- CLAMP TIMEOUT ---
@@ -765,14 +724,14 @@ class RunCommandTool(Tool):
                         tool_name=self.name,
                         status=ToolStatus.ERROR,
                         output=None,
-                        error=f"Working directory does not exist: {working_directory}"
+                        error=f"Working directory does not exist: {working_directory}",
                     )
                 if not cwd_path.is_dir():
                     return ToolResult(
                         tool_name=self.name,
                         status=ToolStatus.ERROR,
                         output=None,
-                        error=f"Working directory path is not a directory: {working_directory}"
+                        error=f"Working directory path is not a directory: {working_directory}",
                     )
                 cwd = str(cwd_path.absolute())
 
@@ -789,10 +748,10 @@ class RunCommandTool(Tool):
                     capture_output=True,
                     text=True,
                     timeout=timeout,
-                    encoding='utf-8',
-                    errors='replace',
+                    encoding="utf-8",
+                    errors="replace",
                     stdin=subprocess.DEVNULL,
-                    creationflags=subprocess.CREATE_NO_WINDOW
+                    creationflags=subprocess.CREATE_NO_WINDOW,
                 )
             else:
                 # On Unix-like systems, use the default shell
@@ -803,10 +762,10 @@ class RunCommandTool(Tool):
                     capture_output=True,
                     text=True,
                     timeout=timeout,
-                    encoding='utf-8',
-                    errors='replace',
+                    encoding="utf-8",
+                    errors="replace",
                     stdin=subprocess.DEVNULL,
-                    start_new_session=True
+                    start_new_session=True,
                 )
 
             # Prepare output
@@ -819,7 +778,9 @@ class RunCommandTool(Tool):
             output = "\n\n".join(output_parts) if output_parts else "(no output)"
 
             # Audit log the execution
-            logger.info(f"[COMMAND_AUDIT] Executed: {command[:200]}, exit_code={result.returncode}, timeout={timeout}s")
+            logger.info(
+                f"[COMMAND_AUDIT] Executed: {command[:200]}, exit_code={result.returncode}, timeout={timeout}s"
+            )
 
             # Determine success based on exit code
             if result.returncode == 0:
@@ -832,8 +793,8 @@ class RunCommandTool(Tool):
                         "exit_code": result.returncode,
                         "working_directory": cwd or "current",
                         "has_stdout": bool(result.stdout),
-                        "has_stderr": bool(result.stderr)
-                    }
+                        "has_stderr": bool(result.stderr),
+                    },
                 )
             else:
                 return ToolResult(
@@ -844,8 +805,8 @@ class RunCommandTool(Tool):
                     metadata={
                         "command": command,
                         "exit_code": result.returncode,
-                        "working_directory": cwd or "current"
-                    }
+                        "working_directory": cwd or "current",
+                    },
                 )
 
         except subprocess.TimeoutExpired as e:
@@ -857,15 +818,17 @@ class RunCommandTool(Tool):
             stderr = e.stderr
             # Handle bytes (can happen on some platforms despite text=True)
             if isinstance(stdout, bytes):
-                stdout = stdout.decode('utf-8', errors='replace')
+                stdout = stdout.decode("utf-8", errors="replace")
             if isinstance(stderr, bytes):
-                stderr = stderr.decode('utf-8', errors='replace')
+                stderr = stderr.decode("utf-8", errors="replace")
             if stdout:
                 output_parts.append(f"STDOUT:\n{stdout}")
             if stderr:
                 output_parts.append(f"STDERR:\n{stderr}")
-            partial_output = "\n\n".join(output_parts) if output_parts else (
-                "(no output captured - process was killed before producing output)"
+            partial_output = (
+                "\n\n".join(output_parts)
+                if output_parts
+                else ("(no output captured - process was killed before producing output)")
             )
 
             return ToolResult(
@@ -873,18 +836,18 @@ class RunCommandTool(Tool):
                 status=ToolStatus.ERROR,
                 output=partial_output,
                 error=f"Command timed out after {timeout} seconds. "
-                      f"Use a longer timeout if the command needs more time (max 600s).",
+                f"Use a longer timeout if the command needs more time (max 600s).",
                 metadata={
                     "command": command,
                     "timeout": timeout,
                     "working_directory": cwd or "current",
-                    "partial_output": bool(output_parts)
-                }
+                    "partial_output": bool(output_parts),
+                },
             )
         except Exception as e:
             return ToolResult(
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 output=None,
-                error=f"Failed to execute command: {str(e)}"
+                error=f"Failed to execute command: {str(e)}",
             )
