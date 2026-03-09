@@ -26,6 +26,16 @@ def registry():
     return BackgroundTaskRegistry()
 
 
+async def _wait_until_not_running(registry, task_id, max_seconds=15):
+    """Poll until task leaves RUNNING state (or max_seconds exceeded)."""
+    for _ in range(max_seconds * 2):  # 0.5s intervals
+        await asyncio.sleep(0.5)
+        info = registry.get_status(task_id)
+        if info and info.status != BackgroundTaskStatus.RUNNING:
+            return info
+    return registry.get_status(task_id)
+
+
 # ---------------------------------------------------------------------------
 # _clamp_bg_timeout
 # ---------------------------------------------------------------------------
@@ -127,8 +137,7 @@ class TestStatusAndResult:
     async def test_get_result_after_completion(self, registry):
         """After task completes, get_result returns full output."""
         task_id, _ = await registry.launch("echo hello-world")
-        # Wait for completion
-        await asyncio.sleep(2)
+        await _wait_until_not_running(registry, task_id)
         result = registry.get_result(task_id)
         assert result is not None
         assert result["status"] in ("completed", "failed")
@@ -158,7 +167,7 @@ class TestCancel:
     @pytest.mark.asyncio
     async def test_cancel_already_completed(self, registry):
         task_id, _ = await registry.launch("echo done")
-        await asyncio.sleep(2)  # Wait for completion
+        await _wait_until_not_running(registry, task_id)
         success, msg = await registry.cancel(task_id)
         assert success is False
         assert "not running" in msg
@@ -176,7 +185,7 @@ class TestDrainCompleted:
     @pytest.mark.asyncio
     async def test_drain_after_completion(self, registry):
         task_id, _ = await registry.launch("echo drain-test")
-        await asyncio.sleep(2)
+        await _wait_until_not_running(registry, task_id)
         completed = registry.drain_completed()
         assert len(completed) >= 1
         assert completed[0].task_id == task_id
@@ -184,8 +193,8 @@ class TestDrainCompleted:
     @pytest.mark.asyncio
     async def test_drain_clears_queue(self, registry):
         """Second drain returns empty after first drain."""
-        await registry.launch("echo test")
-        await asyncio.sleep(2)
+        task_id, _ = await registry.launch("echo test")
+        await _wait_until_not_running(registry, task_id)
         first = registry.drain_completed()
         second = registry.drain_completed()
         assert len(first) >= 1
@@ -216,8 +225,8 @@ class TestCompletionCallback:
     async def test_callback_fires_on_completion(self, registry):
         callback = MagicMock()
         registry.set_completion_callback(callback)
-        await registry.launch("echo callback-test")
-        await asyncio.sleep(2)
+        task_id, _ = await registry.launch("echo callback-test")
+        await _wait_until_not_running(registry, task_id)
         assert callback.called
         # Should be called with active_count (0 after completion)
         callback.assert_called_with(0)
@@ -256,6 +265,10 @@ class TestTimeout:
         """Task that exceeds timeout gets TIMED_OUT status."""
         cmd = "ping -n 30 127.0.0.1" if platform.system() == "Windows" else "sleep 30"
         task_id, _ = await registry.launch(cmd, timeout=2)
-        await asyncio.sleep(4)  # Wait for timeout + cleanup
-        info = registry.get_status(task_id)
+        # Poll until status changes (max 15s to accommodate slow CI subprocess startup)
+        for _ in range(30):
+            await asyncio.sleep(0.5)
+            info = registry.get_status(task_id)
+            if info.status != BackgroundTaskStatus.RUNNING:
+                break
         assert info.status == BackgroundTaskStatus.TIMED_OUT
