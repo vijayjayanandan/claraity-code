@@ -5,11 +5,10 @@ Factory methods that need seq must accept a store parameter.
 See v3.1 Patch 1 for rationale.
 """
 
+import uuid as uuid_lib
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional, Dict, Any
-import uuid as uuid_lib
-
+from typing import Any, Optional
 
 # =============================================================================
 # Constants
@@ -59,10 +58,10 @@ class SessionContext:
     cwd: str
     git_branch: str
     version: str
-    slug: Optional[str] = None
+    slug: str | None = None
     user_type: str = "external"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         result = {
             "session_id": self.session_id,
             "cwd": self.cwd,
@@ -75,7 +74,7 @@ class SessionContext:
         return result
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "SessionContext":
+    def from_dict(cls, data: dict[str, Any]) -> "SessionContext":
         """Create SessionContext from dict."""
         return cls(
             session_id=data.get("session_id", ""),

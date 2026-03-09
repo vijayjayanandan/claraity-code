@@ -8,12 +8,11 @@ Schema: v2.1
 - Runtime Only: _raw_response (NOT persisted)
 """
 
-from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any, Union
 import json
+from dataclasses import dataclass, field
+from typing import Any, Optional
 
-from .base import generate_uuid, now_iso, generate_stream_id, SCHEMA_VERSION
-
+from .base import SCHEMA_VERSION, generate_stream_id, generate_uuid, now_iso
 
 # =============================================================================
 # Segment Types (for content ordering)
@@ -25,11 +24,11 @@ class TextSegment:
     content: str
     type: str = field(default="text", init=False)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {"type": self.type, "content": self.content}
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "TextSegment":
+    def from_dict(cls, data: dict[str, Any]) -> "TextSegment":
         return cls(content=data.get("content", ""))
 
 
@@ -40,7 +39,7 @@ class CodeBlockSegment:
     content: str
     type: str = field(default="code_block", init=False)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "type": self.type,
             "language": self.language,
@@ -48,7 +47,7 @@ class CodeBlockSegment:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "CodeBlockSegment":
+    def from_dict(cls, data: dict[str, Any]) -> "CodeBlockSegment":
         return cls(
             language=data.get("language", ""),
             content=data.get("content", "")
@@ -61,11 +60,11 @@ class ToolCallSegment:
     tool_call_index: int
     type: str = field(default="tool_call", init=False)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {"type": self.type, "tool_call_index": self.tool_call_index}
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ToolCallSegment":
+    def from_dict(cls, data: dict[str, Any]) -> "ToolCallSegment":
         return cls(tool_call_index=data.get("tool_call_index", 0))
 
 
@@ -75,11 +74,11 @@ class ToolCallRefSegment:
     tool_call_id: str
     type: str = field(default="tool_call_ref", init=False)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {"type": self.type, "tool_call_id": self.tool_call_id}
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ToolCallRefSegment":
+    def from_dict(cls, data: dict[str, Any]) -> "ToolCallRefSegment":
         return cls(tool_call_id=data.get("tool_call_id", ""))
 
 
@@ -89,18 +88,18 @@ class ThinkingSegment:
     content: str
     type: str = field(default="thinking", init=False)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {"type": self.type, "content": self.content}
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ThinkingSegment":
+    def from_dict(cls, data: dict[str, Any]) -> "ThinkingSegment":
         return cls(content=data.get("content", ""))
 
 
-Segment = Union[TextSegment, CodeBlockSegment, ToolCallSegment, ToolCallRefSegment, ThinkingSegment]
+Segment = TextSegment | CodeBlockSegment | ToolCallSegment | ToolCallRefSegment | ThinkingSegment
 
 
-def parse_segment(data: Dict[str, Any]) -> Segment:
+def parse_segment(data: dict[str, Any]) -> Segment:
     """Parse segment from dict."""
     seg_type = data.get("type", "text")
     if seg_type == "text":
@@ -128,17 +127,17 @@ class ToolCallFunction:
     name: str
     arguments: str  # JSON string
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {"name": self.name, "arguments": self.arguments}
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ToolCallFunction":
+    def from_dict(cls, data: dict[str, Any]) -> "ToolCallFunction":
         return cls(
             name=data.get("name", ""),
             arguments=data.get("arguments", "{}")
         )
 
-    def get_parsed_arguments(self) -> Dict[str, Any]:
+    def get_parsed_arguments(self) -> dict[str, Any]:
         """Parse arguments JSON string to dict."""
         try:
             return json.loads(self.arguments)
@@ -152,9 +151,9 @@ class ToolCall:
     id: str
     function: ToolCallFunction
     type: str = "function"
-    meta: Dict[str, Any] = field(default_factory=dict)
+    meta: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         result = {
             "id": self.id,
             "type": self.type,
@@ -164,7 +163,7 @@ class ToolCall:
             result["meta"] = self.meta
         return result
 
-    def to_llm_dict(self) -> Dict[str, Any]:
+    def to_llm_dict(self) -> dict[str, Any]:
         """Export for LLM API (strip meta)."""
         return {
             "id": self.id,
@@ -173,7 +172,7 @@ class ToolCall:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ToolCall":
+    def from_dict(cls, data: dict[str, Any]) -> "ToolCall":
         return cls(
             id=data.get("id", ""),
             function=ToolCallFunction.from_dict(data.get("function", {})),
@@ -213,11 +212,11 @@ class TokenUsage:
     """Token usage statistics."""
     input_tokens: int = 0
     output_tokens: int = 0
-    cache_read_tokens: Optional[int] = None
-    cache_write_tokens: Optional[int] = None
-    reasoning_tokens: Optional[int] = None
+    cache_read_tokens: int | None = None
+    cache_write_tokens: int | None = None
+    reasoning_tokens: int | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         result = {
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens
@@ -231,7 +230,7 @@ class TokenUsage:
         return result
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "TokenUsage":
+    def from_dict(cls, data: dict[str, Any]) -> "TokenUsage":
         return cls(
             input_tokens=data.get("input_tokens", 0),
             output_tokens=data.get("output_tokens", 0),
@@ -258,55 +257,55 @@ class MessageMeta:
     seq: int = 0
     timestamp: str = ""
     session_id: str = ""
-    parent_uuid: Optional[str] = None
+    parent_uuid: str | None = None
     is_sidechain: bool = False
 
     # Streaming
-    stream_id: Optional[str] = None
-    provider_message_id: Optional[str] = None
+    stream_id: str | None = None
+    provider_message_id: str | None = None
 
     # Provider
-    provider: Optional[str] = None  # "anthropic" | "openai" | "ollama" | "local"
-    model: Optional[str] = None
+    provider: str | None = None  # "anthropic" | "openai" | "ollama" | "local"
+    model: str | None = None
 
     # Completion
-    stop_reason: Optional[str] = None  # "complete" | "tool_use" | "max_tokens" | "stop_sequence" | "streaming" | "error"
-    usage: Optional[TokenUsage] = None
+    stop_reason: str | None = None  # "complete" | "tool_use" | "max_tokens" | "stop_sequence" | "streaming" | "error"
+    usage: TokenUsage | None = None
 
     # Content Ordering (v2.1)
-    segments: Optional[List[Segment]] = None
+    segments: list[Segment] | None = None
 
     # Thinking
-    thinking: Optional[str] = None
-    thinking_signature: Optional[str] = None
+    thinking: str | None = None
+    thinking_signature: str | None = None
 
     # Reasoning (Kimi K2.5 etc.) - echoed back in to_llm_dict() for iteration 2+
-    reasoning_content: Optional[str] = None
+    reasoning_content: str | None = None
 
     # Tool Execution
-    status: Optional[str] = None  # "success" | "error" | "timeout" | "cancelled"
-    duration_ms: Optional[int] = None
-    exit_code: Optional[int] = None
-    truncated: Optional[bool] = None
+    status: str | None = None  # "success" | "error" | "timeout" | "cancelled"
+    duration_ms: int | None = None
+    exit_code: int | None = None
+    truncated: bool | None = None
 
     # System Events
-    event_type: Optional[str] = None  # "compact_boundary" | "turn_duration" | "session_start"
-    include_in_llm_context: Optional[bool] = None
+    event_type: str | None = None  # "compact_boundary" | "turn_duration" | "session_start"
+    include_in_llm_context: bool | None = None
 
     # Compaction
-    pre_tokens: Optional[int] = None
-    logical_parent_uuid: Optional[str] = None
+    pre_tokens: int | None = None
+    logical_parent_uuid: str | None = None
 
     # UI Hints
-    is_compact_summary: Optional[bool] = None
-    is_visible_in_transcript_only: Optional[bool] = None
+    is_compact_summary: bool | None = None
+    is_visible_in_transcript_only: bool | None = None
 
     # Extensible
-    extra: Optional[Dict[str, Any]] = None
+    extra: dict[str, Any] | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize meta to dict."""
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "schema_version": self.schema_version,
             "uuid": self.uuid,
             "seq": self.seq,
@@ -363,7 +362,7 @@ class MessageMeta:
         return result
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "MessageMeta":
+    def from_dict(cls, data: dict[str, Any]) -> "MessageMeta":
         """Deserialize from dict."""
         usage = None
         if "usage" in data:
@@ -428,21 +427,21 @@ class Message:
     """
     # OpenAI Core
     role: str
-    content: Optional[Union[str, List[Dict[str, Any]]]] = None  # str for text, list for multimodal
-    tool_calls: List[ToolCall] = field(default_factory=list)
-    tool_call_id: Optional[str] = None
+    content: str | list[dict[str, Any]] | None = None  # str for text, list for multimodal
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    tool_call_id: str | None = None
 
     # ClarAIty Extensions
     meta: MessageMeta = field(default_factory=MessageMeta)
 
     # Runtime only - NOT persisted
-    _raw_response: Optional[Dict[str, Any]] = field(
+    _raw_response: dict[str, Any] | None = field(
         default=None, repr=False, compare=False
     )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to JSONL. Excludes _raw_response."""
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "role": self.role,
             "meta": self.meta.to_dict()
         }
@@ -458,9 +457,9 @@ class Message:
 
         return result
 
-    def to_llm_dict(self) -> Dict[str, Any]:
+    def to_llm_dict(self) -> dict[str, Any]:
         """Export for LLM API (strip meta)."""
-        result: Dict[str, Any] = {"role": self.role}
+        result: dict[str, Any] = {"role": self.role}
 
         if self.content is not None:
             result["content"] = self.content
@@ -482,7 +481,7 @@ class Message:
         return result
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any], seq: int = 0) -> "Message":
+    def from_dict(cls, data: dict[str, Any], seq: int = 0) -> "Message":
         """
         Deserialize from JSONL dict.
 
@@ -513,14 +512,14 @@ class Message:
         cls,
         content: str,
         session_id: str,
-        parent_uuid: Optional[str],
+        parent_uuid: str | None,
         seq: int,
         **meta_kwargs
     ) -> "Message":
         """Create a user message."""
         # Remove parent_uuid from meta_kwargs to avoid duplicate parameter error
         meta_kwargs.pop('parent_uuid', None)
-        
+
         return cls(
             role="user",
             content=content,
@@ -538,18 +537,18 @@ class Message:
     @classmethod
     def create_assistant(
         cls,
-        content: Optional[str],
+        content: str | None,
         session_id: str,
-        parent_uuid: Optional[str],
+        parent_uuid: str | None,
         seq: int,
-        tool_calls: Optional[List[ToolCall]] = None,
-        stream_id: Optional[str] = None,
+        tool_calls: list[ToolCall] | None = None,
+        stream_id: str | None = None,
         **meta_kwargs
     ) -> "Message":
         """Create an assistant message."""
         # Remove parent_uuid from meta_kwargs to avoid duplicate parameter error
         meta_kwargs.pop('parent_uuid', None)
-        
+
         return cls(
             role="assistant",
             content=content,
@@ -572,17 +571,17 @@ class Message:
         tool_call_id: str,
         content: str,
         session_id: str,
-        parent_uuid: Optional[str],
+        parent_uuid: str | None,
         seq: int,
         status: str = "success",
-        duration_ms: Optional[int] = None,
-        exit_code: Optional[int] = None,
+        duration_ms: int | None = None,
+        exit_code: int | None = None,
         **meta_kwargs
     ) -> "Message":
         """Create a tool result message."""
         # Remove parent_uuid from meta_kwargs to avoid duplicate parameter error
         meta_kwargs.pop('parent_uuid', None)
-        
+
         return cls(
             role="tool",
             content=content,
@@ -607,8 +606,8 @@ class Message:
         content: str,
         session_id: str,
         seq: int,
-        event_type: Optional[str] = None,
-        include_in_llm_context: Optional[bool] = None,
+        event_type: str | None = None,
+        include_in_llm_context: bool | None = None,
         **meta_kwargs
     ) -> "Message":
         """Create a system message.
@@ -624,7 +623,7 @@ class Message:
         # Remove parent_uuid from meta_kwargs to avoid duplicate parameter error
         # (system messages always have parent_uuid=None)
         meta_kwargs.pop('parent_uuid', None)
-        
+
         return cls(
             role="system",
             content=content,
@@ -645,9 +644,9 @@ class Message:
     def create_agent_state(
         cls,
         session_id: str,
-        todos: List[Dict[str, Any]],
-        current_todo_id: Optional[str] = None,
-        last_stop_reason: Optional[str] = None,
+        todos: list[dict[str, Any]],
+        current_todo_id: str | None = None,
+        last_stop_reason: str | None = None,
         seq: int = 0,
     ) -> "Message":
         """Create an agent_state system event for session persistence.
@@ -687,7 +686,7 @@ class Message:
         tool_name: str,
         approved: bool,
         action: str,
-        feedback: Optional[str] = None,
+        feedback: str | None = None,
         seq: int = 0,
     ) -> "Message":
         """Create a tool_approval system event for session persistence.
@@ -728,8 +727,8 @@ class Message:
         cls,
         session_id: str,
         call_id: str,
-        questions: List[Dict[str, Any]],
-        context: Optional[str] = None,
+        questions: list[dict[str, Any]],
+        context: str | None = None,
         seq: int = 0,
     ) -> "Message":
         """Create a clarify_request system event.
@@ -764,9 +763,9 @@ class Message:
         session_id: str,
         call_id: str,
         submitted: bool,
-        responses: Optional[Dict[str, Any]] = None,
+        responses: dict[str, Any] | None = None,
         chat_instead: bool = False,
-        chat_message: Optional[str] = None,
+        chat_message: str | None = None,
         seq: int = 0,
     ) -> "Message":
         """Create a clarify_response system event.
@@ -837,7 +836,7 @@ class Message:
         return self.meta.session_id
 
     @property
-    def parent_uuid(self) -> Optional[str]:
+    def parent_uuid(self) -> str | None:
         return self.meta.parent_uuid
 
     @property
@@ -845,26 +844,26 @@ class Message:
         return self.meta.is_sidechain
 
     @property
-    def stream_id(self) -> Optional[str]:
+    def stream_id(self) -> str | None:
         return self.meta.stream_id
 
     @property
-    def segments(self) -> List[Segment]:
+    def segments(self) -> list[Segment]:
         """Convenience accessor for meta.segments."""
         return self.meta.segments if self.meta.segments else []
 
     @segments.setter
-    def segments(self, value: List[Segment]) -> None:
+    def segments(self, value: list[Segment]) -> None:
         """Convenience setter for meta.segments."""
         self.meta.segments = value
 
-    def get_collapse_key(self) -> Optional[str]:
+    def get_collapse_key(self) -> str | None:
         """Get key for streaming collapse (stream_id for assistant messages)."""
         if self.is_assistant:
             return self.meta.stream_id
         return None
 
-    def get_tool_call_ids(self) -> List[str]:
+    def get_tool_call_ids(self) -> list[str]:
         """Get IDs of tool calls in this message."""
         return [tc.id for tc in self.tool_calls]
 
@@ -897,7 +896,7 @@ class Message:
         """Check if message has tool calls."""
         return bool(self.tool_calls)
 
-    def get_ordered_content(self) -> List[Segment]:
+    def get_ordered_content(self) -> list[Segment]:
         """
         Get content in display order.
 
@@ -907,7 +906,7 @@ class Message:
             return self.meta.segments
 
         # Synthesize from flat fields
-        segments: List[Segment] = []
+        segments: list[Segment] = []
 
         if self.content:
             segments.append(TextSegment(content=self.content))
@@ -929,7 +928,7 @@ class Snapshot:
     content: str
     hash: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "file_path": self.file_path,
             "content": self.content,
@@ -937,7 +936,7 @@ class Snapshot:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Snapshot":
+    def from_dict(cls, data: dict[str, Any]) -> "Snapshot":
         return cls(
             file_path=data.get("file_path", ""),
             content=data.get("content", ""),
@@ -950,10 +949,10 @@ class FileBackup:
     """File backup for restoration."""
     file_path: str
     existed: bool
-    content: Optional[str] = None
+    content: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
-        result: Dict[str, Any] = {
+    def to_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
             "file_path": self.file_path,
             "existed": self.existed
         }
@@ -962,7 +961,7 @@ class FileBackup:
         return result
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "FileBackup":
+    def from_dict(cls, data: dict[str, Any]) -> "FileBackup":
         return cls(
             file_path=data.get("file_path", ""),
             existed=data.get("existed", True),
@@ -976,11 +975,11 @@ class FileHistorySnapshot:
     uuid: str
     timestamp: str
     session_id: str
-    snapshots: List[Snapshot] = field(default_factory=list)
-    backups: List[FileBackup] = field(default_factory=list)
+    snapshots: list[Snapshot] = field(default_factory=list)
+    backups: list[FileBackup] = field(default_factory=list)
     type: str = field(default="file_snapshot", init=False)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "type": self.type,
             "uuid": self.uuid,
@@ -991,7 +990,7 @@ class FileHistorySnapshot:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "FileHistorySnapshot":
+    def from_dict(cls, data: dict[str, Any]) -> "FileHistorySnapshot":
         return cls(
             uuid=data.get("uuid", ""),
             timestamp=data.get("timestamp", ""),
