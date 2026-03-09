@@ -267,6 +267,7 @@ class BackgroundTaskRegistry:
     ) -> None:
         """Execute command as async subprocess and capture output."""
         info = self._tasks[task_id]
+        communicate_task = None
         try:
             # Platform-specific subprocess creation
             if platform.system() == "Windows":
@@ -287,11 +288,31 @@ class BackgroundTaskRegistry:
                     cwd=working_dir,
                 )
 
-            try:
-                stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                    process.communicate(),
+            # Use asyncio.wait instead of asyncio.wait_for: in Python 3.12+,
+            # wait_for cancels the inner coroutine and blocks until it responds
+            # before raising TimeoutError. On Windows/IOCP, communicate() may
+            # not cancel cleanly while pipes are open (grandchild process keeps
+            # pipe handles alive), causing wait_for to hang indefinitely.
+            communicate_task = asyncio.create_task(process.communicate())
+            done, pending = await asyncio.wait({communicate_task}, timeout=timeout)
+
+            if pending:
+                # Timeout: kill entire process tree first (closes pipes), then cancel task.
+                await self._kill_process(process)
+                communicate_task.cancel()
+                try:
+                    await communicate_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+                info.status = BackgroundTaskStatus.TIMED_OUT
+                info.error = f"Command timed out after {timeout}s"
+                logger.warning(
+                    "background_task_timeout",
+                    task_id=task_id,
                     timeout=timeout,
                 )
+            else:
+                stdout_bytes, stderr_bytes = communicate_task.result()
                 info.stdout = stdout_bytes.decode("utf-8", errors="replace")[:MAX_OUTPUT_BYTES]
                 info.stderr = stderr_bytes.decode("utf-8", errors="replace")[:MAX_OUTPUT_BYTES]
                 info.exit_code = process.returncode
@@ -301,23 +322,10 @@ class BackgroundTaskRegistry:
                 else:
                     info.status = BackgroundTaskStatus.FAILED
 
-            except asyncio.TimeoutError:
-                # Kill the process on timeout
-                try:
-                    process.kill()
-                    await process.wait()
-                except ProcessLookupError:
-                    pass
-                info.status = BackgroundTaskStatus.TIMED_OUT
-                info.error = f"Command timed out after {timeout}s"
-                logger.warning(
-                    "background_task_timeout",
-                    task_id=task_id,
-                    timeout=timeout,
-                )
-
         except asyncio.CancelledError:
             # Task was cancelled via cancel() or cancel_all()
+            if communicate_task is not None and not communicate_task.done():
+                communicate_task.cancel()
             info.status = BackgroundTaskStatus.CANCELLED
             raise
         except Exception as e:
@@ -342,3 +350,32 @@ class BackgroundTaskRegistry:
                 exit_code=info.exit_code,
                 elapsed=round(info.end_time - info.start_time, 1),
             )
+
+    async def _kill_process(self, process: asyncio.subprocess.Process) -> None:
+        """Kill process and wait for exit. On Windows, kills entire process tree."""
+        if platform.system() == "Windows":
+            # taskkill /F /T kills PowerShell and all its child processes (e.g. ping).
+            # process.kill() alone only kills the direct child, leaving grandchildren
+            # running with pipe handles open.
+            try:
+                kill_proc = await asyncio.create_subprocess_exec(
+                    "taskkill",
+                    "/F",
+                    "/T",
+                    "/PID",
+                    str(process.pid),
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await asyncio.wait_for(kill_proc.wait(), timeout=5.0)
+            except Exception:
+                pass
+        else:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+        try:
+            await asyncio.wait_for(process.wait(), timeout=5.0)
+        except asyncio.TimeoutError:
+            pass
