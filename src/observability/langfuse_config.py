@@ -23,7 +23,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 # Global Langfuse client instance
-_langfuse_client: Langfuse | None = None
+_langfuse_client: "Langfuse | None" = None  # noqa: UP037 - Langfuse may be None at runtime
 _current_trace = None
 
 

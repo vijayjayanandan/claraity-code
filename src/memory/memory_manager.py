@@ -10,6 +10,7 @@ from src.observability import get_logger
 logger = get_logger("memory")
 
 from src.core.render_meta import RenderMetaRegistry
+from src.session.models.message import Message as SessionMessage
 
 from .episodic_memory import EpisodicMemory
 from .file_loader import MemoryFileLoader
@@ -33,7 +34,6 @@ from .working_memory import WorkingMemory
 if TYPE_CHECKING:
     from src.core.streaming import StreamingPipeline
     from src.llm.base import LLMBackend, ProviderDelta
-    from src.session.models.message import Message as SessionMessage
     from src.session.store.memory_store import MessageStore
 
 
@@ -108,13 +108,13 @@ class MemoryManager:
 
         # MessageStore integration (Option A: Single Source of Truth)
         # When set, this becomes the primary source for conversation history
-        self._message_store: "MessageStore" | None = None
+        self._message_store: MessageStore | None = None
         self._message_store_session_id: str | None = None
         self._last_parent_uuid: str | None = None  # Track threading for new messages
 
         # StreamingPipeline (Unified Persistence Architecture)
         # Owned by MemoryManager - the single canonical parser for LLM deltas
-        self._streaming_pipeline: "StreamingPipeline" | None = None
+        self._streaming_pipeline: StreamingPipeline | None = None
 
         # Ephemeral render metadata registry (session-scoped)
         # Agent writes approval policy when tool name becomes known during streaming.
@@ -199,15 +199,13 @@ class MemoryManager:
         # Increment turn_id for each user message (stable turn tracking)
         self._current_turn_id += 1
 
-        session_message: "SessionMessage" | None = None
+        session_message: SessionMessage | None = None
 
         # Build multimodal content if attachments present
         message_content = self._build_multimodal_content(content, attachments)
 
         # Add to MessageStore if configured (Option A: Single Source of Truth)
         if self._message_store is not None and self._message_store_session_id is not None:
-            from src.session.models.message import Message as SessionMessage
-
             session_message = SessionMessage.create_user(
                 content=message_content,  # Can be str or list (multimodal)
                 session_id=self._message_store_session_id,
@@ -317,11 +315,10 @@ class MemoryManager:
         Returns:
             SessionMessage if MessageStore is configured, None otherwise
         """
-        session_message: "SessionMessage" | None = None
+        session_message: SessionMessage | None = None
 
         # Add to MessageStore if configured (Option A: Single Source of Truth)
         if self._message_store is not None and self._message_store_session_id is not None:
-            from src.session.models.message import Message as SessionMessage
             from src.session.models.message import ToolCall, ToolCallFunction
 
             # Convert tool_calls dicts to ToolCall objects
@@ -409,8 +406,6 @@ class MemoryManager:
         if self._message_store is None or self._message_store_session_id is None:
             return None
 
-        from src.session.models.message import Message as SessionMessage
-
         msg = SessionMessage.create_system(
             content=content,
             session_id=self._message_store_session_id,
@@ -448,11 +443,9 @@ class MemoryManager:
         Returns:
             SessionMessage if MessageStore is configured, None otherwise
         """
-        session_message: "SessionMessage" | None = None
+        session_message: SessionMessage | None = None
 
         if self._message_store is not None and self._message_store_session_id is not None:
-            from src.session.models.message import Message as SessionMessage
-
             session_message = SessionMessage.create_tool(
                 tool_call_id=tool_call_id,
                 content=content,
