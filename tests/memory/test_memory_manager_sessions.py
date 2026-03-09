@@ -22,7 +22,7 @@ class TestMemoryManagerSessions:
         """Create temporary directory for tests."""
         tmpdir = Path(tempfile.mkdtemp())
         yield tmpdir
-        shutil.rmtree(tmpdir)
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
     @pytest.fixture
     def memory_manager(self, temp_dir):

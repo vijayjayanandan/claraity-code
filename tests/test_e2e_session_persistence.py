@@ -22,7 +22,7 @@ class TestE2ESessionPersistence:
         """Create temporary directory for tests."""
         tmpdir = Path(tempfile.mkdtemp())
         yield tmpdir
-        shutil.rmtree(tmpdir)
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
     @pytest.fixture
     def memory_manager(self, temp_dir):
@@ -443,7 +443,7 @@ class TestSessionPersistenceIntegration:
         """Create temporary directory for tests."""
         tmpdir = Path(tempfile.mkdtemp())
         yield tmpdir
-        shutil.rmtree(tmpdir)
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
     @pytest.fixture
     def memory_manager(self, temp_dir):
