@@ -109,65 +109,57 @@ from .transcript_logger import (
 
 __all__ = [
     # Core
-    'LANGFUSE_AVAILABLE',
-    'is_observability_enabled',
-
+    "LANGFUSE_AVAILABLE",
+    "is_observability_enabled",
     # Instrumentation (Langfuse v3 API)
-    'observe_agent_method',
-    'observe_tool_execution',
-    'observe_llm_call',
-    'start_trace',
-    'update_trace',
-    'flush_observations',
-
+    "observe_agent_method",
+    "observe_tool_execution",
+    "observe_llm_call",
+    "start_trace",
+    "update_trace",
+    "flush_observations",
     # Metrics (SQLite-based)
-    'metrics',
-    'get_metrics_collector',
-    'record_llm_latency',
-    'record_token_usage',
-    'record_tool_metric',
-    'record_cost_estimate',
-    'get_session_stats',
-    'cleanup_old_metrics',
-
+    "metrics",
+    "get_metrics_collector",
+    "record_llm_latency",
+    "record_token_usage",
+    "record_tool_metric",
+    "record_cost_estimate",
+    "get_session_stats",
+    "cleanup_old_metrics",
     # Logging (structlog + stdlib)
-    'configure_logging',
-    'bind_context',
-    'clear_context',
-    'new_request_id',
-    'get_logger',
-    'install_asyncio_handler',
+    "configure_logging",
+    "bind_context",
+    "clear_context",
+    "new_request_id",
+    "get_logger",
+    "install_asyncio_handler",
     # Context variables
-    'session_id',
-    'stream_id',
-    'request_id',
-    'component',
-    'operation',
-
+    "session_id",
+    "stream_id",
+    "request_id",
+    "component",
+    "operation",
     # Error Store (SQLite-based)
-    'ErrorStore',
-    'ErrorRecord',
-    'ErrorCategory',
-    'get_error_store',
-    'error_store',
-
+    "ErrorStore",
+    "ErrorRecord",
+    "ErrorCategory",
+    "get_error_store",
+    "error_store",
     # Log Store (SQLite-based, all log levels)
-    'LogStore',
-    'LogRecord',
-    'get_log_store',
-    'log_store',
-
+    "LogStore",
+    "LogRecord",
+    "get_log_store",
+    "log_store",
     # Programmatic Query API
-    'query_session_logs',
-    'query_session_errors',
-
+    "query_session_logs",
+    "query_session_errors",
     # Logging Configuration
-    'LoggingConfig',
-    'HandlerConfig',
-    'RetentionConfig',
-    'load_logging_config',
-
+    "LoggingConfig",
+    "HandlerConfig",
+    "RetentionConfig",
+    "load_logging_config",
     # Transcript Logger (JSONL-based)
-    'TranscriptLogger',
-    'TranscriptEvent',
+    "TranscriptLogger",
+    "TranscriptEvent",
 ]

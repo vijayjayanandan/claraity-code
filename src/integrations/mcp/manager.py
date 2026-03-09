@@ -6,6 +6,7 @@ and aggregates tool definitions across all connections.
 
 Replaces ad-hoc _mcp_client / _mcp_registry attributes on the agent.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -22,6 +23,7 @@ if TYPE_CHECKING:
 
 try:
     from src.observability import get_logger
+
     logger = get_logger("integrations.mcp.manager")
 except ImportError:
     logger = logging.getLogger(__name__)
@@ -39,6 +41,7 @@ class McpConnection:
         tool_names: Snapshot of prefixed tool names registered in ToolExecutor
                     by this connection. Used for cleanup on disconnect.
     """
+
     name: str
     config: McpServerConfig
     client: McpClient
@@ -90,8 +93,7 @@ class McpConnectionManager:
         """
         if name in self._connections:
             raise ValueError(
-                f"MCP connection '{name}' already exists. "
-                "Disconnect first before reconnecting."
+                f"MCP connection '{name}' already exists. Disconnect first before reconnecting."
             )
 
         await client.connect(secret_store=secret_store)
@@ -197,10 +199,7 @@ class McpConnectionManager:
 
     def is_mcp_tool(self, tool_name: str) -> bool:
         """Check if a tool belongs to any MCP connection."""
-        return any(
-            conn.registry.is_mcp_tool(tool_name)
-            for conn in self._connections.values()
-        )
+        return any(conn.registry.is_mcp_tool(tool_name) for conn in self._connections.values())
 
     def requires_approval(self, tool_name: str) -> bool:
         """Check if an MCP tool requires user approval.

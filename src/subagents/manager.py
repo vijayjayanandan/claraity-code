@@ -54,8 +54,9 @@ class DelegationResult:
         total_time: Total execution time in seconds
         metadata: Additional information about the delegation
     """
+
     success: bool
-    subagent_results: list['SubAgentResult']
+    subagent_results: list["SubAgentResult"]
     total_time: float
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -71,8 +72,7 @@ class DelegationResult:
         for i, result in enumerate(self.subagent_results, 1):
             status_marker = "[OK]" if result.success else "[FAIL]"
             lines.append(
-                f"  {i}. [{result.subagent_name}] {status_marker} "
-                f"({result.execution_time:.2f}s)"
+                f"  {i}. [{result.subagent_name}] {status_marker} ({result.execution_time:.2f}s)"
             )
 
         return "\n".join(lines)
@@ -108,10 +108,10 @@ class SubAgentManager:
 
     def __init__(
         self,
-        main_agent: 'AgentInterface',
+        main_agent: "AgentInterface",
         working_directory: Path | None = None,
         max_parallel_workers: int = 4,
-        enable_auto_delegation: bool = True
+        enable_auto_delegation: bool = True,
     ):
         """Initialize SubAgentManager.
 
@@ -142,7 +142,7 @@ class SubAgentManager:
             f"(max_workers={max_parallel_workers}, auto_delegation={enable_auto_delegation})"
         )
 
-    def discover_subagents(self) -> dict[str, 'SubAgentConfig']:
+    def discover_subagents(self) -> dict[str, "SubAgentConfig"]:
         """Discover all available subagent configurations.
 
         Loads configurations from:
@@ -162,7 +162,7 @@ class SubAgentManager:
 
         return self.configs
 
-    def reload_subagents(self) -> dict[str, 'SubAgentConfig']:
+    def reload_subagents(self) -> dict[str, "SubAgentConfig"]:
         """Reload all configurations and clear cached instances.
 
         Useful when subagent configurations have been modified.
@@ -180,7 +180,7 @@ class SubAgentManager:
 
         return self.configs
 
-    def get_subagent(self, name: str) -> Optional['SubAgent']:
+    def get_subagent(self, name: str) -> Optional["SubAgent"]:
         """Get or create a subagent instance.
 
         Subagent instances are cached for reuse.
@@ -228,8 +228,8 @@ class SubAgentManager:
         subagent_name: str,
         task_description: str,
         context: dict[str, Any] | None = None,
-        max_iterations: int = 50
-    ) -> Optional['SubAgentResult']:
+        max_iterations: int = 50,
+    ) -> Optional["SubAgentResult"]:
         """Delegate task to a specific subagent.
 
         Args:
@@ -261,9 +261,7 @@ class SubAgentManager:
 
         # Execute task
         result = subagent.execute(
-            task_description=task_description,
-            context=context,
-            max_iterations=max_iterations
+            task_description=task_description, context=context, max_iterations=max_iterations
         )
 
         logger.info(
@@ -275,11 +273,8 @@ class SubAgentManager:
         return result
 
     def auto_delegate(
-        self,
-        task_description: str,
-        context: dict[str, Any] | None = None,
-        max_iterations: int = 50
-    ) -> Optional['SubAgentResult']:
+        self, task_description: str, context: dict[str, Any] | None = None, max_iterations: int = 50
+    ) -> Optional["SubAgentResult"]:
         """Automatically select and delegate to best subagent.
 
         Uses subagent descriptions to find the best match for the task.
@@ -315,13 +310,11 @@ class SubAgentManager:
             subagent_name=best_subagent,
             task_description=task_description,
             context=context,
-            max_iterations=max_iterations
+            max_iterations=max_iterations,
         )
 
     def execute_parallel(
-        self,
-        tasks: list[tuple[str, str, dict[str, Any] | None]],
-        max_iterations: int = 50
+        self, tasks: list[tuple[str, str, dict[str, Any] | None]], max_iterations: int = 50
     ) -> DelegationResult:
         """Execute multiple subagent tasks in parallel.
 
@@ -351,11 +344,7 @@ class SubAgentManager:
             future_to_task = {}
             for subagent_name, task_desc, context in tasks:
                 future = executor.submit(
-                    self.delegate,
-                    subagent_name,
-                    task_desc,
-                    context,
-                    max_iterations
+                    self.delegate, subagent_name, task_desc, context, max_iterations
                 )
                 future_to_task[future] = (subagent_name, task_desc)
 
@@ -381,8 +370,8 @@ class SubAgentManager:
             metadata={
                 "tasks_submitted": len(tasks),
                 "tasks_completed": len(results),
-                "parallel_workers": self.max_parallel_workers
-            }
+                "parallel_workers": self.max_parallel_workers,
+            },
         )
 
         logger.info(
@@ -426,7 +415,7 @@ class SubAgentManager:
             score += len(common_words)
 
             # Bonus for exact phrase matches
-            if any(phrase in task_lower for phrase in description_lower.split(',')):
+            if any(phrase in task_lower for phrase in description_lower.split(",")):
                 score += 5
 
             if score > best_score:
@@ -434,9 +423,7 @@ class SubAgentManager:
                 best_match = name
 
         if best_score > 0:
-            logger.debug(
-                f"Best subagent for task: '{best_match}' (score={best_score})"
-            )
+            logger.debug(f"Best subagent for task: '{best_match}' (score={best_score})")
             return best_match
 
         return None
@@ -480,9 +467,11 @@ class SubAgentManager:
                 "model": config.llm.model if config.llm else "Inherited",
                 "base_url": config.llm.base_url if config.llm else "Inherited",
                 "context_window": config.llm.context_window if config.llm else "Inherited",
-            } if config.llm else "Inherited from main agent",
+            }
+            if config.llm
+            else "Inherited from main agent",
             "config_path": str(config.config_path) if config.config_path else None,
-            "delegation_count": self.delegation_count.get(name, 0)
+            "delegation_count": self.delegation_count.get(name, 0),
         }
 
     def get_statistics(self) -> dict[str, Any]:
@@ -502,5 +491,5 @@ class SubAgentManager:
             "delegation_by_subagent": dict(self.delegation_count),
             "cached_instances": len(self.subagent_instances),
             "max_parallel_workers": self.max_parallel_workers,
-            "auto_delegation_enabled": self.enable_auto_delegation
+            "auto_delegation_enabled": self.enable_auto_delegation,
         }

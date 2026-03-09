@@ -4,6 +4,8 @@ Langfuse Configuration and Client Initialization
 Provides the Langfuse client for production observability of the AI coding agent.
 """
 
+from __future__ import annotations
+
 import atexit
 import logging
 import os
@@ -13,6 +15,7 @@ from typing import Any, Optional
 # Langfuse import with graceful degradation (v3 API - June 2025)
 try:
     from langfuse import Langfuse, get_client, observe
+
     LANGFUSE_AVAILABLE = True
 except ImportError:
     LANGFUSE_AVAILABLE = False
@@ -23,7 +26,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 # Global Langfuse client instance
-_langfuse_client: "Langfuse | None" = None  # noqa: UP037 - Langfuse may be None at runtime
+_langfuse_client: Langfuse | None = None
 _current_trace = None
 
 
@@ -78,11 +81,7 @@ def initialize_langfuse() -> Langfuse | None:
         logger.info("Using default local development secret key")
 
     try:
-        _langfuse_client = Langfuse(
-            public_key=public_key,
-            secret_key=secret_key,
-            host=host
-        )
+        _langfuse_client = Langfuse(public_key=public_key, secret_key=secret_key, host=host)
 
         # Register cleanup on exit to flush pending events
         atexit.register(_cleanup_langfuse)
@@ -133,7 +132,7 @@ def start_trace(
     user_id: str | None = None,
     session_id: str | None = None,
     metadata: dict[str, Any] | None = None,
-    tags: list | None = None
+    tags: list | None = None,
 ):
     """
     Start a new trace for tracking execution.
@@ -160,7 +159,7 @@ def start_trace(
             user_id=user_id,
             session_id=session_id,
             metadata=metadata or {},
-            tags=tags or []
+            tags=tags or [],
         )
         logger.debug(f"Started trace: {name}")
         return _current_trace
@@ -208,7 +207,7 @@ def trace_context(
     user_id: str | None = None,
     session_id: str | None = None,
     metadata: dict[str, Any] | None = None,
-    tags: list | None = None
+    tags: list | None = None,
 ):
     """
     Context manager for automatic trace lifecycle.
@@ -226,11 +225,7 @@ def trace_context(
         tags: List of tags
     """
     trace = start_trace(
-        name=name,
-        user_id=user_id,
-        session_id=session_id,
-        metadata=metadata,
-        tags=tags
+        name=name, user_id=user_id, session_id=session_id, metadata=metadata, tags=tags
     )
 
     try:

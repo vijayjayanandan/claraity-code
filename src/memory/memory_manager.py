@@ -84,7 +84,9 @@ class MemoryManager:
         self._knowledge_core_content: str | None = None
 
         # Project root for knowledge base loading (avoids Path.cwd() dependency)
-        self._project_root: Path = Path(starting_directory).resolve() if starting_directory else Path.cwd()
+        self._project_root: Path = (
+            Path(starting_directory).resolve() if starting_directory else Path.cwd()
+        )
 
         # Load file memories if requested
         if load_file_memories:
@@ -98,6 +100,7 @@ class MemoryManager:
         # Key-value store for structured data
         self._key_value_store: dict[str, Any] = {}
         import threading
+
         self._kv_lock = threading.RLock()  # Thread safety for key-value store
 
         # Phase 2: ObservationStore for reversible tool output masking
@@ -226,10 +229,8 @@ class MemoryManager:
         return session_message
 
     def _build_multimodal_content(
-        self,
-        user_input: str,
-        attachments: list | None = None
-    ) -> 'str | list':
+        self, user_input: str, attachments: list | None = None
+    ) -> "str | list":
         """
         Convert user text + attachments to OpenAI-compatible multimodal format.
 
@@ -255,34 +256,37 @@ class MemoryManager:
 
         # Add user text first (if any)
         if user_input.strip():
-            content.append({
-                "type": "text",
-                "text": user_input
-            })
+            content.append({"type": "text", "text": user_input})
 
         # Add each attachment
         for att in attachments:
             if att.kind == "image":
                 # Image attachment - use OpenAI vision format with data URL
                 # Enhanced: Add structured filename and mime fields
-                content.append({
-                    "type": "image_url",
-                    "image_url": {
-                        "url": att.data_url  # data:image/png;base64,...
-                    },
-                    "filename": att.filename,  # Structured field for TUI rendering
-                    "mime": att.mime  # Structured field for file type
-                })
+                content.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": att.data_url  # data:image/png;base64,...
+                        },
+                        "filename": att.filename,  # Structured field for TUI rendering
+                        "mime": att.mime,  # Structured field for file type
+                    }
+                )
             else:
                 # Text file attachment - include as text block with filename context
                 # Enhanced: Add structured filename and mime fields
-                text_content = att.truncated_text() if hasattr(att, 'truncated_text') else (att.text or "")
-                content.append({
-                    "type": "text",
-                    "text": f"--- BEGIN FILE: {att.filename} ---\n{text_content}\n--- END FILE: {att.filename} ---",
-                    "filename": att.filename,  # Structured field (no parsing needed)
-                    "mime": att.mime  # Structured field for file type
-                })
+                text_content = (
+                    att.truncated_text() if hasattr(att, "truncated_text") else (att.text or "")
+                )
+                content.append(
+                    {
+                        "type": "text",
+                        "text": f"--- BEGIN FILE: {att.filename} ---\n{text_content}\n--- END FILE: {att.filename} ---",
+                        "filename": att.filename,  # Structured field (no parsing needed)
+                        "mime": att.mime,  # Structured field for file type
+                    }
+                )
 
         return content
 
@@ -326,14 +330,16 @@ class MemoryManager:
             if tool_calls:
                 for tc in tool_calls:
                     function_data = tc.get("function", {})
-                    session_tool_calls.append(ToolCall(
-                        id=tc.get("id", ""),
-                        function=ToolCallFunction(
-                            name=function_data.get("name", ""),
-                            arguments=function_data.get("arguments", "{}")
-                        ),
-                        type=tc.get("type", "function")
-                    ))
+                    session_tool_calls.append(
+                        ToolCall(
+                            id=tc.get("id", ""),
+                            function=ToolCallFunction(
+                                name=function_data.get("name", ""),
+                                arguments=function_data.get("arguments", "{}"),
+                            ),
+                            type=tc.get("type", "function"),
+                        )
+                    )
 
             session_message = SessionMessage.create_assistant(
                 content=content,
@@ -491,9 +497,7 @@ class MemoryManager:
         from src.core.streaming import StreamingPipeline
 
         if self._message_store is None or self._message_store_session_id is None:
-            raise RuntimeError(
-                "MessageStore not configured. Call set_message_store() first."
-            )
+            raise RuntimeError("MessageStore not configured. Call set_message_store() first.")
 
         self._streaming_pipeline = StreamingPipeline(
             session_id=self._message_store_session_id,
@@ -535,14 +539,10 @@ class MemoryManager:
             ...             print(f"Segment: {type(seg).__name__}")
         """
         if self._streaming_pipeline is None:
-            raise RuntimeError(
-                "No active stream. Call start_assistant_stream() first."
-            )
+            raise RuntimeError("No active stream. Call start_assistant_stream() first.")
 
         if self._message_store is None:
-            raise RuntimeError(
-                "MessageStore not configured. Call set_message_store() first."
-            )
+            raise RuntimeError("MessageStore not configured. Call set_message_store() first.")
 
         # Process delta through canonical pipeline
         message = self._streaming_pipeline.process_delta(delta)
@@ -769,7 +769,11 @@ class MemoryManager:
 
         # 3. Episodic memory summary (if requested)
         # Skip if using MessageStore (it has its own compaction handling)
-        if include_episodic and self._message_store is None and self.episodic_memory.conversation_turns:
+        if (
+            include_episodic
+            and self._message_store is None
+            and self.episodic_memory.conversation_turns
+        ):
             episodic_summary = self.episodic_memory.get_context_summary()
             if episodic_summary:
                 context.append(
@@ -798,8 +802,7 @@ class MemoryManager:
 
             # Filter out system messages (we have our own system prompt)
             conversation_context = [
-                msg for msg in conversation_context
-                if msg.get("role") != "system"
+                msg for msg in conversation_context if msg.get("role") != "system"
             ]
             context.extend(conversation_context)
         else:
@@ -830,9 +833,7 @@ class MemoryManager:
             - episodic_tokens,
         }
 
-    def search_history(
-        self, query: str, max_results: int = 3
-    ) -> list[ConversationTurn]:
+    def search_history(self, query: str, max_results: int = 3) -> list[ConversationTurn]:
         """
         Search conversation history.
 
@@ -886,8 +887,8 @@ class MemoryManager:
                 "conversation_turns": [
                     {
                         "id": turn.id,
-                        "user_message": turn.user_message.model_dump(mode='json'),
-                        "assistant_message": turn.assistant_message.model_dump(mode='json'),
+                        "user_message": turn.user_message.model_dump(mode="json"),
+                        "assistant_message": turn.assistant_message.model_dump(mode="json"),
                         "tool_calls": turn.tool_calls,
                         "timestamp": turn.timestamp.isoformat(),
                         "summary": turn.summary,
@@ -897,7 +898,7 @@ class MemoryManager:
                 ],
             },
             "task_context": (
-                self.working_memory.task_context.model_dump(mode='json')
+                self.working_memory.task_context.model_dump(mode="json")
                 if self.working_memory.task_context
                 else None
             ),
@@ -1024,18 +1025,13 @@ class MemoryManager:
                 metadata = json.load(f)
                 self.session_id = metadata.get("session_id", self.session_id)
                 if "session_start" in metadata:
-                    self.session_start = datetime.fromisoformat(
-                        metadata["session_start"]
-                    )
+                    self.session_start = datetime.fromisoformat(metadata["session_start"])
 
     def get_statistics(self) -> dict[str, Any]:
         """Get comprehensive memory statistics."""
         return {
             "session_id": self.session_id,
-            "session_duration_minutes": (
-                datetime.now() - self.session_start
-            ).total_seconds()
-            / 60,
+            "session_duration_minutes": (datetime.now() - self.session_start).total_seconds() / 60,
             "working_memory": {
                 "messages": len(self.working_memory.messages),
                 "code_contexts": len(self.working_memory.code_contexts),
@@ -1143,15 +1139,18 @@ class MemoryManager:
                 continue
 
             try:
-                content = filepath.read_text(encoding='utf-8')
+                content = filepath.read_text(encoding="utf-8")
                 if not content.strip():
                     continue
 
-                line_count = content.count('\n') + 1
+                line_count = content.count("\n") + 1
                 if line_count > self._KNOWLEDGE_WARN_LINES:
-                    logger.warning("Knowledge file exceeds recommended size",
-                                   file=filename, lines=line_count,
-                                   recommended=self._KNOWLEDGE_WARN_LINES)
+                    logger.warning(
+                        "Knowledge file exceeds recommended size",
+                        file=filename,
+                        lines=line_count,
+                        recommended=self._KNOWLEDGE_WARN_LINES,
+                    )
 
                 sections.append(content)
 

@@ -17,16 +17,16 @@ from src.orchestration import AgentOrchestrator
 def test_basic_communication():
     """Test basic communication between Claude Code and AI Coding Agent"""
 
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("PHASE 1 TEST: Basic Agent-to-Agent Communication")
-    print("="*70 + "\n")
+    print("=" * 70 + "\n")
 
     # Step 1: Initialize orchestrator
     print("[1/5] Initializing orchestrator...")
     try:
         orchestrator = AgentOrchestrator(
             output_dir="./test-orchestration-logs",
-            working_directory="./test-orchestration-workspace"
+            working_directory="./test-orchestration-workspace",
         )
         print("   [OK] Orchestrator initialized")
         print(f"   Model: {orchestrator.model_name}")
@@ -66,6 +66,7 @@ def test_basic_communication():
     except Exception as e:
         print(f"   [FAIL] Failed to send message: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -78,7 +79,7 @@ def test_basic_communication():
                 if file_path.exists():
                     print(f"   [OK] File exists: {file}")
                     # Show first few lines
-                    with open(file_path, encoding='utf-8') as f:
+                    with open(file_path, encoding="utf-8") as f:
                         content = f.read()
                         print(f"        Preview: {content[:100]}...")
                 else:
@@ -100,7 +101,7 @@ def test_basic_communication():
         print(f"   Log saved to: {log.metadata.get('log_path')}\n")
 
         # Verify log file exists
-        log_path = Path(log.metadata.get('log_path'))
+        log_path = Path(log.metadata.get("log_path"))
         if log_path.exists():
             print(f"   [OK] Log file exists ({log_path.stat().st_size} bytes)")
         else:
@@ -111,9 +112,9 @@ def test_basic_communication():
         return False
 
     # Success summary
-    print("="*70)
+    print("=" * 70)
     print("SUCCESS: Phase 1 basic communication working!")
-    print("="*70)
+    print("=" * 70)
     print("\nSummary:")
     print("  - Orchestrator initialized: OK")
     print("  - Conversation started: OK")
@@ -121,7 +122,7 @@ def test_basic_communication():
     print(f"  - Files generated: {len(response.files_generated)}")
     print("  - Conversation logged: OK")
     print("\nPhase 1 is COMPLETE!")
-    print("="*70 + "\n")
+    print("=" * 70 + "\n")
 
     return True
 
@@ -129,18 +130,20 @@ def test_basic_communication():
 def test_simple_send_message_api():
     """Test the simple send_message API (no session tracking)"""
 
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("BONUS TEST: Simple send_message() API")
-    print("="*70 + "\n")
+    print("=" * 70 + "\n")
 
     print("[1/2] Testing simple send_message() API...")
     try:
         orchestrator = AgentOrchestrator(
             output_dir="./test-orchestration-logs",
-            working_directory="./test-orchestration-workspace"
+            working_directory="./test-orchestration-workspace",
         )
 
-        response = orchestrator.send_message("Create a file called test.txt with the text 'Testing!'")
+        response = orchestrator.send_message(
+            "Create a file called test.txt with the text 'Testing!'"
+        )
 
         print("   [OK] Message sent and received")
         print(f"   Success: {response.success}")
@@ -162,9 +165,9 @@ def test_simple_send_message_api():
         print(f"   [FAIL] Failed: {e}")
         return False
 
-    print("="*70)
+    print("=" * 70)
     print("SUCCESS: Simple API working!")
-    print("="*70 + "\n")
+    print("=" * 70 + "\n")
 
     return True
 

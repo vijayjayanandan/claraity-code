@@ -28,10 +28,10 @@ from src.core.attachment import (
 
 # Re-export for convenience
 __all__ = [
-    'Attachment',
-    'AttachmentManager',
-    'create_image_attachment',
-    'create_text_attachment',
+    "Attachment",
+    "AttachmentManager",
+    "create_image_attachment",
+    "create_text_attachment",
 ]
 
 
@@ -73,11 +73,14 @@ class AttachmentManager:
 
         # Generate unique filename with timestamp
         from datetime import datetime
+
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         self._screenshot_counter += 1
         filename = f"screenshot_{timestamp}_{self._screenshot_counter}.{format}"
 
-        logger.debug("screenshot_filename_generated", filename=filename, counter=self._screenshot_counter)
+        logger.debug(
+            "screenshot_filename_generated", filename=filename, counter=self._screenshot_counter
+        )
 
         attachment = create_image_attachment(
             image_bytes=image_bytes,
@@ -105,6 +108,7 @@ class AttachmentManager:
             FileNotFoundError: If file doesn't exist
         """
         from pathlib import Path
+
         path = Path(file_path)
 
         if not path.exists():

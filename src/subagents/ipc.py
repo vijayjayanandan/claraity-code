@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 # Parent -> Child: Input
 # ============================================================================
 
+
 @dataclass
 class SubprocessInput:
     """Configuration sent from parent to child on stdin (single JSON line).
@@ -42,6 +43,7 @@ class SubprocessInput:
         max_iterations: Maximum tool-calling iterations
         transcript_path: Path for JSONL transcript file
     """
+
     config: dict[str, Any]
     llm_config: dict[str, Any]
     api_key: str
@@ -56,7 +58,9 @@ class SubprocessInput:
 
     def __repr__(self) -> str:
         """Redact api_key from repr to prevent leakage in tracebacks/logs."""
-        key_display = f"{self.api_key[:4]}...{self.api_key[-4:]}" if len(self.api_key) > 8 else "***"
+        key_display = (
+            f"{self.api_key[:4]}...{self.api_key[-4:]}" if len(self.api_key) > 8 else "***"
+        )
         return (
             f"SubprocessInput(config={self.config.get('name', '?')!r}, "
             f"api_key={key_display!r}, task={self.task_description[:50]!r}...)"
@@ -77,18 +81,21 @@ class SubprocessInput:
 # Child -> Parent: Event Types
 # ============================================================================
 
+
 class IPCEventType(str, Enum):
     """Event types emitted by the subprocess child."""
-    REGISTERED = "registered"              # Subagent bootstrapped, sends id + model
-    NOTIFICATION = "notification"          # Serialized StoreNotification
+
+    REGISTERED = "registered"  # Subagent bootstrapped, sends id + model
+    NOTIFICATION = "notification"  # Serialized StoreNotification
     APPROVAL_REQUEST = "approval_request"  # Child needs user approval for a tool
-    DONE = "done"                          # SubAgentResult
-    ERROR = "error"                        # Fatal error string
+    DONE = "done"  # SubAgentResult
+    ERROR = "error"  # Fatal error string
 
 
 # ============================================================================
 # Serialization Helpers
 # ============================================================================
+
 
 def serialize_notification(notification: "StoreNotification") -> dict[str, Any]:
     """Serialize a StoreNotification for IPC transport.
@@ -115,8 +122,8 @@ def serialize_notification(notification: "StoreNotification") -> dict[str, Any]:
     if notification.tool_state is not None:
         result["tool_state"] = {
             "status": notification.tool_state.status.name
-                if hasattr(notification.tool_state.status, 'name')
-                else str(notification.tool_state.status),
+            if hasattr(notification.tool_state.status, "name")
+            else str(notification.tool_state.status),
             "result": notification.tool_state.result,
             "error": notification.tool_state.error,
             "duration_ms": notification.tool_state.duration_ms,
@@ -188,6 +195,7 @@ def _resolve_tool_status(status_str: str):
     ToolStatus uses auto() so values are ints, but we serialize the name.
     """
     from src.core.events import ToolStatus
+
     # Try by name first (e.g., "RUNNING", "SUCCESS")
     name_upper = status_str.upper()
     for member in ToolStatus:
@@ -222,6 +230,7 @@ def deserialize_result(data: dict[str, Any]) -> "SubAgentResult":
         SubAgentResult instance
     """
     from src.subagents.subagent import SubAgentResult
+
     return SubAgentResult(
         success=data.get("success", False),
         subagent_name=data.get("subagent_name", ""),
@@ -237,6 +246,7 @@ def deserialize_result(data: dict[str, Any]) -> "SubAgentResult":
 # Tool Approval IPC (bidirectional)
 # ============================================================================
 
+
 @dataclass
 class ApprovalRequest:
     """Request from child to parent for user interaction (emitted on stdout).
@@ -245,6 +255,7 @@ class ApprovalRequest:
     - "tool_approval": risky tool needs permission before executing
     - "clarify": subagent needs structured answers from user
     """
+
     tool_call_id: str
     tool_name: str
     tool_args: dict[str, Any]
@@ -263,7 +274,7 @@ class ApprovalRequest:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> 'ApprovalRequest':
+    def from_dict(cls, data: dict[str, Any]) -> "ApprovalRequest":
         known = {f.name for f in cls.__dataclass_fields__.values()}
         return cls(**{k: v for k, v in data.items() if k in known})
 
@@ -276,6 +287,7 @@ class ApprovalResponse:
     - Tool approval: uses approved/feedback fields
     - Clarify: uses clarify_result dict
     """
+
     tool_call_id: str
     approved: bool
     auto_approve_future: bool = False
@@ -287,7 +299,7 @@ class ApprovalResponse:
         return json.dumps(asdict(self), ensure_ascii=True)
 
     @classmethod
-    def from_json_line(cls, line: str) -> 'ApprovalResponse':
+    def from_json_line(cls, line: str) -> "ApprovalResponse":
         data = json.loads(line.strip())
         known = {f.name for f in cls.__dataclass_fields__.values()}
         return cls(**{k: v for k, v in data.items() if k in known})
@@ -312,6 +324,7 @@ def read_approval_response_from_stdin() -> ApprovalResponse:
 # ============================================================================
 # Event Emission (child process)
 # ============================================================================
+
 
 def emit_event(event_type: IPCEventType, **fields) -> None:
     """Emit a JSON-line event to stdout (used by subprocess runner).

@@ -27,15 +27,17 @@ logger = get_logger("core.protocol")
 # User Actions (UI -> Agent)
 # =============================================================================
 
+
 @dataclass(frozen=True)
 class ApprovalResult:
     """
     User's response to a tool approval request.
     """
+
     call_id: str
     approved: bool
     auto_approve_future: bool = False  # "Don't ask again for this tool"
-    feedback: str | None = None        # Modified instructions (if provided)
+    feedback: str | None = None  # Modified instructions (if provided)
 
 
 @dataclass(frozen=True)
@@ -43,6 +45,7 @@ class InterruptSignal:
     """
     User interrupted the stream (Ctrl+C).
     """
+
     pass
 
 
@@ -51,6 +54,7 @@ class RetrySignal:
     """
     User requested retry after error.
     """
+
     pass
 
 
@@ -59,6 +63,7 @@ class PauseResult:
     """
     User's response to a pause prompt.
     """
+
     continue_work: bool
     feedback: str | None = None  # Optional guidance for next steps
 
@@ -68,6 +73,7 @@ class ClarifyResult:
     """
     User's response to a clarify request.
     """
+
     call_id: str
     submitted: bool
     responses: dict[str, Any] | None = None  # question_id -> selected_option_id(s)
@@ -80,6 +86,7 @@ class PlanApprovalResult:
     """
     User's response to a plan approval request.
     """
+
     plan_hash: str
     approved: bool
     auto_accept_edits: bool = False  # If True, auto-approve edit_file calls during implementation
@@ -87,12 +94,20 @@ class PlanApprovalResult:
 
 
 # Union type for pattern matching
-UserAction = ApprovalResult | InterruptSignal | RetrySignal | PauseResult | ClarifyResult | PlanApprovalResult
+UserAction = (
+    ApprovalResult
+    | InterruptSignal
+    | RetrySignal
+    | PauseResult
+    | ClarifyResult
+    | PlanApprovalResult
+)
 
 
 # =============================================================================
 # Pending Approval Tracker
 # =============================================================================
+
 
 @dataclass
 class PendingApproval:
@@ -103,6 +118,7 @@ class PendingApproval:
     - Deliver approval results to the correct waiting coroutine
     - Track tool names for auto-approve functionality
     """
+
     future: asyncio.Future
     tool_name: str
 
@@ -110,6 +126,7 @@ class PendingApproval:
 # =============================================================================
 # UI Protocol (Coordination Layer)
 # =============================================================================
+
 
 class UIProtocol:
     """
@@ -210,10 +227,7 @@ class UIProtocol:
     # -------------------------------------------------------------------------
 
     async def wait_for_approval(
-        self,
-        call_id: str,
-        tool_name: str,
-        timeout: float | None = None
+        self, call_id: str, tool_name: str, timeout: float | None = None
     ) -> ApprovalResult:
         """
         Wait for user to approve/reject a tool call.
@@ -240,10 +254,7 @@ class UIProtocol:
 
         # Create future for this specific call
         future: asyncio.Future[ApprovalResult] = asyncio.Future()
-        self._pending_approvals[call_id] = PendingApproval(
-            future=future,
-            tool_name=tool_name
-        )
+        self._pending_approvals[call_id] = PendingApproval(future=future, tool_name=tool_name)
 
         try:
             if timeout:
@@ -253,10 +264,7 @@ class UIProtocol:
         finally:
             self._pending_approvals.pop(call_id, None)
 
-    async def wait_for_pause_response(
-        self,
-        timeout: float | None = None
-    ) -> PauseResult:
+    async def wait_for_pause_response(self, timeout: float | None = None) -> PauseResult:
         """
         Wait for user to respond to a pause prompt.
 
@@ -273,14 +281,18 @@ class UIProtocol:
         # Create future for pause response
         future: asyncio.Future[PauseResult] = asyncio.Future()
         self._pending_pause = future
-        logger.debug(f"[PAUSE] wait_for_pause_response called, timeout={timeout}, future_id={id(future)}")
+        logger.debug(
+            f"[PAUSE] wait_for_pause_response called, timeout={timeout}, future_id={id(future)}"
+        )
 
         try:
             if timeout:
                 result = await asyncio.wait_for(future, timeout)
             else:
                 result = await future
-            logger.debug(f"[PAUSE] Future resolved: continue_work={result.continue_work}, feedback={result.feedback}")
+            logger.debug(
+                f"[PAUSE] Future resolved: continue_work={result.continue_work}, feedback={result.feedback}"
+            )
             return result
         except asyncio.CancelledError:
             # Treat cancellation as "stop" - no error propagation
@@ -304,9 +316,7 @@ class UIProtocol:
         return True  # TUI supports pause widget
 
     async def wait_for_clarify_response(
-        self,
-        call_id: str,
-        timeout: float | None = None
+        self, call_id: str, timeout: float | None = None
     ) -> ClarifyResult:
         """
         Wait for user to complete clarify interview.
@@ -325,7 +335,9 @@ class UIProtocol:
         # Create future for this specific call
         future: asyncio.Future[ClarifyResult] = asyncio.Future()
         self._pending_clarify[call_id] = future
-        logger.debug(f"[CLARIFY] wait_for_clarify_response called, call_id={call_id}, timeout={timeout}")
+        logger.debug(
+            f"[CLARIFY] wait_for_clarify_response called, call_id={call_id}, timeout={timeout}"
+        )
 
         try:
             if timeout:
@@ -341,7 +353,7 @@ class UIProtocol:
                 submitted=False,
                 responses=None,
                 chat_instead=False,
-                chat_message="Clarify cancelled"
+                chat_message="Clarify cancelled",
             )
         except asyncio.TimeoutError:
             logger.warning(f"[CLARIFY] Timed out after {timeout}s for call_id={call_id}")
@@ -350,15 +362,13 @@ class UIProtocol:
                 submitted=False,
                 responses=None,
                 chat_instead=False,
-                chat_message="Timed out waiting for response"
+                chat_message="Timed out waiting for response",
             )
         finally:
             self._pending_clarify.pop(call_id, None)
 
     async def wait_for_plan_approval(
-        self,
-        plan_hash: str,
-        timeout: float | None = None
+        self, plan_hash: str, timeout: float | None = None
     ) -> PlanApprovalResult:
         """
         Wait for user to approve or reject a plan.
@@ -377,7 +387,9 @@ class UIProtocol:
         # Create future for this specific plan
         future: asyncio.Future[PlanApprovalResult] = asyncio.Future()
         self._pending_plan_approval[plan_hash] = future
-        logger.debug(f"[PLAN] wait_for_plan_approval called, plan_hash={plan_hash}, timeout={timeout}")
+        logger.debug(
+            f"[PLAN] wait_for_plan_approval called, plan_hash={plan_hash}, timeout={timeout}"
+        )
 
         try:
             if timeout:
@@ -389,16 +401,12 @@ class UIProtocol:
         except asyncio.CancelledError:
             logger.warning(f"[PLAN] Future cancelled for plan_hash={plan_hash}")
             return PlanApprovalResult(
-                plan_hash=plan_hash,
-                approved=False,
-                feedback="Plan approval cancelled"
+                plan_hash=plan_hash, approved=False, feedback="Plan approval cancelled"
             )
         except asyncio.TimeoutError:
             logger.warning(f"[PLAN] Timed out after {timeout}s for plan_hash={plan_hash}")
             return PlanApprovalResult(
-                plan_hash=plan_hash,
-                approved=False,
-                feedback="Timed out waiting for response"
+                plan_hash=plan_hash, approved=False, feedback="Timed out waiting for response"
             )
         finally:
             self._pending_plan_approval.pop(plan_hash, None)
@@ -538,10 +546,7 @@ class UIProtocol:
     # Pause Requests (Delegation Tool -> UI)
     # -------------------------------------------------------------------------
 
-    def set_pause_requested_callback(
-        self,
-        callback: Callable | None
-    ) -> None:
+    def set_pause_requested_callback(self, callback: Callable | None) -> None:
         """
         Register a callback invoked when a subagent requests a pause.
 
@@ -562,7 +567,7 @@ class UIProtocol:
         reason_code: str,
         stats: dict[str, Any],
         pending_todos: list[dict[str, Any]] | None = None,
-    ) -> 'PauseResult':
+    ) -> "PauseResult":
         """
         Request a pause from the user (called by delegation tool).
 
@@ -590,10 +595,7 @@ class UIProtocol:
     # Todo Updates (Agent -> UI)
     # -------------------------------------------------------------------------
 
-    def set_todos_callback(
-        self,
-        callback: Callable[[list[dict[str, Any]]], None] | None
-    ) -> None:
+    def set_todos_callback(self, callback: Callable[[list[dict[str, Any]]], None] | None) -> None:
         """
         Register a callback to be called when todos are updated.
 
@@ -625,18 +627,19 @@ class UIProtocol:
             except Exception:
                 # Don't let UI callback errors break agent execution
                 import logging
+
                 logging.exception("Error in todos callback")
 
 
 # Export all types
 __all__ = [
-    'ApprovalResult',
-    'InterruptSignal',
-    'RetrySignal',
-    'PauseResult',
-    'ClarifyResult',
-    'PlanApprovalResult',
-    'UserAction',
-    'PendingApproval',
-    'UIProtocol',
+    "ApprovalResult",
+    "InterruptSignal",
+    "RetrySignal",
+    "PauseResult",
+    "ClarifyResult",
+    "PlanApprovalResult",
+    "UserAction",
+    "PendingApproval",
+    "UIProtocol",
 ]

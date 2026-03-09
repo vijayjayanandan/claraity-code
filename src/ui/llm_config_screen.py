@@ -290,7 +290,9 @@ class ConfigLLMScreen(ModalScreen[LLMConfigData | None]):
             # Suggest a default URL if the current URL is empty or a known default
             current = url_input.value.strip()
             known_defaults = {
-                "", "http://localhost:8000/v1", "http://localhost:11434",
+                "",
+                "http://localhost:8000/v1",
+                "http://localhost:11434",
             }
             if current in known_defaults:
                 if backend == "ollama":
@@ -469,7 +471,7 @@ class ConfigLLMScreen(ModalScreen[LLMConfigData | None]):
         config = LLMConfigData(
             backend_type=backend,
             base_url=base_url,
-            api_key=api_key,           # Runtime only -- not persisted to YAML
+            api_key=api_key,  # Runtime only -- not persisted to YAML
             api_key_env=self._config.api_key_env,  # Preserve existing env var fallback
             model=model,
             context_window=context_window,
@@ -483,6 +485,7 @@ class ConfigLLMScreen(ModalScreen[LLMConfigData | None]):
         # Save API key to OS credential store (not config.yaml)
         if api_key:
             from src.llm.credential_store import save_api_key
+
             if not save_api_key(api_key):
                 logger.warning("Failed to save API key to credential store")
 

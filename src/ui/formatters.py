@@ -43,18 +43,20 @@ class ToolOutputFormatter:
         must be enabled. This is what Claude Code does to get colors working
         in PowerShell and cmd.exe.
         """
-        if sys.platform != 'win32':
+        if sys.platform != "win32":
             return  # Only needed on Windows
 
         try:
             # Try using colorama (easiest cross-platform solution)
             import colorama
+
             colorama.init()
             logger.debug("ANSI support enabled via colorama")
         except ImportError:
             # Colorama not available, try Windows API directly
             try:
                 import ctypes
+
                 kernel32 = ctypes.windll.kernel32
 
                 # Get stdout handle
@@ -94,11 +96,11 @@ class ToolOutputFormatter:
             from pygments.util import ClassNotFound
 
             self.syntax_highlighter = {
-                'highlight': highlight,
-                'get_lexer_by_name': get_lexer_by_name,
-                'guess_lexer': guess_lexer,
-                'TerminalFormatter': TerminalFormatter,
-                'ClassNotFound': ClassNotFound
+                "highlight": highlight,
+                "get_lexer_by_name": get_lexer_by_name,
+                "guess_lexer": guess_lexer,
+                "TerminalFormatter": TerminalFormatter,
+                "ClassNotFound": ClassNotFound,
             }
         except ImportError:
             # Pygments not available - will fall back to plain text
@@ -118,12 +120,12 @@ class ToolOutputFormatter:
             return False
 
         # Check for path traversal attempts
-        if '..' in file_path:
+        if ".." in file_path:
             logger.warning(f"Rejected suspicious file path with '..' traversal: {file_path}")
             return False
 
         # Check for null bytes
-        if '\x00' in file_path:
+        if "\x00" in file_path:
             logger.warning(f"Rejected file path with null byte: {file_path}")
             return False
 
@@ -164,7 +166,7 @@ class ToolOutputFormatter:
         # Try to validate it's text (not binary)
         try:
             # Attempt to encode/decode to catch encoding issues
-            content.encode('utf-8')
+            content.encode("utf-8")
         except (UnicodeEncodeError, UnicodeDecodeError, AttributeError) as e:
             logger.warning(f"Binary or invalid UTF-8 content detected: {e}")
             return None
@@ -182,13 +184,41 @@ class ToolOutputFormatter:
             True if binary file extension
         """
         binary_extensions = {
-            '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.svg',
-            '.pdf', '.doc', '.docx', '.xls', '.xlsx',
-            '.exe', '.dll', '.so', '.dylib',
-            '.bin', '.dat', '.db', '.sqlite',
-            '.zip', '.tar', '.gz', '.bz2', '.7z', '.rar',
-            '.mp3', '.mp4', '.avi', '.mov', '.wav',
-            '.woff', '.woff2', '.ttf', '.eot'
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".gif",
+            ".bmp",
+            ".ico",
+            ".svg",
+            ".pdf",
+            ".doc",
+            ".docx",
+            ".xls",
+            ".xlsx",
+            ".exe",
+            ".dll",
+            ".so",
+            ".dylib",
+            ".bin",
+            ".dat",
+            ".db",
+            ".sqlite",
+            ".zip",
+            ".tar",
+            ".gz",
+            ".bz2",
+            ".7z",
+            ".rar",
+            ".mp3",
+            ".mp4",
+            ".avi",
+            ".mov",
+            ".wav",
+            ".woff",
+            ".woff2",
+            ".ttf",
+            ".eot",
         }
 
         ext = Path(file_path).suffix.lower()
@@ -208,44 +238,44 @@ class ToolOutputFormatter:
         # Map tool names to clean icons/emojis
         # Using safe symbols that work on Windows
         tool_icons = {
-            'write_file': '[WRITE]',
-            'edit_file': '[EDIT]',
-            'read_file': '[READ]',
-            'append_to_file': '[APPEND]',
-            'list_directory': '[LIST]',
-            'search_code': '[SEARCH]',
-            'analyze_code': '[ANALYZE]',
-            'run_command': '[RUN]',
-            'todo_write': '[TODO]',
-            'git_status': '[GIT]',
-            'git_diff': '[DIFF]',
-            'git_commit': '[COMMIT]',
+            "write_file": "[WRITE]",
+            "edit_file": "[EDIT]",
+            "read_file": "[READ]",
+            "append_to_file": "[APPEND]",
+            "list_directory": "[LIST]",
+            "search_code": "[SEARCH]",
+            "analyze_code": "[ANALYZE]",
+            "run_command": "[RUN]",
+            "todo_write": "[TODO]",
+            "git_status": "[GIT]",
+            "git_diff": "[DIFF]",
+            "git_commit": "[COMMIT]",
         }
 
-        icon = tool_icons.get(tool_name, '[CALL]')
+        icon = tool_icons.get(tool_name, "[CALL]")
 
         # Extract key parameter for display
-        if tool_name in ['write_file', 'edit_file', 'read_file', 'append_to_file', 'analyze_code']:
-            file_path = arguments.get('file_path', '')
+        if tool_name in ["write_file", "edit_file", "read_file", "append_to_file", "analyze_code"]:
+            file_path = arguments.get("file_path", "")
             if file_path and self._validate_file_path(file_path):
                 return f"\n{icon} {Path(file_path).name}\n"
 
-        elif tool_name == 'run_command':
-            command = arguments.get('command', '')
+        elif tool_name == "run_command":
+            command = arguments.get("command", "")
             if command:
                 # Truncate long commands
                 if len(command) > 50:
-                    command = command[:50] + '...'
+                    command = command[:50] + "..."
                 return f"\n{icon} {command}\n"
 
-        elif tool_name == 'search_code':
-            query = arguments.get('query', '')
+        elif tool_name == "search_code":
+            query = arguments.get("query", "")
             if query:
                 if len(query) > 50:
-                    query = query[:50] + '...'
+                    query = query[:50] + "..."
                 return f"\n{icon} {query}\n"
 
-        elif tool_name == 'todo_write':
+        elif tool_name == "todo_write":
             return f"\n{icon} Updating task list\n"
 
         # Default: Just show tool name
@@ -280,9 +310,9 @@ class ToolOutputFormatter:
         content = sanitized
 
         # Truncate if too long (do this AFTER sanitization to handle size limits)
-        lines = content.split('\n')
+        lines = content.split("\n")
         if len(lines) > max_lines:
-            content = '\n'.join(lines[:max_lines])
+            content = "\n".join(lines[:max_lines])
             content += f"\n... ({len(lines) - max_lines} more lines)\n"
 
         # Try syntax highlighting in terminal contexts
@@ -292,38 +322,38 @@ class ToolOutputFormatter:
                 # Get file extension to determine language
                 ext = Path(file_path).suffix.lower()
                 lang_map = {
-                    '.py': 'python',
-                    '.js': 'javascript',
-                    '.ts': 'typescript',
-                    '.jsx': 'jsx',
-                    '.tsx': 'tsx',
-                    '.java': 'java',
-                    '.cpp': 'cpp',
-                    '.c': 'c',
-                    '.go': 'go',
-                    '.rs': 'rust',
-                    '.rb': 'ruby',
-                    '.php': 'php',
-                    '.html': 'html',
-                    '.css': 'css',
-                    '.sql': 'sql',
-                    '.sh': 'bash',
-                    '.yaml': 'yaml',
-                    '.yml': 'yaml',
-                    '.json': 'json',
-                    '.xml': 'xml',
-                    '.md': 'markdown',
+                    ".py": "python",
+                    ".js": "javascript",
+                    ".ts": "typescript",
+                    ".jsx": "jsx",
+                    ".tsx": "tsx",
+                    ".java": "java",
+                    ".cpp": "cpp",
+                    ".c": "c",
+                    ".go": "go",
+                    ".rs": "rust",
+                    ".rb": "ruby",
+                    ".php": "php",
+                    ".html": "html",
+                    ".css": "css",
+                    ".sql": "sql",
+                    ".sh": "bash",
+                    ".yaml": "yaml",
+                    ".yml": "yaml",
+                    ".json": "json",
+                    ".xml": "xml",
+                    ".md": "markdown",
                 }
 
                 language = lang_map.get(ext)
 
                 if language:
-                    lexer = self.syntax_highlighter['get_lexer_by_name'](language)
-                    formatter = self.syntax_highlighter['TerminalFormatter']()
-                    highlighted = self.syntax_highlighter['highlight'](content, lexer, formatter)
+                    lexer = self.syntax_highlighter["get_lexer_by_name"](language)
+                    formatter = self.syntax_highlighter["TerminalFormatter"]()
+                    highlighted = self.syntax_highlighter["highlight"](content, lexer, formatter)
                     return highlighted.rstrip()
 
-            except self.syntax_highlighter['ClassNotFound']:
+            except self.syntax_highlighter["ClassNotFound"]:
                 # Expected: Unknown language
                 logger.debug(f"No lexer found for {ext}, using plain text")
             except Exception as e:
@@ -347,26 +377,22 @@ class ToolOutputFormatter:
             Formatted checklist
         """
         # Safe symbols for Windows
-        status_symbols = {
-            'pending': '[ ]',
-            'in_progress': '[>]',
-            'completed': '[X]'
-        }
+        status_symbols = {"pending": "[ ]", "in_progress": "[>]", "completed": "[X]"}
 
         lines = []
         for todo in todos:
-            status = todo.get('status', 'pending')
-            content = todo.get('content', '')
-            active_form = todo.get('activeForm', content)
+            status = todo.get("status", "pending")
+            content = todo.get("content", "")
+            active_form = todo.get("activeForm", content)
 
-            symbol = status_symbols.get(status, '[ ]')
+            symbol = status_symbols.get(status, "[ ]")
 
             # Use activeForm for in_progress, content for others
-            text = active_form if status == 'in_progress' else content
+            text = active_form if status == "in_progress" else content
 
             lines.append(f"  {symbol} {text}")
 
-        return '\n'.join(lines)
+        return "\n".join(lines)
 
     def format_diff(self, old_text: str, new_text: str, max_context: int = 5) -> str:
         """
@@ -380,8 +406,8 @@ class ToolOutputFormatter:
         Returns:
             Formatted diff (simple +/- format)
         """
-        old_lines = old_text.split('\n')
-        new_lines = new_text.split('\n')
+        old_lines = old_text.split("\n")
+        new_lines = new_text.split("\n")
 
         # Simple diff: show removed and added lines
         lines = []
@@ -401,14 +427,14 @@ class ToolOutputFormatter:
         else:
             lines.append(f"  + ... ({len(new_lines)} lines added)")
 
-        return '\n'.join(lines)
+        return "\n".join(lines)
 
     def format_file_operation_diff(
         self,
         file_path: str,
         new_content: str,
         old_content: str | None = None,
-        max_lines: int = 1000
+        max_lines: int = 1000,
     ) -> str:
         """
         Format file operations as unified diff with line numbers (Claude Code style).
@@ -455,7 +481,7 @@ class ToolOutputFormatter:
         if old_content is None:
             # NEW FILE - Show all lines as additions
             for i, line in enumerate(new_lines, start=1):
-                formatted_line = self._format_diff_line(i, '+', line)
+                formatted_line = self._format_diff_line(i, "+", line)
                 output_lines.append(formatted_line)
 
             if truncated:
@@ -467,7 +493,7 @@ class ToolOutputFormatter:
                 old_lines, new_lines, max_lines
             )
 
-        return '\n'.join(output_lines)
+        return "\n".join(output_lines)
 
     def _format_diff_line(self, line_num: int, prefix: str, content: str) -> str:
         """
@@ -488,12 +514,12 @@ class ToolOutputFormatter:
 
         # Add colors if in terminal
         if self.is_terminal:
-            if prefix == '+':
+            if prefix == "+":
                 # Dark green background for additions (professional style)
                 # \x1b[48;5;22m = dark green background
                 # \x1b[38;5;158m = light green text for good contrast
                 return f"  \x1b[48;5;22m\x1b[38;5;158m{line_num_str} {prefix} {content}\x1b[0m"
-            elif prefix == '-':
+            elif prefix == "-":
                 # Dark red background for deletions (professional style)
                 # \x1b[48;5;52m = dark red background
                 # \x1b[38;5;217m = light pink/red text for good contrast
@@ -506,10 +532,7 @@ class ToolOutputFormatter:
             return f"  {line_num_str} {prefix} {content}"
 
     def _generate_unified_diff_with_line_numbers(
-        self,
-        old_lines: list[str],
-        new_lines: list[str],
-        max_lines: int
+        self, old_lines: list[str], new_lines: list[str], max_lines: int
     ) -> list[str]:
         """
         Generate unified diff with line numbers using difflib.
@@ -526,8 +549,8 @@ class ToolOutputFormatter:
         diff = difflib.unified_diff(
             old_lines,
             new_lines,
-            lineterm='',
-            n=3  # 3 lines of context
+            lineterm="",
+            n=3,  # 3 lines of context
         )
 
         output_lines = []
@@ -537,7 +560,7 @@ class ToolOutputFormatter:
 
         for line in diff:
             # Skip header lines (@@, ---, +++)
-            if line.startswith('@@'):
+            if line.startswith("@@"):
                 # Parse line numbers from header
                 # Format: @@ -old_start,old_count +new_start,new_count @@
                 parts = line.split()
@@ -546,19 +569,19 @@ class ToolOutputFormatter:
                     new_info = parts[2]  # +new_start,new_count
 
                     # Extract start line numbers
-                    if ',' in old_info:
-                        old_line_num = int(old_info.split(',')[0][1:])  # Remove '-'
+                    if "," in old_info:
+                        old_line_num = int(old_info.split(",")[0][1:])  # Remove '-'
                     else:
                         old_line_num = int(old_info[1:])
 
-                    if ',' in new_info:
-                        new_line_num = int(new_info.split(',')[0][1:])  # Remove '+'
+                    if "," in new_info:
+                        new_line_num = int(new_info.split(",")[0][1:])  # Remove '+'
                     else:
                         new_line_num = int(new_info[1:])
 
                 continue
 
-            if line.startswith('---') or line.startswith('+++'):
+            if line.startswith("---") or line.startswith("+++"):
                 continue
 
             # Check max lines limit
@@ -567,24 +590,24 @@ class ToolOutputFormatter:
                 break
 
             # Process diff line
-            if line.startswith('+'):
+            if line.startswith("+"):
                 # Addition
-                formatted = self._format_diff_line(new_line_num, '+', line[1:])
+                formatted = self._format_diff_line(new_line_num, "+", line[1:])
                 output_lines.append(formatted)
                 new_line_num += 1
                 lines_shown += 1
 
-            elif line.startswith('-'):
+            elif line.startswith("-"):
                 # Deletion
-                formatted = self._format_diff_line(old_line_num, '-', line[1:])
+                formatted = self._format_diff_line(old_line_num, "-", line[1:])
                 output_lines.append(formatted)
                 old_line_num += 1
                 lines_shown += 1
 
             else:
                 # Context line (starts with ' ')
-                content = line[1:] if line.startswith(' ') else line
-                formatted = self._format_diff_line(new_line_num, ' ', content)
+                content = line[1:] if line.startswith(" ") else line
+                formatted = self._format_diff_line(new_line_num, " ", content)
                 output_lines.append(formatted)
                 old_line_num += 1
                 new_line_num += 1
@@ -626,16 +649,12 @@ class StreamingToolCallFormatter:
         Args:
             args_chunk: Chunk of JSON arguments
         """
-        if 'raw_json' not in self.accumulator:
-            self.accumulator['raw_json'] = ''
+        if "raw_json" not in self.accumulator:
+            self.accumulator["raw_json"] = ""
 
-        self.accumulator['raw_json'] += args_chunk
+        self.accumulator["raw_json"] += args_chunk
 
-    def format_complete_tool_call(
-        self,
-        tool_name: str,
-        arguments: dict[str, Any]
-    ) -> str | None:
+    def format_complete_tool_call(self, tool_name: str, arguments: dict[str, Any]) -> str | None:
         """
         Format a complete tool call for display.
 
@@ -648,35 +667,35 @@ class StreamingToolCallFormatter:
         """
         # Handle specific tool types
 
-        if tool_name == 'write_file':
-            file_path = arguments.get('file_path', '')
-            content = arguments.get('content', '')
+        if tool_name == "write_file":
+            file_path = arguments.get("file_path", "")
+            content = arguments.get("content", "")
 
             if file_path and content:
                 formatted_content = self.formatter.format_file_content(file_path, content)
                 return f"\n{formatted_content}\n"
 
-        elif tool_name == 'edit_file':
-            file_path = arguments.get('file_path', '')
-            old_text = arguments.get('old_text', '')
-            new_text = arguments.get('new_text', '')
+        elif tool_name == "edit_file":
+            file_path = arguments.get("file_path", "")
+            old_text = arguments.get("old_text", "")
+            new_text = arguments.get("new_text", "")
 
             if file_path:
                 diff = self.formatter.format_diff(old_text, new_text)
                 return f"\n{diff}\n"
 
-        elif tool_name == 'todo_write':
-            todos = arguments.get('todos', [])
+        elif tool_name == "todo_write":
+            todos = arguments.get("todos", [])
             if todos:
                 formatted_todos = self.formatter.format_todo_list(todos)
                 return f"\n{formatted_todos}\n"
 
-        elif tool_name == 'read_file':
+        elif tool_name == "read_file":
             # Don't display file content for read operations
             # (the tool result will show it)
             return None
 
-        elif tool_name in ['search_code', 'analyze_code', 'list_directory']:
+        elif tool_name in ["search_code", "analyze_code", "list_directory"]:
             # Don't display for query tools
             # (the tool result will show findings)
             return None

@@ -117,7 +117,9 @@ class SegmentRenderer:
                         rendered += 1
                         continue
                     args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-                    card = widget.add_tool_card(tc.id, tc.function.name, args, requires_approval=False)
+                    card = widget.add_tool_card(
+                        tc.id, tc.function.name, args, requires_approval=False
+                    )
                     if defer_tool_mount:
                         card.set_defer_diff_mount(True)
                     self._tool_cards[tc.id] = card
@@ -129,6 +131,7 @@ class SegmentRenderer:
                         tool_state = self._message_store.get_tool_state(tc.id)
                         if tool_state and tool_state.status == CoreToolStatus.AWAITING_APPROVAL:
                             from .events import ToolStatus
+
                             card.status = ToolStatus.AWAITING_APPROVAL
             elif isinstance(segment, ToolCallSegment):
                 # Legacy: reference by index (deprecated)
@@ -141,7 +144,9 @@ class SegmentRenderer:
                         rendered += 1
                         continue
                     args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-                    card = widget.add_tool_card(tc.id, tc.function.name, args, requires_approval=False)
+                    card = widget.add_tool_card(
+                        tc.id, tc.function.name, args, requires_approval=False
+                    )
                     if defer_tool_mount:
                         card.set_defer_diff_mount(True)
                     self._tool_cards[tc.id] = card
@@ -153,6 +158,7 @@ class SegmentRenderer:
                         tool_state = self._message_store.get_tool_state(tc.id)
                         if tool_state and tool_state.status == CoreToolStatus.AWAITING_APPROVAL:
                             from .events import ToolStatus
+
                             card.status = ToolStatus.AWAITING_APPROVAL
             rendered += 1
         return rendered
@@ -176,34 +182,35 @@ class SegmentRenderer:
                 if tc and tc.function.name not in self._silent_tools:
                     if tc.id not in self._tool_cards:
                         args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-                        card = widget.add_tool_card(tc.id, tc.function.name, args, requires_approval=False)
+                        card = widget.add_tool_card(
+                            tc.id, tc.function.name, args, requires_approval=False
+                        )
                         self._tool_cards[tc.id] = card
                         self._on_tool_card_created(tc.id, card)
                         if self._message_store:
                             tool_state = self._message_store.get_tool_state(tc.id)
                             if tool_state and tool_state.status == CoreToolStatus.AWAITING_APPROVAL:
                                 from .events import ToolStatus
+
                                 card.status = ToolStatus.AWAITING_APPROVAL
             elif isinstance(segment, ToolCallSegment):
                 tc = self.get_tool_call_safe(message, segment.tool_call_index, "streaming_dedup")
                 if tc and tc.function.name not in self._silent_tools:
                     if tc.id not in self._tool_cards:
                         args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-                        card = widget.add_tool_card(tc.id, tc.function.name, args, requires_approval=False)
+                        card = widget.add_tool_card(
+                            tc.id, tc.function.name, args, requires_approval=False
+                        )
                         self._tool_cards[tc.id] = card
                         self._on_tool_card_created(tc.id, card)
                         if self._message_store:
                             tool_state = self._message_store.get_tool_state(tc.id)
                             if tool_state and tool_state.status == CoreToolStatus.AWAITING_APPROVAL:
                                 from .events import ToolStatus
+
                                 card.status = ToolStatus.AWAITING_APPROVAL
 
-    def get_tool_call_safe(
-        self,
-        message: "Message",
-        tc_idx: int,
-        context: str = ""
-    ) -> Any | None:
+    def get_tool_call_safe(self, message: "Message", tc_idx: int, context: str = "") -> Any | None:
         """
         Safely get a tool call by index with bounds checking and logging.
 
@@ -232,10 +239,7 @@ class SegmentRenderer:
         return message.tool_calls[tc_idx]
 
     def get_tool_call_by_id(
-        self,
-        message: "Message",
-        tool_call_id: str,
-        context: str = ""
+        self, message: "Message", tool_call_id: str, context: str = ""
     ) -> Any | None:
         """
         Get a tool call by ID (stable reference).

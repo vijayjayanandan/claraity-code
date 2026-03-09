@@ -55,20 +55,23 @@ class ServerSubagentBridge:
             "model_name": model_name,
             "subagent_name": subagent_name,
         }
-        asyncio.ensure_future(self._protocol._send_json({
-            "type": "subagent",
-            "event": "registered",
-            "data": {
-                "subagent_id": subagent_id,
-                "parent_tool_call_id": parent_tool_call_id,
-                "model_name": model_name,
-                "subagent_name": subagent_name,
-                "transcript_path": str(transcript_path),
-            },
-        }))
+        asyncio.ensure_future(
+            self._protocol._send_json(
+                {
+                    "type": "subagent",
+                    "event": "registered",
+                    "data": {
+                        "subagent_id": subagent_id,
+                        "parent_tool_call_id": parent_tool_call_id,
+                        "model_name": model_name,
+                        "subagent_name": subagent_name,
+                        "transcript_path": str(transcript_path),
+                    },
+                }
+            )
+        )
         logger.info(
-            f"[BRIDGE] Registered subagent {subagent_id} "
-            f"(name={subagent_name}, model={model_name})"
+            f"[BRIDGE] Registered subagent {subagent_id} (name={subagent_name}, model={model_name})"
         )
 
     def push_notification(
@@ -85,9 +88,13 @@ class ServerSubagentBridge:
     def unregister(self, subagent_id: str) -> None:
         """Remove tracking and notify the client."""
         self._active.pop(subagent_id, None)
-        asyncio.ensure_future(self._protocol._send_json({
-            "type": "subagent",
-            "event": "unregistered",
-            "data": {"subagent_id": subagent_id},
-        }))
+        asyncio.ensure_future(
+            self._protocol._send_json(
+                {
+                    "type": "subagent",
+                    "event": "unregistered",
+                    "data": {"subagent_id": subagent_id},
+                }
+            )
+        )
         logger.info(f"[BRIDGE] Unregistered subagent {subagent_id}")

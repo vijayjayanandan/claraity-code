@@ -12,6 +12,7 @@ from typing import Any, Optional
 
 class DirectorPhase(Enum):
     """States in the Director Protocol state machine."""
+
     IDLE = auto()
     UNDERSTAND = auto()
     PLAN = auto()
@@ -24,6 +25,7 @@ class DirectorPhase(Enum):
 
 class SliceStatus(Enum):
     """Status of an individual vertical slice."""
+
     PENDING = auto()
     IN_PROGRESS = auto()
     COMPLETED = auto()
@@ -33,6 +35,7 @@ class SliceStatus(Enum):
 @dataclass
 class FileMapping:
     """A file identified during the UNDERSTAND phase."""
+
     path: str
     role: str
     description: str
@@ -42,6 +45,7 @@ class FileMapping:
 @dataclass
 class ContextDocument:
     """Output of the UNDERSTAND phase."""
+
     task_description: str
     affected_files: list[FileMapping] = field(default_factory=list)
     existing_patterns: list[str] = field(default_factory=list)
@@ -74,6 +78,7 @@ class ContextDocument:
 @dataclass
 class VerticalSlice:
     """A thin, independently testable increment of functionality."""
+
     id: int
     title: str
     description: str = ""
@@ -100,6 +105,7 @@ class VerticalSlice:
 @dataclass
 class DirectorPlan:
     """Output of the PLAN phase."""
+
     slices: list[VerticalSlice] = field(default_factory=list)
     context: ContextDocument | None = None
     summary: str = ""
@@ -127,6 +133,7 @@ class DirectorPlan:
 @dataclass
 class PhaseResult:
     """Result from executing a phase."""
+
     phase: DirectorPhase
     success: bool
     output: Any = None

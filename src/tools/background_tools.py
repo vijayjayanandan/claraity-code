@@ -53,17 +53,21 @@ class CheckBackgroundTaskTool(Tool):
         if result is None:
             # Still running
             import time
+
             elapsed = time.monotonic() - info.start_time
             return ToolResult(
                 tool_name=self.name,
                 status=ToolStatus.SUCCESS,
-                output=json.dumps({
-                    "task_id": info.task_id,
-                    "status": "running",
-                    "command": info.command,
-                    "description": info.description,
-                    "elapsed_seconds": round(elapsed, 1),
-                }, indent=2),
+                output=json.dumps(
+                    {
+                        "task_id": info.task_id,
+                        "status": "running",
+                        "command": info.command,
+                        "description": info.description,
+                        "elapsed_seconds": round(elapsed, 1),
+                    },
+                    indent=2,
+                ),
             )
 
         return ToolResult(

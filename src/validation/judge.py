@@ -33,7 +33,7 @@ class ValidationJudge:
         llm_backend: LLMBackend | None = None,
         model_name: str | None = None,
         api_key: str | None = None,
-        base_url: str | None = None
+        base_url: str | None = None,
     ):
         """
         Initialize judge.
@@ -62,9 +62,13 @@ class ValidationJudge:
                 )
 
             if not base_url:
-                raise ValueError("Base URL required. Set LLM_HOST in .env or pass base_url parameter.")
+                raise ValueError(
+                    "Base URL required. Set LLM_HOST in .env or pass base_url parameter."
+                )
             if not model_name:
-                raise ValueError("Model name required. Set LLM_MODEL in .env or pass model_name parameter.")
+                raise ValueError(
+                    "Model name required. Set LLM_MODEL in .env or pass model_name parameter."
+                )
 
             config = LLMConfig(
                 backend_type=LLMBackendType.OPENAI,
@@ -72,7 +76,7 @@ class ValidationJudge:
                 base_url=base_url,
                 temperature=0.0,  # Deterministic for evaluation
                 max_tokens=int(os.getenv("LLM_MAX_TOKENS", "4000")),
-                top_p=float(os.getenv("LLM_TOP_P", "0.95"))
+                top_p=float(os.getenv("LLM_TOP_P", "0.95")),
             )
 
             self.llm = OpenAIBackend(config, api_key=api_key)
@@ -82,7 +86,7 @@ class ValidationJudge:
         scenario: ValidationScenario,
         result: ValidationResult,
         workspace: Path,
-        verbose: bool = True
+        verbose: bool = True,
     ) -> dict[str, Any]:
         """
         Evaluate generated code using Claude.
@@ -112,13 +116,11 @@ class ValidationJudge:
                 "best_practices": 0.0,
                 "strengths": [],
                 "weaknesses": ["No code files generated"],
-                "overall_assessment": "Agent did not generate any code files."
+                "overall_assessment": "Agent did not generate any code files.",
             }
 
         # Build evaluation prompt
-        eval_prompt = self._build_evaluation_prompt(
-            scenario, result, code_files
-        )
+        eval_prompt = self._build_evaluation_prompt(scenario, result, code_files)
 
         # Call LLM API (same backend as agent)
         try:
@@ -157,7 +159,7 @@ class ValidationJudge:
                 "best_practices": 0.0,
                 "strengths": [],
                 "weaknesses": [f"Judge evaluation failed: {str(e)}"],
-                "overall_assessment": "Could not evaluate code due to error."
+                "overall_assessment": "Could not evaluate code due to error.",
             }
 
     def _collect_code_files(self, code_dir: Path) -> dict[str, str]:
@@ -196,10 +198,7 @@ class ValidationJudge:
         return code_files
 
     def _build_evaluation_prompt(
-        self,
-        scenario: ValidationScenario,
-        result: ValidationResult,
-        code_files: dict[str, str]
+        self, scenario: ValidationScenario, result: ValidationResult, code_files: dict[str, str]
     ) -> str:
         """Build evaluation prompt for Claude"""
 
@@ -359,14 +358,11 @@ Respond with ONLY the JSON, no other text."""
                 "strengths": [],
                 "weaknesses": [f"Failed to parse judge response: {str(e)}"],
                 "overall_assessment": "Could not evaluate due to response parsing error.",
-                "raw_response": response_text
+                "raw_response": response_text,
             }
 
     def calculate_final_scores(
-        self,
-        scenario: ValidationScenario,
-        result: ValidationResult,
-        judge_scores: dict[str, float]
+        self, scenario: ValidationScenario, result: ValidationResult, judge_scores: dict[str, float]
     ) -> dict[str, float]:
         """
         Calculate final weighted scores combining automated checks + judge evaluation.
@@ -402,19 +398,14 @@ Respond with ONLY the JSON, no other text."""
 
         # Calculate overall weighted score
         weights = scenario.scoring_weights
-        overall = sum(
-            scores.get(k, 0.0) * v
-            for k, v in weights.items()
-        )
+        overall = sum(scores.get(k, 0.0) * v for k, v in weights.items())
 
         scores["overall"] = overall
 
         return scores
 
     def _calculate_auto_completeness(
-        self,
-        scenario: ValidationScenario,
-        result: ValidationResult
+        self, scenario: ValidationScenario, result: ValidationResult
     ) -> float:
         """Calculate automated completeness score"""
 
@@ -437,9 +428,7 @@ Respond with ONLY the JSON, no other text."""
         return score / checks if checks > 0 else 1.0
 
     def _calculate_auto_correctness(
-        self,
-        scenario: ValidationScenario,
-        result: ValidationResult
+        self, scenario: ValidationScenario, result: ValidationResult
     ) -> float:
         """Calculate automated correctness score"""
 
@@ -456,7 +445,7 @@ Respond with ONLY the JSON, no other text."""
                 # Partial credit for some tests passing
                 total = test_check.get("total", 1)
                 passed = test_check.get("passed", 0)
-                score += (passed / total)
+                score += passed / total
 
         # Check validation steps
         for key, value in result.check_results.items():
@@ -468,9 +457,7 @@ Respond with ONLY the JSON, no other text."""
         return score / checks if checks > 0 else 1.0
 
     def _calculate_auto_quality(
-        self,
-        scenario: ValidationScenario,
-        result: ValidationResult
+        self, scenario: ValidationScenario, result: ValidationResult
     ) -> float:
         """Calculate automated quality score"""
 

@@ -19,6 +19,7 @@ class AgentMessage:
     Represents one turn in the conversation, either from the user
     (Testing Claude) or the assistant (AI Coding Agent).
     """
+
     role: str  # "user" or "assistant"
     content: str
     timestamp: datetime
@@ -30,7 +31,7 @@ class AgentMessage:
             "role": self.role,
             "content": self.content,
             "timestamp": self.timestamp.isoformat(),
-            "metadata": self.metadata
+            "metadata": self.metadata,
         }
 
     @classmethod
@@ -40,7 +41,7 @@ class AgentMessage:
             role=data["role"],
             content=data["content"],
             timestamp=datetime.fromisoformat(data["timestamp"]),
-            metadata=data.get("metadata", {})
+            metadata=data.get("metadata", {}),
         )
 
 
@@ -52,6 +53,7 @@ class AgentResponse:
     Contains the agent's natural language response plus metadata about
     what actions it took (files generated, tools called, etc.).
     """
+
     content: str  # Natural language response
     files_generated: list[str] = field(default_factory=list)  # Files created/modified
     tool_calls: list[dict[str, Any]] = field(default_factory=list)  # Tools executed
@@ -67,7 +69,7 @@ class AgentResponse:
             "tool_calls": self.tool_calls,
             "success": self.success,
             "error": self.error,
-            "metadata": self.metadata
+            "metadata": self.metadata,
         }
 
     @classmethod
@@ -79,7 +81,7 @@ class AgentResponse:
             tool_calls=data.get("tool_calls", []),
             success=data.get("success", True),
             error=data.get("error"),
-            metadata=data.get("metadata", {})
+            metadata=data.get("metadata", {}),
         )
 
 
@@ -91,6 +93,7 @@ class ConversationLog:
     Records the full conversation between Testing Claude and AI Coding Agent,
     including all messages, timing, and metadata.
     """
+
     conversation_id: str
     messages: list[AgentMessage]
     started_at: datetime
@@ -106,7 +109,7 @@ class ConversationLog:
             "started_at": self.started_at.isoformat(),
             "ended_at": self.ended_at.isoformat() if self.ended_at else None,
             "total_turns": self.total_turns,
-            "metadata": self.metadata
+            "metadata": self.metadata,
         }
 
     @classmethod
@@ -118,7 +121,7 @@ class ConversationLog:
             started_at=datetime.fromisoformat(data["started_at"]),
             ended_at=datetime.fromisoformat(data["ended_at"]) if data.get("ended_at") else None,
             total_turns=data.get("total_turns", 0),
-            metadata=data.get("metadata", {})
+            metadata=data.get("metadata", {}),
         )
 
     def to_json(self, pretty: bool = True) -> str:

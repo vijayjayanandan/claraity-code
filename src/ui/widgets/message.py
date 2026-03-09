@@ -40,9 +40,11 @@ _perf_counters = {
     "widgets_mounted": 0,
 }
 
+
 def get_perf_counters() -> dict:
     """Get current performance counters (for debugging)."""
     return _perf_counters.copy()
+
 
 def reset_perf_counters() -> None:
     """Reset performance counters."""
@@ -53,20 +55,22 @@ def reset_perf_counters() -> None:
         "widgets_mounted": 0,
     }
 
+
 # Try to import pyperclip for clipboard support
 try:
     import pyperclip
+
     HAS_PYPERCLIP = True
 except ImportError:
     HAS_PYPERCLIP = False
 
 # ANSI escape code pattern for stripping
-ANSI_ESCAPE_PATTERN = re.compile(r'\x1b\[[0-9;]*m|\x1b\[\?[0-9;]*[a-zA-Z]|\x1b\[[0-9;]*[a-zA-Z]')
+ANSI_ESCAPE_PATTERN = re.compile(r"\x1b\[[0-9;]*m|\x1b\[\?[0-9;]*[a-zA-Z]|\x1b\[[0-9;]*[a-zA-Z]")
 
 
 def strip_ansi_codes(text: str) -> str:
     """Remove ANSI escape codes from text."""
-    return ANSI_ESCAPE_PATTERN.sub('', text)
+    return ANSI_ESCAPE_PATTERN.sub("", text)
 
 
 class CopyButton(Static):
@@ -411,6 +415,7 @@ class MessageWidget(Vertical):
                 # Lazy import to avoid circular imports
                 try:
                     from src.observability import get_logger
+
                     logger = get_logger("tui.perf")
                     logger.debug(
                         "markdown_finalized",
@@ -722,8 +727,14 @@ class ClickableAttachmentPlaceholder(Static):
     }
     """
 
-    def __init__(self, attachment_type: str, attachment_num: int, attachment_data: str,
-                 filename: str = "", message_uuid: str = ""):
+    def __init__(
+        self,
+        attachment_type: str,
+        attachment_num: int,
+        attachment_data: str,
+        filename: str = "",
+        message_uuid: str = "",
+    ):
         """
         Initialize clickable attachment placeholder.
 
@@ -788,7 +799,7 @@ class ClickableAttachmentPlaceholder(Static):
 
         # Extract MIME type and extension
         header = parts[0]  # data:image/png;base64
-        data = parts[1]    # base64 data
+        data = parts[1]  # base64 data
 
         # Decode base64
         img_bytes = base64.b64decode(data)
@@ -799,7 +810,7 @@ class ClickableAttachmentPlaceholder(Static):
             temp_dir = tempfile.gettempdir()
             temp_path = os.path.join(temp_dir, self.filename)
 
-            with open(temp_path, 'wb') as f:
+            with open(temp_path, "wb") as f:
                 f.write(img_bytes)
         else:
             # Fallback: generate temp name with extension from MIME type
@@ -845,7 +856,7 @@ class ClickableAttachmentPlaceholder(Static):
         temp_dir = tempfile.gettempdir()
         temp_path = os.path.join(temp_dir, self.filename)
 
-        with open(temp_path, 'w', encoding='utf-8') as f:
+        with open(temp_path, "w", encoding="utf-8") as f:
             f.write(self.attachment_data)
 
         # Open in system viewer
@@ -876,8 +887,7 @@ class UserMessage(MessageWidget):
         self._raw_content = content
         self._message_uuid = message_uuid
         self._has_attachments = isinstance(content, list) and any(
-            isinstance(item, dict) and item.get("type") in ("image_url", "text")
-            for item in content
+            isinstance(item, dict) and item.get("type") in ("image_url", "text") for item in content
         )
         self._pending_annotations: list[str] = []
 
@@ -938,7 +948,9 @@ class UserMessage(MessageWidget):
                         # Format: --- BEGIN FILE: filename.txt ---
                         try:
                             header_line = text.split("\n")[0]
-                            filename = header_line.split("--- BEGIN FILE:")[1].split("---")[0].strip()
+                            filename = (
+                                header_line.split("--- BEGIN FILE:")[1].split("---")[0].strip()
+                            )
                         except Exception:
                             filename = "attachment.txt"
 
@@ -949,7 +961,7 @@ class UserMessage(MessageWidget):
                         attachment_num=file_count,
                         attachment_data=text,
                         filename=filename,
-                        message_uuid=self._message_uuid
+                        message_uuid=self._message_uuid,
                     )
                     self._blocks.append(placeholder)
                     # Add file content to segments (the actual file text)
@@ -972,22 +984,29 @@ class UserMessage(MessageWidget):
                 # Create clickable image placeholder
                 image_count += 1
                 image_url = item.get("image_url", {})
-                data_url = image_url.get("url", "") if isinstance(image_url, dict) else str(image_url)
+                data_url = (
+                    image_url.get("url", "") if isinstance(image_url, dict) else str(image_url)
+                )
 
                 # Extract filename from structured field (with fallback)
                 filename = item.get("filename", f"image_{image_count}.png")
 
                 # Debug: Log extracted filename
                 from src.observability import get_logger
+
                 logger = get_logger(__name__)
-                logger.debug("image_filename_extracted", filename=filename, has_filename_field=("filename" in item))
+                logger.debug(
+                    "image_filename_extracted",
+                    filename=filename,
+                    has_filename_field=("filename" in item),
+                )
 
                 placeholder = ClickableAttachmentPlaceholder(
                     attachment_type="image",
                     attachment_num=image_count,
                     attachment_data=data_url,
                     filename=filename,
-                    message_uuid=self._message_uuid
+                    message_uuid=self._message_uuid,
                 )
                 self._blocks.append(placeholder)
                 # Add image placeholder to segments

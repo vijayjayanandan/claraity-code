@@ -25,7 +25,7 @@ class TodoBar(Static):
         """Show/hide based on whether todos exist and not all completed."""
         if todos:
             # Check if all tasks are completed
-            completed = sum(1 for t in todos if t.get('status') == 'completed')
+            completed = sum(1 for t in todos if t.get("status") == "completed")
             total = len(todos)
             if completed == total and total > 0:
                 # All completed - hide the bar
@@ -47,8 +47,8 @@ class TodoBar(Static):
         if not self.todos:
             return Text("")
 
-        completed = sum(1 for t in self.todos if t.get('status') == 'completed')
-        in_progress = sum(1 for t in self.todos if t.get('status') == 'in_progress')
+        completed = sum(1 for t in self.todos if t.get("status") == "completed")
+        in_progress = sum(1 for t in self.todos if t.get("status") == "in_progress")
         total = len(self.todos)
 
         # All completed case is handled by watch_todos removing has-todos class
@@ -63,19 +63,18 @@ class TodoBar(Static):
             # Sort: in_progress first, then pending, then completed at bottom
             status_order = {"in_progress": 0, "pending": 1, "completed": 2}
             sorted_todos = sorted(
-                self.todos,
-                key=lambda t: status_order.get(t.get("status", "pending"), 1)
+                self.todos, key=lambda t: status_order.get(t.get("status", "pending"), 1)
             )
 
             for todo in sorted_todos:
-                status = todo.get('status', 'pending')
-                content = todo.get('subject', todo.get('content', ''))
-                active_form = todo.get('activeForm', content)
+                status = todo.get("status", "pending")
+                content = todo.get("subject", todo.get("content", ""))
+                active_form = todo.get("activeForm", content)
 
-                if status == 'completed':
+                if status == "completed":
                     result.append("  [x] ", style="green")
                     result.append(f"{content}\n", style="dim strike")  # Strikethrough
-                elif status == 'in_progress':
+                elif status == "in_progress":
                     result.append("  [>>>] ", style="bold yellow")
                     result.append(f"{active_form}\n", style="yellow")
                 else:  # pending
@@ -108,6 +107,6 @@ class TodoBar(Static):
     def get_current_task(self) -> str:
         """Get the activeForm of the current in_progress task."""
         for todo in self.todos:
-            if todo.get('status') == 'in_progress':
-                return todo.get('activeForm', todo.get('subject', todo.get('content', '')))
+            if todo.get("status") == "in_progress":
+                return todo.get("activeForm", todo.get("subject", todo.get("content", "")))
         return ""

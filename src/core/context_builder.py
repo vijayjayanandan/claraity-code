@@ -26,6 +26,7 @@ class ContextAssemblyReport:
     This is the single source of truth for context pressure decisions.
     All token counts are measured from the actual assembled payload.
     """
+
     # Configuration
     total_limit: int
     reserved_output_tokens: int
@@ -48,26 +49,22 @@ class ContextAssemblyReport:
     def __post_init__(self):
         """Calculate derived fields after initialization."""
         self.total_input_tokens = (
-            self.system_prompt_tokens +
-            self.tools_schema_tokens +
-            self.file_references_tokens +
-            self.agent_state_tokens +
-            self.working_memory_tokens +
-            self.episodic_memory_tokens
+            self.system_prompt_tokens
+            + self.tools_schema_tokens
+            + self.file_references_tokens
+            + self.agent_state_tokens
+            + self.working_memory_tokens
+            + self.episodic_memory_tokens
         )
 
         # Available budget for input (excluding output reservation and safety buffer)
         self.available_for_input = (
-            self.total_limit -
-            self.reserved_output_tokens -
-            self.safety_buffer_tokens
+            self.total_limit - self.reserved_output_tokens - self.safety_buffer_tokens
         )
 
         # Utilization as percentage of available input budget
         if self.available_for_input > 0:
-            self.utilization_percent = (
-                self.total_input_tokens / self.available_for_input
-            ) * 100
+            self.utilization_percent = (self.total_input_tokens / self.available_for_input) * 100
         else:
             self.utilization_percent = 100.0
 
@@ -86,13 +83,13 @@ class ContextAssemblyReport:
             'green' (< 60%), 'yellow' (60-80%), 'orange' (80-90%), 'red' (> 90%)
         """
         if self.utilization_percent >= 90:
-            return 'red'
+            return "red"
         elif self.utilization_percent >= 80:
-            return 'orange'
+            return "orange"
         elif self.utilization_percent >= 60:
-            return 'yellow'
+            return "yellow"
         else:
-            return 'green'
+            return "green"
 
     def format_summary(self) -> str:
         """Format a one-line summary for logging."""
@@ -109,20 +106,20 @@ class ContextAssemblyReport:
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
-            'total_limit': self.total_limit,
-            'reserved_output_tokens': self.reserved_output_tokens,
-            'safety_buffer_tokens': self.safety_buffer_tokens,
-            'system_prompt_tokens': self.system_prompt_tokens,
-            'tools_schema_tokens': self.tools_schema_tokens,
-            'file_references_tokens': self.file_references_tokens,
-            'agent_state_tokens': self.agent_state_tokens,
-            'working_memory_tokens': self.working_memory_tokens,
-            'episodic_memory_tokens': self.episodic_memory_tokens,
-            'total_input_tokens': self.total_input_tokens,
-            'available_for_input': self.available_for_input,
-            'utilization_percent': self.utilization_percent,
-            'headroom_tokens': self.headroom_tokens,
-            'pressure_level': self.get_pressure_level(),
+            "total_limit": self.total_limit,
+            "reserved_output_tokens": self.reserved_output_tokens,
+            "safety_buffer_tokens": self.safety_buffer_tokens,
+            "system_prompt_tokens": self.system_prompt_tokens,
+            "tools_schema_tokens": self.tools_schema_tokens,
+            "file_references_tokens": self.file_references_tokens,
+            "agent_state_tokens": self.agent_state_tokens,
+            "working_memory_tokens": self.working_memory_tokens,
+            "episodic_memory_tokens": self.episodic_memory_tokens,
+            "total_input_tokens": self.total_input_tokens,
+            "available_for_input": self.available_for_input,
+            "utilization_percent": self.utilization_percent,
+            "headroom_tokens": self.headroom_tokens,
+            "pressure_level": self.get_pressure_level(),
         }
 
 
@@ -202,11 +199,11 @@ class ContextBuilder:
         """
         # Token tracking for each bucket
         tokens = {
-            'system_prompt': 0,
-            'file_references': 0,
-            'agent_state': 0,
-            'working_memory': 0,
-            'episodic_memory': 0,
+            "system_prompt": 0,
+            "file_references": 0,
+            "agent_state": 0,
+            "working_memory": 0,
+            "episodic_memory": 0,
         }
 
         # Calculate token budgets (percentages for compression decisions)
@@ -214,9 +211,7 @@ class ContextBuilder:
 
         # 1. Build system prompt using gold-standard prompts (based on Claude Code)
         system_prompt = get_system_prompt(
-            language=language,
-            task_type=task_type,
-            context_size=self.max_context_tokens
+            language=language, task_type=task_type, context_size=self.max_context_tokens
         )
 
         # Inject plan mode context if active
@@ -224,7 +219,7 @@ class ContextBuilder:
             plan_injection = get_plan_mode_injection(
                 plan_path=str(plan_mode_state.plan_file_path),
                 plan_hash=plan_mode_state.plan_hash,
-                is_awaiting_approval=plan_mode_state.is_awaiting_approval()
+                is_awaiting_approval=plan_mode_state.is_awaiting_approval(),
             )
             system_prompt = system_prompt + "\n\n" + plan_injection
 
@@ -251,7 +246,7 @@ class ContextBuilder:
                 target_tokens=system_prompt_budget,
             )
 
-        tokens['system_prompt'] = self.optimizer.count_tokens(system_prompt)
+        tokens["system_prompt"] = self.optimizer.count_tokens(system_prompt)
 
         # 2. Get memory context from MemoryManager
         # MemoryManager uses MessageStore when configured (Option A: Single Source of Truth)
@@ -267,21 +262,18 @@ class ContextBuilder:
                 # System messages from memory are episodic summaries
                 content = msg.get("content", "")
                 if isinstance(content, str):
-                    tokens['episodic_memory'] += self.optimizer.count_tokens(content)
+                    tokens["episodic_memory"] += self.optimizer.count_tokens(content)
             else:
                 # User/assistant/tool messages are working memory
                 content = msg.get("content", "")
                 if isinstance(content, str):
-                    tokens['working_memory'] += self.optimizer.count_tokens(content)
+                    tokens["working_memory"] += self.optimizer.count_tokens(content)
 
         # 3. Assemble final context
         context = []
 
         # Add system prompt
-        context.append({
-            "role": "system",
-            "content": system_prompt
-        })
+        context.append({"role": "system", "content": system_prompt})
 
         # Add file references if provided (after system prompt)
         file_context_content = ""
@@ -308,21 +300,15 @@ class ContextBuilder:
                     "[END REFERENCED FILE CONTENT]\n"
                     "</referenced_files>"
                 )
-                context.append({
-                    "role": "system",
-                    "content": full_file_content
-                })
-                tokens['file_references'] = self.optimizer.count_tokens(full_file_content)
+                context.append({"role": "system", "content": full_file_content})
+                tokens["file_references"] = self.optimizer.count_tokens(full_file_content)
 
         # Add agent state if incomplete work exists (task continuation support)
         if agent_state:
             state_block = self._format_agent_state(agent_state)
             if state_block:
-                context.append({
-                    "role": "system",
-                    "content": state_block
-                })
-                tokens['agent_state'] = self.optimizer.count_tokens(state_block)
+                context.append({"role": "system", "content": state_block})
+                tokens["agent_state"] = self.optimizer.count_tokens(state_block)
 
         # Add memory context (skip system messages from memory as we have our own)
         for msg in memory_context:
@@ -334,12 +320,12 @@ class ContextBuilder:
             total_limit=self.max_context_tokens,
             reserved_output_tokens=self.reserved_output_tokens,
             safety_buffer_tokens=self.safety_buffer_tokens,
-            system_prompt_tokens=tokens['system_prompt'],
+            system_prompt_tokens=tokens["system_prompt"],
             tools_schema_tokens=self.tools_schema_tokens,  # Estimated, actual counted at LLM call
-            file_references_tokens=tokens['file_references'],
-            agent_state_tokens=tokens['agent_state'],
-            working_memory_tokens=tokens['working_memory'],
-            episodic_memory_tokens=tokens['episodic_memory'],
+            file_references_tokens=tokens["file_references"],
+            agent_state_tokens=tokens["agent_state"],
+            working_memory_tokens=tokens["working_memory"],
+            episodic_memory_tokens=tokens["episodic_memory"],
         )
 
         # Log the report if enabled
@@ -357,11 +343,11 @@ class ContextBuilder:
         summary = report.format_summary()
         pressure = report.get_pressure_level()
 
-        if pressure == 'red':
+        if pressure == "red":
             logger.warning(f"[CONTEXT PRESSURE RED] {summary}")
-        elif pressure == 'orange':
+        elif pressure == "orange":
             logger.warning(f"[CONTEXT PRESSURE ORANGE] {summary}")
-        elif pressure == 'yellow':
+        elif pressure == "yellow":
             logger.info(f"[CONTEXT PRESSURE YELLOW] {summary}")
         else:
             logger.debug(summary)
@@ -426,13 +412,13 @@ class ContextBuilder:
         Returns:
             Formatted XML-like string for LLM context, or None if no incomplete work
         """
-        todos = agent_state.get('todos', [])
+        todos = agent_state.get("todos", [])
         if not todos:
             return None
 
         # Separate by status
-        completed = [t for t in todos if t.get('status') == 'completed']
-        incomplete = [t for t in todos if t.get('status') in ('in_progress', 'pending')]
+        completed = [t for t in todos if t.get("status") == "completed"]
+        incomplete = [t for t in todos if t.get("status") in ("in_progress", "pending")]
 
         if not incomplete:
             return None  # All complete, no need to inject
@@ -442,7 +428,7 @@ class ContextBuilder:
             if not text:
                 return ""
             # Normalize whitespace (collapse newlines)
-            text = re.sub(r'\s+', ' ', text.strip())
+            text = re.sub(r"\s+", " ", text.strip())
             # Truncate
             if len(text) > max_len:
                 text = text[:max_len] + "..."
@@ -453,22 +439,21 @@ class ContextBuilder:
 
         # Only include incomplete todos (compact)
         for t in incomplete:
-            tid = t.get('id', 'T?')
-            status = t.get('status', 'pending')
-            content = safe_content(t.get('content', ''))
+            tid = t.get("id", "T?")
+            status = t.get("status", "pending")
+            content = safe_content(t.get("content", ""))
             lines.append(f'    <todo id="{tid}" status="{status}">{content}</todo>')
 
         lines.append("  </todos>")
         lines.append(f"  <completed_count>{len(completed)}</completed_count>")
 
-        current_id = agent_state.get('current_todo_id')
+        current_id = agent_state.get("current_todo_id")
         if current_id:
             lines.append(f"  <current_todo_id>{current_id}</current_todo_id>")
 
-        stop_reason = agent_state.get('last_stop_reason')
+        stop_reason = agent_state.get("last_stop_reason")
         if stop_reason:
             lines.append(f"  <stop_reason>{stop_reason}</stop_reason>")
 
         lines.append("</agent_state>")
         return "\n".join(lines)
-

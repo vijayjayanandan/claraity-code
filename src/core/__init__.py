@@ -46,6 +46,7 @@ _LAZY_IMPORTS = {
 def __getattr__(name):
     if name in _LAZY_IMPORTS:
         import importlib
+
         module = importlib.import_module(_LAZY_IMPORTS[name], __name__)
         value = getattr(module, name)
         # Cache on the module so __getattr__ is only called once per name
@@ -69,13 +70,22 @@ __all__ = [
     "SessionMetadata",
     # Events
     "ToolStatus",
-    "StreamStart", "StreamEnd",
+    "StreamStart",
+    "StreamEnd",
     "TextDelta",
-    "CodeBlockStart", "CodeBlockDelta", "CodeBlockEnd",
-    "ToolCallStart", "ToolCallStatus", "ToolCallResult",
-    "ThinkingStart", "ThinkingDelta", "ThinkingEnd",
-    "PausePromptStart", "PausePromptEnd",
-    "ContextUpdated", "ContextCompacted",
+    "CodeBlockStart",
+    "CodeBlockDelta",
+    "CodeBlockEnd",
+    "ToolCallStart",
+    "ToolCallStatus",
+    "ToolCallResult",
+    "ThinkingStart",
+    "ThinkingDelta",
+    "ThinkingEnd",
+    "PausePromptStart",
+    "PausePromptEnd",
+    "ContextUpdated",
+    "ContextCompacted",
     "ErrorEvent",
     "UIEvent",
 ]

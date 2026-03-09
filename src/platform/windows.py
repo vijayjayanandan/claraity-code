@@ -21,14 +21,15 @@ from typing import Any, Optional, Union
 # PLATFORM DETECTION
 # =============================================================================
 
+
 def is_windows() -> bool:
     """Check if running on Windows."""
-    return sys.platform == 'win32'
+    return sys.platform == "win32"
 
 
 def is_unix() -> bool:
     """Check if running on Unix-like system (Linux, macOS)."""
-    return sys.platform in ['linux', 'darwin']
+    return sys.platform in ["linux", "darwin"]
 
 
 def get_platform_name() -> str:
@@ -41,27 +42,27 @@ def get_shell_type() -> str:
     if is_windows():
         # Check if PowerShell is available
         try:
-            subprocess.run(['powershell', '-Command', 'echo test'],
-                          capture_output=True, timeout=1)
-            return 'powershell'
+            subprocess.run(["powershell", "-Command", "echo test"], capture_output=True, timeout=1)
+            return "powershell"
         except (FileNotFoundError, subprocess.TimeoutExpired):
-            return 'cmd'
+            return "cmd"
     else:
         # Unix-like: check SHELL environment variable
-        shell = os.environ.get('SHELL', '/bin/bash')
-        if 'zsh' in shell:
-            return 'zsh'
-        elif 'bash' in shell:
-            return 'bash'
-        elif 'fish' in shell:
-            return 'fish'
+        shell = os.environ.get("SHELL", "/bin/bash")
+        if "zsh" in shell:
+            return "zsh"
+        elif "bash" in shell:
+            return "bash"
+        elif "fish" in shell:
+            return "fish"
         else:
-            return 'bash'  # Default to bash
+            return "bash"  # Default to bash
 
 
 # =============================================================================
 # PATH NORMALIZATION
 # =============================================================================
+
 
 def normalize_path(path: str | Path) -> str:
     """
@@ -117,7 +118,7 @@ def to_windows_path(path: str | Path) -> str:
         Path with backslashes (on Windows) or forward slashes (on Unix)
     """
     if is_windows():
-        return str(Path(path)).replace('/', '\\')
+        return str(Path(path)).replace("/", "\\")
     else:
         return str(Path(path))
 
@@ -159,6 +160,7 @@ def get_relative_path(path: str | Path, base: str | Path) -> str:
 # ENCODING SAFETY (Critical for Windows cp1252)
 # =============================================================================
 
+
 def get_console_encoding() -> str:
     """
     Get console encoding.
@@ -167,7 +169,7 @@ def get_console_encoding() -> str:
         Encoding name (e.g., 'cp1252', 'utf-8')
     """
     # Try stdout encoding first
-    if hasattr(sys.stdout, 'encoding') and sys.stdout.encoding:
+    if hasattr(sys.stdout, "encoding") and sys.stdout.encoding:
         return sys.stdout.encoding
 
     # Fall back to default encoding
@@ -177,7 +179,7 @@ def get_console_encoding() -> str:
 def is_utf8_encoding() -> bool:
     """Check if console uses UTF-8 encoding."""
     encoding = get_console_encoding().lower()
-    return 'utf' in encoding or 'utf8' in encoding
+    return "utf" in encoding or "utf8" in encoding
 
 
 def safe_encode_output(text: str) -> str:
@@ -204,10 +206,10 @@ def safe_encode_output(text: str) -> str:
 
     try:
         # Try encoding, replace unencodable characters
-        return text.encode(encoding, errors='replace').decode(encoding)
+        return text.encode(encoding, errors="replace").decode(encoding)
     except Exception:
         # Fallback: ASCII only
-        return text.encode('ascii', errors='replace').decode('ascii')
+        return text.encode("ascii", errors="replace").decode("ascii")
 
 
 def remove_emojis(text: str) -> str:
@@ -237,24 +239,24 @@ def remove_emojis(text: str) -> str:
     # Based on Unicode TR51 (Emoji specification)
     emoji_pattern = re.compile(
         "["
-        "\U0001F600-\U0001F64F"  # emoticons
-        "\U0001F300-\U0001F5FF"  # symbols & pictographs
-        "\U0001F680-\U0001F6FF"  # transport & map symbols
-        "\U0001F1E0-\U0001F1FF"  # flags (iOS)
-        "\U0001F900-\U0001F9FF"  # supplemental symbols (includes fire emoji)
-        "\U00002600-\U000026FF"  # miscellaneous symbols (includes checkmark, cross, warning)
-        "\U00002700-\U000027BF"  # dingbats
-        "\U00002B00-\U00002BFF"  # miscellaneous symbols and arrows
-        "\U0001FA00-\U0001FA6F"  # chess symbols
-        "\U0001FA70-\U0001FAFF"  # symbols and pictographs extended
-        "\U000024C2-\U0001F251"  # enclosed characters
-        "\U0000FE00-\U0000FE0F"  # variation selectors
-        "\U0001F200-\U0001F2FF"  # enclosed ideographic supplement
+        "\U0001f600-\U0001f64f"  # emoticons
+        "\U0001f300-\U0001f5ff"  # symbols & pictographs
+        "\U0001f680-\U0001f6ff"  # transport & map symbols
+        "\U0001f1e0-\U0001f1ff"  # flags (iOS)
+        "\U0001f900-\U0001f9ff"  # supplemental symbols (includes fire emoji)
+        "\U00002600-\U000026ff"  # miscellaneous symbols (includes checkmark, cross, warning)
+        "\U00002700-\U000027bf"  # dingbats
+        "\U00002b00-\U00002bff"  # miscellaneous symbols and arrows
+        "\U0001fa00-\U0001fa6f"  # chess symbols
+        "\U0001fa70-\U0001faff"  # symbols and pictographs extended
+        "\U000024c2-\U0001f251"  # enclosed characters
+        "\U0000fe00-\U0000fe0f"  # variation selectors
+        "\U0001f200-\U0001f2ff"  # enclosed ideographic supplement
         "]+",
-        flags=re.UNICODE
+        flags=re.UNICODE,
     )
 
-    return emoji_pattern.sub('', text)
+    return emoji_pattern.sub("", text)
 
 
 def safe_print(text: str, **kwargs) -> None:
@@ -281,6 +283,7 @@ def safe_print(text: str, **kwargs) -> None:
 # SUBPROCESS WRAPPER (cmd.exe vs bash)
 # =============================================================================
 
+
 def run_command(
     command: str | list[str],
     cwd: str | None = None,
@@ -288,7 +291,7 @@ def run_command(
     capture_output: bool = True,
     timeout: float | None = None,
     shell: bool = False,
-    _allow_shell: bool = False
+    _allow_shell: bool = False,
 ) -> subprocess.CompletedProcess:
     """
     Run command with platform-appropriate shell.
@@ -350,7 +353,7 @@ def run_command(
             timeout=timeout,
             shell=shell,
             encoding=encoding,
-            errors='replace'  # Replace unencodable characters
+            errors="replace",  # Replace unencodable characters
         )
 
         # Remove emojis from output on Windows
@@ -367,8 +370,8 @@ def run_command(
         raise subprocess.TimeoutExpired(
             cmd=e.cmd,
             timeout=e.timeout,
-            output=remove_emojis(e.output.decode(encoding, errors='replace')) if e.output else None,
-            stderr=remove_emojis(e.stderr.decode(encoding, errors='replace')) if e.stderr else None
+            output=remove_emojis(e.output.decode(encoding, errors="replace")) if e.output else None,
+            stderr=remove_emojis(e.stderr.decode(encoding, errors="replace")) if e.stderr else None,
         )
 
 
@@ -393,14 +396,14 @@ def get_pip_executable() -> str:
 
     if is_windows():
         # Windows: pip.exe in Scripts/ directory
-        pip_path = python_dir / 'Scripts' / 'pip.exe'
+        pip_path = python_dir / "Scripts" / "pip.exe"
         if not pip_path.exists():
-            pip_path = python_dir / 'Scripts' / 'pip3.exe'
+            pip_path = python_dir / "Scripts" / "pip3.exe"
     else:
         # Unix: pip in bin/ directory
-        pip_path = python_dir / 'pip'
+        pip_path = python_dir / "pip"
         if not pip_path.exists():
-            pip_path = python_dir / 'pip3'
+            pip_path = python_dir / "pip3"
 
     return normalize_path(pip_path)
 
@@ -409,10 +412,11 @@ def get_pip_executable() -> str:
 # VIRTUAL ENVIRONMENT HANDLING
 # =============================================================================
 
+
 def is_in_virtualenv() -> bool:
     """Check if running inside a virtual environment."""
-    return hasattr(sys, 'real_prefix') or (
-        hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix
+    return hasattr(sys, "real_prefix") or (
+        hasattr(sys, "base_prefix") and sys.base_prefix != sys.prefix
     )
 
 
@@ -444,8 +448,8 @@ def get_activation_script() -> str | None:
 
     if is_windows():
         # Windows: Scripts/activate.bat or Scripts/Activate.ps1
-        activate_bat = venv / 'Scripts' / 'activate.bat'
-        activate_ps1 = venv / 'Scripts' / 'Activate.ps1'
+        activate_bat = venv / "Scripts" / "activate.bat"
+        activate_ps1 = venv / "Scripts" / "Activate.ps1"
 
         if activate_ps1.exists():
             return normalize_path(activate_ps1)
@@ -453,7 +457,7 @@ def get_activation_script() -> str | None:
             return normalize_path(activate_bat)
     else:
         # Unix: bin/activate
-        activate = venv / 'bin' / 'activate'
+        activate = venv / "bin" / "activate"
         if activate.exists():
             return normalize_path(activate)
 
@@ -474,15 +478,15 @@ def create_virtualenv_command(venv_path: str) -> tuple[str, str]:
     shell = get_shell_type()
 
     if is_windows():
-        if shell == 'powershell':
-            script = venv / 'Scripts' / 'Activate.ps1'
-            return ('powershell', f'& "{script}"')
+        if shell == "powershell":
+            script = venv / "Scripts" / "Activate.ps1"
+            return ("powershell", f'& "{script}"')
         else:  # cmd
-            script = venv / 'Scripts' / 'activate.bat'
-            return ('cmd', f'"{script}"')
+            script = venv / "Scripts" / "activate.bat"
+            return ("cmd", f'"{script}"')
     else:
         # Unix: source bin/activate
-        script = venv / 'bin' / 'activate'
+        script = venv / "bin" / "activate"
         return (shell, f'source "{script}"')
 
 
@@ -490,7 +494,8 @@ def create_virtualenv_command(venv_path: str) -> tuple[str, str]:
 # FILE OPERATIONS (Windows-safe)
 # =============================================================================
 
-def safe_read_file(file_path: str | Path, encoding: str = 'utf-8') -> str:
+
+def safe_read_file(file_path: str | Path, encoding: str = "utf-8") -> str:
     """
     Safely read file with encoding fallback.
 
@@ -511,19 +516,16 @@ def safe_read_file(file_path: str | Path, encoding: str = 'utf-8') -> str:
         # Fallback to platform encoding
         platform_encoding = get_console_encoding()
         try:
-            with open(path, encoding=platform_encoding, errors='replace') as f:
+            with open(path, encoding=platform_encoding, errors="replace") as f:
                 return f.read()
         except Exception:
             # Last resort: binary mode
-            with open(path, 'rb') as f:
-                return f.read().decode('utf-8', errors='replace')
+            with open(path, "rb") as f:
+                return f.read().decode("utf-8", errors="replace")
 
 
 def safe_write_file(
-    file_path: str | Path,
-    content: str,
-    encoding: str = 'utf-8',
-    ensure_parent: bool = True
+    file_path: str | Path, content: str, encoding: str = "utf-8", ensure_parent: bool = True
 ) -> None:
     """
     Safely write file with encoding.
@@ -539,13 +541,14 @@ def safe_write_file(
     if ensure_parent:
         path.parent.mkdir(parents=True, exist_ok=True)
 
-    with open(path, 'w', encoding=encoding) as f:
+    with open(path, "w", encoding=encoding) as f:
         f.write(content)
 
 
 # =============================================================================
 # UTILITY FUNCTIONS
 # =============================================================================
+
 
 def get_line_ending() -> str:
     """
@@ -554,7 +557,7 @@ def get_line_ending() -> str:
     Returns:
         '\\r\\n' on Windows, '\\n' on Unix
     """
-    return '\r\n' if is_windows() else '\n'
+    return "\r\n" if is_windows() else "\n"
 
 
 def normalize_line_endings(text: str, target: str | None = None) -> str:
@@ -572,11 +575,11 @@ def normalize_line_endings(text: str, target: str | None = None) -> str:
         target = get_line_ending()
 
     # Replace all line endings with target
-    text = text.replace('\r\n', '\n')  # Windows -> Unix
-    text = text.replace('\r', '\n')    # Old Mac -> Unix
+    text = text.replace("\r\n", "\n")  # Windows -> Unix
+    text = text.replace("\r", "\n")  # Old Mac -> Unix
 
-    if target == '\r\n':
-        text = text.replace('\n', '\r\n')  # Unix -> Windows
+    if target == "\r\n":
+        text = text.replace("\n", "\r\n")  # Unix -> Windows
 
     return text
 

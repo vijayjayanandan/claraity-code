@@ -52,7 +52,8 @@ class ClipboardHandler:
                 # Filter to only existing files (not directories)
                 try:
                     valid_files = [
-                        f for f in result
+                        f
+                        for f in result
                         if isinstance(f, str) and Path(f).exists() and Path(f).is_file()
                     ]
                     if valid_files:
@@ -65,9 +66,9 @@ class ClipboardHandler:
             try:
                 output = BytesIO()
                 # Convert to RGB if necessary (handles RGBA, P mode images)
-                if hasattr(result, 'mode') and result.mode in ('RGBA', 'P'):
-                    result = result.convert('RGB')
-                result.save(output, format='PNG')
+                if hasattr(result, "mode") and result.mode in ("RGBA", "P"):
+                    result = result.convert("RGB")
+                result.save(output, format="PNG")
                 image_bytes = output.getvalue()
                 # SUCCESS - return image bytes
                 return image_bytes, None, None
@@ -98,6 +99,7 @@ class ClipboardHandler:
         # Try pyperclip first (cross-platform)
         try:
             import pyperclip
+
             text = pyperclip.paste()
             if text:
                 return text
@@ -170,6 +172,7 @@ class ClipboardHandler:
         """
         try:
             from PIL import ImageGrab
+
             result = ImageGrab.grabclipboard()
             # It's an image if it's not None and not a list
             return result is not None and not isinstance(result, list)
@@ -186,6 +189,7 @@ class ClipboardHandler:
         """
         try:
             from PIL import ImageGrab
+
             result = ImageGrab.grabclipboard()
             if isinstance(result, list):
                 return any(Path(f).exists() and Path(f).is_file() for f in result)

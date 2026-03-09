@@ -43,16 +43,18 @@ class PlanPhaseHandler(PhaseHandler):
 
         slices = []
         for i, s in enumerate(raw_output.get("slices", []), start=1):
-            slices.append(VerticalSlice(
-                id=s.get("id", i),
-                title=s["title"],
-                description=s.get("description", ""),
-                files_to_create=s.get("files_to_create", []),
-                files_to_modify=s.get("files_to_modify", []),
-                test_criteria=s.get("test_criteria", []),
-                depends_on=s.get("depends_on", []),
-                status=SliceStatus.PENDING,
-            ))
+            slices.append(
+                VerticalSlice(
+                    id=s.get("id", i),
+                    title=s["title"],
+                    description=s.get("description", ""),
+                    files_to_create=s.get("files_to_create", []),
+                    files_to_modify=s.get("files_to_modify", []),
+                    test_criteria=s.get("test_criteria", []),
+                    depends_on=s.get("depends_on", []),
+                    status=SliceStatus.PENDING,
+                )
+            )
 
         return DirectorPlan(
             slices=slices,

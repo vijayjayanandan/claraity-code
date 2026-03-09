@@ -34,10 +34,10 @@ from src.subagents.manager import DelegationResult, SubAgentManager
 from src.subagents.subagent import SubAgent, SubAgentResult
 
 __all__ = [
-    'SubAgent',
-    'SubAgentResult',
-    'SubAgentConfig',
-    'SubAgentConfigLoader',
-    'SubAgentManager',
-    'DelegationResult',
+    "SubAgent",
+    "SubAgentResult",
+    "SubAgentConfig",
+    "SubAgentConfigLoader",
+    "SubAgentManager",
+    "DelegationResult",
 ]

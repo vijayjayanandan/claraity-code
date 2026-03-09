@@ -18,9 +18,11 @@ from .base import SCHEMA_VERSION, generate_stream_id, generate_uuid, now_iso
 # Segment Types (for content ordering)
 # =============================================================================
 
+
 @dataclass
 class TextSegment:
     """Text segment in ordered content."""
+
     content: str
     type: str = field(default="text", init=False)
 
@@ -35,28 +37,23 @@ class TextSegment:
 @dataclass
 class CodeBlockSegment:
     """Code block segment with language."""
+
     language: str
     content: str
     type: str = field(default="code_block", init=False)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "type": self.type,
-            "language": self.language,
-            "content": self.content
-        }
+        return {"type": self.type, "language": self.language, "content": self.content}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "CodeBlockSegment":
-        return cls(
-            language=data.get("language", ""),
-            content=data.get("content", "")
-        )
+        return cls(language=data.get("language", ""), content=data.get("content", ""))
 
 
 @dataclass
 class ToolCallSegment:
     """Tool call segment referencing tool_calls array index (DEPRECATED - use ToolCallRefSegment)."""
+
     tool_call_index: int
     type: str = field(default="tool_call", init=False)
 
@@ -71,6 +68,7 @@ class ToolCallSegment:
 @dataclass
 class ToolCallRefSegment:
     """Tool call segment referencing tool_calls by ID (stable reference)."""
+
     tool_call_id: str
     type: str = field(default="tool_call_ref", init=False)
 
@@ -85,6 +83,7 @@ class ToolCallRefSegment:
 @dataclass
 class ThinkingSegment:
     """Thinking segment for extended thinking content."""
+
     content: str
     type: str = field(default="thinking", init=False)
 
@@ -121,9 +120,11 @@ def parse_segment(data: dict[str, Any]) -> Segment:
 # ToolCall (OpenAI-compatible)
 # =============================================================================
 
+
 @dataclass
 class ToolCallFunction:
     """Function details in a tool call."""
+
     name: str
     arguments: str  # JSON string
 
@@ -132,10 +133,7 @@ class ToolCallFunction:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ToolCallFunction":
-        return cls(
-            name=data.get("name", ""),
-            arguments=data.get("arguments", "{}")
-        )
+        return cls(name=data.get("name", ""), arguments=data.get("arguments", "{}"))
 
     def get_parsed_arguments(self) -> dict[str, Any]:
         """Parse arguments JSON string to dict."""
@@ -148,28 +146,21 @@ class ToolCallFunction:
 @dataclass
 class ToolCall:
     """OpenAI-compatible tool call with optional ClarAIty meta."""
+
     id: str
     function: ToolCallFunction
     type: str = "function"
     meta: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        result = {
-            "id": self.id,
-            "type": self.type,
-            "function": self.function.to_dict()
-        }
+        result = {"id": self.id, "type": self.type, "function": self.function.to_dict()}
         if self.meta:
             result["meta"] = self.meta
         return result
 
     def to_llm_dict(self) -> dict[str, Any]:
         """Export for LLM API (strip meta)."""
-        return {
-            "id": self.id,
-            "type": self.type,
-            "function": self.function.to_dict()
-        }
+        return {"id": self.id, "type": self.type, "function": self.function.to_dict()}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ToolCall":
@@ -177,7 +168,7 @@ class ToolCall:
             id=data.get("id", ""),
             function=ToolCallFunction.from_dict(data.get("function", {})),
             type=data.get("type", "function"),
-            meta=data.get("meta", {})
+            meta=data.get("meta", {}),
         )
 
     @classmethod
@@ -195,6 +186,7 @@ class ToolCall:
         is safe for all providers, enabling model switching mid-session.
         """
         from src.session.models.base import generate_tool_call_id
+
         return cls(
             id=generate_tool_call_id(),
             function=function,
@@ -207,9 +199,11 @@ class ToolCall:
 # TokenUsage
 # =============================================================================
 
+
 @dataclass
 class TokenUsage:
     """Token usage statistics."""
+
     input_tokens: int = 0
     output_tokens: int = 0
     cache_read_tokens: int | None = None
@@ -217,10 +211,7 @@ class TokenUsage:
     reasoning_tokens: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        result = {
-            "input_tokens": self.input_tokens,
-            "output_tokens": self.output_tokens
-        }
+        result = {"input_tokens": self.input_tokens, "output_tokens": self.output_tokens}
         if self.cache_read_tokens is not None:
             result["cache_read_tokens"] = self.cache_read_tokens
         if self.cache_write_tokens is not None:
@@ -236,7 +227,7 @@ class TokenUsage:
             output_tokens=data.get("output_tokens", 0),
             cache_read_tokens=data.get("cache_read_tokens"),
             cache_write_tokens=data.get("cache_write_tokens"),
-            reasoning_tokens=data.get("reasoning_tokens")
+            reasoning_tokens=data.get("reasoning_tokens"),
         )
 
     @property
@@ -248,9 +239,11 @@ class TokenUsage:
 # MessageMeta (ClarAIty Extensions)
 # =============================================================================
 
+
 @dataclass
 class MessageMeta:
     """ClarAIty extensions - stripped for LLM context."""
+
     # Required
     schema_version: int = SCHEMA_VERSION
     uuid: str = ""
@@ -269,7 +262,9 @@ class MessageMeta:
     model: str | None = None
 
     # Completion
-    stop_reason: str | None = None  # "complete" | "tool_use" | "max_tokens" | "stop_sequence" | "streaming" | "error"
+    stop_reason: str | None = (
+        None  # "complete" | "tool_use" | "max_tokens" | "stop_sequence" | "streaming" | "error"
+    )
     usage: TokenUsage | None = None
 
     # Content Ordering (v2.1)
@@ -400,13 +395,14 @@ class MessageMeta:
             logical_parent_uuid=data.get("logical_parent_uuid"),
             is_compact_summary=data.get("is_compact_summary"),
             is_visible_in_transcript_only=data.get("is_visible_in_transcript_only"),
-            extra=data.get("extra")
+            extra=data.get("extra"),
         )
 
 
 # =============================================================================
 # Message (Unified)
 # =============================================================================
+
 
 @dataclass
 class Message:
@@ -425,6 +421,7 @@ class Message:
     Runtime Only:
     - _raw_response: original provider response (NOT persisted)
     """
+
     # OpenAI Core
     role: str
     content: str | list[dict[str, Any]] | None = None  # str for text, list for multimodal
@@ -435,16 +432,11 @@ class Message:
     meta: MessageMeta = field(default_factory=MessageMeta)
 
     # Runtime only - NOT persisted
-    _raw_response: dict[str, Any] | None = field(
-        default=None, repr=False, compare=False
-    )
+    _raw_response: dict[str, Any] | None = field(default=None, repr=False, compare=False)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to JSONL. Excludes _raw_response."""
-        result: dict[str, Any] = {
-            "role": self.role,
-            "meta": self.meta.to_dict()
-        }
+        result: dict[str, Any] = {"role": self.role, "meta": self.meta.to_dict()}
 
         if self.content is not None:
             result["content"] = self.content
@@ -473,8 +465,12 @@ class Message:
         if self.role == "assistant" and self.meta and self.meta.reasoning_content:
             result["reasoning_content"] = self.meta.reasoning_content
 
-        if (self.role == "assistant" and self.meta
-                and self.meta.thinking and self.meta.thinking_signature):
+        if (
+            self.role == "assistant"
+            and self.meta
+            and self.meta.thinking
+            and self.meta.thinking_signature
+        ):
             result["thinking"] = self.meta.thinking
             result["thinking_signature"] = self.meta.thinking_signature
 
@@ -500,7 +496,7 @@ class Message:
             content=data.get("content"),
             tool_calls=tool_calls,
             tool_call_id=data.get("tool_call_id"),
-            meta=MessageMeta.from_dict(meta_data)
+            meta=MessageMeta.from_dict(meta_data),
         )
 
     # =========================================================================
@@ -509,16 +505,11 @@ class Message:
 
     @classmethod
     def create_user(
-        cls,
-        content: str,
-        session_id: str,
-        parent_uuid: str | None,
-        seq: int,
-        **meta_kwargs
+        cls, content: str, session_id: str, parent_uuid: str | None, seq: int, **meta_kwargs
     ) -> "Message":
         """Create a user message."""
         # Remove parent_uuid from meta_kwargs to avoid duplicate parameter error
-        meta_kwargs.pop('parent_uuid', None)
+        meta_kwargs.pop("parent_uuid", None)
 
         return cls(
             role="user",
@@ -530,8 +521,8 @@ class Message:
                 session_id=session_id,
                 parent_uuid=parent_uuid,
                 is_sidechain=False,
-                **meta_kwargs
-            )
+                **meta_kwargs,
+            ),
         )
 
     @classmethod
@@ -543,11 +534,11 @@ class Message:
         seq: int,
         tool_calls: list[ToolCall] | None = None,
         stream_id: str | None = None,
-        **meta_kwargs
+        **meta_kwargs,
     ) -> "Message":
         """Create an assistant message."""
         # Remove parent_uuid from meta_kwargs to avoid duplicate parameter error
-        meta_kwargs.pop('parent_uuid', None)
+        meta_kwargs.pop("parent_uuid", None)
 
         return cls(
             role="assistant",
@@ -561,8 +552,8 @@ class Message:
                 parent_uuid=parent_uuid,
                 is_sidechain=False,
                 stream_id=stream_id or generate_stream_id(),
-                **meta_kwargs
-            )
+                **meta_kwargs,
+            ),
         )
 
     @classmethod
@@ -576,11 +567,11 @@ class Message:
         status: str = "success",
         duration_ms: int | None = None,
         exit_code: int | None = None,
-        **meta_kwargs
+        **meta_kwargs,
     ) -> "Message":
         """Create a tool result message."""
         # Remove parent_uuid from meta_kwargs to avoid duplicate parameter error
-        meta_kwargs.pop('parent_uuid', None)
+        meta_kwargs.pop("parent_uuid", None)
 
         return cls(
             role="tool",
@@ -596,8 +587,8 @@ class Message:
                 status=status,
                 duration_ms=duration_ms,
                 exit_code=exit_code,
-                **meta_kwargs
-            )
+                **meta_kwargs,
+            ),
         )
 
     @classmethod
@@ -608,7 +599,7 @@ class Message:
         seq: int,
         event_type: str | None = None,
         include_in_llm_context: bool | None = None,
-        **meta_kwargs
+        **meta_kwargs,
     ) -> "Message":
         """Create a system message.
 
@@ -622,7 +613,7 @@ class Message:
         """
         # Remove parent_uuid from meta_kwargs to avoid duplicate parameter error
         # (system messages always have parent_uuid=None)
-        meta_kwargs.pop('parent_uuid', None)
+        meta_kwargs.pop("parent_uuid", None)
 
         return cls(
             role="system",
@@ -636,8 +627,8 @@ class Message:
                 is_sidechain=False,
                 event_type=event_type,
                 include_in_llm_context=include_in_llm_context,
-                **meta_kwargs
-            )
+                **meta_kwargs,
+            ),
         )
 
     @classmethod
@@ -675,7 +666,7 @@ class Message:
             seq=seq,
             event_type="agent_state",
             include_in_llm_context=False,
-            extra=extra
+            extra=extra,
         )
 
     @classmethod
@@ -719,7 +710,7 @@ class Message:
             seq=seq,
             event_type="tool_approval",
             include_in_llm_context=False,
-            extra=extra
+            extra=extra,
         )
 
     @classmethod
@@ -754,7 +745,7 @@ class Message:
             seq=seq,
             event_type="clarify_request",
             include_in_llm_context=False,
-            extra=extra
+            extra=extra,
         )
 
     @classmethod
@@ -796,7 +787,7 @@ class Message:
             seq=seq,
             event_type="clarify_response",
             include_in_llm_context=False,
-            extra=extra
+            extra=extra,
         )
 
     # =========================================================================
@@ -921,41 +912,37 @@ class Message:
 # File Snapshot (for file history tracking)
 # =============================================================================
 
+
 @dataclass
 class Snapshot:
     """Single file snapshot."""
+
     file_path: str
     content: str
     hash: str
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "file_path": self.file_path,
-            "content": self.content,
-            "hash": self.hash
-        }
+        return {"file_path": self.file_path, "content": self.content, "hash": self.hash}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Snapshot":
         return cls(
             file_path=data.get("file_path", ""),
             content=data.get("content", ""),
-            hash=data.get("hash", "")
+            hash=data.get("hash", ""),
         )
 
 
 @dataclass
 class FileBackup:
     """File backup for restoration."""
+
     file_path: str
     existed: bool
     content: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        result: dict[str, Any] = {
-            "file_path": self.file_path,
-            "existed": self.existed
-        }
+        result: dict[str, Any] = {"file_path": self.file_path, "existed": self.existed}
         if self.content is not None:
             result["content"] = self.content
         return result
@@ -965,13 +952,14 @@ class FileBackup:
         return cls(
             file_path=data.get("file_path", ""),
             existed=data.get("existed", True),
-            content=data.get("content")
+            content=data.get("content"),
         )
 
 
 @dataclass
 class FileHistorySnapshot:
     """Full file history snapshot for session."""
+
     uuid: str
     timestamp: str
     session_id: str
@@ -986,7 +974,7 @@ class FileHistorySnapshot:
             "timestamp": self.timestamp,
             "session_id": self.session_id,
             "snapshots": [s.to_dict() for s in self.snapshots],
-            "backups": [b.to_dict() for b in self.backups]
+            "backups": [b.to_dict() for b in self.backups],
         }
 
     @classmethod
@@ -996,14 +984,10 @@ class FileHistorySnapshot:
             timestamp=data.get("timestamp", ""),
             session_id=data.get("session_id", ""),
             snapshots=[Snapshot.from_dict(s) for s in data.get("snapshots", [])],
-            backups=[FileBackup.from_dict(b) for b in data.get("backups", [])]
+            backups=[FileBackup.from_dict(b) for b in data.get("backups", [])],
         )
 
     @classmethod
     def create(cls, session_id: str) -> "FileHistorySnapshot":
         """Create a new empty snapshot."""
-        return cls(
-            uuid=generate_uuid(),
-            timestamp=now_iso(),
-            session_id=session_id
-        )
+        return cls(uuid=generate_uuid(), timestamp=now_iso(), session_id=session_id)

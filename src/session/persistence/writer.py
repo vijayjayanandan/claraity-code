@@ -33,6 +33,7 @@ logger = get_logger("session.persistence.writer")
 @dataclass
 class WriteResult:
     """Result of a write operation."""
+
     success: bool
     bytes_written: int = 0
     error: str | None = None
@@ -56,7 +57,7 @@ class SessionWriter:
         self,
         file_path: str | Path,
         on_error: Callable[[Exception], None] | None = None,
-        drain_timeout: float = 5.0
+        drain_timeout: float = 5.0,
     ):
         self._file_path = Path(file_path)
         self._on_error = on_error
@@ -101,7 +102,9 @@ class SessionWriter:
 
         # DO NOT open file yet - will be opened on first write
         # This prevents empty session files from appearing in /resume
-        logger.info(f"SessionWriter ready (file and directory will be created on first write): {self._file_path}")
+        logger.info(
+            f"SessionWriter ready (file and directory will be created on first write): {self._file_path}"
+        )
 
     async def close(self) -> None:
         """
@@ -116,10 +119,7 @@ class SessionWriter:
         if self._pending_count > 0:
             logger.info(f"Draining {self._pending_count} pending writes...")
             try:
-                await asyncio.wait_for(
-                    self._drain_complete.wait(),
-                    timeout=self._drain_timeout
-                )
+                await asyncio.wait_for(self._drain_complete.wait(), timeout=self._drain_timeout)
                 logger.info("Writer drain complete")
             except asyncio.TimeoutError:
                 logger.warning(
@@ -167,8 +167,7 @@ class SessionWriter:
 
             # Schedule the async handler
             future = asyncio.run_coroutine_threadsafe(
-                self._handle_event_tracked(notification),
-                self._loop
+                self._handle_event_tracked(notification), self._loop
             )
 
             # Add error callback for visibility
@@ -252,7 +251,7 @@ class SessionWriter:
         todos: list,
         current_todo_id: str | None = None,
         last_stop_reason: str | None = None,
-        seq: int | None = None
+        seq: int | None = None,
     ) -> WriteResult:
         """
         Write agent state to the JSONL file as a system event.
@@ -282,7 +281,7 @@ class SessionWriter:
             todos=todos,
             current_todo_id=current_todo_id,
             last_stop_reason=last_stop_reason,
-            seq=seq or 0
+            seq=seq or 0,
         )
 
         result = await self.write_message(message)
@@ -309,7 +308,7 @@ class SessionWriter:
                 if not self._file:
                     # Create parent directory on first write
                     self._file_path.parent.mkdir(parents=True, exist_ok=True)
-                    self._file = open(self._file_path, 'a', encoding='utf-8')
+                    self._file = open(self._file_path, "a", encoding="utf-8")
                     # Set restrictive permissions on the session file (600 on POSIX)
                     secure_file(self._file_path)
                     logger.info(f"SessionWriter file created on first write: {self._file_path}")
@@ -320,7 +319,7 @@ class SessionWriter:
                     safe_data["content"] = redact_secrets(safe_data["content"])
 
                 line = json.dumps(safe_data, ensure_ascii=False)
-                self._file.write(line + '\n')
+                self._file.write(line + "\n")
 
                 self._total_writes += 1
                 self._total_bytes += len(line) + 1
@@ -373,6 +372,7 @@ class SessionWriter:
 # Convenience Functions
 # =========================================================================
 
+
 def create_session_file(file_path: str | Path) -> Path:
     """Create a new empty session file."""
     path = Path(file_path)
@@ -382,8 +382,7 @@ def create_session_file(file_path: str | Path) -> Path:
 
 
 async def append_to_session(
-    file_path: str | Path,
-    message: Union["Message", "FileHistorySnapshot", dict]
+    file_path: str | Path, message: Union["Message", "FileHistorySnapshot", dict]
 ) -> WriteResult:
     """
     Async append a single message to session file.
@@ -407,8 +406,8 @@ async def append_to_session(
 
         line = json.dumps(safe_data, ensure_ascii=False)
 
-        with open(path, 'a', encoding='utf-8') as f:
-            f.write(line + '\n')
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
             f.flush()
 
         return WriteResult(success=True, bytes_written=len(line) + 1)

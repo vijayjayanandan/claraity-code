@@ -58,7 +58,7 @@ class AgentContextProvider:
             int: Number of messages
         """
         context = self.agent.get_context()
-        return len(context.get('conversation_history', []))
+        return len(context.get("conversation_history", []))
 
     def get_working_directory(self) -> str:
         """
@@ -68,7 +68,7 @@ class AgentContextProvider:
             str: Working directory path
         """
         context = self.agent.get_context()
-        return context.get('working_directory', '.')
+        return context.get("working_directory", ".")
 
     def get_session_id(self) -> str:
         """
@@ -78,7 +78,7 @@ class AgentContextProvider:
             str: Session ID
         """
         context = self.agent.get_context()
-        return context.get('session_id', 'unknown')
+        return context.get("session_id", "unknown")
 
 
 class AgentLLMProxy:
@@ -104,11 +104,7 @@ class AgentLLMProxy:
         self.call_count = 0
         self.error_count = 0
 
-    def call_llm(
-        self,
-        messages: list[dict[str, str]],
-        **kwargs
-    ) -> str:
+    def call_llm(self, messages: list[dict[str, str]], **kwargs) -> str:
         """
         Call LLM with tracking.
 
@@ -132,10 +128,7 @@ class AgentLLMProxy:
             raise
 
     def call_with_retry(
-        self,
-        messages: list[dict[str, str]],
-        max_retries: int = 3,
-        **kwargs
+        self, messages: list[dict[str, str]], max_retries: int = 3, **kwargs
     ) -> str | None:
         """
         Call LLM with automatic retry on failure.
@@ -174,7 +167,7 @@ class AgentLLMProxy:
                 (self.call_count - self.error_count) / self.call_count
                 if self.call_count > 0
                 else 0.0
-            )
+            ),
         }
 
 
@@ -200,11 +193,7 @@ class AgentToolProxy:
         self.agent = agent
         self.execution_history: list[dict[str, Any]] = []
 
-    def execute_tool(
-        self,
-        tool_name: str,
-        **params
-    ) -> Any:
+    def execute_tool(self, tool_name: str, **params) -> Any:
         """
         Execute tool with tracking.
 
@@ -218,18 +207,10 @@ class AgentToolProxy:
             Any: Tool result
         """
         result = self.agent.execute_tool(tool_name, **params)
-        self.execution_history.append({
-            "tool": tool_name,
-            "params": params,
-            "result": result
-        })
+        self.execution_history.append({"tool": tool_name, "params": params, "result": result})
         return result
 
-    def execute_with_validation(
-        self,
-        tool_name: str,
-        **params
-    ) -> Any:
+    def execute_with_validation(self, tool_name: str, **params) -> Any:
         """
         Execute tool with parameter validation.
 
@@ -244,8 +225,8 @@ class AgentToolProxy:
             ValueError: Invalid parameters
         """
         # Example validation: check required params
-        if tool_name == 'write_file':
-            if 'file_path' not in params or 'content' not in params:
+        if tool_name == "write_file":
+            if "file_path" not in params or "content" not in params:
                 raise ValueError("write_file requires file_path and content")
 
         return self.execute_tool(tool_name, **params)
@@ -268,6 +249,6 @@ class AgentToolProxy:
         """
         usage = {}
         for entry in self.execution_history:
-            tool = entry['tool']
+            tool = entry["tool"]
             usage[tool] = usage.get(tool, 0) + 1
         return usage

@@ -18,6 +18,7 @@ from .base import Tool, ToolResult, ToolStatus
 
 class OutputMode(Enum):
     """Grep output modes."""
+
     CONTENT = "content"  # Show matching lines
     FILES_WITH_MATCHES = "files_with_matches"  # Show only file paths
     COUNT = "count"  # Show match counts per file
@@ -54,9 +55,7 @@ FILE_TYPE_MAP = {
 
 
 def validate_path_security(
-    path_str: str,
-    workspace_root: Path | None = None,
-    allow_files_outside_workspace: bool = False
+    path_str: str, workspace_root: Path | None = None, allow_files_outside_workspace: bool = False
 ) -> Path:
     """
     Validate path for security (prevent path traversal attacks).
@@ -127,15 +126,15 @@ def validate_regex_safety(pattern: str, max_length: int = 500) -> None:
     # Dangerous patterns that can cause catastrophic backtracking
     # These patterns have exponential time complexity: O(2^n)
     dangerous_patterns = [
-        (r'\(\.\*\+', "(.* followed by +"),  # (.*+  - possessive quantifier misuse
-        (r'\+\+', "Consecutive ++"),  # ++
-        (r'\*\*', "Consecutive **"),  # **
-        (r'\(\w+\)\+', "Nested quantifier (word+)+"),  # (x+)+
-        (r'\(\.\+\)\*', "Nested quantifier (.+)*"),  # (.+)*
-        (r'\(\[\^.\]\+\)\+', "Nested negated class"),  # ([^x]+)+
-        (r'\(\w+\)\*', "Greedy nested quantifier (word+)*"),  # (x+)*
-        (r'\(.\*\)\+', "Greedy nested wildcard (.*)+"),  # (.*)+
-        (r'\(.\+\)\+', "Nested greedy plus (.+)+"),  # (.+)+
+        (r"\(\.\*\+", "(.* followed by +"),  # (.*+  - possessive quantifier misuse
+        (r"\+\+", "Consecutive ++"),  # ++
+        (r"\*\*", "Consecutive **"),  # **
+        (r"\(\w+\)\+", "Nested quantifier (word+)+"),  # (x+)+
+        (r"\(\.\+\)\*", "Nested quantifier (.+)*"),  # (.+)*
+        (r"\(\[\^.\]\+\)\+", "Nested negated class"),  # ([^x]+)+
+        (r"\(\w+\)\*", "Greedy nested quantifier (word+)*"),  # (x+)*
+        (r"\(.\*\)\+", "Greedy nested wildcard (.*)+"),  # (.*)+
+        (r"\(.\+\)\+", "Nested greedy plus (.+)+"),  # (.+)+
     ]
 
     for danger_pattern, description in dangerous_patterns:
@@ -152,16 +151,16 @@ def validate_regex_safety(pattern: str, max_length: int = 500) -> None:
     max_nesting = 3  # Allow max 3 levels of nesting
     i = 0
     while i < len(pattern):
-        if pattern[i] == '(':
+        if pattern[i] == "(":
             # Check if this group has a quantifier after closing paren
             depth = 1
             j = i + 1
             while j < len(pattern) and depth > 0:
-                if pattern[j] == '(':
+                if pattern[j] == "(":
                     depth += 1
-                elif pattern[j] == ')':
+                elif pattern[j] == ")":
                     depth -= 1
-                    if depth == 0 and j + 1 < len(pattern) and pattern[j + 1] in '+*?{':
+                    if depth == 0 and j + 1 < len(pattern) and pattern[j + 1] in "+*?{":
                         nesting_depth += 1
                 j += 1
         i += 1
@@ -193,8 +192,7 @@ class GrepTool(Tool):
 
     def __init__(self):
         super().__init__(
-            name="grep",
-            description="Search for regex patterns in files with advanced filtering"
+            name="grep", description="Search for regex patterns in files with advanced filtering"
         )
 
     def execute(
@@ -212,7 +210,7 @@ class GrepTool(Tool):
         multiline: bool = False,
         head_limit: int | None = None,
         offset: int = 0,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> ToolResult:
         """
         Search for pattern in files.
@@ -244,7 +242,7 @@ class GrepTool(Tool):
                     tool_name=self.name,
                     status=ToolStatus.ERROR,
                     output=None,
-                    error=f"Invalid output_mode: {output_mode}. Must be 'content', 'files_with_matches', or 'count'"
+                    error=f"Invalid output_mode: {output_mode}. Must be 'content', 'files_with_matches', or 'count'",
                 )
 
             # Default path
@@ -256,10 +254,7 @@ class GrepTool(Tool):
                 search_path = validate_path_security(path)
             except ValueError as e:
                 return ToolResult(
-                    tool_name=self.name,
-                    status=ToolStatus.ERROR,
-                    output=None,
-                    error=str(e)
+                    tool_name=self.name, status=ToolStatus.ERROR, output=None, error=str(e)
                 )
 
             if not search_path.exists():
@@ -267,7 +262,7 @@ class GrepTool(Tool):
                     tool_name=self.name,
                     status=ToolStatus.ERROR,
                     output=None,
-                    error=f"Path not found: {path}"
+                    error=f"Path not found: {path}",
                 )
 
             # Determine context lines
@@ -279,10 +274,7 @@ class GrepTool(Tool):
                 validate_regex_safety(pattern)
             except ValueError as e:
                 return ToolResult(
-                    tool_name=self.name,
-                    status=ToolStatus.ERROR,
-                    output=None,
-                    error=str(e)
+                    tool_name=self.name, status=ToolStatus.ERROR, output=None, error=str(e)
                 )
 
             # Compile regex pattern
@@ -297,7 +289,7 @@ class GrepTool(Tool):
                     tool_name=self.name,
                     status=ToolStatus.ERROR,
                     output=None,
-                    error=f"Invalid regex pattern: {e}"
+                    error=f"Invalid regex pattern: {e}",
                 )
 
             # Find files to search
@@ -308,7 +300,7 @@ class GrepTool(Tool):
                     tool_name=self.name,
                     status=ToolStatus.SUCCESS,
                     output="No files found matching criteria",
-                    metadata={"pattern": pattern, "files_searched": 0, "matches": 0}
+                    metadata={"pattern": pattern, "files_searched": 0, "matches": 0},
                 )
 
             # Search files
@@ -356,8 +348,8 @@ class GrepTool(Tool):
                         "files_searched": len(files),
                         "files_skipped": len(skipped_files),
                         "skipped_details": skipped_files[:10],  # First 10 for debugging
-                        "matches": 0
-                    }
+                        "matches": 0,
+                    },
                 )
 
             # Build output based on mode
@@ -382,8 +374,8 @@ class GrepTool(Tool):
                     "files_skipped": len(skipped_files),
                     "skipped_details": skipped_files[:10],  # First 10 for debugging
                     "matches": total_matches,
-                    "output_mode": output_mode
-                }
+                    "output_mode": output_mode,
+                },
             )
 
         except Exception as e:
@@ -391,14 +383,11 @@ class GrepTool(Tool):
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 output=None,
-                error=f"Grep search failed: {str(e)}"
+                error=f"Grep search failed: {str(e)}",
             )
 
     def _find_files(
-        self,
-        search_path: Path,
-        file_type: str | None,
-        glob_pattern: str | None
+        self, search_path: Path, file_type: str | None, glob_pattern: str | None
     ) -> list[Path]:
         """Find files matching criteria."""
         files = []
@@ -422,10 +411,7 @@ class GrepTool(Tool):
                 files = list(search_path.rglob(f"*.{file_type}"))
         else:
             # All files (exclude common non-text patterns)
-            files = [
-                f for f in search_path.rglob("*")
-                if f.is_file() and not self._should_skip(f)
-            ]
+            files = [f for f in search_path.rglob("*") if f.is_file() and not self._should_skip(f)]
 
         # Remove duplicates and sort
         unique_files = sorted(set(files))
@@ -434,16 +420,31 @@ class GrepTool(Tool):
     def _should_skip(self, file_path: Path) -> bool:
         """Check if file should be skipped."""
         # Skip hidden files/directories
-        if any(part.startswith('.') for part in file_path.parts):
+        if any(part.startswith(".") for part in file_path.parts):
             return True
 
         # Skip common non-text directories
-        skip_dirs = {'node_modules', '__pycache__', '.git', '.venv', 'venv', 'dist', 'build'}
+        skip_dirs = {"node_modules", "__pycache__", ".git", ".venv", "venv", "dist", "build"}
         if any(part in skip_dirs for part in file_path.parts):
             return True
 
         # Skip binary file extensions
-        skip_exts = {'.pyc', '.pyo', '.so', '.dll', '.exe', '.bin', '.png', '.jpg', '.jpeg', '.gif', '.pdf', '.zip', '.tar', '.gz'}
+        skip_exts = {
+            ".pyc",
+            ".pyo",
+            ".so",
+            ".dll",
+            ".exe",
+            ".bin",
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".gif",
+            ".pdf",
+            ".zip",
+            ".tar",
+            ".gz",
+        }
         if file_path.suffix.lower() in skip_exts:
             return True
 
@@ -457,7 +458,7 @@ class GrepTool(Tool):
         context_before: int,
         context_after: int,
         show_line_numbers: bool,
-        skipped_files: list[str] | None = None
+        skipped_files: list[str] | None = None,
     ) -> list[str]:
         """
         Search single file for pattern.
@@ -475,7 +476,7 @@ class GrepTool(Tool):
             list of matching lines or indicators
         """
         try:
-            with open(file_path, encoding='utf-8', errors='ignore') as f:
+            with open(file_path, encoding="utf-8", errors="ignore") as f:
                 lines = f.readlines()
         except PermissionError:
             if skipped_files is not None:
@@ -520,7 +521,7 @@ class GrepTool(Tool):
 
         # Build formatted output
         for line_num in sorted(output_lines):
-            line_content = lines[line_num].rstrip('\n')
+            line_content = lines[line_num].rstrip("\n")
 
             if show_line_numbers:
                 # Format: file:line_num: content
@@ -535,61 +536,52 @@ class GrepTool(Tool):
         return {
             "type": "object",
             "properties": {
-                "pattern": {
-                    "type": "string",
-                    "description": "Regex pattern to search for"
-                },
+                "pattern": {"type": "string", "description": "Regex pattern to search for"},
                 "path": {
                     "type": "string",
-                    "description": "File or directory to search (default: current directory)"
+                    "description": "File or directory to search (default: current directory)",
                 },
                 "file_type": {
                     "type": "string",
-                    "description": "File type filter (e.g., 'py', 'js', 'ts', 'java', 'cpp')"
+                    "description": "File type filter (e.g., 'py', 'js', 'ts', 'java', 'cpp')",
                 },
                 "glob": {
                     "type": "string",
-                    "description": "Glob pattern to filter files (e.g., '*.py', 'src/**/*.ts')"
+                    "description": "Glob pattern to filter files (e.g., '*.py', 'src/**/*.ts')",
                 },
                 "output_mode": {
                     "type": "string",
                     "enum": ["content", "files_with_matches", "count"],
-                    "description": "Output mode: 'content' (show lines), 'files_with_matches' (file paths only), 'count' (match counts)"
+                    "description": "Output mode: 'content' (show lines), 'files_with_matches' (file paths only), 'count' (match counts)",
                 },
                 "context_before": {
                     "type": "number",
-                    "description": "Number of lines before match to show (like -B)"
+                    "description": "Number of lines before match to show (like -B)",
                 },
                 "context_after": {
                     "type": "number",
-                    "description": "Number of lines after match to show (like -A)"
+                    "description": "Number of lines after match to show (like -A)",
                 },
                 "context": {
                     "type": "number",
-                    "description": "Number of lines before AND after match (like -C)"
+                    "description": "Number of lines before AND after match (like -C)",
                 },
                 "case_insensitive": {
                     "type": "boolean",
-                    "description": "Ignore case when searching (like -i)"
+                    "description": "Ignore case when searching (like -i)",
                 },
                 "line_numbers": {
                     "type": "boolean",
-                    "description": "Show line numbers (default: true for content mode)"
+                    "description": "Show line numbers (default: true for content mode)",
                 },
                 "multiline": {
                     "type": "boolean",
-                    "description": "Enable multiline matching (pattern can span lines)"
+                    "description": "Enable multiline matching (pattern can span lines)",
                 },
-                "head_limit": {
-                    "type": "number",
-                    "description": "Limit output to first N results"
-                },
-                "offset": {
-                    "type": "number",
-                    "description": "Skip first N results"
-                }
+                "head_limit": {"type": "number", "description": "Limit output to first N results"},
+                "offset": {"type": "number", "description": "Skip first N results"},
             },
-            "required": ["pattern"]
+            "required": ["pattern"],
         }
 
 
@@ -610,15 +602,11 @@ class GlobTool(Tool):
     def __init__(self):
         super().__init__(
             name="glob",
-            description="Find files matching glob patterns (e.g., **/*.py, src/**/*.{ts,tsx})"
+            description="Find files matching glob patterns (e.g., **/*.py, src/**/*.{ts,tsx})",
         )
 
     def execute(
-        self,
-        pattern: str,
-        path: str | None = None,
-        sort_by_mtime: bool = True,
-        **kwargs: Any
+        self, pattern: str, path: str | None = None, sort_by_mtime: bool = True, **kwargs: Any
     ) -> ToolResult:
         """
         Find files matching glob pattern.
@@ -641,10 +629,7 @@ class GlobTool(Tool):
                 search_path = validate_path_security(path)
             except ValueError as e:
                 return ToolResult(
-                    tool_name=self.name,
-                    status=ToolStatus.ERROR,
-                    output=None,
-                    error=str(e)
+                    tool_name=self.name, status=ToolStatus.ERROR, output=None, error=str(e)
                 )
 
             if not search_path.exists():
@@ -652,7 +637,7 @@ class GlobTool(Tool):
                     tool_name=self.name,
                     status=ToolStatus.ERROR,
                     output=None,
-                    error=f"Path not found: {path}"
+                    error=f"Path not found: {path}",
                 )
 
             # Handle brace expansion (e.g., *.{py,js,ts})
@@ -674,7 +659,7 @@ class GlobTool(Tool):
                     tool_name=self.name,
                     status=ToolStatus.SUCCESS,
                     output="No files found matching pattern",
-                    metadata={"pattern": pattern, "matches": 0}
+                    metadata={"pattern": pattern, "matches": 0},
                 )
 
             # Sort files
@@ -693,10 +678,7 @@ class GlobTool(Tool):
                 tool_name=self.name,
                 status=ToolStatus.SUCCESS,
                 output=output,
-                metadata={
-                    "pattern": pattern,
-                    "matches": len(sorted_files)
-                }
+                metadata={"pattern": pattern, "matches": len(sorted_files)},
             )
 
         except Exception as e:
@@ -704,7 +686,7 @@ class GlobTool(Tool):
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 output=None,
-                error=f"Glob search failed: {str(e)}"
+                error=f"Glob search failed: {str(e)}",
             )
 
     def _expand_braces(self, pattern: str) -> list[str]:
@@ -712,19 +694,19 @@ class GlobTool(Tool):
         Expand brace patterns (e.g., *.{py,js,ts} -> [*.py, *.js, *.ts]).
         """
         # Simple brace expansion
-        if '{' not in pattern or '}' not in pattern:
+        if "{" not in pattern or "}" not in pattern:
             return [pattern]
 
         # Find brace group
-        start = pattern.find('{')
-        end = pattern.find('}', start)
+        start = pattern.find("{")
+        end = pattern.find("}", start)
 
         if start == -1 or end == -1:
             return [pattern]
 
         prefix = pattern[:start]
-        suffix = pattern[end + 1:]
-        options = pattern[start + 1:end].split(',')
+        suffix = pattern[end + 1 :]
+        options = pattern[start + 1 : end].split(",")
 
         # Generate all combinations
         expanded = [f"{prefix}{opt.strip()}{suffix}" for opt in options]
@@ -739,16 +721,31 @@ class GlobTool(Tool):
     def _should_skip(self, file_path: Path) -> bool:
         """Check if file should be skipped (same logic as GrepTool)."""
         # Skip hidden files/directories
-        if any(part.startswith('.') for part in file_path.parts):
+        if any(part.startswith(".") for part in file_path.parts):
             return True
 
         # Skip common non-text directories
-        skip_dirs = {'node_modules', '__pycache__', '.git', '.venv', 'venv', 'dist', 'build'}
+        skip_dirs = {"node_modules", "__pycache__", ".git", ".venv", "venv", "dist", "build"}
         if any(part in skip_dirs for part in file_path.parts):
             return True
 
         # Skip binary file extensions
-        skip_exts = {'.pyc', '.pyo', '.so', '.dll', '.exe', '.bin', '.png', '.jpg', '.jpeg', '.gif', '.pdf', '.zip', '.tar', '.gz'}
+        skip_exts = {
+            ".pyc",
+            ".pyo",
+            ".so",
+            ".dll",
+            ".exe",
+            ".bin",
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".gif",
+            ".pdf",
+            ".zip",
+            ".tar",
+            ".gz",
+        }
         if file_path.suffix.lower() in skip_exts:
             return True
 
@@ -760,16 +757,16 @@ class GlobTool(Tool):
             "properties": {
                 "pattern": {
                     "type": "string",
-                    "description": "Glob pattern (e.g., '*.py', '**/*.js', 'src/**/*.{ts,tsx}')"
+                    "description": "Glob pattern (e.g., '*.py', '**/*.js', 'src/**/*.{ts,tsx}')",
                 },
                 "path": {
                     "type": "string",
-                    "description": "Directory to search in (default: current directory)"
+                    "description": "Directory to search in (default: current directory)",
                 },
                 "sort_by_mtime": {
                     "type": "boolean",
-                    "description": "Sort results by modification time (default: true)"
-                }
+                    "description": "Sort results by modification time (default: true)",
+                },
             },
-            "required": ["pattern"]
+            "required": ["pattern"],
         }

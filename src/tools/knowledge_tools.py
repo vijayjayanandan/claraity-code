@@ -22,13 +22,38 @@ MANIFEST_PATH = ".clarity/knowledge/.manifest.json"
 
 # File extensions to skip (binary/non-source) — applied as post-filter
 _SKIP_EXTENSIONS = {
-    '.pyc', '.pyo', '.so', '.dll', '.dylib', '.exe', '.bin',
-    '.db', '.sqlite', '.sqlite3',
-    '.png', '.jpg', '.jpeg', '.gif', '.ico', '.svg', '.webp',
-    '.woff', '.woff2', '.ttf', '.eot',
-    '.zip', '.tar', '.gz', '.bz2', '.7z',
-    '.pdf', '.doc', '.docx', '.xls', '.xlsx',
-    '.lock',
+    ".pyc",
+    ".pyo",
+    ".so",
+    ".dll",
+    ".dylib",
+    ".exe",
+    ".bin",
+    ".db",
+    ".sqlite",
+    ".sqlite3",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".ico",
+    ".svg",
+    ".webp",
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".eot",
+    ".zip",
+    ".tar",
+    ".gz",
+    ".bz2",
+    ".7z",
+    ".pdf",
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
+    ".lock",
 }
 
 
@@ -73,6 +98,7 @@ def _read_kb_config(root: Path) -> dict[str, list[str]]:
         return result
     try:
         import yaml
+
         config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
         include = config.get("include")
         exclude = config.get("exclude")
@@ -96,11 +122,7 @@ def _git_ls_files(root: Path) -> list[str] | None:
             timeout=30,
         )
         if result.returncode == 0:
-            return [
-                f.replace('\\', '/')
-                for f in result.stdout.strip().splitlines()
-                if f.strip()
-            ]
+            return [f.replace("\\", "/") for f in result.stdout.strip().splitlines() if f.strip()]
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         pass
     return None
@@ -158,37 +180,46 @@ def _scan_project_files(root: Path) -> dict[str, dict[str, Any]]:
     else:
         # Fallback: os.walk (non-git projects)
         _skip_dirs = {
-            '.git', '.hg', '.svn', '.clarity',
-            '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache',
-            'node_modules', '.next', 'dist', 'build', 'out',
-            '.venv', 'venv', '.env', 'env',
-            '.tox', '.nox', '.eggs',
-            '.idea', '.vscode',
-            '.benchmarks', '.checkpoints',
+            ".git",
+            ".hg",
+            ".svn",
+            ".clarity",
+            "__pycache__",
+            ".pytest_cache",
+            ".mypy_cache",
+            ".ruff_cache",
+            "node_modules",
+            ".next",
+            "dist",
+            "build",
+            "out",
+            ".venv",
+            "venv",
+            ".env",
+            "env",
+            ".tox",
+            ".nox",
+            ".eggs",
+            ".idea",
+            ".vscode",
+            ".benchmarks",
+            ".checkpoints",
         }
         file_paths = []
         for dirpath, dirnames, filenames in os.walk(root):
-            dirnames[:] = [
-                d for d in dirnames
-                if d not in _skip_dirs and not d.startswith('.')
-            ]
+            dirnames[:] = [d for d in dirnames if d not in _skip_dirs and not d.startswith(".")]
             rel_dir = Path(dirpath).relative_to(root)
             for filename in filenames:
-                if filename.startswith('.'):
+                if filename.startswith("."):
                     continue
-                rel_path = str(rel_dir / filename).replace('\\', '/')
+                rel_path = str(rel_dir / filename).replace("\\", "/")
                 file_paths.append(rel_path)
 
     # Filter binary extensions
-    file_paths = [
-        f for f in file_paths
-        if Path(f).suffix.lower() not in _SKIP_EXTENSIONS
-    ]
+    file_paths = [f for f in file_paths if Path(f).suffix.lower() not in _SKIP_EXTENSIONS]
 
     # Apply user include/exclude patterns
-    file_paths = _apply_filters(
-        file_paths, kb_config["include"], kb_config["exclude"]
-    )
+    file_paths = _apply_filters(file_paths, kb_config["include"], kb_config["exclude"])
 
     # Stat each file
     files = {}
@@ -196,9 +227,7 @@ def _scan_project_files(root: Path) -> dict[str, dict[str, Any]]:
         filepath = root / rel_path
         try:
             stat = filepath.stat()
-            mtime_iso = datetime.fromtimestamp(
-                stat.st_mtime, tz=timezone.utc
-            ).isoformat()
+            mtime_iso = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
             files[rel_path] = {
                 "size": stat.st_size,
                 "mtime": mtime_iso,
@@ -246,15 +275,11 @@ class KBDetectChangesTool(Tool):
                 "Detect source file changes since last knowledge base update. "
                 "Returns FULL mode if no manifest exists, or INCREMENTAL mode "
                 "with a list of changed/new/deleted files and affected knowledge files."
-            )
+            ),
         )
 
     def _get_parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {},
-            "required": []
-        }
+        return {"type": "object", "properties": {}, "required": []}
 
     def execute(self, **kwargs: Any) -> ToolResult:
         try:
@@ -285,7 +310,7 @@ class KBDetectChangesTool(Tool):
                         "mode": "full",
                         "total_files": len(file_list),
                         "files": file_list,
-                    }
+                    },
                 )
 
             # Read manifest and compare
@@ -306,30 +331,34 @@ class KBDetectChangesTool(Tool):
                     deleted.append(path)
                 else:
                     current = current_files[path]
-                    if (current["size"] != stored_stat["size"]
-                            or current["mtime"] != stored_stat["mtime"]):
-                        changed.append({
-                            "path": path,
-                            "old_size": stored_stat["size"],
-                            "new_size": current["size"],
-                        })
+                    if (
+                        current["size"] != stored_stat["size"]
+                        or current["mtime"] != stored_stat["mtime"]
+                    ):
+                        changed.append(
+                            {
+                                "path": path,
+                                "old_size": stored_stat["size"],
+                                "new_size": current["size"],
+                            }
+                        )
                     else:
                         unchanged += 1
 
             # Check for new files (in current but not in manifest)
             for path in current_files:
                 if path not in stored_files:
-                    new_files.append({
-                        "path": path,
-                        "size": current_files[path]["size"],
-                    })
+                    new_files.append(
+                        {
+                            "path": path,
+                            "size": current_files[path]["size"],
+                        }
+                    )
 
             # Determine affected knowledge files
             affected = set()
             all_changed_paths = (
-                [c["path"] for c in changed]
-                + [n["path"] for n in new_files]
-                + deleted
+                [c["path"] for c in changed] + [n["path"] for n in new_files] + deleted
             )
             for kf_name, patterns in knowledge_coverage.items():
                 for changed_path in all_changed_paths:
@@ -348,7 +377,7 @@ class KBDetectChangesTool(Tool):
                         f"All {unchanged} tracked source files are unchanged.\n"
                         f"Knowledge base is up to date."
                     ),
-                    metadata={"mode": "incremental", "changes": False}
+                    metadata={"mode": "incremental", "changes": False},
                 )
 
             # Build human-readable report
@@ -364,9 +393,7 @@ class KBDetectChangesTool(Tool):
             if changed:
                 lines.append("Changed files:")
                 for c in changed:
-                    lines.append(
-                        f"  {c['path']} (size: {c['old_size']} -> {c['new_size']})"
-                    )
+                    lines.append(f"  {c['path']} (size: {c['old_size']} -> {c['new_size']})")
                 lines.append("")
 
             if new_files:
@@ -388,8 +415,7 @@ class KBDetectChangesTool(Tool):
                     lines.append(f"  {kf_name} (covers: {', '.join(patterns)})")
             else:
                 lines.append(
-                    "No existing knowledge files affected "
-                    "(changes may be in uncovered areas)."
+                    "No existing knowledge files affected (changes may be in uncovered areas)."
                 )
 
             return ToolResult(
@@ -404,7 +430,7 @@ class KBDetectChangesTool(Tool):
                     "deleted_count": len(deleted),
                     "unchanged_count": unchanged,
                     "affected_knowledge_files": sorted(affected),
-                }
+                },
             )
 
         except Exception as e:
@@ -412,7 +438,7 @@ class KBDetectChangesTool(Tool):
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 output=None,
-                error=f"Failed to detect changes: {str(e)}"
+                error=f"Failed to detect changes: {str(e)}",
             )
 
 
@@ -433,7 +459,7 @@ class KBUpdateManifestTool(Tool):
                 "Pass the list of source files you analyzed and which knowledge "
                 "files cover which source patterns. The tool stats each file "
                 "for accurate size/mtime automatically."
-            )
+            ),
         )
 
     def _get_parameters(self) -> dict[str, Any]:
@@ -446,26 +472,23 @@ class KBUpdateManifestTool(Tool):
                     "description": (
                         "list of source file paths analyzed in this run "
                         "(relative to project root, e.g. 'src/api/main.py')"
-                    )
+                    ),
                 },
                 "knowledge_coverage": {
                     "type": "object",
-                    "additionalProperties": {
-                        "type": "array",
-                        "items": {"type": "string"}
-                    },
+                    "additionalProperties": {"type": "array", "items": {"type": "string"}},
                     "description": (
                         "Map of knowledge file name to source path patterns "
-                        "it covers, e.g. {\"architecture.md\": [\"src/api/*\", \"src/chat/*\"]}"
-                    )
+                        'it covers, e.g. {"architecture.md": ["src/api/*", "src/chat/*"]}'
+                    ),
                 },
                 "mode": {
                     "type": "string",
                     "enum": ["full", "incremental"],
-                    "description": "Whether this was a full or incremental run"
-                }
+                    "description": "Whether this was a full or incremental run",
+                },
             },
-            "required": ["analyzed_files", "knowledge_coverage", "mode"]
+            "required": ["analyzed_files", "knowledge_coverage", "mode"],
         }
 
     def execute(
@@ -473,7 +496,7 @@ class KBUpdateManifestTool(Tool):
         analyzed_files: list[str],
         knowledge_coverage: dict[str, list[str]],
         mode: str = "full",
-        **kwargs: Any
+        **kwargs: Any,
     ) -> ToolResult:
         try:
             root = Path.cwd()
@@ -487,10 +510,8 @@ class KBUpdateManifestTool(Tool):
                 full_path = root / filepath
                 try:
                     stat = full_path.stat()
-                    mtime_iso = datetime.fromtimestamp(
-                        stat.st_mtime, tz=timezone.utc
-                    ).isoformat()
-                    normalized = filepath.replace('\\', '/')
+                    mtime_iso = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
+                    normalized = filepath.replace("\\", "/")
                     source_files[normalized] = {
                         "size": stat.st_size,
                         "mtime": mtime_iso,
@@ -505,15 +526,10 @@ class KBUpdateManifestTool(Tool):
                     merged_files = dict(existing.get("source_files", {}))
                     merged_files.update(source_files)
                     # Remove entries for files that no longer exist
-                    merged_files = {
-                        k: v for k, v in merged_files.items()
-                        if (root / k).exists()
-                    }
+                    merged_files = {k: v for k, v in merged_files.items() if (root / k).exists()}
                     source_files = merged_files
 
-                    merged_coverage = dict(
-                        existing.get("knowledge_coverage", {})
-                    )
+                    merged_coverage = dict(existing.get("knowledge_coverage", {}))
                     merged_coverage.update(knowledge_coverage)
                     knowledge_coverage = merged_coverage
 
@@ -528,8 +544,7 @@ class KBUpdateManifestTool(Tool):
             # Write
             manifest_path.parent.mkdir(parents=True, exist_ok=True)
             manifest_path.write_text(
-                json.dumps(manifest, indent=2, ensure_ascii=False),
-                encoding="utf-8"
+                json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"
             )
 
             # Confirmation
@@ -540,9 +555,7 @@ class KBUpdateManifestTool(Tool):
                 f"Knowledge files mapped: {len(knowledge_coverage)}",
             ]
             if stat_errors:
-                lines.append(
-                    f"Warnings ({len(stat_errors)} files could not be statted):"
-                )
+                lines.append(f"Warnings ({len(stat_errors)} files could not be statted):")
                 for err in stat_errors[:5]:
                     lines.append(f"  {err}")
 
@@ -555,7 +568,7 @@ class KBUpdateManifestTool(Tool):
                     "source_files_count": len(source_files),
                     "knowledge_files_count": len(knowledge_coverage),
                     "stat_errors": len(stat_errors),
-                }
+                },
             )
 
         except Exception as e:
@@ -563,5 +576,5 @@ class KBUpdateManifestTool(Tool):
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 output=None,
-                error=f"Failed to write manifest: {str(e)}"
+                error=f"Failed to write manifest: {str(e)}",
             )

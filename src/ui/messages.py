@@ -15,12 +15,7 @@ class ApprovalResponseMessage(Message):
     Posted by ToolApprovalOptions, handled by CodingAgentApp.
     """
 
-    def __init__(
-        self,
-        call_id: str,
-        action: str,
-        feedback: str | None = None
-    ):
+    def __init__(self, call_id: str, action: str, feedback: str | None = None):
         super().__init__()
         self.call_id = call_id
         self.action = action  # "yes", "yes_all", "no", "feedback"
@@ -33,6 +28,7 @@ class StreamInterruptMessage(Message):
 
     Posted by keybinding handler, triggers cancellation.
     """
+
     pass
 
 
@@ -40,6 +36,7 @@ class RetryRequestMessage(Message):
     """
     User clicked retry after a recoverable error.
     """
+
     pass
 
 
@@ -99,7 +96,7 @@ class ClarifyResponseMessage(Message):
         submitted: bool,
         responses: dict | None = None,
         chat_instead: bool = False,
-        chat_message: str | None = None
+        chat_message: str | None = None,
     ):
         super().__init__()
         self.call_id = call_id
@@ -121,7 +118,7 @@ class PlanApprovalResponseMessage(Message):
         plan_hash: str,
         approved: bool,
         auto_accept_edits: bool = False,
-        feedback: str | None = None
+        feedback: str | None = None,
     ):
         super().__init__()
         self.plan_hash = plan_hash
@@ -132,12 +129,12 @@ class PlanApprovalResponseMessage(Message):
 
 # Export all message types
 __all__ = [
-    'ApprovalResponseMessage',
-    'StreamInterruptMessage',
-    'RetryRequestMessage',
-    'ScrollStateChangedMessage',
-    'InputSubmittedMessage',
-    'PauseResponseMessage',
-    'ClarifyResponseMessage',
-    'PlanApprovalResponseMessage',
+    "ApprovalResponseMessage",
+    "StreamInterruptMessage",
+    "RetryRequestMessage",
+    "ScrollStateChangedMessage",
+    "InputSubmittedMessage",
+    "PauseResponseMessage",
+    "ClarifyResponseMessage",
+    "PlanApprovalResponseMessage",
 ]

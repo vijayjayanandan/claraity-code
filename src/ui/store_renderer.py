@@ -128,7 +128,9 @@ class StoreRenderer:
                 if current_message is not None:
                     if stream_id:
                         self._store_message_widgets[stream_id] = current_message
-                    segments = message.meta.segments if message.meta and message.meta.segments else []
+                    segments = (
+                        message.meta.segments if message.meta and message.meta.segments else []
+                    )
                     if segments:
                         await self._segment_renderer.render_tool_segments_only(
                             current_message, message, segments
@@ -147,9 +149,7 @@ class StoreRenderer:
             await self.apply_tool_result_to_card(message)
             return pre_mounted_user_widget
         elif message.is_system:
-            await self._handle_system_message(
-                message, conversation, status_bar
-            )
+            await self._handle_system_message(message, conversation, status_bar)
             return pre_mounted_user_widget
         else:
             return pre_mounted_user_widget
@@ -166,16 +166,15 @@ class StoreRenderer:
             if segments:
                 try:
                     rendered = await self._segment_renderer.render_segments(
-                        widget, message, segments,
+                        widget,
+                        message,
+                        segments,
                         defer_tool_mount=bulk_load,
                         use_store_hydration=bulk_load,
                         hydrate_fn=self.hydrate_tool_card_from_store if bulk_load else None,
                     )
                 except Exception as e:
-                    logger.error(
-                        f"_render_segments failed: {type(e).__name__}: {e}",
-                        exc_info=True
-                    )
+                    logger.error(f"_render_segments failed: {type(e).__name__}: {e}", exc_info=True)
                     rendered = 0
                 # Track segment index for future updates (live path only)
                 if not bulk_load and stream_id:
@@ -187,11 +186,14 @@ class StoreRenderer:
                 # Bulk load: also render tool calls in fallback path
                 if bulk_load and message.tool_calls:
                     import json
+
                     for tc in message.tool_calls:
                         if tc.function.name in self._silent_tools:
                             continue
                         args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-                        card = widget.add_tool_card(tc.id, tc.function.name, args, requires_approval=False)
+                        card = widget.add_tool_card(
+                            tc.id, tc.function.name, args, requires_approval=False
+                        )
                         card.set_defer_diff_mount(True)
                         self._tool_cards[tc.id] = card
                         self._on_tool_card_created(tc.id, card)
@@ -271,7 +273,9 @@ class StoreRenderer:
         if call_id and self._message_store:
             tool_result = self._message_store.get_tool_result(call_id)
             if tool_result:
-                logger.info(f"[{label}] Skipping approval mount - tool result exists for call_id={call_id}")
+                logger.info(
+                    f"[{label}] Skipping approval mount - tool result exists for call_id={call_id}"
+                )
                 return
 
         await self._on_plan_approval(
@@ -295,7 +299,9 @@ class StoreRenderer:
         tool_call_id = message.tool_call_id
         card = self._tool_cards.get(tool_call_id)
         if not card:
-            logger.debug(f"No ToolCard found for tool_call_id={tool_call_id}, skipping result update")
+            logger.debug(
+                f"No ToolCard found for tool_call_id={tool_call_id}, skipping result update"
+            )
             return
 
         status = message.meta.status if message.meta else None
@@ -345,7 +351,11 @@ class StoreRenderer:
         result_msg = self._message_store.get_tool_result(tool_call_id)
 
         if result_msg:
-            result_content = result_msg.get_text_content() if hasattr(result_msg, 'get_text_content') else (result_msg.content or "")
+            result_content = (
+                result_msg.get_text_content()
+                if hasattr(result_msg, "get_text_content")
+                else (result_msg.content or "")
+            )
             status = result_msg.meta.status if result_msg.meta else None
             duration = result_msg.meta.duration_ms if result_msg.meta else None
 
@@ -361,7 +371,9 @@ class StoreRenderer:
                 card.result_preview = "(Approved but not executed)"
             else:
                 card.status = ToolStatus.REJECTED
-                feedback = approval_msg.meta.extra.get("feedback") if approval_msg.meta.extra else None
+                feedback = (
+                    approval_msg.meta.extra.get("feedback") if approval_msg.meta.extra else None
+                )
                 if feedback:
                     card.result_preview = f"(Rejected: {feedback[:50]})"
                 else:

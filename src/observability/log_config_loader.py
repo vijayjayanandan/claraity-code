@@ -48,9 +48,11 @@ COMPONENT_LOGGER_MAP: dict[str, str] = {
 # DATA MODEL
 # =============================================================================
 
+
 @dataclass
 class HandlerConfig:
     """Per-handler log level configuration."""
+
     jsonl_level: str = "INFO"
     logs_db_level: str = "DEBUG"
     errors_db_level: str = "ERROR"
@@ -59,15 +61,17 @@ class HandlerConfig:
 @dataclass
 class RetentionConfig:
     """Log retention settings."""
+
     logs_db_days: int = 7
     errors_db_days: int = 30
-    jsonl_max_bytes: int = 52_428_800   # 50 MB
+    jsonl_max_bytes: int = 52_428_800  # 50 MB
     jsonl_backup_count: int = 5
 
 
 @dataclass
 class LoggingConfig:
     """Complete logging configuration loaded from config.yaml."""
+
     level: str = "INFO"
     components: dict[str, str] = field(default_factory=dict)
     handlers: HandlerConfig = field(default_factory=HandlerConfig)
@@ -77,6 +81,7 @@ class LoggingConfig:
 # =============================================================================
 # LOADER
 # =============================================================================
+
 
 def _safe_stderr(message: str) -> None:
     """Write warning to stderr without going through logging (avoids recursion)."""
@@ -153,9 +158,7 @@ def load_logging_config(
                     f"Valid: {', '.join(sorted(COMPONENT_LOGGER_MAP))}"
                 )
                 continue
-            validated = _validate_level(
-                str(comp_level), f"components.{comp_name}"
-            )
+            validated = _validate_level(str(comp_level), f"components.{comp_name}")
             if validated:
                 config.components[comp_name] = validated
 
@@ -168,9 +171,7 @@ def load_logging_config(
             ("errors_db", "errors_db_level"),
         ]:
             if key in handlers:
-                validated = _validate_level(
-                    str(handlers[key]), f"handlers.{key}"
-                )
+                validated = _validate_level(str(handlers[key]), f"handlers.{key}")
                 if validated:
                     setattr(config.handlers, attr, validated)
 
@@ -189,13 +190,9 @@ def load_logging_config(
                     if val > 0:
                         setattr(config.retention, attr, val)
                     else:
-                        _safe_stderr(
-                            f"retention.{key} must be positive, ignoring"
-                        )
+                        _safe_stderr(f"retention.{key} must be positive, ignoring")
                 except (TypeError, ValueError):
-                    _safe_stderr(
-                        f"Invalid value for retention.{key}, ignoring"
-                    )
+                    _safe_stderr(f"Invalid value for retention.{key}, ignoring")
 
     return config
 

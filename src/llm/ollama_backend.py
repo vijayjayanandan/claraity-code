@@ -29,11 +29,7 @@ class OllamaBackend(LLMBackend):
         except Exception:
             self.encoding = None
 
-    def generate(
-        self,
-        messages: list[dict[str, str]],
-        **kwargs: Any
-    ) -> LLMResponse:
+    def generate(self, messages: list[dict[str, str]], **kwargs: Any) -> LLMResponse:
         """Generate completion from messages."""
         self.validate_messages(messages)
 
@@ -47,7 +43,7 @@ class OllamaBackend(LLMBackend):
                 "top_p": kwargs.get("top_p", self.config.top_p),
                 "top_k": kwargs.get("top_k", self.config.top_k),
                 "repeat_penalty": kwargs.get("repeat_penalty", self.config.repeat_penalty),
-            }
+            },
         }
 
         if self.config.num_ctx:
@@ -58,9 +54,7 @@ class OllamaBackend(LLMBackend):
 
         try:
             response = requests.post(
-                f"{self.api_url}/chat",
-                json=payload,
-                timeout=self.config.timeout
+                f"{self.api_url}/chat", json=payload, timeout=self.config.timeout
             )
             response.raise_for_status()
 
@@ -82,16 +76,14 @@ class OllamaBackend(LLMBackend):
                 completion_tokens=completion_tokens,
                 total_tokens=prompt_tokens + completion_tokens,
                 eval_duration=data.get("total_duration", 0) / 1e9,  # Convert to seconds
-                raw_response=data
+                raw_response=data,
             )
 
         except requests.exceptions.RequestException as e:
             raise RuntimeError(f"Ollama API error: {e}")
 
     def generate_stream(
-        self,
-        messages: list[dict[str, str]],
-        **kwargs: Any
+        self, messages: list[dict[str, str]], **kwargs: Any
     ) -> Iterator[StreamChunk]:
         """Generate streaming completion."""
         self.validate_messages(messages)
@@ -104,7 +96,7 @@ class OllamaBackend(LLMBackend):
                 "temperature": kwargs.get("temperature", self.config.temperature),
                 "top_p": kwargs.get("top_p", self.config.top_p),
                 "top_k": kwargs.get("top_k", self.config.top_k),
-            }
+            },
         }
 
         if self.config.num_ctx:
@@ -112,10 +104,7 @@ class OllamaBackend(LLMBackend):
 
         try:
             response = requests.post(
-                f"{self.api_url}/chat",
-                json=payload,
-                stream=True,
-                timeout=self.config.timeout
+                f"{self.api_url}/chat", json=payload, stream=True, timeout=self.config.timeout
             )
             response.raise_for_status()
 
@@ -130,7 +119,7 @@ class OllamaBackend(LLMBackend):
                         content=content,
                         done=done,
                         model=data.get("model"),
-                        finish_reason=data.get("done_reason") if done else None
+                        finish_reason=data.get("done_reason") if done else None,
                     )
 
                     if done:
@@ -150,10 +139,7 @@ class OllamaBackend(LLMBackend):
     def is_available(self) -> bool:
         """Check if Ollama is available."""
         try:
-            response = requests.get(
-                f"{self.api_url}/tags",
-                timeout=5.0
-            )
+            response = requests.get(f"{self.api_url}/tags", timeout=5.0)
             return response.status_code == 200
         except Exception:
             return False
@@ -161,10 +147,7 @@ class OllamaBackend(LLMBackend):
     def list_models(self) -> list[str]:
         """list available models in Ollama."""
         try:
-            response = requests.get(
-                f"{self.api_url}/tags",
-                timeout=5.0
-            )
+            response = requests.get(f"{self.api_url}/tags", timeout=5.0)
             response.raise_for_status()
 
             data = response.json()
@@ -187,7 +170,7 @@ class OllamaBackend(LLMBackend):
                 f"{self.api_url}/pull",
                 json={"name": model_name},
                 stream=True,
-                timeout=600.0  # 10 minutes for download
+                timeout=600.0,  # 10 minutes for download
             )
             response.raise_for_status()
 

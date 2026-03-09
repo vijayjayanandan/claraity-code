@@ -31,6 +31,7 @@ class ErrorContext:
         attempt_number: How many times this tool+error_type combination has failed
         previous_attempts: list of previous distinct attempts (capped to last 3)
     """
+
     error_type: str
     tool_name: str
     tool_args: dict[str, Any]
@@ -111,6 +112,7 @@ rules:
 # ROOT CAUSE EXTRACTION
 # =============================================================================
 
+
 def get_root_cause_info(exc: BaseException, max_message_len: int = 500) -> tuple[str, str]:
     """
     Walk exception chain to find the deepest root cause.
@@ -184,4 +186,4 @@ def is_timeout_error(exc: BaseException) -> bool:
 
 
 # Export
-__all__ = ['ErrorContext', 'get_root_cause_info', 'is_timeout_error']
+__all__ = ["ErrorContext", "get_root_cause_info", "is_timeout_error"]

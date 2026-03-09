@@ -20,6 +20,7 @@ from .config import McpServerConfig
 
 try:
     from src.observability import get_logger
+
     logger = get_logger("integrations.mcp.client")
 except ImportError:
     logger = logging.getLogger(__name__)
@@ -69,7 +70,9 @@ class SseTransport(McpTransport):
         self._client = None
         self._base_url: str | None = None
         self._base_headers: dict[str, str] = {}  # Non-secret headers only
-        self._auth_headers: dict[str, str] = {}  # Per-request auth; set at connect, cleared at disconnect
+        self._auth_headers: dict[
+            str, str
+        ] = {}  # Per-request auth; set at connect, cleared at disconnect
         self._connected = False
 
     async def connect(self, config: McpServerConfig, auth_headers: dict[str, str]) -> None:
@@ -108,9 +111,7 @@ class SseTransport(McpTransport):
         }
 
         # Inject auth per-request (not stored on httpx client)
-        response = await self._client.post(
-            self._base_url, json=payload, headers=self._auth_headers
-        )
+        response = await self._client.post(self._base_url, json=payload, headers=self._auth_headers)
         response.raise_for_status()
         result = response.json()
 
@@ -134,9 +135,7 @@ class SseTransport(McpTransport):
         if params:
             payload["params"] = params
 
-        await self._client.post(
-            self._base_url, json=payload, headers=self._auth_headers
-        )
+        await self._client.post(self._base_url, json=payload, headers=self._auth_headers)
 
     async def disconnect(self) -> None:
         if self._client:
@@ -194,6 +193,7 @@ class StdioTransport(McpTransport):
             )
         else:
             import shlex
+
             cmd_parts = shlex.split(config.command)
             self._process = await asyncio.create_subprocess_exec(
                 *cmd_parts,
@@ -320,17 +320,17 @@ class StdioTransport(McpTransport):
             # -- Neutralize asyncio transport internals --
             # Access the underlying BaseSubprocessTransport via the
             # asyncio.subprocess.Process wrapper.
-            subprocess_transport = getattr(self._process, '_transport', None)
+            subprocess_transport = getattr(self._process, "_transport", None)
             if subprocess_transport is not None:
                 # Prevent BaseSubprocessTransport.__del__ -> close() -> loop.call_soon
                 subprocess_transport._closed = True
 
                 # Neutralize each pipe transport (_ProactorBasePipeTransport)
-                for proto in getattr(subprocess_transport, '_pipes', {}).values():
-                    pipe_transport = getattr(proto, 'pipe', None)
+                for proto in getattr(subprocess_transport, "_pipes", {}).values():
+                    pipe_transport = getattr(proto, "pipe", None)
                     if pipe_transport is not None:
                         # Close the OS-level pipe handle
-                        sock = getattr(pipe_transport, '_sock', None)
+                        sock = getattr(pipe_transport, "_sock", None)
                         if sock is not None:
                             try:
                                 sock.close()
@@ -418,11 +418,14 @@ class McpClient:
         await self._transport.connect(self._config, auth_headers)
 
         # MCP initialization handshake
-        init_result = await self._transport.send("initialize", {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {"roots": {}, "sampling": {}},
-            "clientInfo": {"name": "claraity-agent", "version": "1.0.0"},
-        })
+        init_result = await self._transport.send(
+            "initialize",
+            {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {"roots": {}, "sampling": {}},
+                "clientInfo": {"name": "claraity-agent", "version": "1.0.0"},
+            },
+        )
 
         server_info = init_result.get("serverInfo", {})
         logger.info(

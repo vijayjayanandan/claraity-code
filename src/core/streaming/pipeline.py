@@ -33,10 +33,10 @@ from .state import StreamingState, ToolCallAccumulator
 logger = get_logger("core.streaming.pipeline")
 
 # Regex patterns for structural detection
-CODE_FENCE_START = re.compile(r'^```(\w*)\s*$', re.MULTILINE)
-CODE_FENCE_END = re.compile(r'^```\s*$', re.MULTILINE)
-THINKING_START = re.compile(r'<thinking>', re.IGNORECASE)
-THINKING_END = re.compile(r'</thinking>', re.IGNORECASE)
+CODE_FENCE_START = re.compile(r"^```(\w*)\s*$", re.MULTILINE)
+CODE_FENCE_END = re.compile(r"^```\s*$", re.MULTILINE)
+THINKING_START = re.compile(r"<thinking>", re.IGNORECASE)
+THINKING_END = re.compile(r"</thinking>", re.IGNORECASE)
 
 
 class StreamingPipeline:
@@ -64,7 +64,7 @@ class StreamingPipeline:
         session_id: str,
         parent_uuid: str | None = None,
         provider: str | None = None,
-        model: str | None = None
+        model: str | None = None,
     ):
         """
         Initialize the streaming pipeline.
@@ -108,7 +108,7 @@ class StreamingPipeline:
                 session_id=self._session_id,
                 parent_uuid=self._parent_uuid,
                 provider=self._provider,
-                model=self._model
+                model=self._model,
             )
             logger.debug(f"Stream started: {self._state.stream_id}")
 
@@ -126,7 +126,9 @@ class StreamingPipeline:
 
         # Store usage if provided (convert dict to TokenUsage)
         if delta.usage:
-            self._state.usage = TokenUsage.from_dict(delta.usage) if isinstance(delta.usage, dict) else delta.usage
+            self._state.usage = (
+                TokenUsage.from_dict(delta.usage) if isinstance(delta.usage, dict) else delta.usage
+            )
 
         # Capture thinking signature (Anthropic sends on final delta)
         if delta.thinking_signature:
@@ -186,11 +188,11 @@ class StreamingPipeline:
         state.full_text_content += text
 
         # Check for code fence start
-        if '```' in state.text_buffer:
+        if "```" in state.text_buffer:
             self._check_code_fence_start()
 
         # Check for thinking tag start (if not using native thinking)
-        if '<thinking>' in state.text_buffer.lower():
+        if "<thinking>" in state.text_buffer.lower():
             self._check_thinking_start()
 
     def _check_code_fence_start(self) -> None:
@@ -202,33 +204,43 @@ class StreamingPipeline:
         # A code fence start is complete when we see: ```language\n (newline ends the fence line)
 
         # Only process if we have at least one complete line (ends with newline)
-        if '\n' not in state.text_buffer:
+        if "\n" not in state.text_buffer:
             return
 
-        lines = state.text_buffer.split('\n')
+        lines = state.text_buffer.split("\n")
 
         # Check all complete lines (all except possibly the last one if no trailing newline)
         # If buffer ends with newline, last element is empty string - all lines are complete
-        check_lines = lines[:-1] if state.text_buffer and not state.text_buffer.endswith('\n') else lines[:-1] if lines[-1] == '' else lines
+        check_lines = (
+            lines[:-1]
+            if state.text_buffer and not state.text_buffer.endswith("\n")
+            else lines[:-1]
+            if lines[-1] == ""
+            else lines
+        )
 
         for i, line in enumerate(check_lines):
             stripped = line.strip()
             # Match opening fence: starts with ``` but is not just ``` (which could be closing)
             # Also not ```...``` (inline code)
-            if stripped.startswith('```'):
+            if stripped.startswith("```"):
                 # Check it's not a closing fence (just ```) or inline (```x```)
                 rest = stripped[3:]
-                if rest and rest.endswith('```'):
+                if rest and rest.endswith("```"):
                     # Inline code block like ```code```, skip
                     continue
-                if not rest or rest.isidentifier() or rest.replace('-', '').replace('_', '').isalnum():
+                if (
+                    not rest
+                    or rest.isidentifier()
+                    or rest.replace("-", "").replace("_", "").isalnum()
+                ):
                     # Valid opening fence with optional language
                     lang = rest.strip()
 
                     # Calculate position in buffer
-                    pre_lines = '\n'.join(lines[:i])
+                    pre_lines = "\n".join(lines[:i])
                     if pre_lines:
-                        pre_lines += '\n'
+                        pre_lines += "\n"
 
                     # Flush text before the fence as a segment
                     if pre_lines.strip():
@@ -240,7 +252,7 @@ class StreamingPipeline:
                     state.code_block_content = ""
 
                     # Clear buffer, keeping text after the fence line
-                    post_fence = '\n'.join(lines[i + 1:])
+                    post_fence = "\n".join(lines[i + 1 :])
                     state.text_buffer = ""
 
                     # Process any remaining text as code
@@ -257,30 +269,29 @@ class StreamingPipeline:
         state.full_text_content += text
 
         # Check for code fence end
-        if '```' in state.code_block_content:
+        if "```" in state.code_block_content:
             match = CODE_FENCE_END.search(state.code_block_content)
             if match:
                 # Extract code content before the closing fence
-                code_content = state.code_block_content[:match.start()].rstrip('\n')
+                code_content = state.code_block_content[: match.start()].rstrip("\n")
 
                 # Add code block segment
-                state.segments.append(CodeBlockSegment(
-                    language=state.code_block_language,
-                    content=code_content
-                ))
+                state.segments.append(
+                    CodeBlockSegment(language=state.code_block_language, content=code_content)
+                )
 
                 # Exit code block mode
                 state.in_code_block = False
                 state.code_block_language = ""
 
                 # Any text after closing fence goes back to normal processing
-                post_fence = state.code_block_content[match.end():]
+                post_fence = state.code_block_content[match.end() :]
                 state.code_block_content = ""
 
                 if post_fence:
                     state.text_buffer = post_fence
                     # Check for another code fence
-                    if '```' in post_fence:
+                    if "```" in post_fence:
                         self._check_code_fence_start()
 
     def _check_thinking_start(self) -> None:
@@ -290,7 +301,7 @@ class StreamingPipeline:
         match = THINKING_START.search(state.text_buffer)
         if match:
             # Flush text before the tag as a segment
-            pre_tag_text = state.text_buffer[:match.start()]
+            pre_tag_text = state.text_buffer[: match.start()]
             if pre_tag_text.strip():
                 state.segments.append(TextSegment(content=pre_tag_text))
 
@@ -299,7 +310,7 @@ class StreamingPipeline:
             state.thinking_content = ""
 
             # Clear buffer, keeping any text after the tag
-            post_match = state.text_buffer[match.end():]
+            post_match = state.text_buffer[match.end() :]
             state.text_buffer = ""
 
             if post_match:
@@ -312,11 +323,11 @@ class StreamingPipeline:
         state.thinking_content += text
 
         # Check for thinking end tag
-        if '</thinking>' in state.thinking_content.lower():
+        if "</thinking>" in state.thinking_content.lower():
             match = THINKING_END.search(state.thinking_content)
             if match:
                 # Extract thinking content
-                thinking_text = state.thinking_content[:match.start()]
+                thinking_text = state.thinking_content[: match.start()]
 
                 # Add thinking segment
                 if thinking_text.strip():
@@ -326,7 +337,7 @@ class StreamingPipeline:
                 state.in_thinking = False
 
                 # Any text after closing tag goes back to normal processing
-                post_tag = state.thinking_content[match.end():]
+                post_tag = state.thinking_content[match.end() :]
                 state.thinking_content = ""
 
                 if post_tag:
@@ -432,10 +443,12 @@ class StreamingPipeline:
 
         # Flush pending code block
         if state.in_code_block and state.code_block_content:
-            state.segments.append(CodeBlockSegment(
-                language=state.code_block_language,
-                content=state.code_block_content.rstrip('\n')
-            ))
+            state.segments.append(
+                CodeBlockSegment(
+                    language=state.code_block_language,
+                    content=state.code_block_content.rstrip("\n"),
+                )
+            )
             state.in_code_block = False
             state.code_block_content = ""
 
@@ -498,5 +511,5 @@ class StreamingPipeline:
                 reasoning_content=state.reasoning_content or None,
                 provider=state.provider,
                 model=state.model,
-            )
+            ),
         )

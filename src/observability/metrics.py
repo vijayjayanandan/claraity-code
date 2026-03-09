@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class MetricEntry:
     """Single metric entry."""
+
     timestamp: str
     metric_name: str
     value: float
@@ -104,12 +105,7 @@ class MetricsCollector:
             with self._get_connection() as conn:
                 conn.execute(
                     "INSERT INTO metrics (timestamp, metric_name, value, tags) VALUES (?, ?, ?, ?)",
-                    (
-                        datetime.now().isoformat(),
-                        metric_name,
-                        value,
-                        json.dumps(tags or {})
-                    )
+                    (datetime.now().isoformat(), metric_name, value, json.dumps(tags or {})),
                 )
                 conn.commit()
         except Exception as e:
@@ -121,7 +117,7 @@ class MetricsCollector:
         since: datetime | None = None,
         until: datetime | None = None,
         tags: dict[str, Any] | None = None,
-        limit: int | None = None
+        limit: int | None = None,
     ) -> list[MetricEntry]:
         """
         Query metrics.
@@ -138,7 +134,9 @@ class MetricsCollector:
         """
         try:
             with self._get_connection() as conn:
-                query = "SELECT timestamp, metric_name, value, tags FROM metrics WHERE metric_name = ?"
+                query = (
+                    "SELECT timestamp, metric_name, value, tags FROM metrics WHERE metric_name = ?"
+                )
                 params = [metric_name]
 
                 if since:
@@ -179,7 +177,7 @@ class MetricsCollector:
         aggregation: str = "avg",
         since: datetime | None = None,
         until: datetime | None = None,
-        tags: dict[str, Any] | None = None
+        tags: dict[str, Any] | None = None,
     ) -> float | None:
         """
         Aggregate metrics.
@@ -271,10 +269,7 @@ class MetricsCollector:
         try:
             cutoff = (datetime.now() - timedelta(days=days)).isoformat()
             with self._get_connection() as conn:
-                cursor = conn.execute(
-                    "DELETE FROM metrics WHERE timestamp < ?",
-                    (cutoff,)
-                )
+                cursor = conn.execute("DELETE FROM metrics WHERE timestamp < ?", (cutoff,))
                 deleted = cursor.rowcount
                 conn.commit()
                 logger.info(f"[OK] Deleted {deleted} metrics older than {days} days")
@@ -306,6 +301,7 @@ metrics = get_metrics_collector()
 # CONVENIENCE FUNCTIONS
 # =============================================================================
 
+
 def record_llm_latency(latency_ms: float, model: str, operation: str = "call"):
     """
     Record LLM latency.
@@ -315,11 +311,7 @@ def record_llm_latency(latency_ms: float, model: str, operation: str = "call"):
         model: Model name (e.g., "gpt-4", "deepseek-coder")
         operation: Operation type (e.g., "call", "stream")
     """
-    metrics.record(
-        "llm_latency_ms",
-        latency_ms,
-        tags={"model": model, "operation": operation}
-    )
+    metrics.record("llm_latency_ms", latency_ms, tags={"model": model, "operation": operation})
 
 
 def record_token_usage(prompt_tokens: int, completion_tokens: int, model: str):
@@ -345,11 +337,7 @@ def record_tool_execution(tool: str, duration_ms: float, success: bool):
         duration_ms: Execution time in milliseconds
         success: Whether execution succeeded
     """
-    metrics.record(
-        "tool_duration_ms",
-        duration_ms,
-        tags={"tool": tool, "success": success}
-    )
+    metrics.record("tool_duration_ms", duration_ms, tags={"tool": tool, "success": success})
 
 
 def record_cost_estimate(cost_usd: float, model: str, operation: str = "llm_call"):
@@ -361,11 +349,7 @@ def record_cost_estimate(cost_usd: float, model: str, operation: str = "llm_call
         model: Model name
         operation: Operation type
     """
-    metrics.record(
-        "cost_usd",
-        cost_usd,
-        tags={"model": model, "operation": operation}
-    )
+    metrics.record("cost_usd", cost_usd, tags={"model": model, "operation": operation})
 
 
 def get_session_stats(hours: int = 24) -> dict[str, Any]:
@@ -391,6 +375,7 @@ def get_session_stats(hours: int = 24) -> dict[str, Any]:
 # =============================================================================
 # MAINTENANCE
 # =============================================================================
+
 
 def cleanup_old_metrics(days: int = 30):
     """

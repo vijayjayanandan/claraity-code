@@ -19,6 +19,7 @@ from typing import Optional
 # Use our structured logging if available, otherwise stdlib
 try:
     from src.observability import get_logger
+
     logger = get_logger("integrations.secrets")
 except ImportError:
     logger = logging.getLogger(__name__)
@@ -58,6 +59,7 @@ class KeyringSecretStore(SecretStore):
 
     def __init__(self, service: str = _KEYRING_SERVICE):
         import keyring as _kr
+
         self._kr = _kr
         self._service = service
 

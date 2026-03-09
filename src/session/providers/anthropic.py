@@ -86,10 +86,9 @@ def from_anthropic(
             tool_call = ToolCall(
                 id=block.get("id", ""),
                 function=ToolCallFunction(
-                    name=block.get("name", ""),
-                    arguments=json.dumps(block.get("input", {}))
+                    name=block.get("name", ""), arguments=json.dumps(block.get("input", {}))
                 ),
-                type="function"
+                type="function",
             )
             tool_calls.append(tool_call)
             segments.append(ToolCallSegment(tool_call_index=len(tool_calls) - 1))
@@ -133,7 +132,7 @@ def from_anthropic(
             thinking=thinking,
             thinking_signature=thinking_signature,
             provider_message_id=response.get("id"),
-        )
+        ),
     )
 
     # Store raw response for runtime debugging (NOT persisted)
@@ -194,11 +193,8 @@ def from_anthropic_stream_event(
             accumulated_tool_calls.append(
                 ToolCall(
                     id=block.get("id", ""),
-                    function=ToolCallFunction(
-                        name=block.get("name", ""),
-                        arguments=""
-                    ),
-                    type="function"
+                    function=ToolCallFunction(name=block.get("name", ""), arguments=""),
+                    type="function",
                 )
             )
 
@@ -220,9 +216,9 @@ def from_anthropic_stream_event(
                     id=tc.id,
                     function=ToolCallFunction(
                         name=tc.function.name,
-                        arguments=tc.function.arguments + delta.get("partial_json", "")
+                        arguments=tc.function.arguments + delta.get("partial_json", ""),
                     ),
-                    type=tc.type
+                    type=tc.type,
                 )
 
     # Build segments
@@ -259,7 +255,7 @@ def from_anthropic_stream_event(
             stop_reason=stop_reason,
             segments=segments if len(segments) > 1 else None,
             thinking=accumulated_thinking if accumulated_thinking else None,
-        )
+        ),
     )
 
 
@@ -288,49 +284,43 @@ def to_anthropic(messages: list[Message]) -> list[dict[str, Any]]:
 
             # Add thinking if present
             if msg.meta.thinking:
-                content_blocks.append({
-                    "type": "thinking",
-                    "thinking": msg.meta.thinking
-                })
+                content_blocks.append({"type": "thinking", "thinking": msg.meta.thinking})
 
             # Add text if present
             if msg.content:
-                content_blocks.append({
-                    "type": "text",
-                    "text": msg.content
-                })
+                content_blocks.append({"type": "text", "text": msg.content})
 
             # Add tool_use blocks
             for tc in msg.tool_calls:
-                content_blocks.append({
-                    "type": "tool_use",
-                    "id": tc.id,
-                    "name": tc.function.name,
-                    "input": tc.function.get_parsed_arguments()
-                })
+                content_blocks.append(
+                    {
+                        "type": "tool_use",
+                        "id": tc.id,
+                        "name": tc.function.name,
+                        "input": tc.function.get_parsed_arguments(),
+                    }
+                )
 
-            result.append({
-                "role": "assistant",
-                "content": content_blocks
-            })
+            result.append({"role": "assistant", "content": content_blocks})
 
         elif msg.role == "tool":
             # Tool result
-            result.append({
-                "role": "user",
-                "content": [{
-                    "type": "tool_result",
-                    "tool_use_id": msg.tool_call_id,
-                    "content": msg.content or ""
-                }]
-            })
+            result.append(
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": msg.tool_call_id,
+                            "content": msg.content or "",
+                        }
+                    ],
+                }
+            )
 
         else:
             # User or simple assistant message
-            result.append({
-                "role": msg.role,
-                "content": msg.content or ""
-            })
+            result.append({"role": msg.role, "content": msg.content or ""})
 
     return result
 

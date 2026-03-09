@@ -36,7 +36,7 @@ class ContextInjector:
     def __init__(
         self,
         working_memory: "WorkingMemory",
-        transcript_logger: Optional["TranscriptLogger"] = None
+        transcript_logger: Optional["TranscriptLogger"] = None,
     ):
         """
         Initialize the context injector.
@@ -78,7 +78,7 @@ class ContextInjector:
             logger.info(
                 "context_injected",
                 summary_chars=len(summary),
-                sections=self._extract_sections(summary)
+                sections=self._extract_sections(summary),
             )
 
         # Add actual user message (escaped to prevent injection)
@@ -131,8 +131,7 @@ INSTRUCTION: This is context from earlier in the conversation that was compacted
             Escaped text with clarity-context tags neutralized
         """
         return (
-            text
-            .replace("<clarity-context>", "&lt;clarity-context&gt;")
+            text.replace("<clarity-context>", "&lt;clarity-context&gt;")
             .replace("</clarity-context>", "&lt;/clarity-context&gt;")
             .replace("<clarity-context", "&lt;clarity-context")  # Catch partial tags
         )
@@ -182,8 +181,7 @@ INSTRUCTION: This is context from earlier in the conversation that was compacted
         if self.transcript_logger:
             try:
                 self.transcript_logger.log_continuation_injected(
-                    injected_chars=len(summary),
-                    sections_included=self._extract_sections(summary)
+                    injected_chars=len(summary), sections_included=self._extract_sections(summary)
                 )
             except Exception as e:
                 logger.warning("injection_log_failed", error=str(e))

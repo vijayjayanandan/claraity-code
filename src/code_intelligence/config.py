@@ -228,9 +228,11 @@ class CodeIntelligenceConfig:
             languages=other.languages if other.languages else self.languages,
             max_servers=other.max_servers if other.max_servers != 3 else self.max_servers,
             cache_size_mb=other.cache_size_mb if other.cache_size_mb != 10 else self.cache_size_mb,
-            cache_ttl_seconds=other.cache_ttl_seconds if other.cache_ttl_seconds != 300 else self.cache_ttl_seconds,
+            cache_ttl_seconds=other.cache_ttl_seconds
+            if other.cache_ttl_seconds != 300
+            else self.cache_ttl_seconds,
             lsp_paths={**self.lsp_paths, **other.lsp_paths},  # Merge dicts
-            enabled=other.enabled if hasattr(other, 'enabled') else self.enabled,
+            enabled=other.enabled if hasattr(other, "enabled") else self.enabled,
         )
 
     @staticmethod

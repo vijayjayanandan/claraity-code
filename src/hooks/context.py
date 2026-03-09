@@ -19,10 +19,7 @@ class HookContext(BaseModel):
 
     session_id: str = Field(..., description="Unique session identifier")
     event_type: str = Field(..., description="Hook event type (e.g., 'PreToolUse')")
-    timestamp: datetime = Field(
-        default_factory=datetime.now,
-        description="When the event occurred"
-    )
+    timestamp: datetime = Field(default_factory=datetime.now, description="When the event occurred")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -42,12 +39,10 @@ class PreToolUseContext(HookContext):
 
     tool: str = Field(..., description="Tool name being called (e.g., 'write_file')")
     arguments: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Tool arguments that will be passed to the tool"
+        default_factory=dict, description="Tool arguments that will be passed to the tool"
     )
     step_id: int | None = Field(
-        None,
-        description="Workflow step ID if this tool call is part of a workflow"
+        None, description="Workflow step ID if this tool call is part of a workflow"
     )
 
 
@@ -67,8 +62,7 @@ class PostToolUseContext(HookContext):
 
     tool: str = Field(..., description="Tool name that was called")
     arguments: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Tool arguments that were used"
+        default_factory=dict, description="Tool arguments that were used"
     )
     result: Any = Field(..., description="Tool execution result")
     success: bool = Field(..., description="Whether tool execution succeeded")
@@ -91,8 +85,7 @@ class UserPromptSubmitContext(HookContext):
 
     prompt: str = Field(..., description="User's input prompt")
     metadata: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Additional metadata about the prompt"
+        default_factory=dict, description="Additional metadata about the prompt"
     )
 
 
@@ -109,16 +102,14 @@ class NotificationContext(HookContext):
             return NotificationResult(decision=HookApproval.DENY)
     """
 
-    notification_type: str = Field(..., description="Type of notification (e.g., 'approval_request')")
+    notification_type: str = Field(
+        ..., description="Type of notification (e.g., 'approval_request')"
+    )
     message: str = Field(..., description="Notification message")
     step_info: dict[str, Any] | None = Field(
-        None,
-        description="Information about the step requiring approval"
+        None, description="Information about the step requiring approval"
     )
-    risk_level: str | None = Field(
-        None,
-        description="Risk level assessment (low/medium/high)"
-    )
+    risk_level: str | None = Field(None, description="Risk level assessment (low/medium/high)")
 
 
 class SessionStartContext(HookContext):
@@ -131,14 +122,12 @@ class SessionStartContext(HookContext):
             setup_logger(context.working_directory)
             return HookResult(decision=HookDecision.PERMIT)
     """
+
     model_config = ConfigDict(protected_namespaces=())
 
     working_directory: str = Field(..., description="Current working directory")
     model_name: str = Field(..., description="LLM model being used")
-    config: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Session configuration"
-    )
+    config: dict[str, Any] = Field(default_factory=dict, description="Session configuration")
 
 
 class SessionEndContext(HookContext):
@@ -154,12 +143,10 @@ class SessionEndContext(HookContext):
 
     duration: float = Field(..., description="Total session duration in seconds")
     statistics: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Session statistics (tool calls, tokens used, etc.)"
+        default_factory=dict, description="Session statistics (tool calls, tokens used, etc.)"
     )
     exit_reason: str = Field(
-        default="normal",
-        description="Why session ended (normal/error/user_interrupt)"
+        default="normal", description="Why session ended (normal/error/user_interrupt)"
     )
 
 
@@ -182,8 +169,7 @@ class PreCompactContext(HookContext):
     current_tokens: int = Field(..., description="Current context token count")
     target_tokens: int = Field(..., description="Target token count after compaction")
     messages_to_drop: list[str] = Field(
-        default_factory=list,
-        description="Messages that will be dropped during compaction"
+        default_factory=list, description="Messages that will be dropped during compaction"
     )
 
 
@@ -201,8 +187,7 @@ class StopContext(HookContext):
 
     response: str = Field(..., description="Agent's generated response")
     tool_calls: list[dict[str, Any]] = Field(
-        default_factory=list,
-        description="list of tools called during this response generation"
+        default_factory=list, description="list of tools called during this response generation"
     )
     execution_time: float = Field(..., description="Total execution time in seconds")
 

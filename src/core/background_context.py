@@ -55,11 +55,11 @@ def inject_background_task_completions(
 
         parts.append("")  # blank line between tasks
 
-    parts.append(
-        "Use check_background_task(task_id) to get the full output if needed."
-    )
+    parts.append("Use check_background_task(task_id) to get the full output if needed.")
 
-    context.append({
-        "role": "user",
-        "content": "\n".join(parts),
-    })
+    context.append(
+        {
+            "role": "user",
+            "content": "\n".join(parts),
+        }
+    )

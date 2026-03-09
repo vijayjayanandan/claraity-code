@@ -103,10 +103,12 @@ def inject_controller_constraint(
         "- If impossible, explain to user why task cannot be completed"
     )
 
-    context.append({
-        "role": "user",
-        "content": constraint,
-    })
+    context.append(
+        {
+            "role": "user",
+            "content": constraint,
+        }
+    )
 
 
 def fill_skipped_tool_results(
@@ -133,12 +135,14 @@ def fill_skipped_tool_results(
     for tc in tool_calls:
         call_id = tc.id or ""
         if call_id not in processed_call_ids:
-            skipped.append({
-                "role": "tool",
-                "tool_call_id": call_id,
-                "name": tc.function.name,
-                "content": reason,
-            })
+            skipped.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": call_id,
+                    "name": tc.function.name,
+                    "content": reason,
+                }
+            )
     return skipped
 
 

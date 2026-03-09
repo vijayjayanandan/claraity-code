@@ -18,6 +18,7 @@ from src.integrations.mcp.config import McpServerConfig
 
 try:
     from src.observability import get_logger
+
     logger = get_logger("integrations.jira.connection")
 except ImportError:
     logger = logging.getLogger(__name__)
@@ -70,6 +71,7 @@ class JiraConnection:
         """Lazy-load SecretStore (avoids import cost if never needed)."""
         if self._secret_store is None:
             from src.integrations.secrets import get_secret_store
+
             self._secret_store = get_secret_store()
         return self._secret_store
 
@@ -163,12 +165,7 @@ class JiraConnection:
 
     def is_configured(self) -> bool:
         """Check if profile has all required fields including API token."""
-        return bool(
-            self._enabled
-            and self._jira_url
-            and self._username
-            and self.has_api_token()
-        )
+        return bool(self._enabled and self._jira_url and self._username and self.has_api_token())
 
     def get_mcp_config(self) -> McpServerConfig:
         """Build McpServerConfig for mcp-atlassian stdio transport.
@@ -181,13 +178,9 @@ class JiraConnection:
             ValueError: If profile is not fully configured.
         """
         if not self._jira_url:
-            raise ValueError(
-                f"Jira profile '{self._profile}' not configured: no jira_url"
-            )
+            raise ValueError(f"Jira profile '{self._profile}' not configured: no jira_url")
         if not self._username:
-            raise ValueError(
-                f"Jira profile '{self._profile}' not configured: no username"
-            )
+            raise ValueError(f"Jira profile '{self._profile}' not configured: no username")
 
         api_token = self._get_api_token()
         if not api_token:
@@ -224,7 +217,4 @@ class JiraConnection:
         d = config_dir or DEFAULT_CONFIG_DIR
         if not d.exists():
             return []
-        return sorted(
-            p.stem for p in d.glob("*.json")
-            if p.is_file()
-        )
+        return sorted(p.stem for p in d.glob("*.json") if p.is_file())

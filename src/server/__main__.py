@@ -24,7 +24,9 @@ def main():
     parser.add_argument("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=9120, help="Port (default: 9120)")
     parser.add_argument("--workdir", default=None, help="Working directory (default: cwd)")
-    parser.add_argument("--config", default=None, help="Config file path (default: .clarity/config.yaml)")
+    parser.add_argument(
+        "--config", default=None, help="Config file path (default: .clarity/config.yaml)"
+    )
     args = parser.parse_args()
 
     working_directory = args.workdir or os.getcwd()
@@ -61,6 +63,7 @@ def main():
         except Exception as e:
             print(f"\n[ERROR] Server failed to start: {e}")
             import traceback
+
             traceback.print_exc()
             return
 

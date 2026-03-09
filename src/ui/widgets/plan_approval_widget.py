@@ -28,15 +28,17 @@ class _PlanContent(Static):
 
     def render(self) -> RenderableType:
         lines = []
-        for line in self.excerpt.split('\n'):
+        for line in self.excerpt.split("\n"):
             lines.append(Text(line, style="dim"))
 
         if self.truncated:
             lines.append(Text())
-            lines.append(Text(
-                f"[Plan exceeded context limit - full plan at: {self.plan_path}]",
-                style="italic dim"
-            ))
+            lines.append(
+                Text(
+                    f"[Plan exceeded context limit - full plan at: {self.plan_path}]",
+                    style="italic dim",
+                )
+            )
 
         result = Text()
         for i, line in enumerate(lines):
@@ -135,30 +137,36 @@ class _PlanOptionsDisplay(Static, can_focus=True):
             if option["id"] == "feedback":
                 # Feedback mode - send feedback text (or None if empty)
                 feedback = self.feedback_text.strip() if self.feedback_text else None
-                parent.post_message(PlanApprovalResponseMessage(
-                    plan_hash=parent.plan_hash,
-                    approved=False,
-                    auto_accept_edits=False,
-                    feedback=feedback
-                ))
+                parent.post_message(
+                    PlanApprovalResponseMessage(
+                        plan_hash=parent.plan_hash,
+                        approved=False,
+                        auto_accept_edits=False,
+                        feedback=feedback,
+                    )
+                )
             else:
                 # Approve options (1 or 2)
-                parent.post_message(PlanApprovalResponseMessage(
-                    plan_hash=parent.plan_hash,
-                    approved=option["approved"],
-                    auto_accept_edits=option["auto_accept_edits"],
-                    feedback=None
-                ))
+                parent.post_message(
+                    PlanApprovalResponseMessage(
+                        plan_hash=parent.plan_hash,
+                        approved=option["approved"],
+                        auto_accept_edits=option["auto_accept_edits"],
+                        feedback=None,
+                    )
+                )
 
     def action_cancel(self) -> None:
         parent = self.parent
         if isinstance(parent, PlanApprovalWidget):
-            parent.post_message(PlanApprovalResponseMessage(
-                plan_hash=parent.plan_hash,
-                approved=False,
-                auto_accept_edits=False,
-                feedback=None
-            ))
+            parent.post_message(
+                PlanApprovalResponseMessage(
+                    plan_hash=parent.plan_hash,
+                    approved=False,
+                    auto_accept_edits=False,
+                    feedback=None,
+                )
+            )
 
     def render(self) -> RenderableType:
         lines = []
@@ -173,7 +181,7 @@ class _PlanOptionsDisplay(Static, can_focus=True):
                 if self.feedback_text or is_selected:
                     if is_selected:
                         prefix = Text("> ", style="bold green")
-                        num = Text(f"{i+1}  ", style="bold green")
+                        num = Text(f"{i + 1}  ", style="bold green")
                         if self.feedback_text:
                             # Show typed text + cursor
                             label = Text(self.feedback_text, style="bold green")
@@ -194,7 +202,7 @@ class _PlanOptionsDisplay(Static, can_focus=True):
                     else:
                         # Not selected but has text
                         prefix = Text("  ", style="dim")
-                        num = Text(f"{i+1}  ", style="dim")
+                        num = Text(f"{i + 1}  ", style="dim")
                         label = Text(self.feedback_text or "Provide feedback", style="italic dim")
 
                         line = Text()
@@ -205,7 +213,7 @@ class _PlanOptionsDisplay(Static, can_focus=True):
                 else:
                     # Not selected, no text yet
                     prefix = Text("  ", style="dim")
-                    num = Text(f"{i+1}  ", style="dim")
+                    num = Text(f"{i + 1}  ", style="dim")
                     label = Text(option["label"], style="white")
 
                     line = Text()
@@ -220,11 +228,11 @@ class _PlanOptionsDisplay(Static, can_focus=True):
                 # Options 1 and 2 - regular display
                 if is_selected:
                     prefix = Text("> ", style="bold green")
-                    num = Text(f"{i+1}  ", style="bold green")
+                    num = Text(f"{i + 1}  ", style="bold green")
                     label = Text(option["label"], style="bold green")
                 else:
                     prefix = Text("  ", style="dim")
-                    num = Text(f"{i+1}  ", style="dim")
+                    num = Text(f"{i + 1}  ", style="dim")
                     label = Text(option["label"], style="white")
 
                 line = Text()
@@ -305,7 +313,7 @@ class PlanApprovalWidget(Container, can_focus=False):
         excerpt: str,
         truncated: bool = False,
         plan_path: str | None = None,
-        **kwargs
+        **kwargs,
     ):
         super().__init__(**kwargs)
         self.plan_hash = plan_hash
@@ -324,4 +332,4 @@ class PlanApprovalWidget(Container, can_focus=False):
 
 
 # Export
-__all__ = ['PlanApprovalWidget']
+__all__ = ["PlanApprovalWidget"]

@@ -24,6 +24,7 @@ from typing import Optional
 
 class PromptSection(Enum):
     """Sections of the enhanced prompt system."""
+
     IDENTITY = "identity"
     THINKING = "thinking"
     DECISION_MAKING = "decision_making"  # NEW: LLM-first decision making
@@ -1131,6 +1132,7 @@ Approach 1 fails → think harder → try different approach → succeed
 # PART 8: SYSTEM PROMPT BUILDER
 # =============================================================================
 
+
 class EnhancedSystemPrompts:
     """
     Production-quality system prompts for coding agents.
@@ -1206,7 +1208,9 @@ class EnhancedSystemPrompts:
                 sections.append(task_note)
 
         # Add context window awareness
-        sections.append(f"\n<context_info>\nYour context window is {context_size:,} tokens. Your context will be automatically compacted as it approaches its limit, so work efficiently but don't prematurely stop tasks.\n</context_info>")
+        sections.append(
+            f"\n<context_info>\nYour context window is {context_size:,} tokens. Your context will be automatically compacted as it approaches its limit, so work efficiently but don't prematurely stop tasks.\n</context_info>"
+        )
 
         return "\n\n".join(sections)
 

@@ -153,17 +153,19 @@ class SubagentRegistry:
             model_name: LLM model name used by this subagent
             subagent_name: Subagent type/name (e.g., "knowledge-builder", "planner")
         """
-        is_subprocess = (store is None)
+        is_subprocess = store is None
 
         with self._lock:
             self._instances[subagent_id] = instance
 
             if is_subprocess:
                 self._subprocess_ids.add(subagent_id)
-            elif hasattr(store, 'subscribe'):
+            elif hasattr(store, "subscribe"):
                 # In-process mode: subscribe to store for live notifications
                 unsub = store.subscribe(
-                    lambda notification, sid=subagent_id: self._on_store_notification(sid, notification)
+                    lambda notification, sid=subagent_id: self._on_store_notification(
+                        sid, notification
+                    )
                 )
                 self._store_unsubscribes[subagent_id] = unsub
 
@@ -181,12 +183,21 @@ class SubagentRegistry:
             # Subprocess: caller is already on event loop, dispatch directly
             for callback in callbacks:
                 try:
-                    callback(subagent_id, store, transcript_path, parent_tool_call_id, model_name, subagent_name)
+                    callback(
+                        subagent_id,
+                        store,
+                        transcript_path,
+                        parent_tool_call_id,
+                        model_name,
+                        subagent_name,
+                    )
                 except Exception as e:
                     logger.error(f"Error in registered callback: {e}")
         else:
             # In-process: use call_from_thread to get onto event loop
-            self._dispatch_registered(subagent_id, store, transcript_path, parent_tool_call_id, model_name, subagent_name)
+            self._dispatch_registered(
+                subagent_id, store, transcript_path, parent_tool_call_id, model_name, subagent_name
+            )
 
     def unregister(self, subagent_id: str) -> None:
         """Unregister a completed subagent.
@@ -262,10 +273,10 @@ class SubagentRegistry:
         if inst is None:
             return
 
-        if is_subprocess and hasattr(inst, 'terminate'):
+        if is_subprocess and hasattr(inst, "terminate"):
             logger.info(f"Terminating subprocess subagent {subagent_id}")
             inst.terminate()
-        elif hasattr(inst, 'cancel'):
+        elif hasattr(inst, "cancel"):
             logger.info(f"Cancelling in-process subagent {subagent_id}")
             inst.cancel()
 
@@ -283,7 +294,7 @@ class SubagentRegistry:
             callbacks = list(self._on_notification)
         for callback in callbacks:
             try:
-                if self._app and hasattr(self._app, 'call_from_thread'):
+                if self._app and hasattr(self._app, "call_from_thread"):
                     self._app.call_from_thread(callback, subagent_id, notification)
                 else:
                     callback(subagent_id, notification)
@@ -304,12 +315,25 @@ class SubagentRegistry:
             callbacks = list(self._on_registered)
         for callback in callbacks:
             try:
-                if self._app and hasattr(self._app, 'call_from_thread'):
+                if self._app and hasattr(self._app, "call_from_thread"):
                     self._app.call_from_thread(
-                        callback, subagent_id, store, transcript_path, parent_tool_call_id, model_name, subagent_name
+                        callback,
+                        subagent_id,
+                        store,
+                        transcript_path,
+                        parent_tool_call_id,
+                        model_name,
+                        subagent_name,
                     )
                 else:
-                    callback(subagent_id, store, transcript_path, parent_tool_call_id, model_name, subagent_name)
+                    callback(
+                        subagent_id,
+                        store,
+                        transcript_path,
+                        parent_tool_call_id,
+                        model_name,
+                        subagent_name,
+                    )
             except Exception as e:
                 logger.error(f"Error in registered callback: {e}")
 
@@ -319,7 +343,7 @@ class SubagentRegistry:
             callbacks = list(self._on_unregistered)
         for callback in callbacks:
             try:
-                if self._app and hasattr(self._app, 'call_from_thread'):
+                if self._app and hasattr(self._app, "call_from_thread"):
                     self._app.call_from_thread(callback, subagent_id)
                 else:
                     callback(subagent_id)

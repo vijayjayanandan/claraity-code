@@ -74,11 +74,13 @@ class CacheTracker:
         cost_without = self.total_input_tokens
 
         # Cost with caching: each bucket charged at its actual rate
-        uncached_tokens = max(0, self.total_input_tokens - self.cache_read_tokens - self.cache_write_tokens)
+        uncached_tokens = max(
+            0, self.total_input_tokens - self.cache_read_tokens - self.cache_write_tokens
+        )
         cost_with = (
-            self.cache_read_tokens * 0.1       # 90% savings
-            + self.cache_write_tokens * 1.25   # 25% surcharge
-            + uncached_tokens * 1.0            # full price
+            self.cache_read_tokens * 0.1  # 90% savings
+            + self.cache_write_tokens * 1.25  # 25% surcharge
+            + uncached_tokens * 1.0  # full price
         )
 
         savings_pct = ((cost_without - cost_with) / cost_without * 100) if cost_without > 0 else 0

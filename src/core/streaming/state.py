@@ -14,6 +14,7 @@ from src.session.models.message import Segment, TokenUsage, ToolCall, ToolCallFu
 @dataclass
 class ToolCallAccumulator:
     """Accumulates incremental tool call data during streaming."""
+
     id: str = ""
     name: str = ""
     arguments_buffer: str = ""  # Accumulated JSON string
@@ -31,10 +32,7 @@ class ToolCallAccumulator:
         """
         return ToolCall(
             id=self.id,
-            function=ToolCallFunction(
-                name=self.name,
-                arguments=self.arguments_buffer or "{}"
-            ),
+            function=ToolCallFunction(name=self.name, arguments=self.arguments_buffer or "{}"),
         )
 
 
@@ -46,26 +44,27 @@ class StreamingState:
     This state is maintained by StreamingPipeline during delta processing
     and is used to build the final Message with segments.
     """
+
     # Identity
     stream_id: str = field(default_factory=generate_stream_id)
     session_id: str = ""
     parent_uuid: str | None = None
 
     # Text accumulation
-    text_buffer: str = ""           # Current text being accumulated
-    full_text_content: str = ""     # Complete text content for message.content
+    text_buffer: str = ""  # Current text being accumulated
+    full_text_content: str = ""  # Complete text content for message.content
 
     # Code block state
     in_code_block: bool = False
     code_block_language: str = ""
     code_block_content: str = ""
-    code_fence_buffer: str = ""     # Buffer for detecting fence patterns
+    code_fence_buffer: str = ""  # Buffer for detecting fence patterns
 
     # Thinking state
     in_thinking: bool = False
     thinking_content: str = ""
-    thinking_buffer: str = ""       # Buffer for detecting thinking tags
-    thinking_signature: str = ""    # Anthropic thinking block signature
+    thinking_buffer: str = ""  # Buffer for detecting thinking tags
+    thinking_signature: str = ""  # Anthropic thinking block signature
 
     # Reasoning content (Kimi K2.5 etc.) - must be echoed back on iteration 2+
     reasoning_content: str = ""

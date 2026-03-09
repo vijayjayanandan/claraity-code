@@ -13,17 +13,19 @@ from typing import Any, Optional
 
 class DifficultyLevel(Enum):
     """Test difficulty levels"""
-    EASY = "easy"           # 1-2 hours, single component
-    MEDIUM = "medium"       # 3-4 hours, multiple components
-    HARD = "hard"           # 5-8 hours, full application
+
+    EASY = "easy"  # 1-2 hours, single component
+    MEDIUM = "medium"  # 3-4 hours, multiple components
+    HARD = "hard"  # 5-8 hours, full application
 
 
 class StepType(Enum):
     """Types of validation steps"""
-    BASH = "bash"           # Run shell command
-    PYTEST = "pytest"       # Run pytest tests
-    INSPECT = "inspect"     # Inspect file contents
-    API_CALL = "api_call"   # Test API endpoint
+
+    BASH = "bash"  # Run shell command
+    PYTEST = "pytest"  # Run pytest tests
+    INSPECT = "inspect"  # Inspect file contents
+    API_CALL = "api_call"  # Test API endpoint
 
 
 @dataclass
@@ -86,7 +88,7 @@ class ValidationScenario:
     estimated_hours: float
 
     # Task definition
-    prompt: str                          # What to ask the agent
+    prompt: str  # What to ask the agent
     context_files: list[str] = field(default_factory=list)  # Starting files
     initial_setup: str | None = None  # Setup commands (e.g., "mkdir project")
 
@@ -97,12 +99,14 @@ class ValidationScenario:
     validation_steps: list[ValidationStep] = field(default_factory=list)
 
     # Scoring weights (must sum to 1.0)
-    scoring_weights: dict[str, float] = field(default_factory=lambda: {
-        "completeness": 0.30,    # Did it finish all requirements?
-        "correctness": 0.30,     # Does the code work?
-        "quality": 0.25,         # Code quality (structure, docs, tests)
-        "autonomy": 0.15         # How much human intervention needed?
-    })
+    scoring_weights: dict[str, float] = field(
+        default_factory=lambda: {
+            "completeness": 0.30,  # Did it finish all requirements?
+            "correctness": 0.30,  # Does the code work?
+            "quality": 0.25,  # Code quality (structure, docs, tests)
+            "autonomy": 0.15,  # How much human intervention needed?
+        }
+    )
 
     # Metadata
     tags: list[str] = field(default_factory=list)  # e.g., ["cli", "api", "database"]

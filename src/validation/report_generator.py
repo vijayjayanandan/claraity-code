@@ -16,10 +16,7 @@ class ReportGenerator:
     """Generates comprehensive validation reports"""
 
     def generate_report(
-        self,
-        report: ValidationReport,
-        format: str = "markdown",
-        output_dir: Path | None = None
+        self, report: ValidationReport, format: str = "markdown", output_dir: Path | None = None
     ) -> Path:
         """
         Generate validation report in specified format.
@@ -76,7 +73,7 @@ class ReportGenerator:
 | **Failed** | {report.scenarios_failed} [FAIL] |
 | **Pass Rate** | {report.pass_rate():.1%} |
 | **Average Score** | {report.average_score:.1%} |
-| **Total Duration** | {report.total_duration_seconds/3600:.1f} hours |
+| **Total Duration** | {report.total_duration_seconds / 3600:.1f} hours |
 | **Total Cost** | ${report.total_cost_usd:.2f} |
 
 ---
@@ -91,7 +88,7 @@ class ReportGenerator:
             md += f"### {i}. {status} - {result.scenario_name}\n\n"
 
             md += f"""**Scenario ID:** `{result.scenario_id}`
-**Duration:** {result.duration_seconds/60:.1f} minutes
+**Duration:** {result.duration_seconds / 60:.1f} minutes
 **Overall Score:** {result.overall_score:.1%}
 
 """

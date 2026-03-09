@@ -63,7 +63,7 @@ def parse_line(line: str, line_number: int) -> Message | FileHistorySnapshot | N
         raise ParseError(
             line_number,
             f"Line exceeds maximum size ({len(line)} > {MAX_LINE_SIZE} bytes)",
-            line[:100] + "..."  # Truncate for error message
+            line[:100] + "...",  # Truncate for error message
         )
 
     try:
@@ -98,8 +98,7 @@ def parse_line(line: str, line_number: int) -> Message | FileHistorySnapshot | N
 
 
 def parse_file_iter(
-    file_path: str | Path,
-    tolerant_last_line: bool = True
+    file_path: str | Path, tolerant_last_line: bool = True
 ) -> Iterator[tuple[int, Message | FileHistorySnapshot]]:
     """
     Parse JSONL file lazily using streaming (no readlines()).
@@ -119,7 +118,7 @@ def parse_file_iter(
     if not path.exists():
         raise FileNotFoundError(f"Session file not found: {path}")
 
-    with open(path, encoding='utf-8') as f:
+    with open(path, encoding="utf-8") as f:
         prev_line: str | None = None
         prev_line_number: int = 0
 
@@ -157,7 +156,7 @@ def parse_file_iter(
 def load_session(
     file_path: str | Path,
     store: MessageStore | None = None,
-    on_progress: Callable[[int, int], None] | None = None
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> MessageStore:
     """
     Load a complete session from JSONL file into memory store.
@@ -183,7 +182,7 @@ def load_session(
     # Count lines for progress (separate pass, but streaming)
     total_lines = 0
     if on_progress:
-        with open(path, encoding='utf-8') as f:
+        with open(path, encoding="utf-8") as f:
             for line in f:
                 if line.strip():
                     total_lines += 1
@@ -252,7 +251,7 @@ def get_session_info(file_path: str | Path) -> dict | None:
     line_count = 0
 
     try:
-        with open(path, encoding='utf-8') as f:
+        with open(path, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -274,7 +273,7 @@ def get_session_info(file_path: str | Path) -> dict | None:
         return {
             "session_id": session_id,
             "first_timestamp": first_timestamp,
-            "line_count": line_count
+            "line_count": line_count,
         }
     except Exception:
         return None

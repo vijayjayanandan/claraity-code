@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 # The set of tool names handled by this module
-HANDLED_TOOLS = frozenset({'clarify', 'request_plan_approval', 'director_complete_plan'})
+HANDLED_TOOLS = frozenset({"clarify", "request_plan_approval", "director_complete_plan"})
 
 
 class SpecialToolHandlers:
@@ -108,11 +108,16 @@ class SpecialToolHandlers:
         # 2. Wait for user response via UIProtocol
         try:
             from src.core.protocol import ClarifyResult
+
             result = await ui_protocol.wait_for_clarify_response(call_id)
 
             # 3. Persist clarify_response via MemoryManager (SINGLE WRITER)
             if self._memory.has_message_store:
-                status = "submitted" if result.submitted else ("chat" if result.chat_instead else "cancelled")
+                status = (
+                    "submitted"
+                    if result.submitted
+                    else ("chat" if result.chat_instead else "cancelled")
+                )
                 self._memory.persist_system_event(
                     event_type="clarify_response",
                     content=f"[Clarification {status}]",
@@ -201,6 +206,7 @@ class SpecialToolHandlers:
         # 4. Wait for user approval via UIProtocol
         try:
             from src.core.protocol import PlanApprovalResult
+
             approval = await ui_protocol.wait_for_plan_approval(plan_hash)
 
             if approval.approved:
@@ -223,9 +229,7 @@ class SpecialToolHandlers:
                         extra={"old_mode": "plan", "new_mode": new_mode},
                         include_in_llm_context=False,
                     )
-                    self._permission_manager.set_mode(
-                        PermissionManager.from_string(new_mode)
-                    )
+                    self._permission_manager.set_mode(PermissionManager.from_string(new_mode))
 
                 result_text = (
                     "User has approved your plan. You can now start coding. "
@@ -310,11 +314,7 @@ class SpecialToolHandlers:
             if plan:
                 for s in plan.slices:
                     slices_text += f"\n- Slice {s.id}: {s.title}"
-            excerpt = (
-                f"## Director Plan\n\n"
-                f"{plan_summary}\n\n"
-                f"### Vertical Slices:{slices_text}"
-            )
+            excerpt = f"## Director Plan\n\n{plan_summary}\n\n### Vertical Slices:{slices_text}"
         plan_hash = hashlib.sha256(excerpt.encode()).hexdigest()
 
         # Persist event for TUI to mount approval widget
@@ -334,6 +334,7 @@ class SpecialToolHandlers:
         # Wait for user approval via UIProtocol
         try:
             from src.core.protocol import PlanApprovalResult
+
             approval = await ui_protocol.wait_for_plan_approval(plan_hash)
 
             if approval.approved:

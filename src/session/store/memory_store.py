@@ -47,6 +47,7 @@ class StoreEvent(str, Enum):
     - BULK_LOAD_COMPLETE: Replay finished, all messages loaded
     - TOOL_STATE_UPDATED: Tool execution state changed (ephemeral, not persisted)
     """
+
     MESSAGE_ADDED = "message_added"
     MESSAGE_UPDATED = "message_updated"
     MESSAGE_FINALIZED = "message_finalized"
@@ -64,6 +65,7 @@ class ToolExecutionState:
     Agent updates this via MessageStore.update_tool_state().
     TUI reads via MessageStore.get_tool_state() or TOOL_STATE_UPDATED notifications.
     """
+
     status: ToolStatus = ToolStatus.PENDING
     result: Any | None = None
     error: str | None = None
@@ -73,6 +75,7 @@ class ToolExecutionState:
 @dataclass
 class StoreNotification:
     """Notification payload for store events."""
+
     event: StoreEvent
     message: Optional["Message"] = None
     snapshot: Optional["FileHistorySnapshot"] = None
@@ -87,6 +90,7 @@ Subscriber = Callable[[StoreNotification], None]
 
 class SeqCollisionError(Exception):
     """Raised when two messages have the same seq (invariant violation)."""
+
     pass
 
 
@@ -130,7 +134,7 @@ class MessageStore:
         self._tool_approvals: dict[str, str] = {}  # tool_call_id -> approval_message_uuid
 
         # Clarify indexes (for interactive clarification flow)
-        self._clarify_requests: dict[str, str] = {}   # call_id -> message_uuid
+        self._clarify_requests: dict[str, str] = {}  # call_id -> message_uuid
         self._clarify_responses: dict[str, str] = {}  # call_id -> message_uuid
 
         # Sidechain tracking
@@ -228,6 +232,7 @@ class MessageStore:
 
                 # Log tool message addition for debugging
                 from src.observability import get_logger
+
                 logger = get_logger("session.store")
                 logger.debug(
                     f"[ADD_MESSAGE] Tool message added: tool_call_id={message.tool_call_id}, "
@@ -325,11 +330,13 @@ class MessageStore:
             # Notify subscribers with appropriate event type
             if not self._is_bulk_loading:
                 event_type = StoreEvent.MESSAGE_UPDATED if is_update else StoreEvent.MESSAGE_ADDED
-                self._notify(StoreNotification(
-                    event=event_type,
-                    message=message,
-                    metadata={"is_streaming_update": is_update}
-                ))
+                self._notify(
+                    StoreNotification(
+                        event=event_type,
+                        message=message,
+                        metadata={"is_streaming_update": is_update},
+                    )
+                )
 
     def finalize_message(self, stream_id: str) -> Optional["Message"]:
         """
@@ -360,11 +367,13 @@ class MessageStore:
 
             # Notify subscribers of finalization
             if not self._is_bulk_loading:
-                self._notify(StoreNotification(
-                    event=StoreEvent.MESSAGE_FINALIZED,
-                    message=message,
-                    metadata={"stream_id": stream_id}
-                ))
+                self._notify(
+                    StoreNotification(
+                        event=StoreEvent.MESSAGE_FINALIZED,
+                        message=message,
+                        metadata={"stream_id": stream_id},
+                    )
+                )
 
             return message
 
@@ -402,13 +411,17 @@ class MessageStore:
         """
         with self._lock:
             seqs = sorted(self._by_seq.keys())
-            return [self._messages[self._by_seq[s]] for s in seqs if self._by_seq[s] in self._messages]
+            return [
+                self._messages[self._by_seq[s]] for s in seqs if self._by_seq[s] in self._messages
+            ]
 
     def get_messages_after_seq(self, seq: int) -> list["Message"]:
         """Get messages with seq > given value, ordered."""
         with self._lock:
             seqs = sorted(s for s in self._by_seq.keys() if s > seq)
-            return [self._messages[self._by_seq[s]] for s in seqs if self._by_seq[s] in self._messages]
+            return [
+                self._messages[self._by_seq[s]] for s in seqs if self._by_seq[s] in self._messages
+            ]
 
     # =========================================================================
     # Tool Linkage (O(1) lookups)
@@ -524,10 +537,7 @@ class MessageStore:
         """
         with self._lock:
             self._tool_state[tool_call_id] = ToolExecutionState(
-                status=status,
-                result=result,
-                error=error,
-                duration_ms=duration_ms
+                status=status, result=result, error=error, duration_ms=duration_ms
             )
 
             # Store metadata for hydration (merge, don't overwrite)
@@ -552,12 +562,14 @@ class MessageStore:
                 metadata = dict(extra_metadata) if extra_metadata else {}
                 if tool_name:
                     metadata["tool_name"] = tool_name
-                self._notify(StoreNotification(
-                    event=StoreEvent.TOOL_STATE_UPDATED,
-                    tool_call_id=tool_call_id,
-                    tool_state=self._tool_state[tool_call_id],
-                    metadata=metadata,
-                ))
+                self._notify(
+                    StoreNotification(
+                        event=StoreEvent.TOOL_STATE_UPDATED,
+                        tool_call_id=tool_call_id,
+                        tool_state=self._tool_state[tool_call_id],
+                        metadata=metadata,
+                    )
+                )
 
     def get_tool_state(self, tool_call_id: str) -> ToolExecutionState | None:
         """Get ephemeral tool execution state.
@@ -646,6 +658,7 @@ class MessageStore:
             list of dicts in OpenAI message format
         """
         from src.observability import get_logger
+
         logger = get_logger("session.store")
 
         with self._lock:
@@ -774,8 +787,7 @@ class MessageStore:
             summary_msg = Message.create_user(
                 content=(
                     "[Conversation summary - earlier messages were compacted "
-                    "to free context space]\n\n"
-                    + summary_content
+                    "to free context space]\n\n" + summary_content
                 ),
                 session_id=session_id,
                 parent_uuid=None,
@@ -833,10 +845,7 @@ class MessageStore:
             self._snapshots[snapshot.uuid] = snapshot
 
             if not self._is_bulk_loading:
-                self._notify(StoreNotification(
-                    event=StoreEvent.SNAPSHOT_ADDED,
-                    snapshot=snapshot
-                ))
+                self._notify(StoreNotification(event=StoreEvent.SNAPSHOT_ADDED, snapshot=snapshot))
 
     def get_snapshot(self, uuid: str) -> Optional["FileHistorySnapshot"]:
         """Get snapshot by UUID."""
@@ -856,10 +865,12 @@ class MessageStore:
         """End bulk loading and notify subscribers."""
         with self._lock:
             self._is_bulk_loading = False
-            self._notify(StoreNotification(
-                event=StoreEvent.BULK_LOAD_COMPLETE,
-                metadata={"message_count": len(self._messages)}
-            ))
+            self._notify(
+                StoreNotification(
+                    event=StoreEvent.BULK_LOAD_COMPLETE,
+                    metadata={"message_count": len(self._messages)},
+                )
+            )
 
     def clear(self) -> None:
         """Clear all messages and indexes."""

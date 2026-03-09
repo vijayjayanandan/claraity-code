@@ -22,7 +22,6 @@ def get_vague_calculator_scenario() -> AutonomousScenario:
         scenario_id="vague_calculator",
         name="Vague Calculator Request",
         description="User starts with vague request for 'help with numbers', agent should clarify requirements before implementing a calculator",
-
         testing_agent_prompt="""
 You are a NON-TECHNICAL USER who needs help building a calculator, but you don't know how to explain it properly at first.
 
@@ -47,16 +46,14 @@ YOUR BEHAVIOR:
 
 BE REALISTIC: Real users start vague and clarify gradually. That's what you're testing!
 """,
-
         success_criteria=[
             "Agent asked clarifying questions before implementing (didn't just guess)",
             "Agent created a calculator file (calculator.py, calc.py, or similar)",
             "Code contains basic arithmetic operations (add, subtract, multiply, divide)",
-            "Agent handled the vague initial request professionally (didn't complain about lack of details)"
+            "Agent handled the vague initial request professionally (didn't complain about lack of details)",
         ],
-
         max_turns=5,
-        timeout_seconds=300
+        timeout_seconds=300,
     )
 
 
@@ -74,7 +71,6 @@ def get_simple_bugfix_scenario() -> AutonomousScenario:
         scenario_id="simple_bugfix",
         name="Simple Bug Report",
         description="User reports a bug in their code, agent should investigate and fix it",
-
         testing_agent_prompt="""
 You are a DEVELOPER who found a bug in a simple Python script and needs help fixing it.
 
@@ -108,16 +104,14 @@ result = divide(10, 0)  # This crashes!
 print(result)
 ```
 """,
-
         success_criteria=[
             "Agent asked for the code or error details",
             "Agent identified the issue (division by zero or similar)",
             "Agent provided a fix (add error handling/validation)",
-            "Agent explained the fix clearly"
+            "Agent explained the fix clearly",
         ],
-
         max_turns=5,
-        timeout_seconds=300
+        timeout_seconds=300,
     )
 
 
@@ -135,7 +129,6 @@ def get_requirement_change_scenario() -> AutonomousScenario:
         scenario_id="requirement_change",
         name="Mid-Task Requirement Change",
         description="User starts with one request, then changes requirements mid-conversation",
-
         testing_agent_prompt="""
 You are a USER who isn't quite sure what they want and changes their mind mid-task.
 
@@ -164,16 +157,14 @@ YOUR BEHAVIOR:
 
 GOAL: Test if agent handles requirement changes gracefully without getting confused or frustrated.
 """,
-
         success_criteria=[
             "Agent handled the requirement change without complaint",
             "Agent adapted the implementation to new requirements",
             "Agent maintained context (didn't forget initial request)",
-            "Final solution incorporates both initial and changed requirements"
+            "Final solution incorporates both initial and changed requirements",
         ],
-
         max_turns=6,
-        timeout_seconds=300
+        timeout_seconds=300,
     )
 
 
@@ -191,7 +182,6 @@ def get_checkpoint_feature_scenario() -> AutonomousScenario:
         scenario_id="checkpoint_feature",
         name="Checkpoint Feature Test",
         description="User asks about checkpoint feature and wants to save work. Agent should demonstrate checkpoint functionality.",
-
         testing_agent_prompt="""
 You are a USER working on a long-running project who wants to learn about and use the checkpoint feature.
 
@@ -226,15 +216,13 @@ IMPORTANT:
 - The agent should either use checkpoint commands or the create_checkpoint tool
 - Act like a real user learning a new feature
 """,
-
         success_criteria=[
             "Agent explained checkpoint feature clearly (save points for long sessions)",
             "Agent demonstrated checkpoint creation (via tool call)",
-            "Agent successfully created at least one checkpoint with valid metadata"
+            "Agent successfully created at least one checkpoint with valid metadata",
         ],
-
         max_turns=5,
-        timeout_seconds=300
+        timeout_seconds=300,
     )
 
 
@@ -278,7 +266,7 @@ def list_scenarios() -> dict:
         scenario_id: {
             "name": factory().name,
             "description": factory().description,
-            "max_turns": factory().max_turns
+            "max_turns": factory().max_turns,
         }
         for scenario_id, factory in ALL_SCENARIOS.items()
     }

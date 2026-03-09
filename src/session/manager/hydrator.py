@@ -36,6 +36,7 @@ DEFAULT_MAX_CONTEXT_MESSAGES = int(os.getenv("SESSION_MAX_CONTEXT_MESSAGES", "10
 @dataclass
 class AgentState:
     """Restored agent runtime state."""
+
     todos: list[dict[str, Any]] = field(default_factory=list)
     current_todo_id: str | None = None
     last_stop_reason: str | None = None
@@ -48,6 +49,7 @@ class AgentState:
 @dataclass
 class HydrationReport:
     """Summary of hydration results."""
+
     session_id: str
     total_messages: int
     context_messages: int
@@ -74,6 +76,7 @@ class HydrationReport:
 @dataclass
 class HydrationResult:
     """Complete result of session hydration."""
+
     store: MessageStore
     base_llm_messages: list[dict[str, Any]]
     agent_state: AgentState
@@ -100,11 +103,7 @@ class SessionHydrator:
         """
         self.max_context_messages = max_context_messages or DEFAULT_MAX_CONTEXT_MESSAGES
 
-    def hydrate(
-        self,
-        jsonl_path: Path,
-        on_progress: Callable | None = None
-    ) -> HydrationResult:
+    def hydrate(self, jsonl_path: Path, on_progress: Callable | None = None) -> HydrationResult:
         """
         Hydrate session from JSONL file.
 
@@ -163,17 +162,16 @@ class SessionHydrator:
             has_compaction=store._last_compact_boundary_seq is not None,
             compaction_boundary_seq=store._last_compact_boundary_seq,
             agent_state_restored=agent_state_restored,
-            errors=errors
+            errors=errors,
         )
 
-        logger.info(f"Hydration complete: {report.context_messages} context messages, "
-                   f"agent_state_restored={agent_state_restored}")
+        logger.info(
+            f"Hydration complete: {report.context_messages} context messages, "
+            f"agent_state_restored={agent_state_restored}"
+        )
 
         return HydrationResult(
-            store=store,
-            base_llm_messages=base_llm_messages,
-            agent_state=agent_state,
-            report=report
+            store=store, base_llm_messages=base_llm_messages, agent_state=agent_state, report=report
         )
 
     def _extract_agent_state(self, store: MessageStore) -> AgentState:
@@ -196,19 +194,19 @@ class SessionHydrator:
                 continue
 
             # Check for agent_state event type
-            event_type = getattr(meta, 'event_type', None)
+            event_type = getattr(meta, "event_type", None)
             if event_type != "agent_state":
                 continue
 
             # Extract state from meta.extra
-            extra = getattr(meta, 'extra', None) or {}
+            extra = getattr(meta, "extra", None) or {}
 
-            if 'todos' in extra:
-                agent_state.todos = extra['todos']
-            if 'current_todo_id' in extra:
-                agent_state.current_todo_id = extra['current_todo_id']
-            if 'last_stop_reason' in extra:
-                agent_state.last_stop_reason = extra['last_stop_reason']
+            if "todos" in extra:
+                agent_state.todos = extra["todos"]
+            if "current_todo_id" in extra:
+                agent_state.current_todo_id = extra["current_todo_id"]
+            if "last_stop_reason" in extra:
+                agent_state.last_stop_reason = extra["last_stop_reason"]
 
         return agent_state
 
@@ -276,7 +274,7 @@ class SessionHydrator:
             logger.info(f"Pending tool IDs: {list(pending_tool_ids)[:5]}...")  # Log first 5
 
             if last_valid_index >= 0:
-                return messages[:last_valid_index + 1], warning
+                return messages[: last_valid_index + 1], warning
             else:
                 # No valid boundary found - return empty to avoid API error
                 logger.warning("No valid tool sequence boundary found, returning empty context")

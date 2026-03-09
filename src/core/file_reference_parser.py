@@ -38,6 +38,7 @@ class FileReference:
         line_start: Optional starting line number for range reference
         line_end: Optional ending line number for range reference
     """
+
     original: str
     path: Path
     content: str | None = None
@@ -103,8 +104,8 @@ class FileReferenceParser:
     # Also supports line ranges: @file.py:10-20, @file.py:50
     # On Windows, supports drive letters: @C:\path\to\file.py
     FILE_REFERENCE_PATTERN = re.compile(
-        r'@([A-Za-z]:[\\\/][A-Za-z0-9_.\\\/\-]+(?:\.[A-Za-z0-9]+)?(?::\d+(?:-\d+)?)?'
-        r'|[A-Za-z0-9_./\-]+(?:\.[A-Za-z0-9]+)?(?::\d+(?:-\d+)?)?)'
+        r"@([A-Za-z]:[\\\/][A-Za-z0-9_.\\\/\-]+(?:\.[A-Za-z0-9]+)?(?::\d+(?:-\d+)?)?"
+        r"|[A-Za-z0-9_./\-]+(?:\.[A-Za-z0-9]+)?(?::\d+(?:-\d+)?)?)"
     )
 
     def __init__(self, base_dir: Path | None = None, max_file_size: int = 100_000):
@@ -140,12 +141,12 @@ class FileReferenceParser:
             # Check for line range suffix - but skip Windows drive letter colons
             # Windows paths like C:\path\file.py have a colon after drive letter
             # We only treat colons as line range separators when followed by digits
-            if re.search(r':(\d+(?:-\d+)?)$', file_spec):
-                file_path, line_spec = file_spec.rsplit(':', 1)
+            if re.search(r":(\d+(?:-\d+)?)$", file_spec):
+                file_path, line_spec = file_spec.rsplit(":", 1)
                 try:
-                    if '-' in line_spec:
+                    if "-" in line_spec:
                         # Range: @file.py:10-20
-                        start_str, end_str = line_spec.split('-', 1)
+                        start_str, end_str = line_spec.split("-", 1)
                         line_start = int(start_str)
                         line_end = int(end_str)
                     else:
@@ -161,21 +162,25 @@ class FileReferenceParser:
             # Resolve path
             try:
                 resolved_path = self._resolve_path(file_path)
-                references.append(FileReference(
-                    original=original,
-                    path=resolved_path,
-                    line_start=line_start,
-                    line_end=line_end
-                ))
+                references.append(
+                    FileReference(
+                        original=original,
+                        path=resolved_path,
+                        line_start=line_start,
+                        line_end=line_end,
+                    )
+                )
                 logger.debug(f"Parsed reference: {original} -> {resolved_path}")
             except Exception as e:
                 logger.warning(f"Failed to resolve path {original}: {e}")
                 # Still add reference but with error
-                references.append(FileReference(
-                    original=original,
-                    path=Path(file_path),
-                    error=f"Failed to resolve path: {e}"
-                ))
+                references.append(
+                    FileReference(
+                        original=original,
+                        path=Path(file_path),
+                        error=f"Failed to resolve path: {e}",
+                    )
+                )
 
         logger.info(f"Parsed {len(references)} file references from message")
         return references
@@ -245,19 +250,16 @@ class FileReferenceParser:
         # Check file size
         file_size = ref.path.stat().st_size
         if file_size > self.max_file_size:
-            raise ValueError(
-                f"File too large: {file_size} chars "
-                f"(max: {self.max_file_size})"
-            )
+            raise ValueError(f"File too large: {file_size} chars (max: {self.max_file_size})")
 
         # Read file content
         try:
-            with open(ref.path, encoding='utf-8') as f:
+            with open(ref.path, encoding="utf-8") as f:
                 content = f.read()
         except UnicodeDecodeError:
             # Try reading as binary and decoding with fallback
-            with open(ref.path, 'rb') as f:
-                content = f.read().decode('utf-8', errors='replace')
+            with open(ref.path, "rb") as f:
+                content = f.read().decode("utf-8", errors="replace")
 
         # Apply line range if specified
         if ref.line_start is not None:
@@ -266,7 +268,7 @@ class FileReferenceParser:
             end_idx = min(len(lines), ref.line_end) if ref.line_end else start_idx + 1
 
             selected_lines = lines[start_idx:end_idx]
-            content = '\n'.join(selected_lines)
+            content = "\n".join(selected_lines)
 
             logger.debug(
                 f"Applied line range {ref.line_start}-{ref.line_end or ref.line_start} "
@@ -288,9 +290,7 @@ class FileReferenceParser:
         return self.load_files(references)
 
     def inject_into_context(
-        self,
-        references: list[FileReference],
-        context: list[dict[str, str]]
+        self, references: list[FileReference], context: list[dict[str, str]]
     ) -> list[dict[str, str]]:
         """Inject loaded file contents into LLM context.
 
@@ -329,7 +329,7 @@ class FileReferenceParser:
         # Format: <referenced_files>...</referenced_files>
         file_message = {
             "role": "system",
-            "content": f"<referenced_files>\nThe user has referenced these files:\n\n{file_context}\n</referenced_files>"
+            "content": f"<referenced_files>\nThe user has referenced these files:\n\n{file_context}\n</referenced_files>",
         }
 
         # Find insertion point (after first system message)
@@ -354,10 +354,10 @@ class FileReferenceParser:
             Message with references removed
         """
         # Replace references with empty string, then clean up extra whitespace
-        cleaned = self.FILE_REFERENCE_PATTERN.sub('', message)
+        cleaned = self.FILE_REFERENCE_PATTERN.sub("", message)
 
         # Clean up extra whitespace
-        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
 
         return cleaned
 

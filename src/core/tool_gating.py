@@ -34,6 +34,7 @@ logger = get_logger(__name__)
 
 class GateAction(Enum):
     """What the caller should do with this tool call."""
+
     ALLOW = auto()
     DENY = auto()
     NEEDS_APPROVAL = auto()
@@ -50,6 +51,7 @@ class GateResult:
         gate_response: Full gated response dict for LLM feedback (set for DENY gates).
         call_summary: Summary of the blocked call (set for BLOCKED_REPEAT).
     """
+
     action: GateAction
     message: str | None = None
     gate_response: dict[str, Any] | None = None
@@ -64,10 +66,15 @@ class ToolGatingService:
     """
 
     # Tools that require user approval in NORMAL permission mode
-    RISKY_TOOLS = frozenset({
-        'write_file', 'edit_file', 'append_to_file',
-        'run_command', 'git_commit',
-    })
+    RISKY_TOOLS = frozenset(
+        {
+            "write_file",
+            "edit_file",
+            "append_to_file",
+            "run_command",
+            "git_commit",
+        }
+    )
 
     # Tool -> category mapping for granular auto-approve
     TOOL_CATEGORIES = {
@@ -126,16 +133,12 @@ class ToolGatingService:
     # Individual checks (can be called standalone)
     # ------------------------------------------------------------------
 
-    def check_repeat(
-        self, tool_name: str, tool_args: dict[str, Any]
-    ) -> GateResult | None:
+    def check_repeat(self, tool_name: str, tool_args: dict[str, Any]) -> GateResult | None:
         """Check if this exact call has failed before.
 
         Returns GateResult with BLOCKED_REPEAT if repeated, else None.
         """
-        is_repeat, call_summary = self._error_tracker.is_repeated_failed_call(
-            tool_name, tool_args
-        )
+        is_repeat, call_summary = self._error_tracker.is_repeated_failed_call(tool_name, tool_args)
         if is_repeat:
             return GateResult(
                 action=GateAction.BLOCKED_REPEAT,
@@ -147,9 +150,7 @@ class ToolGatingService:
             )
         return None
 
-    def check_plan_mode_gate(
-        self, tool_name: str, tool_args: dict[str, Any]
-    ) -> GateResult | None:
+    def check_plan_mode_gate(self, tool_name: str, tool_args: dict[str, Any]) -> GateResult | None:
         """Check if tool is restricted by plan mode.
 
         Returns GateResult with DENY if gated, else None.
@@ -169,7 +170,8 @@ class ToolGatingService:
                 ),
                 "plan_path": (
                     str(self._plan_mode_state.plan_file_path)
-                    if self._plan_mode_state.plan_file_path else None
+                    if self._plan_mode_state.plan_file_path
+                    else None
                 ),
                 "allowed_actions": [
                     "Use read-only tools (read_file, grep, glob, etc.)",
@@ -193,7 +195,8 @@ class ToolGatingService:
                 ),
                 "plan_path": (
                     str(self._plan_mode_state.plan_file_path)
-                    if self._plan_mode_state.plan_file_path else None
+                    if self._plan_mode_state.plan_file_path
+                    else None
                 ),
                 "allowed_actions": [
                     "Wait for user to approve or reject the plan",
@@ -208,9 +211,7 @@ class ToolGatingService:
 
         return None  # Allowed
 
-    def check_director_gate(
-        self, tool_name: str, tool_args: dict[str, Any]
-    ) -> GateResult | None:
+    def check_director_gate(self, tool_name: str, tool_args: dict[str, Any]) -> GateResult | None:
         """Check if tool is restricted by director phase.
 
         Returns GateResult with DENY if gated, else None.
@@ -242,9 +243,7 @@ class ToolGatingService:
 
         return None  # Allowed
 
-    def needs_approval(
-        self, tool_name: str, tool_args: dict[str, Any] | None = None
-    ) -> bool:
+    def needs_approval(self, tool_name: str, tool_args: dict[str, Any] | None = None) -> bool:
         """Determine if a tool call requires user approval.
 
         Logic depends on the current permission mode:
@@ -288,9 +287,7 @@ class ToolGatingService:
     # Combined evaluation
     # ------------------------------------------------------------------
 
-    def evaluate(
-        self, tool_name: str, tool_args: dict[str, Any]
-    ) -> GateResult:
+    def evaluate(self, tool_name: str, tool_args: dict[str, Any]) -> GateResult:
         """Run all gating checks in priority order.
 
         Order: repeat -> plan mode -> director -> approval -> allow.

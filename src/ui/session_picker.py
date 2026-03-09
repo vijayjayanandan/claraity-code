@@ -32,6 +32,7 @@ logger = get_logger("ui.session_picker")
 @dataclass
 class SessionDisplay:
     """Session information for display in picker."""
+
     session_id: str
     file_path: Path
     first_message: str
@@ -136,7 +137,7 @@ def _extract_session_info(jsonl_path: Path, session_id: str) -> SessionDisplay |
     message_count = 0
 
     try:
-        with open(jsonl_path, encoding='utf-8') as f:
+        with open(jsonl_path, encoding="utf-8") as f:
             for i, line in enumerate(f):
                 line = line.strip()
                 if not line:
@@ -176,7 +177,7 @@ def _extract_session_info(jsonl_path: Path, session_id: str) -> SessionDisplay |
             first_message=first_user_message,
             message_count=message_count,
             updated_at=updated_at,
-            git_branch=git_branch
+            git_branch=git_branch,
         )
 
     except Exception as e:
@@ -246,7 +247,7 @@ class SessionPickerScreen(ModalScreen[str | None]):
         sessions_dir: Path,
         name: str | None = None,
         id: str | None = None,
-        classes: str | None = None
+        classes: str | None = None,
     ):
         super().__init__(name=name, id=id, classes=classes)
         self._sessions_dir = sessions_dir
@@ -275,21 +276,14 @@ class SessionPickerScreen(ModalScreen[str | None]):
         option_list.clear_options()
 
         if not self._filtered_sessions:
-            option_list.add_option(Option(
-                "[No sessions found]",
-                id="__none__",
-                disabled=True
-            ))
+            option_list.add_option(Option("[No sessions found]", id="__none__", disabled=True))
             return
 
         for session in self._filtered_sessions:
             # Create rich text for option
             # Title line + meta line
             prompt_text = f"{session.display_title}\n[dim]{session.display_meta}[/dim]"
-            option_list.add_option(Option(
-                prompt_text,
-                id=session.session_id
-            ))
+            option_list.add_option(Option(prompt_text, id=session.session_id))
 
     def on_input_changed(self, event: Input.Changed) -> None:
         """Filter sessions based on search input."""
@@ -299,7 +293,8 @@ class SessionPickerScreen(ModalScreen[str | None]):
             self._filtered_sessions = self._sessions
         else:
             self._filtered_sessions = [
-                s for s in self._sessions
+                s
+                for s in self._sessions
                 if query in s.first_message.lower()
                 or query in s.session_id.lower()
                 or (s.git_branch and query in s.git_branch.lower())

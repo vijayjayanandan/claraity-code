@@ -3,6 +3,7 @@
 
 class CancelledException(Exception):
     """Raised when a cancel token is triggered."""
+
     pass
 
 

@@ -58,7 +58,7 @@ _atexit_registered: bool = False
 _atexit_lock = threading.Lock()
 
 # Re-entry guard using contextvars (works with async coroutines)
-_in_emit: ContextVar[bool] = ContextVar('sqlite_handler_in_emit', default=False)
+_in_emit: ContextVar[bool] = ContextVar("sqlite_handler_in_emit", default=False)
 
 
 class SQLiteErrorHandler(logging.Handler):
@@ -259,11 +259,11 @@ class SQLiteErrorHandler(logging.Handler):
         """
         # Base fields
         data = {
-            'level': record.levelname,
-            'error_type': 'LogRecord',
-            'message': '',
-            'component': record.name,
-            'category': ErrorCategory.UNEXPECTED,
+            "level": record.levelname,
+            "error_type": "LogRecord",
+            "message": "",
+            "component": record.name,
+            "category": ErrorCategory.UNEXPECTED,
         }
 
         # =====================================================================
@@ -272,54 +272,75 @@ class SQLiteErrorHandler(logging.Handler):
         if isinstance(record.msg, dict):
             event_dict = record.msg.copy()
             # Remove internal structlog metadata
-            event_dict.pop('_record', None)
-            event_dict.pop('_from_structlog', None)
+            event_dict.pop("_record", None)
+            event_dict.pop("_from_structlog", None)
 
             # Event name -> message
-            if 'event' in event_dict:
-                data['message'] = event_dict['event']
+            if "event" in event_dict:
+                data["message"] = event_dict["event"]
 
             # Error category (taxonomy)
-            if 'category' in event_dict:
-                data['category'] = event_dict['category']
+            if "category" in event_dict:
+                data["category"] = event_dict["category"]
 
             # Error type
-            if 'error_type' in event_dict:
-                data['error_type'] = event_dict['error_type']
+            if "error_type" in event_dict:
+                data["error_type"] = event_dict["error_type"]
 
             # Context fields
-            for field in ('run_id', 'session_id', 'stream_id', 'request_id', 'operation', 'component'):
+            for field in (
+                "run_id",
+                "session_id",
+                "stream_id",
+                "request_id",
+                "operation",
+                "component",
+            ):
                 if field in event_dict:
                     data[field] = event_dict[field]
 
             # LLM/Provider fields
-            for field in ('model', 'backend', 'payload_bytes', 'prompt_tokens', 'completion_tokens'):
+            for field in (
+                "model",
+                "backend",
+                "payload_bytes",
+                "prompt_tokens",
+                "completion_tokens",
+            ):
                 if field in event_dict:
                     data[field] = event_dict[field]
 
             # Timeout debugging fields
-            for field in ('elapsed_ms', 'timeout_read_s', 'timeout_write_s',
-                          'timeout_connect_s', 'timeout_pool_s', 'retry_attempt', 'retry_max',
-                          'root_cause_type', 'root_cause_message'):
+            for field in (
+                "elapsed_ms",
+                "timeout_read_s",
+                "timeout_write_s",
+                "timeout_connect_s",
+                "timeout_pool_s",
+                "retry_attempt",
+                "retry_max",
+                "root_cause_type",
+                "root_cause_message",
+            ):
                 if field in event_dict:
                     data[field] = event_dict[field]
 
             # Tool fields
-            for field in ('tool_name', 'tool_timeout_s', 'tool_args_keys'):
+            for field in ("tool_name", "tool_timeout_s", "tool_args_keys"):
                 if field in event_dict:
                     data[field] = event_dict[field]
 
             # Traceback from event_dict
-            if 'traceback' in event_dict:
-                data['traceback'] = event_dict['traceback']
+            if "traceback" in event_dict:
+                data["traceback"] = event_dict["traceback"]
 
             # Formatted exception from structlog
-            if 'exception' in event_dict:
-                data['traceback'] = event_dict['exception']
+            if "exception" in event_dict:
+                data["traceback"] = event_dict["exception"]
 
         else:
             # Plain string message (non-structlog stdlib logs)
-            data['message'] = record.getMessage()
+            data["message"] = record.getMessage()
 
         # =====================================================================
         # Add exception info if present (from exc_info)
@@ -327,18 +348,20 @@ class SQLiteErrorHandler(logging.Handler):
         if record.exc_info and record.exc_info[0] is not None:
             exc_type, exc_value, exc_tb = record.exc_info
             if exc_type:
-                data['error_type'] = exc_type.__name__
-            if exc_value and not data['message']:
-                data['message'] = str(exc_value)
+                data["error_type"] = exc_type.__name__
+            if exc_value and not data["message"]:
+                data["message"] = str(exc_value)
             if exc_tb:
-                data['traceback'] = ''.join(traceback.format_exception(exc_type, exc_value, exc_tb))[:MAX_TRACEBACK_LENGTH]
+                data["traceback"] = "".join(
+                    traceback.format_exception(exc_type, exc_value, exc_tb)
+                )[:MAX_TRACEBACK_LENGTH]
 
             # Classify exception type
-            data['category'] = self._classify_exception(exc_type, exc_value, data.get('category'))
+            data["category"] = self._classify_exception(exc_type, exc_value, data.get("category"))
 
         # Ensure message is not empty
-        if not data['message']:
-            data['message'] = f"Error from {record.name}"
+        if not data["message"]:
+            data["message"] = f"Error from {record.name}"
 
         return data
 
@@ -365,22 +388,30 @@ class SQLiteErrorHandler(logging.Handler):
             exc_name = type(current_exc).__name__.lower()
 
             # Timeout detection
-            timeout_keywords = ['timeout', 'timedout', 'readtimeout', 'writetimeout',
-                                'connecttimeout', 'pooltimeout']
+            timeout_keywords = [
+                "timeout",
+                "timedout",
+                "readtimeout",
+                "writetimeout",
+                "connecttimeout",
+                "pooltimeout",
+            ]
             if any(kw in exc_name for kw in timeout_keywords):
                 return ErrorCategory.PROVIDER_TIMEOUT
 
             # HTTP/API errors
-            api_keywords = ['httperror', 'apierror', 'requestexception', 'connectionerror']
+            api_keywords = ["httperror", "apierror", "requestexception", "connectionerror"]
             if any(kw in exc_name for kw in api_keywords):
                 return ErrorCategory.PROVIDER_ERROR
 
             # Rate limiting
-            if 'ratelimit' in exc_name:
+            if "ratelimit" in exc_name:
                 return ErrorCategory.PROVIDER_ERROR
 
             # Walk the chain
-            current_exc = getattr(current_exc, '__cause__', None) or getattr(current_exc, '__context__', None)
+            current_exc = getattr(current_exc, "__cause__", None) or getattr(
+                current_exc, "__context__", None
+            )
 
         return default_category
 
@@ -393,6 +424,7 @@ class SQLiteErrorHandler(logging.Handler):
 # =============================================================================
 # MODULE-LEVEL SHUTDOWN HANDLER
 # =============================================================================
+
 
 def _module_shutdown_handler() -> None:
     """

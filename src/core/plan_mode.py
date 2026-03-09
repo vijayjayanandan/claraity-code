@@ -44,54 +44,53 @@ def _is_read_only(tool_name: str) -> bool:
 
 class PlanGateDecision(Enum):
     """Decision from tool gating in plan mode."""
+
     ALLOW = "allow"
     DENY = "deny"
     REQUIRE_APPROVAL = "require_approval"
 
 
 # Read-only tools that are always allowed in plan mode
-READ_ONLY_TOOLS = frozenset({
-    # File reading
-    "read_file",
-    "list_directory",
-
-    # Search tools
-    "search_code",
-    "grep",
-    "glob",
-
-    # Analysis tools (read-only)
-    "analyze_code",
-    "get_file_outline",
-    "get_symbol_context",
-
-    # Web tools (read-only)
-    "web_fetch",
-    "web_search",
-
-    # Task/todo tools (read-only queries)
-    "get_todos",
-    "get_next_task",
-
-    # Architecture query tools (read-only)
-    "query_component",
-    "query_dependencies",
-    "query_decisions",
-    "query_flows",
-    "query_architecture_summary",
-    "search_components",
-    "get_implementation_spec",
-
-    # Git read-only
-    "git_status",
-    "git_diff",
-})
+READ_ONLY_TOOLS = frozenset(
+    {
+        # File reading
+        "read_file",
+        "list_directory",
+        # Search tools
+        "search_code",
+        "grep",
+        "glob",
+        # Analysis tools (read-only)
+        "analyze_code",
+        "get_file_outline",
+        "get_symbol_context",
+        # Web tools (read-only)
+        "web_fetch",
+        "web_search",
+        # Task/todo tools (read-only queries)
+        "get_todos",
+        "get_next_task",
+        # Architecture query tools (read-only)
+        "query_component",
+        "query_dependencies",
+        "query_decisions",
+        "query_flows",
+        "query_architecture_summary",
+        "search_components",
+        "get_implementation_spec",
+        # Git read-only
+        "git_status",
+        "git_diff",
+    }
+)
 
 # Plan mode control tools
-PLAN_MODE_TOOLS = frozenset({
-    "enter_plan_mode",
-    "request_plan_approval",
-})
+PLAN_MODE_TOOLS = frozenset(
+    {
+        "enter_plan_mode",
+        "request_plan_approval",
+    }
+)
 
 # Agent workspace directory — files under this path are agent-internal
 # (plan files, session logs, metrics) and bypass approval in all modes.
@@ -285,11 +284,7 @@ class PlanModeState:
         self._awaiting_approval = False
         self.is_active = True
 
-    def gate_tool(
-        self,
-        tool_name: str,
-        target_path: str | None = None
-    ) -> PlanGateDecision:
+    def gate_tool(self, tool_name: str, target_path: str | None = None) -> PlanGateDecision:
         """
         Check if tool is allowed in current plan mode state.
 
@@ -332,7 +327,7 @@ class PlanModeState:
                     except (OSError, FileNotFoundError):
                         # Files may not exist yet, fall back to normalized path comparison
                         # Normalize for case-insensitive comparison on Windows
-                        if os.name == 'nt':
+                        if os.name == "nt":
                             if str(target).lower() == str(plan_path).lower():
                                 return PlanGateDecision.ALLOW
                         elif target == plan_path:
@@ -408,8 +403,8 @@ Created: {timestamp}
 
 # Export all types
 __all__ = [
-    'PlanGateDecision',
-    'PlanModeState',
-    'READ_ONLY_TOOLS',
-    'PLAN_MODE_TOOLS',
+    "PlanGateDecision",
+    "PlanModeState",
+    "READ_ONLY_TOOLS",
+    "PLAN_MODE_TOOLS",
 ]

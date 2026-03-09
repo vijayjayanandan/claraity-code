@@ -66,12 +66,14 @@ class AttachmentBar(Widget, can_focus=True):
 
     class AttachmentRemoved(Message):
         """Sent when an attachment is removed."""
+
         def __init__(self, index: int) -> None:
             self.index = index
             super().__init__()
 
     class ExitToInput(Message):
         """Sent when user wants to return to input."""
+
         pass
 
     def __init__(self, **kwargs):
@@ -79,7 +81,7 @@ class AttachmentBar(Widget, can_focus=True):
         self._attachments: list[Attachment] = []
         self._hover_index: int = -1  # Track mouse hover
 
-    def update_attachments(self, attachments: list['Attachment']) -> None:
+    def update_attachments(self, attachments: list["Attachment"]) -> None:
         """Update the list of attachments."""
         self._attachments = attachments
 
@@ -115,7 +117,7 @@ class AttachmentBar(Widget, can_focus=True):
 
             # Build the attachment chip
             is_selected = (i == self.selected_index) and is_focused
-            is_hovered = (i == self._hover_index)
+            is_hovered = i == self._hover_index
 
             if is_selected:
                 # Selected: inverse colors

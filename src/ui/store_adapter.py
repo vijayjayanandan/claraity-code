@@ -66,6 +66,7 @@ logger = get_logger("ui.store_adapter")
 @dataclass
 class StreamingState:
     """Tracks state of the current streaming message."""
+
     stream_id: str
     session_id: str
     parent_uuid: str | None
@@ -119,7 +120,7 @@ class StoreAdapter:
         store: "MessageStore",
         session_id: str,
         parent_uuid: str | None = None,
-        flush_on_boundary: bool = True
+        flush_on_boundary: bool = True,
     ):
         """
         Initialize the adapter.
@@ -184,7 +185,9 @@ class StoreAdapter:
                 self._handle_tool_start(cid, name, args, req)
             case ToolCallStatus():
                 pass  # Status updates don't affect message content
-            case ToolCallResult(call_id=cid, status=status, result=result, error=err, duration_ms=dur):
+            case ToolCallResult(
+                call_id=cid, status=status, result=result, error=err, duration_ms=dur
+            ):
                 self._handle_tool_result(cid, status, result, err, dur)
 
             # Thinking
@@ -210,13 +213,15 @@ class StoreAdapter:
         """Initialize new streaming message state."""
         if self._state is not None:
             # Expected after Ctrl+C interrupt - previous stream wasn't finalized
-            logger.info("StreamStart: finalizing incomplete previous stream (normal after interrupt)")
+            logger.info(
+                "StreamStart: finalizing incomplete previous stream (normal after interrupt)"
+            )
             self._finalize_current()
 
         self._state = StreamingState(
             stream_id=generate_stream_id(),
             session_id=self._session_id,
-            parent_uuid=self._parent_uuid
+            parent_uuid=self._parent_uuid,
         )
 
         logger.debug(f"Stream started: {self._state.stream_id}")
@@ -224,11 +229,7 @@ class StoreAdapter:
         # Create initial message in store
         self._flush_to_store()
 
-    def _handle_stream_end(
-        self,
-        total_tokens: int | None,
-        duration_ms: int | None
-    ) -> None:
+    def _handle_stream_end(self, total_tokens: int | None, duration_ms: int | None) -> None:
         """Finalize the streaming message."""
         if self._state is None:
             # Expected when finally block sends StreamEnd after normal completion
@@ -285,7 +286,7 @@ class StoreAdapter:
             return
 
         # Get text since last segment
-        text_since_last = self._state.text_content[self._state.current_text_segment_start:]
+        text_since_last = self._state.text_content[self._state.current_text_segment_start :]
 
         if text_since_last.strip():
             self._state.segments.append(TextSegment(content=text_since_last))
@@ -342,11 +343,7 @@ class StoreAdapter:
     # =========================================================================
 
     def _handle_tool_start(
-        self,
-        call_id: str,
-        name: str,
-        arguments: dict,
-        requires_approval: bool
+        self, call_id: str, name: str, arguments: dict, requires_approval: bool
     ) -> None:
         """Add a tool call to the message."""
         if self._state is None:
@@ -358,11 +355,8 @@ class StoreAdapter:
         # Create ToolCall object
         tool_call = ToolCall(
             id=call_id,
-            function=ToolCallFunction(
-                name=name,
-                arguments=json.dumps(arguments)
-            ),
-            meta={"requires_approval": requires_approval}
+            function=ToolCallFunction(name=name, arguments=json.dumps(arguments)),
+            meta={"requires_approval": requires_approval},
         )
 
         self._state.tool_calls.append(tool_call)
@@ -380,7 +374,7 @@ class StoreAdapter:
         status,  # ToolStatus enum
         result,
         error: str | None,
-        duration_ms: int | None
+        duration_ms: int | None,
     ) -> None:
         """
         Handle tool result by persisting as a separate role="tool" message.
@@ -410,10 +404,7 @@ class StoreAdapter:
 
         # Persist tool result as separate message
         self.add_tool_result(
-            tool_call_id=call_id,
-            content=content,
-            status=status_str,
-            duration_ms=duration_ms
+            tool_call_id=call_id, content=content, status=status_str, duration_ms=duration_ms
         )
 
     def add_tool_result(
@@ -422,7 +413,7 @@ class StoreAdapter:
         content: str,
         status: str = "success",
         duration_ms: int | None = None,
-        exit_code: int | None = None
+        exit_code: int | None = None,
     ) -> Message:
         """
         Add a tool result as a separate message.
@@ -482,9 +473,7 @@ class StoreAdapter:
 
         # Add ThinkingSegment
         if self._state.thinking_content.strip():
-            self._state.segments.append(
-                ThinkingSegment(content=self._state.thinking_content)
-            )
+            self._state.segments.append(ThinkingSegment(content=self._state.thinking_content))
 
         self._state.in_thinking = False
 
@@ -515,7 +504,7 @@ class StoreAdapter:
 
         # Add any pending text as final segment (for finalization)
         if finalize:
-            text_since_last = self._state.text_content[self._state.current_text_segment_start:]
+            text_since_last = self._state.text_content[self._state.current_text_segment_start :]
             if text_since_last.strip():
                 segments.append(TextSegment(content=text_since_last))
 
@@ -550,7 +539,7 @@ class StoreAdapter:
             content=content,
             session_id=self._session_id,
             parent_uuid=self._parent_uuid,
-            seq=self._store.next_seq()
+            seq=self._store.next_seq(),
         )
 
         self._store.add_message(message)
