@@ -54,7 +54,7 @@ class WorkingMemory:
 
         # Compaction state
         self.pending_continuation_summary: str | None = None
-        self._summarizer: "PrioritizedSummarizer" | None = None
+        self._summarizer: PrioritizedSummarizer | None = None
 
     def count_tokens(self, text: str) -> int:
         """Count tokens in text."""

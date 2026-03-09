@@ -226,13 +226,13 @@ class SubAgentCard(Container):
         self._duration_ms: int | None = None
 
         # Own tool card tracking (separate from app._tool_cards)
-        self._tool_cards: dict[str, "ToolCard"] = {}
+        self._tool_cards: dict[str, ToolCard] = {}
         self._tool_count = 0
 
         # Buffer for tool state updates that arrive before the card is mounted.
         # call_later creates concurrent async tasks, so TOOL_STATE_UPDATED can
         # race ahead of the MESSAGE_ADDED handler that creates the ToolCard.
-        self._pending_tool_states: dict[str, "StoreNotification"] = {}
+        self._pending_tool_states: dict[str, StoreNotification] = {}
 
         # Current assistant message widget (for appending tool cards)
         self._current_assistant: Any | None = None

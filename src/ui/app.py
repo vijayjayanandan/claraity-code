@@ -716,8 +716,8 @@ class CodingAgentApp(App):
         # Phase 6: Store-driven rendering
         # TUI renders from MessageStore notifications. UIEvents are forwarded
         # to StoreAdapter for persistence; store notifications handle rendering.
-        self._message_store: 'MessageStore' | None = None
-        self._store_adapter: 'StoreAdapter' | None = None  # Bridges UIEvents to store
+        self._message_store: MessageStore | None = None
+        self._store_adapter: StoreAdapter | None = None  # Bridges UIEvents to store
         self._store_unsubscribe: Callable[[], None] | None = None
         self._store_message_widgets: dict[str, MessageWidget] = {}  # stream_id -> widget
         self._store_rendered_segment_idx: dict[str, int] = {}  # stream_id -> last rendered segment index
@@ -727,7 +727,7 @@ class CodingAgentApp(App):
         self._session_writer = None  # SessionWriter, opened in on_mount
 
         # PR4: Store update coalescing (prevents UI flicker during streaming)
-        self._store_pending_updates: dict[str, "Message"] = {}  # stream_id -> latest message
+        self._store_pending_updates: dict[str, Message] = {}  # stream_id -> latest message
 
         # Buffered file-read notes: FileReadEvents arrive before UserMessage widget
         # is mounted (store notification chain is async). We buffer them and flush
@@ -748,7 +748,7 @@ class CodingAgentApp(App):
         self._segment_flush_running: bool = False  # Prevent overlapping flushes (Fix #4)
 
         # Subagent visibility: registry + coordinator (extracted Phase 5)
-        self._subagent_registry: 'SubagentRegistry' | None = subagent_registry
+        self._subagent_registry: SubagentRegistry | None = subagent_registry
         self._subagent_coordinator = SubagentCoordinator(
             tool_cards=self._tool_cards,
             mount_callback=self.call_later,

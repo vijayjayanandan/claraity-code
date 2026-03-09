@@ -76,7 +76,7 @@ class AttachmentBar(Widget, can_focus=True):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._attachments: list['Attachment'] = []
+        self._attachments: list[Attachment] = []
         self._hover_index: int = -1  # Track mouse hover
 
     def update_attachments(self, attachments: list['Attachment']) -> None:
