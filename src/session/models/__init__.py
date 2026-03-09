@@ -27,33 +27,32 @@ File snapshots:
 
 from .base import (
     SCHEMA_VERSION,
-    generate_uuid,
-    now_iso,
+    SessionContext,
     generate_stream_id,
     generate_tool_call_id,
-    SessionContext,
+    generate_uuid,
+    now_iso,
 )
-
 from .message import (
-    # Segment types
-    TextSegment,
-    ToolCallSegment,
-    ThinkingSegment,
-    Segment,
-    parse_segment,
-    # Tool calls
-    ToolCallFunction,
-    ToolCall,
-    # Token usage
-    TokenUsage,
-    # Message meta
-    MessageMeta,
-    # Unified message
-    Message,
-    # File snapshots
-    Snapshot,
     FileBackup,
     FileHistorySnapshot,
+    # Unified message
+    Message,
+    # Message meta
+    MessageMeta,
+    Segment,
+    # File snapshots
+    Snapshot,
+    # Segment types
+    TextSegment,
+    ThinkingSegment,
+    # Token usage
+    TokenUsage,
+    ToolCall,
+    # Tool calls
+    ToolCallFunction,
+    ToolCallSegment,
+    parse_segment,
 )
 
 __all__ = [
