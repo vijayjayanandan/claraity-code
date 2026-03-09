@@ -56,7 +56,7 @@ jobs:
 
       - name: Run tests
         run: |
-          pytest tests/ -v --tb=short -x --ignore=tests/test_testing/
+          pytest tests/ -v --tb=short -x --ignore=tests/test_testing/ -m "not integration"
         env:
           # Disable tests that require external services
           SKIP_INTEGRATION_TESTS: "1"

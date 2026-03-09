@@ -106,7 +106,7 @@ class TestSessionManager:
         """Create temporary directory for tests."""
         tmpdir = Path(tempfile.mkdtemp())
         yield tmpdir
-        shutil.rmtree(tmpdir)
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
     @pytest.fixture
     def manager(self, temp_dir):
