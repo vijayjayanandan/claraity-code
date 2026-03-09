@@ -274,8 +274,11 @@ class TestExecuteToolsParallel:
         agent = make_agent()
         executor = agent_parts['executor']
 
-        # Both tools have a small delay to detect concurrency
-        executor.set_result("read_file", make_success_result("file content A"), delay=0.05)
+        # Both tools have a delay to detect concurrency.
+        # delay=0.2 so sequential=0.4s; concurrent≈0.2s+overhead.
+        # Threshold 0.36s is well below sequential even with ~100ms CI overhead.
+        delay = 0.2
+        executor.set_result("read_file", make_success_result("file content A"), delay=delay)
 
         tc1 = make_tool_call("read_file", {"file_path": "/a.py"}, "call_1")
         tc2 = make_tool_call("read_file", {"file_path": "/b.py"}, "call_2")
@@ -292,8 +295,8 @@ class TestExecuteToolsParallel:
         # Both should complete
         assert len(results) == 2
 
-        # Should run concurrently: total time < 2x delay
-        assert elapsed < 0.15, f"Expected concurrent execution, took {elapsed:.3f}s"
+        # Should run concurrently: total time < sequential time (2x delay)
+        assert elapsed < 2 * delay * 0.9, f"Expected concurrent execution, took {elapsed:.3f}s"
 
         # Both should have tool_msg
         for _, _, _, outcome in results:
