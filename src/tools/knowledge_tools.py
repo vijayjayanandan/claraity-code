@@ -507,11 +507,11 @@ class KBUpdateManifestTool(Tool):
             source_files = {}
             stat_errors = []
             for filepath in analyzed_files:
-                full_path = root / filepath
+                normalized = filepath.replace("\\", "/")
+                full_path = root / normalized
                 try:
                     stat = full_path.stat()
                     mtime_iso = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
-                    normalized = filepath.replace("\\", "/")
                     source_files[normalized] = {
                         "size": stat.st_size,
                         "mtime": mtime_iso,

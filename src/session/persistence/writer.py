@@ -118,6 +118,13 @@ class SessionWriter:
         # Wait for pending writes to drain (v3.1 Patch 3)
         if self._pending_count > 0:
             logger.info(f"Draining {self._pending_count} pending writes...")
+            # Ensure drain_complete is cleared before we wait.
+            # When sync_handler and close() run in the same async task,
+            # call_soon_threadsafe(drain_complete.clear) may still be queued
+            # and hasn't executed yet, so drain_complete could still be set.
+            # Clearing it here guarantees we actually wait for the writes.
+            if self._drain_complete:
+                self._drain_complete.clear()
             try:
                 await asyncio.wait_for(self._drain_complete.wait(), timeout=self._drain_timeout)
                 logger.info("Writer drain complete")
