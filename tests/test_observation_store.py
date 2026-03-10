@@ -1,6 +1,7 @@
 """Tests for ObservationStore - Phase 2 of Context Management."""
 
 import os
+import shutil
 import tempfile
 import pytest
 from pathlib import Path
@@ -77,9 +78,10 @@ class TestObservationStore:
     @pytest.fixture
     def temp_db(self):
         """Create a temporary database for testing."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = os.path.join(tmpdir, "test_observations.db")
-            yield db_path
+        tmpdir = tempfile.mkdtemp()
+        db_path = os.path.join(tmpdir, "test_observations.db")
+        yield db_path
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
     @pytest.fixture
     def store(self, temp_db):
@@ -348,9 +350,10 @@ class TestTokenCounting:
 
     @pytest.fixture
     def temp_db(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = os.path.join(tmpdir, "test.db")
-            yield db_path
+        tmpdir = tempfile.mkdtemp()
+        db_path = os.path.join(tmpdir, "test.db")
+        yield db_path
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
     def test_default_token_counter(self, temp_db):
         """Test default word-based token estimation."""
