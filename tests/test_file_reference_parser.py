@@ -188,7 +188,8 @@ class TestFileReferenceParser:
         refs = parser.parse_references(message)
 
         assert len(refs) == 1
-        assert refs[0].path == absolute_path
+        # Resolve both sides to handle Windows 8.3 short names (e.g. RUNNER~1 vs runneradmin)
+        assert refs[0].path.resolve() == absolute_path.resolve()
 
     def test_display_path_relative(self, parser, temp_dir):
         """Test display_path returns relative path when possible."""
