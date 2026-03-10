@@ -104,8 +104,8 @@ class FileReferenceParser:
     # Also supports line ranges: @file.py:10-20, @file.py:50
     # On Windows, supports drive letters: @C:\path\to\file.py
     FILE_REFERENCE_PATTERN = re.compile(
-        r"@([A-Za-z]:[\\\/][A-Za-z0-9_.\\\/\-]+(?:\.[A-Za-z0-9]+)?(?::\d+(?:-\d+)?)?"
-        r"|[A-Za-z0-9_./\-]+(?:\.[A-Za-z0-9]+)?(?::\d+(?:-\d+)?)?)"
+        r"@([A-Za-z]:[\\\/][A-Za-z0-9_.\\\/\-~]+(?:\.[A-Za-z0-9]+)?(?::\d+(?:-\d+)?)?"
+        r"|[A-Za-z0-9_./\-~]+(?:\.[A-Za-z0-9]+)?(?::\d+(?:-\d+)?)?)"
     )
 
     def __init__(self, base_dir: Path | None = None, max_file_size: int = 100_000):
