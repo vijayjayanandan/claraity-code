@@ -24,14 +24,10 @@ from textual.widgets import Footer, Header, Static, TextArea
 from textual.widgets.text_area import Selection
 from textual.worker import Worker
 
-from src.observability import get_logger
-
-# Module-level logger for debugging silent exceptions
-logger = get_logger(__name__)
-
 from src.core.attachment import Attachment
 from src.core.render_meta import RenderMetaRegistry
 from src.core.tool_status import ToolStatus as CoreToolStatus
+from src.observability import get_logger
 
 from .autocomplete import FileAutocomplete
 from .clipboard_handler import ClipboardHandler
@@ -78,6 +74,7 @@ from .store_renderer import StoreRenderer
 from .subagent_coordinator import SubagentCoordinator
 from .widgets.attachment_bar import AttachmentBar
 from .widgets.autocomplete_dropdown import AutocompleteDropdown
+from .widgets.background_task_bar import BackgroundTaskBar
 from .widgets.clarify_widget import ClarifyWidget
 from .widgets.code_block import CodeBlock
 from .widgets.message import AssistantMessage, MessageWidget, UserMessage
@@ -86,9 +83,11 @@ from .widgets.plan_approval_widget import PlanApprovalWidget
 from .widgets.status_bar import StatusBar
 from .widgets.subagent_card import SubAgentCard
 from .widgets.thinking import ThinkingBlock
-from .widgets.background_task_bar import BackgroundTaskBar
 from .widgets.todo_bar import TodoBar
 from .widgets.tool_card import ToolCard
+
+# Module-level logger for debugging silent exceptions
+logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from ..core.agent import CodingAgent  # For type hints

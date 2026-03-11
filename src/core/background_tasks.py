@@ -81,7 +81,7 @@ class BackgroundTaskRegistry:
         self._async_tasks: dict[str, asyncio.Task] = {}
         self._completed_queue: list[BackgroundTaskInfo] = []
         self._counter: int = 0
-        self._completion_callback: Callable[[int, Optional["BackgroundTaskInfo"]], Any] | None = None
+        self._completion_callback: Callable[[int, BackgroundTaskInfo | None], Any] | None = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -260,7 +260,7 @@ class BackgroundTaskRegistry:
             1 for info in self._tasks.values() if info.status == BackgroundTaskStatus.RUNNING
         )
 
-    def _fire_completion_callback(self, completed_task: Optional[BackgroundTaskInfo] = None) -> None:
+    def _fire_completion_callback(self, completed_task: BackgroundTaskInfo | None = None) -> None:
         if self._completion_callback:
             try:
                 self._completion_callback(self._active_count(), completed_task)
