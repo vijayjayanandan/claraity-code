@@ -55,7 +55,7 @@ def _replace_outside_quotes(text: str, old: str, new: str) -> str:
             # Find the matching close quote
             j = i + 1
             while j < length and text[j] != quote_char:
-                if text[j] == '\\' and j + 1 < length:
+                if text[j] == "\\" and j + 1 < length:
                     j += 1  # skip escaped char
                 j += 1
             if j < length:

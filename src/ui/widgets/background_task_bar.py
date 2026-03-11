@@ -174,10 +174,7 @@ class BackgroundTaskBar(Widget, can_focus=True):
 
     def update_from_registry(self, registry: BackgroundTaskRegistry) -> None:
         """Refresh task list from BackgroundTaskRegistry. Only shows running tasks."""
-        running = [
-            t for t in registry.all_tasks()
-            if t.status == BackgroundTaskStatus.RUNNING
-        ]
+        running = [t for t in registry.all_tasks() if t.status == BackgroundTaskStatus.RUNNING]
 
         self.tasks = [
             {

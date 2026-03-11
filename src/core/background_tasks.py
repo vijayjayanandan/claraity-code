@@ -224,7 +224,9 @@ class BackgroundTaskRegistry:
             logger.info("background_tasks_cancel_all", count=count)
         return count
 
-    def set_completion_callback(self, fn: Callable[[int, Optional["BackgroundTaskInfo"]], Any]) -> None:
+    def set_completion_callback(
+        self, fn: Callable[[int, Optional["BackgroundTaskInfo"]], Any]
+    ) -> None:
         """Register callback fired on task start/completion.
 
         Args:

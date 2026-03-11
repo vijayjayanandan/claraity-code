@@ -135,7 +135,9 @@ class VSCodeChannel:
         finally:
             self._pending_results.pop(task_id, None)
 
-    def receive_result(self, task_id: str, exit_code: int, output: str = "", error: str = "") -> None:
+    def receive_result(
+        self, task_id: str, exit_code: int, output: str = "", error: str = ""
+    ) -> None:
         """Called when extension sends back terminal result.
 
         Args:

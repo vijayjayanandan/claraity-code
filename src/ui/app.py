@@ -1357,9 +1357,7 @@ class CodingAgentApp(App):
     # Background Task Bar Handlers
     # -------------------------------------------------------------------------
 
-    async def on_background_task_bar_kill_task(
-        self, message: BackgroundTaskBar.KillTask
-    ) -> None:
+    async def on_background_task_bar_kill_task(self, message: BackgroundTaskBar.KillTask) -> None:
         """Handle kill request from BackgroundTaskBar."""
         if not self.agent:
             return
@@ -1375,9 +1373,7 @@ class CodingAgentApp(App):
         except NoMatches:
             pass
 
-    def on_background_task_bar_collapse_bar(
-        self, message: BackgroundTaskBar.CollapseBar
-    ) -> None:
+    def on_background_task_bar_collapse_bar(self, message: BackgroundTaskBar.CollapseBar) -> None:
         """Handle collapse — return focus to input."""
         self._focus_input()
 
@@ -2886,11 +2882,7 @@ class CodingAgentApp(App):
                 f"</task>"
             )
 
-        notification = (
-            "<task-notification>\n"
-            + "\n".join(task_blocks)
-            + "\n</task-notification>"
-        )
+        notification = "<task-notification>\n" + "\n".join(task_blocks) + "\n</task-notification>"
         self.post_message(InputSubmittedMessage(content=notification))
 
     # -------------------------------------------------------------------------
