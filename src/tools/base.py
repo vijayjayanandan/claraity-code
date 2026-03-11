@@ -170,6 +170,17 @@ class ToolExecutor:
         """Remove a tool by name. No-op if not registered."""
         self.tools.pop(tool_name, None)
 
+    def get_tool(self, tool_name: str) -> Optional[Tool]:
+        """Get a tool by name.
+
+        Args:
+            tool_name: Name of tool to retrieve
+
+        Returns:
+            Tool instance or None if not registered
+        """
+        return self.tools.get(tool_name)
+
     def execute_tool(self, tool_name: str, **kwargs: Any) -> ToolResult:
         """
         Execute a tool by name with optional hook integration.

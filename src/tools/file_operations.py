@@ -22,6 +22,7 @@ from typing import Any, Optional
 
 from src.observability import get_logger
 from src.tools.command_safety import check_command_safety, clamp_timeout
+from src.tools.powershell_sanitize import sanitize_for_powershell
 
 from .base import Tool, ToolResult, ToolStatus
 from .search_tools import validate_path_security
@@ -561,8 +562,9 @@ class RunCommandTool(Tool):
     """
     Tool for running shell commands safely.
 
-    Supports both synchronous (foreground) and asynchronous (background) execution.
-    When background=True, delegates to BackgroundTaskRegistry for non-blocking execution.
+    Supports two execution modes:
+    1. Background execution (background=True) - non-blocking with task registry
+    2. Captured execution (default) - returns captured output
 
     Note: Does not inherit from FileOperationTool as it doesn't
     operate on files directly. Security handled via command validation.
@@ -609,7 +611,13 @@ class RunCommandTool(Tool):
         description: str = "",
         **kwargs: Any,
     ) -> ToolResult:
-        """Async execution path -- required for background=True (registry.launch is async)."""
+        """Async execution path.
+
+        Execution order:
+        1. If background=True -> delegate to BackgroundTaskRegistry
+        2. Otherwise -> capture output via subprocess
+        """
+        # --- FOREGROUND EXECUTION ---
         if not background:
             # Foreground: delegate to sync execute() (will be run in thread pool by ToolExecutor)
             return self.execute(
@@ -734,6 +742,10 @@ class RunCommandTool(Tool):
                         error=f"Working directory path is not a directory: {working_directory}",
                     )
                 cwd = str(cwd_path.absolute())
+
+            # Sanitize cmd.exe/bash syntax for PowerShell (defensive -- LLM sometimes
+            # generates '&&' chains or '2>nul' despite being told to use PowerShell)
+            command = sanitize_for_powershell(command)
 
             # Execute command
             # On Windows, use PowerShell instead of cmd.exe for better Unix compatibility

@@ -96,15 +96,16 @@ class TestSubagentHeaderRender:
             "Expected at least one span with 'blink' style for awaiting_approval"
         )
 
-    def test_render_running_shows_asterisk_and_running_label(self):
-        """Regression: 'running' status must show '*' icon and 'running' label."""
+    def test_render_running_shows_asterisk_and_live_status(self):
+        """Regression: 'running' status must show '*' icon and live status info."""
         header = _make_header()
         header.update_status("running", tool_count=1)
         text = header.render()
         rendered = str(text)
 
         assert "*" in rendered, "Icon '*' missing from running render"
-        assert "running" in rendered, "'running' label missing from running render"
+        assert "1 tools" in rendered, "Tool count missing from running render"
+        assert "s" in rendered, "Elapsed time missing from running render"
 
     def test_render_running_has_no_blink_style(self):
         """Running status must NOT apply blink style to any span."""

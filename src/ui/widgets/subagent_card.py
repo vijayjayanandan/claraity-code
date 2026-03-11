@@ -19,6 +19,8 @@ Mounted inside the parent ToolCard (delegation tool call).
 """
 
 import json
+import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -88,7 +90,18 @@ class _SubagentHeader(Static):
         self._status = "running"
         self._tool_count = 0
         self._duration_ms: int | None = None
-        self._collapsed = False
+        self._collapsed = True
+        self._current_tool: str = ""
+        self._current_tool_arg: str = ""
+        self._start_time: float = time.monotonic()
+        self._timer: Any = None
+
+    def on_mount(self) -> None:
+        self._timer = self.set_interval(0.15, lambda: self.refresh(layout=False))
+
+    def on_unmount(self) -> None:
+        if self._timer:
+            self._timer.stop()
 
     def update_status(
         self,
@@ -99,7 +112,14 @@ class _SubagentHeader(Static):
         self._status = status
         self._tool_count = tool_count
         self._duration_ms = duration_ms
+        if status in ("done", "failed") and self._timer:
+            self._timer.stop()
+            self._timer = None
         self.refresh()
+
+    def update_current_tool(self, name: str, arg: str) -> None:
+        self._current_tool = name
+        self._current_tool_arg = arg
 
     def set_collapsed(self, collapsed: bool) -> None:
         self._collapsed = collapsed
@@ -131,15 +151,27 @@ class _SubagentHeader(Static):
         if self._model_name:
             t.append(f" ({self._model_name})", style="#b5cea8")
 
-        t.append(f" | {self._tool_count} tools", style="#6e7681")
-
-        if self._duration_ms:
-            secs = self._duration_ms / 1000
-            t.append(f" | {secs:.1f}s", style="#6e7681")
-        elif self._status == "awaiting_approval":
-            t.append(" | awaiting approval", style="blink #ff8c00")
-        elif self._status == "running":
-            t.append(" | running", style="#cca700")
+        if self._status == "running":
+            # Live status: tool count, elapsed, current tool, braille spinner
+            elapsed = int(time.monotonic() - self._start_time)
+            # Braille orbit spinner — 10-frame cycle (Claude Code style, 6fps)
+            braille = "\u280b\u2819\u2839\u2838\u283c\u2834\u2826\u2827\u2807\u280f"
+            frame = int(time.monotonic() * 6) % len(braille)
+            t.append(f" | {self._tool_count} tools", style="#6e7681")
+            t.append(f" | {elapsed}s", style="#6e7681")
+            if self._current_tool:
+                label = self._current_tool
+                if self._current_tool_arg:
+                    label += f" - {self._current_tool_arg}"
+                t.append(f" | {label}", style="#9cdcfe")
+            t.append(f" {braille[frame]}", style="bold #cca700")
+        else:
+            t.append(f" | {self._tool_count} tools", style="#6e7681")
+            if self._duration_ms:
+                secs = self._duration_ms / 1000
+                t.append(f" | {secs:.1f}s", style="#6e7681")
+            elif self._status == "awaiting_approval":
+                t.append(" | awaiting approval", style="blink #ff8c00")
 
         return t
 
@@ -216,6 +248,7 @@ class SubAgentCard(Container):
         buffered_notifications: list | None = None,
         model_name: str = "",
         subagent_name: str = "",
+        approval_callback: Callable | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -224,7 +257,8 @@ class SubAgentCard(Container):
         self.model_name = model_name
         self.subagent_name = subagent_name
         self._status = "running"
-        self._collapsed = False
+        self._collapsed = True
+        self._approval_callback = approval_callback
         self._duration_ms: int | None = None
 
         # Own tool card tracking (separate from app._tool_cards)
@@ -269,6 +303,10 @@ class SubAgentCard(Container):
             self._body = self.query_one("#sa-body", _SubagentBody)
         except Exception:
             pass
+
+        # Start collapsed
+        if self._body and self._collapsed:
+            self._body.add_class("-collapsed")
 
         # Deferred hydration
         if self._pending_store is not None:
@@ -392,12 +430,29 @@ class SubAgentCard(Container):
 
         if status == ToolStatus.AWAITING_APPROVAL:
             card.status = ToolStatus.AWAITING_APPROVAL
+            # Promote approval to conversation level via callback
+            if self._approval_callback:
+                self.call_later(
+                    self._approval_callback,
+                    notification.tool_call_id,
+                    card.tool_name,
+                    card.args,
+                    self.subagent_name or self.subagent_id[:8],
+                    self.subagent_id,
+                )
         elif status == ToolStatus.APPROVED:
             card.status = ToolStatus.APPROVED
         elif status == ToolStatus.REJECTED:
             card.status = ToolStatus.REJECTED
         elif status == ToolStatus.RUNNING:
             card.start_running()
+            # Update header with current tool info
+            if self._header:
+                tool_name = state.metadata.get("tool_name", "") or "" if state.metadata else ""
+                args_summary = (
+                    state.metadata.get("args_summary", "") or "" if state.metadata else ""
+                )
+                self._header.update_current_tool(tool_name, args_summary)
         elif status == ToolStatus.SUCCESS:
             # Result content comes from tool MESSAGE_ADDED, not state update.
             # Use state.result if available, otherwise just update duration/status.
@@ -485,7 +540,11 @@ class SubAgentCard(Container):
                         continue
                     args = json.loads(tc.function.arguments) if tc.function.arguments else {}
                     card = widget.add_tool_card(
-                        tc.id, tc.function.name, args, requires_approval=False
+                        tc.id,
+                        tc.function.name,
+                        args,
+                        requires_approval=False,
+                        suppress_approval_ui=True,
                     )
                     self._register_tool_card(tc.id, card)
                     if store:
@@ -556,7 +615,11 @@ class SubAgentCard(Container):
                         continue
                     args = json.loads(tc.function.arguments) if tc.function.arguments else {}
                     card = widget.add_tool_card(
-                        tc.id, tc.function.name, args, requires_approval=False
+                        tc.id,
+                        tc.function.name,
+                        args,
+                        requires_approval=False,
+                        suppress_approval_ui=True,
                     )
                     self._register_tool_card(tc.id, card)
                     # Hydrate from store if available (session resume)

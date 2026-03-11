@@ -64,6 +64,7 @@ class SubagentCoordinator:
         agent: Any,
         ui_protocol: "UIProtocol",
         pause_callback: Callable,
+        approval_callback: Callable | None = None,
     ) -> None:
         """Subscribe to registry events and wire to delegation tool.
 
@@ -72,7 +73,9 @@ class SubagentCoordinator:
             agent: CodingAgent instance (for delegation tool wiring)
             ui_protocol: UIProtocol instance
             pause_callback: Callback for subagent pause requests
+            approval_callback: Callback for subagent approval requests (promoted to conversation)
         """
+        self._approval_callback = approval_callback
         self._unsubscribe_registry_reg = registry.subscribe_on_registered(
             self.on_subagent_registered
         )
@@ -196,6 +199,7 @@ class SubagentCoordinator:
                 buffered_notifications=buffered,
                 model_name=model_name,
                 subagent_name=subagent_name,
+                approval_callback=getattr(self, "_approval_callback", None),
                 id=f"subagent-{subagent_id}",
             )
 
