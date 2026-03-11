@@ -170,7 +170,7 @@ class ToolExecutor:
         """Remove a tool by name. No-op if not registered."""
         self.tools.pop(tool_name, None)
 
-    def get_tool(self, tool_name: str) -> Optional[Tool]:
+    def get_tool(self, tool_name: str) -> Tool | None:
         """Get a tool by name.
 
         Args:

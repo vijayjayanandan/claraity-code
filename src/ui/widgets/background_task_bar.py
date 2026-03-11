@@ -21,7 +21,11 @@ from textual.message import Message
 from textual.reactive import reactive
 from textual.widget import Widget
 
-from src.core.background_tasks import BackgroundTaskInfo, BackgroundTaskRegistry, BackgroundTaskStatus
+from src.core.background_tasks import (
+    BackgroundTaskInfo,
+    BackgroundTaskRegistry,
+    BackgroundTaskStatus,
+)
 
 
 class BackgroundTaskBar(Widget, can_focus=True):
