@@ -1,14 +1,16 @@
 # Source files (compiled output is in out/)
 src/**
 **/*.ts
-!**/*.d.ts
+!out/**/*.d.ts
 tsconfig.json
 
-# Webview source (built output goes to webview-ui/dist/)
+# Webview -- only dist/ is needed at runtime; exclude everything else
 webview-ui/src/**
 webview-ui/node_modules/**
 webview-ui/tsconfig.json
 webview-ui/vite.config.ts
+webview-ui/package-lock.json
+webview-ui/GAP_ANALYSIS.md
 
 # Development files
 .vscode/**
@@ -24,5 +26,4 @@ jest.config.*
 # Package manager locks (not needed at runtime)
 package-lock.json
 
-# Documentation source (README is included by default)
-CHANGELOG.md
+# Documentation source (README and CHANGELOG included by default)

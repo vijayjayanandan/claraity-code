@@ -36,7 +36,9 @@
       "Bash(powershell:*)",
       "Bash(dir:*)",
       "Bash(python3:*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "WebFetch(domain:marketplace.visualstudio.com)",
+      "WebFetch(domain:docs.anthropic.com)"
     ],
     "deny": []
   }
