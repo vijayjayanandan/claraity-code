@@ -4,15 +4,18 @@ Langfuse Configuration and Client Initialization
 Provides the Langfuse client for production observability of the AI coding agent.
 """
 
-import os
+from __future__ import annotations
+
 import atexit
 import logging
-from typing import Optional, Dict, Any
+import os
 from contextlib import contextmanager
+from typing import Any, Optional
 
 # Langfuse import with graceful degradation (v3 API - June 2025)
 try:
     from langfuse import Langfuse, get_client, observe
+
     LANGFUSE_AVAILABLE = True
 except ImportError:
     LANGFUSE_AVAILABLE = False
@@ -23,7 +26,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 # Global Langfuse client instance
-_langfuse_client: Optional[Langfuse] = None
+_langfuse_client: Langfuse | None = None
 _current_trace = None
 
 
@@ -38,7 +41,7 @@ def _cleanup_langfuse():
             logger.error(f"Failed to flush Langfuse on exit: {e}")
 
 
-def initialize_langfuse() -> Optional[Langfuse]:
+def initialize_langfuse() -> Langfuse | None:
     """
     Initialize Langfuse client from environment variables.
 
@@ -78,11 +81,7 @@ def initialize_langfuse() -> Optional[Langfuse]:
         logger.info("Using default local development secret key")
 
     try:
-        _langfuse_client = Langfuse(
-            public_key=public_key,
-            secret_key=secret_key,
-            host=host
-        )
+        _langfuse_client = Langfuse(public_key=public_key, secret_key=secret_key, host=host)
 
         # Register cleanup on exit to flush pending events
         atexit.register(_cleanup_langfuse)
@@ -95,7 +94,7 @@ def initialize_langfuse() -> Optional[Langfuse]:
         return None
 
 
-def get_langfuse_client() -> Optional[Langfuse]:
+def get_langfuse_client() -> Langfuse | None:
     """
     Get the global Langfuse client instance.
 
@@ -130,10 +129,10 @@ is_observability_enabled = is_enabled
 
 def start_trace(
     name: str,
-    user_id: Optional[str] = None,
-    session_id: Optional[str] = None,
-    metadata: Optional[Dict[str, Any]] = None,
-    tags: Optional[list] = None
+    user_id: str | None = None,
+    session_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    tags: list | None = None,
 ):
     """
     Start a new trace for tracking execution.
@@ -160,7 +159,7 @@ def start_trace(
             user_id=user_id,
             session_id=session_id,
             metadata=metadata or {},
-            tags=tags or []
+            tags=tags or [],
         )
         logger.debug(f"Started trace: {name}")
         return _current_trace
@@ -205,10 +204,10 @@ def get_current_trace():
 @contextmanager
 def trace_context(
     name: str,
-    user_id: Optional[str] = None,
-    session_id: Optional[str] = None,
-    metadata: Optional[Dict[str, Any]] = None,
-    tags: Optional[list] = None
+    user_id: str | None = None,
+    session_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    tags: list | None = None,
 ):
     """
     Context manager for automatic trace lifecycle.
@@ -226,11 +225,7 @@ def trace_context(
         tags: List of tags
     """
     trace = start_trace(
-        name=name,
-        user_id=user_id,
-        session_id=session_id,
-        metadata=metadata,
-        tags=tags
+        name=name, user_id=user_id, session_id=session_id, metadata=metadata, tags=tags
     )
 
     try:

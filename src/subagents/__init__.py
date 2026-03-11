@@ -29,15 +29,15 @@ Example:
     >>> print(result.output)
 """
 
-from src.subagents.subagent import SubAgent, SubAgentResult
 from src.subagents.config import SubAgentConfig, SubAgentConfigLoader
-from src.subagents.manager import SubAgentManager, DelegationResult
+from src.subagents.manager import DelegationResult, SubAgentManager
+from src.subagents.subagent import SubAgent, SubAgentResult
 
 __all__ = [
-    'SubAgent',
-    'SubAgentResult',
-    'SubAgentConfig',
-    'SubAgentConfigLoader',
-    'SubAgentManager',
-    'DelegationResult',
+    "SubAgent",
+    "SubAgentResult",
+    "SubAgentConfig",
+    "SubAgentConfigLoader",
+    "SubAgentManager",
+    "DelegationResult",
 ]

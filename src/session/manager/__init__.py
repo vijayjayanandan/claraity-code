@@ -16,8 +16,8 @@ Key design per v3.1 Patch 1:
 """
 
 from .session_manager import (
-    SessionManager,
     SessionInfo,
+    SessionManager,
 )
 
 __all__ = [

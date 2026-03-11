@@ -13,10 +13,11 @@ has no annotations, it is conservatively treated as a write tool.
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Optional
 
 try:
     from src.observability import get_logger
+
     logger = get_logger("integrations.mcp.policy")
 except ImportError:
     logger = logging.getLogger(__name__)
@@ -33,6 +34,7 @@ class ToolPolicy:
         is_destructive: Whether this tool performs destructive operations.
         description_override: Optional override for MCP-provided description.
     """
+
     allowed: bool = True
     requires_approval: bool = False
     is_write: bool = False
@@ -42,7 +44,7 @@ class ToolPolicy:
     @classmethod
     def from_annotations(
         cls,
-        annotations: Dict[str, Any],
+        annotations: dict[str, Any],
         blocked: bool = False,
     ) -> "ToolPolicy":
         """Build a ToolPolicy from MCP tool annotations.
@@ -77,24 +79,24 @@ class McpPolicyGate:
     Read/write classification comes from MCP annotations, not hardcoded names.
     """
 
-    def __init__(self, blocklist: Optional[Set[str]] = None):
+    def __init__(self, blocklist: set[str] | None = None):
         """Initialize with an optional blocklist.
 
         Args:
-            blocklist: Set of prefixed tool names to block.
+            blocklist: set of prefixed tool names to block.
                       e.g. {"jira_admin_danger", "jira_delete_project"}
         """
-        self._blocklist: Set[str] = set(blocklist) if blocklist else set()
-        self._policies: Dict[str, ToolPolicy] = {}
+        self._blocklist: set[str] = set(blocklist) if blocklist else set()
+        self._policies: dict[str, ToolPolicy] = {}
 
     @property
-    def policies(self) -> Dict[str, ToolPolicy]:
+    def policies(self) -> dict[str, ToolPolicy]:
         return dict(self._policies)
 
     def register_tool(
         self,
         prefixed_name: str,
-        annotations: Dict[str, Any],
+        annotations: dict[str, Any],
     ) -> ToolPolicy:
         """Register a discovered tool and build its policy from annotations.
 

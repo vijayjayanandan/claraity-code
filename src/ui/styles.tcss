@@ -99,6 +99,32 @@ Screen {
 }
 
 /* =============================================================================
+ * Background Task Bar (collapsible running-tasks list)
+ * ============================================================================= */
+
+#bg-task-bar {
+    height: auto;
+    min-height: 0;
+    max-height: 0;
+    width: 100%;
+    background: #000000;
+    padding: 0 1;
+    display: none;
+    overflow: hidden;
+}
+
+#bg-task-bar.has-tasks {
+    display: block;
+    max-height: 15;
+    min-height: 1;
+    border-top: solid #3794ff;
+}
+
+#bg-task-bar.expanded {
+    padding: 1 1;
+}
+
+/* =============================================================================
  * Status Bar
  * ============================================================================= */
 
@@ -184,6 +210,24 @@ ToolApprovalOptions {
 ToolApprovalOptions:focus {
     border: round #3794ff;
     background: #1e2838;
+}
+
+/* =============================================================================
+ * Promoted Subagent Approval (shown at conversation level)
+ * ============================================================================= */
+
+.promoted-approval-container {
+    height: auto;
+    margin: 1 0;
+    padding: 0;
+    border-left: thick #cca700;
+    background: #1a1a2e;
+}
+
+.promoted-approval-label {
+    height: 1;
+    padding: 0 1;
+    background: #1a1a2e;
 }
 
 /* =============================================================================

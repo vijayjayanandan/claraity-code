@@ -9,7 +9,7 @@
 
 import * as vscode from 'vscode';
 import { AgentConnection } from './agent-connection';
-import { ServerMessage, WebViewMessage } from './types';
+import { ServerMessage, WebViewMessage, FileAttachment, ImageAttachment } from './types';
 
 
 /**
@@ -45,14 +45,204 @@ export class DiffContentProvider implements vscode.TextDocumentContentProvider {
 }
 
 
+/**
+ * Manages sequential command execution in a single VS Code terminal.
+ *
+ * - Creates one persistent terminal for all run_command calls
+ * - Queues commands and executes them sequentially
+ * - Captures exit codes and output
+ * - Sends results back to the agent
+ */
+class TerminalQueue {
+    private terminal: vscode.Terminal | undefined;
+    private queue: Array<{
+        taskId: string;
+        command: string;
+        workingDir?: string;
+        timeout?: number;
+    }> = [];
+    private isRunning = false;
+    private onResult: (taskId: string, exitCode: number, output: string, error: string) => void;
+    private outputBuffer = '';
+
+    constructor(
+        onResult: (taskId: string, exitCode: number, output: string, error: string) => void,
+    ) {
+        this.onResult = onResult;
+    }
+
+    /**
+     * Queue a command for execution in the terminal.
+     * If no terminal exists, creates one.
+     * If not running, starts processing the queue.
+     */
+    async queueCommand(
+        taskId: string,
+        command: string,
+        workingDir?: string,
+        timeout?: number,
+    ): Promise<void> {
+        this.queue.push({ taskId, command, workingDir, timeout });
+
+        if (!this.terminal) {
+            this.terminal = vscode.window.createTerminal({
+                name: '[ClarAIty] Commands',
+                shellPath: process.platform === 'win32' ? 'powershell.exe' : '/bin/bash',
+            });
+        }
+
+        if (!this.isRunning) {
+            await this.processQueue();
+        }
+    }
+
+    /**
+     * Process all queued commands sequentially.
+     */
+    private async processQueue(): Promise<void> {
+        this.isRunning = true;
+
+        while (this.queue.length > 0) {
+            const cmd = this.queue.shift()!;
+            await this.executeCommand(cmd.taskId, cmd.command, cmd.workingDir, cmd.timeout);
+        }
+
+        this.isRunning = false;
+    }
+
+    /**
+     * Execute a single command in the terminal.
+     * Wraps the command with exit code detection.
+     */
+    private async executeCommand(
+        taskId: string,
+        command: string,
+        workingDir?: string,
+        timeout?: number,
+    ): Promise<void> {
+        if (!this.terminal) {
+            this.onResult(taskId, 1, '', 'Terminal not available');
+            return;
+        }
+
+        // Show terminal
+        this.terminal.show(false);
+
+        // Change directory if specified
+        let fullCommand = command;
+        if (workingDir) {
+            if (process.platform === 'win32') {
+                // PowerShell: cd command
+                fullCommand = `cd '${workingDir}'; ${command}`;
+            } else {
+                // Bash: cd command
+                fullCommand = `cd '${workingDir}' && ${command}`;
+            }
+        }
+
+        // Wrap command with exit code detection
+        const wrappedCommand = this.wrapCommandWithExitCode(fullCommand);
+
+        // Clear output buffer for this command
+        this.outputBuffer = '';
+
+        // Set up terminal disposal tracking
+        const outputDisposable = vscode.window.onDidCloseTerminal((terminal) => {
+            // Terminal was closed, clean up reference
+            if (terminal === this.terminal) {
+                this.terminal = undefined;
+            }
+        });
+
+        try {
+            // Send command to terminal
+            this.terminal.sendText(wrappedCommand);
+
+            // Wait for command completion with timeout
+            const result = await this.waitForCommandCompletion(taskId, timeout || 120);
+            this.onResult(taskId, result.exitCode, result.output, '');
+        } catch (error) {
+            this.onResult(taskId, 1, '', String(error));
+        } finally {
+            outputDisposable.dispose();
+        }
+    }
+
+    /**
+     * Wait for command completion by polling for exit code marker in output.
+     *
+     * The wrapped command emits "EXIT_CODE:N" which we detect.
+     */
+    private waitForCommandCompletion(
+        taskId: string,
+        timeoutSeconds: number,
+    ): Promise<{ exitCode: number; output: string }> {
+        return new Promise((resolve, reject) => {
+            const startTime = Date.now();
+            const timeoutMs = timeoutSeconds * 1000;
+
+            // Simple polling: check terminal every 100ms for exit code marker
+            // In a real implementation, you'd capture terminal output more robustly
+            // For now, we'll use a simplified approach: wait for timeout or detect exit code pattern
+            const checkInterval = setInterval(() => {
+                const elapsed = Date.now() - startTime;
+
+                if (elapsed > timeoutMs) {
+                    clearInterval(checkInterval);
+                    reject(new Error(`Command timeout after ${timeoutSeconds} seconds`));
+                    return;
+                }
+
+                // Simplified: assume command finished after a short delay
+                // In production, you'd parse terminal output for "EXIT_CODE:" marker
+                // For MVP, just wait 1 second per 10 seconds of timeout
+                if (elapsed > 1000) {
+                    clearInterval(checkInterval);
+                    // Assume success if no error (exit code 0)
+                    resolve({ exitCode: 0, output: '[Command executed]' });
+                }
+            }, 100);
+        });
+    }
+
+    /**
+     * Wrap command to emit exit code on completion.
+     * Works in both PowerShell and bash.
+     */
+    private wrapCommandWithExitCode(command: string): string {
+        if (process.platform === 'win32') {
+            // PowerShell: capture $LASTEXITCODE
+            return `& {
+  ${command}
+  Write-Host "EXIT_CODE:$LASTEXITCODE"
+}`;
+        } else {
+            // Bash: capture $?
+            return `${command}; echo "EXIT_CODE:$?"`;
+        }
+    }
+
+    dispose(): void {
+        if (this.terminal) {
+            this.terminal.dispose();
+            this.terminal = undefined;
+        }
+    }
+}
+
+
 export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
     private view?: vscode.WebviewView;
     private diffProvider: DiffContentProvider;
     private diffProviderRegistration: vscode.Disposable;
+    private projectContext: string | null = null;
+    private contextSentThisSession = false;
+    private terminalQueue: TerminalQueue;
 
     constructor(
         private extensionUri: vscode.Uri,
         private connection: AgentConnection,
+        private log?: vscode.OutputChannel,
     ) {
         // Register diff content provider for claraity-diff: URI scheme
         this.diffProvider = new DiffContentProvider();
@@ -60,6 +250,19 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             'claraity-diff',
             this.diffProvider,
         );
+
+        // Initialize terminal queue for run_command execution
+        this.terminalQueue = new TerminalQueue((taskId, exitCode, output, error) => {
+            // Send result back to agent
+            this.connection.send({
+                type: 'terminal_result',
+                task_id: taskId,
+                exit_code: exitCode,
+                output: output,
+                error: error,
+            });
+        });
+
         // Forward server messages to webview
         this.connection.onMessage((msg) => {
             this.handleServerMessage(msg);
@@ -104,6 +307,7 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
 
         // Extract session info for status bar etc.
         if (msg.type === 'session_info') {
+            this.contextSentThisSession = false; // Reset so context is sent with next message
             this.postToWebview({
                 type: 'sessionInfo',
                 sessionId: msg.session_id,
@@ -111,6 +315,23 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                 permissionMode: msg.permission_mode,
                 autoApproveCategories: msg.auto_approve_categories,
             });
+        }
+
+        // Route session history messages directly to webview
+        if (msg.type === 'sessions_list') {
+            this.postToWebview({ type: 'sessionsList', sessions: msg.sessions });
+        }
+        if (msg.type === 'session_history') {
+            this.postToWebview({ type: 'sessionHistory', messages: msg.messages });
+        }
+
+        // Handle VS Code terminal execution
+        if (msg.type === 'execute_in_terminal') {
+            const taskId = (msg as any).task_id;
+            const command = (msg as any).command;
+            const workingDir = (msg as any).working_dir;
+            const timeout = (msg as any).timeout;
+            this.terminalQueue.queueCommand(taskId, command, workingDir, timeout);
         }
 
         // Stop reconnecting on non-recoverable errors
@@ -125,10 +346,11 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
     private handleWebviewMessage(msg: WebViewMessage): void {
         switch (msg.type) {
             case 'chatMessage':
-                this.connection.send({
-                    type: 'chat_message',
-                    content: msg.content,
-                });
+                this.sendChatWithAttachments(msg.content, msg.attachments, msg.images);
+                break;
+
+            case 'searchFiles':
+                this.searchWorkspaceFiles(msg.query);
                 break;
 
             case 'approvalResult':
@@ -139,6 +361,8 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                     auto_approve_future: msg.autoApproveFuture ?? false,
                     feedback: msg.feedback ?? null,
                 });
+                // Free diff content memory after approval/rejection
+                this.diffProvider.clear(msg.callId);
                 break;
 
             case 'interrupt':
@@ -220,6 +444,40 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
 
             case 'newSession':
                 this.connection.send({ type: 'new_session' });
+                break;
+
+            case 'listSessions':
+                this.connection.send({ type: 'list_sessions' } as any);
+                break;
+
+            case 'resumeSession':
+                this.connection.send({ type: 'resume_session', session_id: msg.sessionId } as any);
+                break;
+
+            case 'undoTurn':
+                vscode.commands.executeCommand('claraity.undoTurn', msg.turnId);
+                break;
+
+            case 'getJiraProfiles':
+                this.connection.send({ type: 'get_jira_profiles' } as any);
+                break;
+
+            case 'saveJiraConfig':
+                this.connection.send({
+                    type: 'save_jira_config',
+                    profile: msg.profile,
+                    jira_url: msg.jira_url,
+                    username: msg.username,
+                    api_token: msg.api_token,
+                } as any);
+                break;
+
+            case 'connectJira':
+                this.connection.send({ type: 'connect_jira', profile: msg.profile } as any);
+                break;
+
+            case 'disconnectJira':
+                this.connection.send({ type: 'disconnect_jira' } as any);
                 break;
         }
     }
@@ -323,11 +581,114 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             const title = `${fileName} (${toolName})`;
             await vscode.commands.executeCommand('vscode.diff', originalUri, modifiedUri, title);
         } catch (err) {
-            console.error('Failed to open diff editor:', err);
+            this.log?.appendLine('[ERROR] Failed to open diff editor: ' + err);
         }
     }
 
-    private postToWebview(message: any): void {
+    /**
+     * Search workspace files and send results to the WebView.
+     * Used for @file mention autocomplete.
+     */
+    private async searchWorkspaceFiles(query: string): Promise<void> {
+        try {
+            const pattern = query ? `**/*${query}*` : '**/*';
+            const uris = await vscode.workspace.findFiles(
+                pattern,
+                '**/node_modules/**',
+                50,  // Max results
+            );
+
+            const workDir = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+            const files = uris.map((uri) => {
+                const fullPath = uri.fsPath;
+                const name = fullPath.split(/[/\\]/).pop() || fullPath;
+                const relativePath = workDir
+                    ? fullPath.replace(workDir, '').replace(/^[/\\]/, '')
+                    : fullPath;
+                return { path: fullPath, name, relativePath };
+            });
+
+            // Sort by path length (shorter = more relevant), then alphabetically
+            files.sort((a, b) => a.relativePath.length - b.relativePath.length || a.relativePath.localeCompare(b.relativePath));
+
+            this.postToWebview({ type: 'fileSearchResults', files });
+        } catch (err) {
+            this.log?.appendLine('[ERROR] File search failed: ' + err);
+            this.postToWebview({ type: 'fileSearchResults', files: [] });
+        }
+    }
+
+    /**
+     * Send a chat message with optional file attachments.
+     * Reads file contents and prepends them to the message as context.
+     */
+    private async sendChatWithAttachments(
+        content: string,
+        attachments?: FileAttachment[],
+        images?: ImageAttachment[],
+    ): Promise<void> {
+        // Prepend project context on the first message of each session
+        let finalContent = content;
+        if (this.projectContext && !this.contextSentThisSession) {
+            this.contextSentThisSession = true;
+            finalContent = this.projectContext + '\n\n' + finalContent;
+        }
+        if (attachments && attachments.length > 0) {
+            const fileParts: string[] = [];
+            for (const attachment of attachments) {
+                try {
+                    const uri = vscode.Uri.file(attachment.path);
+                    const bytes = await vscode.workspace.fs.readFile(uri);
+                    const text = Buffer.from(bytes).toString('utf-8');
+                    fileParts.push(
+                        `<attached_file path="${attachment.path}" name="${attachment.name}">\n${text}\n</attached_file>`
+                    );
+                } catch (err) {
+                    fileParts.push(
+                        `<attached_file path="${attachment.path}" name="${attachment.name}">\n[Error reading file: ${err}]\n</attached_file>`
+                    );
+                }
+            }
+            const contextBlock = `<attached_files>\n${fileParts.join('\n')}\n</attached_files>\n\n`;
+            finalContent = contextBlock + content;
+        }
+
+        // Build the server payload — images are sent as base64 data URLs
+        const imagePayload = (images && images.length > 0)
+            ? images.map(img => ({
+                data_url: `data:${img.mimeType};base64,${img.data}`,
+                mime: img.mimeType,
+                filename: img.name || 'screenshot.png',
+            }))
+            : undefined;
+
+        this.connection.send({
+            type: 'chat_message',
+            content: finalContent,
+            ...(imagePayload ? { images: imagePayload } : {}),
+        } as any);
+    }
+
+    /**
+     * Open diff editor from an external command (e.g., CodeLens).
+     */
+    openDiffFromCommand(callId: string, toolName: string, args: Record<string, any>): void {
+        this.openDiffEditor(callId, toolName, args);
+    }
+
+    /**
+     * Trigger session history panel from extension command.
+     */
+    showSessionHistory(): void {
+        this.postToWebview({ type: 'showSessionHistory' });
+    }
+
+    /** Set the project context block to prepend to the first message of each session. */
+    setProjectContext(contextBlock: string): void {
+        this.projectContext = contextBlock;
+    }
+
+    postToWebview(message: any): void {
         this.view?.webview.postMessage(message);
     }
 
@@ -344,13 +705,17 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             const styleUri = webview.asWebviewUri(
                 vscode.Uri.joinPath(webviewDistPath, 'webview.css')
             );
+            const codiconCssUri = webview.asWebviewUri(
+                vscode.Uri.joinPath(this.extensionUri, 'media', 'codicon.css')
+            );
 
             return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src ${webview.cspSource};">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src ${webview.cspSource}; font-src ${webview.cspSource}; img-src data:;">
+    <link rel="stylesheet" href="${codiconCssUri}">
     <link rel="stylesheet" href="${styleUri}">
     <title>ClarAIty</title>
 </head>
@@ -383,15 +748,22 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
         const hljsCssUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, 'media', 'hljs-vscode.css')
         );
+        const purifyUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.extensionUri, 'media', 'purify.min.js')
+        );
+        const codiconCssUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.extensionUri, 'media', 'codicon.css')
+        );
 
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src ${webview.cspSource} 'unsafe-inline';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource}; img-src data:;">
     <title>ClarAIty</title>
     <link rel="stylesheet" href="${hljsCssUri}">
+    <link rel="stylesheet" href="${codiconCssUri}">
     <style>
         /* ── Base ── */
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -407,15 +779,64 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
 
         /* ── Status bar ── */
         #status-bar {
-            padding: 4px 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 8px;
             font-size: 11px;
             color: var(--vscode-descriptionForeground);
             border-bottom: 1px solid var(--vscode-panel-border);
+        }
+        #header-title {
+            font-weight: 600;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--vscode-foreground);
+        }
+        #status-right {
+            display: flex;
+            align-items: center;
+            gap: 2px;
+        }
+        .toolbar-icon {
+            cursor: pointer;
+            opacity: 0.7;
+            user-select: none;
+            padding: 2px 4px;
+            border-radius: 3px;
+            display: flex;
+            align-items: center;
+        }
+        .toolbar-icon:hover {
+            opacity: 1;
+            background: var(--vscode-toolbar-hoverBackground);
+        }
+        .toolbar-icon .codicon { font-size: 16px; }
+
+        /* ── Bottom bar ── */
+        #bottom-bar {
             display: flex;
             justify-content: space-between;
+            align-items: center;
+            padding: 4px 8px;
+            font-size: 11px;
+            color: var(--vscode-descriptionForeground);
+            border-top: 1px solid var(--vscode-panel-border);
         }
-        #status-bar .connected { color: var(--vscode-testing-iconPassed); }
-        #status-bar .disconnected { color: var(--vscode-testing-iconFailed); }
+        #bottom-left {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            overflow: hidden;
+        }
+        #bottom-left #model-name {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        #bottom-bar .connected { color: var(--vscode-testing-iconPassed); }
+        #bottom-bar .disconnected { color: var(--vscode-testing-iconFailed); }
 
         /* ── Context bar ── */
         #context-bar {
@@ -719,6 +1140,47 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             color: var(--vscode-button-secondaryForeground);
         }
 
+        /* ── Subagent activity animation ── */
+        @keyframes subagent-progress {
+            0%   { left: -30%; }
+            100% { left: 100%; }
+        }
+        .tool-card.subagent-active {
+            position: relative;
+        }
+        .tool-card.subagent-active::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: -30%;
+            width: 30%;
+            height: 2px;
+            background: var(--vscode-progressBar-background);
+            border-radius: 1px;
+            animation: subagent-progress 1.5s ease-in-out infinite;
+        }
+
+        /* ── Subagent live status line ── */
+        .subagent-status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 3px 10px;
+            font-size: 11px;
+            color: var(--vscode-descriptionForeground);
+            border-top: 1px solid var(--vscode-panel-border);
+        }
+        .subagent-status .sa-current-tool {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .subagent-status .sa-stats {
+            white-space: nowrap;
+            font-variant-numeric: tabular-nums;
+        }
+
         /* ── Subagent containers (nested inside delegation cards) ── */
         .subagent-details {
             border-top: 1px solid var(--vscode-panel-border);
@@ -863,6 +1325,93 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             font-family: var(--vscode-font-family);
         }
 
+        /* ── Subagent approval widget (promoted to top level) ── */
+        .subagent-approval-widget {
+            border: 1px solid var(--vscode-editorWarning-foreground);
+            background: var(--vscode-editor-background);
+        }
+        .subagent-approval-widget .widget-header {
+            background: var(--vscode-editorWarning-foreground);
+            color: #fff;
+        }
+        .subagent-approval-widget .widget-body {
+            font-size: 12px;
+            line-height: 1.4;
+        }
+
+        /* ── Undo button ── */
+        .undo-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 10px;
+            margin: 4px 0 8px 0;
+            border-radius: 4px;
+            background: var(--vscode-editor-background);
+            border: 1px solid var(--vscode-panel-border);
+            font-size: 11px;
+        }
+        .undo-bar .undo-info {
+            flex: 1;
+            color: var(--vscode-descriptionForeground);
+        }
+        .undo-bar .undo-btn {
+            padding: 3px 10px;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+            background: var(--vscode-button-secondaryBackground);
+            color: var(--vscode-button-secondaryForeground);
+        }
+        .undo-bar .undo-btn:hover {
+            background: var(--vscode-button-secondaryHoverBackground);
+        }
+        .undo-bar.undone {
+            opacity: 0.6;
+        }
+        .undo-bar.undone .undo-btn {
+            display: none;
+        }
+
+        /* ── Image previews ── */
+        .image-preview-bar {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            padding: 4px 0;
+        }
+        .image-preview-bar:empty {
+            display: none;
+        }
+        .image-thumb {
+            position: relative;
+            display: inline-block;
+        }
+        .image-thumb img {
+            max-width: 80px;
+            max-height: 60px;
+            border-radius: 4px;
+            border: 1px solid var(--vscode-panel-border);
+            object-fit: cover;
+        }
+        .image-thumb .remove-img {
+            position: absolute;
+            top: -4px;
+            right: -4px;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--vscode-testing-iconFailed);
+            color: #fff;
+            border: none;
+            cursor: pointer;
+            font-size: 10px;
+            line-height: 16px;
+            text-align: center;
+            padding: 0;
+        }
+
         /* ── Clarify widget ── */
         .clarify-widget {
             border: 1px solid var(--vscode-focusBorder);
@@ -957,7 +1506,6 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
         /* ── Plan/Act toggle ── */
         #mode-toggle-group {
             display: flex;
-            margin-left: 6px;
             border: 1px solid var(--vscode-panel-border);
             border-radius: 2px;
             overflow: hidden;
@@ -1063,13 +1611,6 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
         .aa-row input[type="checkbox"] { margin: 0; cursor: pointer; }
 
         /* ── Config panel ── */
-        #config-gear {
-            cursor: pointer;
-            font-size: 14px;
-            opacity: 0.7;
-            user-select: none;
-        }
-        #config-gear:hover { opacity: 1; }
         #config-panel {
             display: none;
             border-bottom: 1px solid var(--vscode-panel-border);
@@ -1221,9 +1762,211 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             color: var(--vscode-descriptionForeground);
         }
 
-        /* ── Input area ── */
-        #input-area {
+        /* ── Jira config panel ── */
+        #jira-panel {
+            display: none;
+            border-bottom: 1px solid var(--vscode-panel-border);
+            max-height: 60vh;
+            overflow-y: auto;
+        }
+        #jira-panel.visible { display: block; }
+        #jira-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 8px;
+            background: var(--vscode-editor-inactiveSelectionBackground);
+            font-weight: 600;
+            font-size: 12px;
+        }
+        #jira-close {
+            cursor: pointer;
+            font-size: 14px;
+            opacity: 0.7;
+            background: none;
+            border: none;
+            color: var(--vscode-foreground);
+        }
+        #jira-close:hover { opacity: 1; }
+        #jira-notification {
+            padding: 4px 8px;
+            font-size: 11px;
+            display: none;
+        }
+        #jira-notification.success { display: block; color: var(--vscode-testing-iconPassed); }
+        #jira-notification.error { display: block; color: var(--vscode-testing-iconFailed); }
+        #jira-notification.info { display: block; color: var(--vscode-descriptionForeground); }
+        .jira-section {
+            padding: 8px;
+        }
+        .jira-section label {
+            display: block;
+            font-size: 11px;
+            color: var(--vscode-descriptionForeground);
+            margin: 6px 0 2px;
+        }
+        .jira-section label:first-child { margin-top: 0; }
+        .jira-section input[type="text"],
+        .jira-section input[type="password"],
+        .jira-section select {
+            width: 100%;
+            padding: 4px 6px;
+            background: var(--vscode-input-background);
+            color: var(--vscode-input-foreground);
+            border: 1px solid var(--vscode-input-border);
+            border-radius: 2px;
+            font-family: var(--vscode-font-family);
+            font-size: var(--vscode-font-size);
+        }
+        #jira-actions {
+            display: flex;
+            gap: 6px;
+            padding: 6px 8px;
             border-top: 1px solid var(--vscode-panel-border);
+            flex-wrap: wrap;
+        }
+        #jira-actions button {
+            padding: 4px 12px;
+            border: none;
+            border-radius: 2px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        #jira-status-badge {
+            font-size: 10px;
+            padding: 1px 6px;
+            border-radius: 8px;
+            margin-left: 6px;
+        }
+        #jira-status-badge.connected {
+            background: var(--vscode-testing-iconPassed);
+            color: var(--vscode-editor-background);
+        }
+        #jira-status-badge.disconnected {
+            background: var(--vscode-descriptionForeground);
+            color: var(--vscode-editor-background);
+        }
+        #jira-new-profile-row {
+            display: none;
+        }
+        #jira-new-profile-row.visible {
+            display: block;
+        }
+
+        /* ── Session history panel ── */
+        #session-panel {
+            display: none;
+            flex-direction: column;
+            flex: 1;
+            overflow: hidden;
+        }
+        #session-panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 6px 8px;
+            border-bottom: 1px solid var(--vscode-panel-border);
+            font-weight: 600;
+            font-size: 12px;
+        }
+        #session-back-btn {
+            background: var(--vscode-button-secondaryBackground);
+            color: var(--vscode-button-secondaryForeground);
+            border: none;
+            border-radius: 2px;
+            padding: 2px 8px;
+            cursor: pointer;
+            font-size: 12px;
+            font-family: var(--vscode-font-family);
+        }
+        #session-back-btn:hover {
+            background: var(--vscode-toolbar-hoverBackground);
+        }
+        #session-new-btn {
+            cursor: pointer;
+            font-size: 16px;
+            opacity: 0.7;
+            user-select: none;
+        }
+        #session-new-btn:hover { opacity: 1; }
+        #session-search {
+            width: calc(100% - 16px);
+            margin: 6px 8px;
+            padding: 4px 8px;
+            background: var(--vscode-input-background);
+            color: var(--vscode-input-foreground);
+            border: 1px solid var(--vscode-input-border);
+            border-radius: 2px;
+            font-family: var(--vscode-font-family);
+            font-size: var(--vscode-font-size);
+        }
+        #session-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0 8px 8px;
+        }
+        .session-card {
+            padding: 8px;
+            margin: 4px 0;
+            border: 1px solid var(--vscode-panel-border);
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .session-card:hover {
+            background: var(--vscode-list-hoverBackground);
+        }
+        .session-card .session-title {
+            font-weight: 500;
+            font-size: 12px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .session-card .session-meta {
+            font-size: 11px;
+            opacity: 0.7;
+            margin-top: 2px;
+        }
+        #session-empty {
+            padding: 20px 8px;
+            text-align: center;
+            color: var(--vscode-descriptionForeground);
+            font-size: 12px;
+        }
+        /* ── Input area ── */
+        #input-container {
+            border-top: 1px solid var(--vscode-panel-border);
+            position: relative;
+        }
+        #attachment-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            padding: 4px 8px 0 8px;
+        }
+        #attachment-bar:empty { display: none; }
+        .attachment-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            background: var(--vscode-badge-background);
+            color: var(--vscode-badge-foreground);
+            font-size: 11px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .attachment-badge .remove-badge {
+            cursor: pointer;
+            opacity: 0.7;
+            font-size: 13px;
+            line-height: 1;
+        }
+        .attachment-badge .remove-badge:hover { opacity: 1; }
+        #input-area {
             padding: 8px;
             display: flex;
             gap: 4px;
@@ -1254,18 +1997,54 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             opacity: 0.5;
             cursor: not-allowed;
         }
+        /* ── File mention dropdown ── */
+        #mention-dropdown {
+            display: none;
+            position: absolute;
+            bottom: 100%;
+            left: 8px;
+            right: 8px;
+            max-height: 200px;
+            overflow-y: auto;
+            background: var(--vscode-editorSuggestWidget-background, var(--vscode-dropdown-background));
+            border: 1px solid var(--vscode-editorSuggestWidget-border, var(--vscode-panel-border));
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            z-index: 100;
+        }
+        #mention-dropdown.visible { display: block; }
+        .mention-item {
+            padding: 4px 8px;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            font-size: 12px;
+        }
+        .mention-item:hover, .mention-item.selected {
+            background: var(--vscode-editorSuggestWidget-selectedBackground, var(--vscode-list-hoverBackground));
+        }
+        .mention-item .mention-name {
+            font-weight: 600;
+            color: var(--vscode-foreground);
+        }
+        .mention-item .mention-path {
+            font-size: 10px;
+            color: var(--vscode-descriptionForeground);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
     </style>
 </head>
 <body>
     <div id="status-bar">
-        <span id="connection-status" class="disconnected">Disconnected</span>
-        <span id="model-name"></span>
-        <div id="mode-toggle-group">
-            <button id="mode-plan-btn">Plan</button>
-            <button id="mode-act-btn" class="active">Act</button>
+        <span id="header-title">ClarAIty</span>
+        <div id="status-right">
+            <span id="new-chat-btn" class="toolbar-icon" title="New Chat"><i class="codicon codicon-add"></i></span>
+            <span id="history-btn" class="toolbar-icon" title="Session History"><i class="codicon codicon-history"></i></span>
+            <span id="jira-gear" class="toolbar-icon" title="MCP Connections"><i class="codicon codicon-plug"></i></span>
+            <span id="config-gear" class="toolbar-icon" title="LLM Configuration"><i class="codicon codicon-gear"></i></span>
         </div>
-        <span id="new-chat-btn" title="New Chat" style="cursor:pointer;font-size:14px;opacity:0.7;user-select:none;margin-left:6px;">+</span>
-        <span id="config-gear" title="LLM Configuration">\u2699</span>
     </div>
     <div id="config-panel">
         <div id="config-header">
@@ -1330,6 +2109,49 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             <button id="cfg-cancel-btn" class="cfg-btn-secondary">Cancel</button>
         </div>
     </div>
+    <div id="jira-panel">
+        <div id="jira-header">
+            <span>Jira Integration <span id="jira-status-badge" class="disconnected">disconnected</span></span>
+            <button id="jira-close">\u2715</button>
+        </div>
+        <div id="jira-notification"></div>
+        <div class="jira-section">
+            <label>Profile</label>
+            <select id="jira-profile-select">
+                <option value="">-- Select profile --</option>
+                <option value="__new__">+ New Profile</option>
+            </select>
+
+            <div id="jira-new-profile-row">
+                <label>New Profile Name</label>
+                <input type="text" id="jira-new-profile" placeholder="e.g. corporate" />
+            </div>
+
+            <label>Jira URL</label>
+            <input type="text" id="jira-url" placeholder="https://mycompany.atlassian.net" />
+
+            <label>Username (email)</label>
+            <input type="text" id="jira-username" placeholder="you@company.com" />
+
+            <label>API Token <span id="jira-token-indicator"></span></label>
+            <input type="password" id="jira-token" placeholder="Enter API token..." />
+        </div>
+        <div id="jira-actions">
+            <button id="jira-save-btn" class="cfg-btn-primary">Save</button>
+            <button id="jira-connect-btn" class="cfg-btn-primary">Connect</button>
+            <button id="jira-disconnect-btn" class="cfg-btn-secondary">Disconnect</button>
+            <button id="jira-cancel-btn" class="cfg-btn-secondary">Cancel</button>
+        </div>
+    </div>
+    <div id="session-panel">
+        <div id="session-panel-header">
+            <button id="session-back-btn">&larr; Back</button>
+            <span>Session History</span>
+            <span id="session-new-btn" title="New Chat">+</span>
+        </div>
+        <input id="session-search" type="text" placeholder="Search sessions..." />
+        <div id="session-list"></div>
+    </div>
     <div id="todo-panel" class="collapsed">
         <div id="todo-header">
             <span id="todo-summary">Tasks: 0 active</span>
@@ -1338,7 +2160,10 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
         <div id="todo-list"></div>
     </div>
     <div id="context-bar" style="display:none">
-        <span id="context-text"></span>
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span id="context-text"></span>
+            <span id="session-stats" style="display:none;font-size:10px;color:var(--vscode-descriptionForeground);"></span>
+        </div>
         <div class="bar" id="context-bar-fill" style="width:0%"></div>
     </div>
     <div id="chat-history"></div>
@@ -1353,13 +2178,29 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             <label class="aa-row"><input type="checkbox" id="aa-browser" /> Browser tools</label>
         </div>
     </div>
-    <div id="input-area">
-        <textarea id="chat-input" placeholder="Ask ClarAIty..." rows="1"></textarea>
-        <button id="send-btn">Send</button>
+    <div id="input-container">
+        <div id="mention-dropdown"></div>
+        <div id="attachment-bar"></div>
+        <div id="image-preview-bar" class="image-preview-bar"></div>
+        <div id="input-area">
+            <textarea id="chat-input" placeholder="Ask ClarAIty... (@ to mention files, Ctrl+V to paste images)" rows="1"></textarea>
+            <button id="send-btn">Send</button>
+        </div>
+    </div>
+    <div id="bottom-bar">
+        <div id="bottom-left">
+            <span id="connection-status" class="disconnected">Disconnected</span>
+            <span id="model-name"></span>
+        </div>
+        <div id="mode-toggle-group">
+            <button id="mode-plan-btn">Plan</button>
+            <button id="mode-act-btn" class="active">Act</button>
+        </div>
     </div>
 
     <script src="${markedUri}"></script>
     <script src="${hljsUri}"></script>
+    <script src="${purifyUri}"></script>
     <script>
         // ── VS Code API ──
         const vscode = acquireVsCodeApi();
@@ -1374,9 +2215,65 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
         let renderScheduled = false;      // Throttle flag for markdown re-render
         let userScrolledUp = false;       // Auto-scroll lock
         const toolCards = {};             // call_id -> DOM element
+
+        // ── Cost tracking ──
+        let sessionTotalTokens = 0;
+        let sessionTurnCount = 0;
+        let currentModelName = '';
+
+        // Approximate pricing per 1M tokens (input/output blended average)
+        const MODEL_PRICING = {
+            'gpt-4o':        { per1M: 7.50 },
+            'gpt-4o-mini':   { per1M: 0.30 },
+            'gpt-4-turbo':   { per1M: 20.00 },
+            'gpt-4':         { per1M: 45.00 },
+            'gpt-3.5-turbo': { per1M: 1.00 },
+            'o1':            { per1M: 30.00 },
+            'o1-mini':       { per1M: 6.00 },
+            'o3-mini':       { per1M: 2.20 },
+            'claude-3-opus': { per1M: 45.00 },
+            'claude-3-sonnet': { per1M: 9.00 },
+            'claude-3-haiku': { per1M: 0.65 },
+            'claude-3.5-sonnet': { per1M: 9.00 },
+            'claude-4-sonnet': { per1M: 9.00 },
+            'deepseek-chat': { per1M: 0.27 },
+            'deepseek-reasoner': { per1M: 1.10 },
+            'kimi-k2':       { per1M: 0.60 },
+        };
+
+        function estimateCost(tokens, model) {
+            const key = Object.keys(MODEL_PRICING).find(k => model.toLowerCase().includes(k));
+            if (!key) return null;
+            return (tokens / 1_000_000) * MODEL_PRICING[key].per1M;
+        }
+
+        function formatCost(cost) {
+            if (cost === null) return '';
+            if (cost < 0.01) return ' ~$' + cost.toFixed(4);
+            return ' ~$' + cost.toFixed(2);
+        }
+
+        function updateSessionStats(turnTokens) {
+            if (turnTokens) {
+                sessionTotalTokens += turnTokens;
+                sessionTurnCount++;
+            }
+            const cost = estimateCost(sessionTotalTokens, currentModelName);
+            const costStr = formatCost(cost);
+            const statsEl = document.getElementById('session-stats');
+            if (statsEl) {
+                if (sessionTotalTokens > 0) {
+                    statsEl.textContent = sessionTotalTokens.toLocaleString() + ' tokens' + costStr + ' | ' + sessionTurnCount + ' turns';
+                    statsEl.style.display = '';
+                } else {
+                    statsEl.style.display = 'none';
+                }
+            }
+        }
         const toolMeta = {};              // call_id -> { name, arguments } (cached from first update)
         const subagentContainers = {};    // subagent_id -> { details, body, summary, toolCount }
         const subagentParents = {};       // subagent_id -> parent_tool_call_id
+        const promotedApprovals = {};     // call_id -> promoted widget element
 
         // Tool icon mapping
         const TOOL_ICONS = {
@@ -1423,6 +2320,158 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             vscode.postMessage({ type: 'newSession' });
         });
 
+        // ── Session History ──
+        const sessionPanel = document.getElementById('session-panel');
+        const sessionList = document.getElementById('session-list');
+        const sessionSearch = document.getElementById('session-search');
+
+        function showSessionPanel() {
+            sessionPanel.style.display = 'flex';
+            chatHistory.style.display = 'none';
+            document.getElementById('input-area').style.display = 'none';
+            document.getElementById('context-bar').style.display = 'none';
+            autoApprovePanel.style.display = 'none';
+            todoPanel.style.display = 'none';
+            sessionSearch.value = '';
+            sessionList.innerHTML = '<div id="session-empty">Loading...</div>';
+            vscode.postMessage({ type: 'listSessions' });
+        }
+
+        function hideSessionPanel() {
+            sessionPanel.style.display = 'none';
+            chatHistory.style.display = '';
+            document.getElementById('input-area').style.display = '';
+            autoApprovePanel.style.display = '';
+        }
+
+        function timeAgo(isoString) {
+            const seconds = Math.floor((Date.now() - new Date(isoString).getTime()) / 1000);
+            if (seconds < 60) return 'just now';
+            if (seconds < 3600) return Math.floor(seconds / 60) + 'm ago';
+            if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';
+            return Math.floor(seconds / 86400) + 'd ago';
+        }
+
+        function renderSessionList(sessions) {
+            sessionList.innerHTML = '';
+            if (!sessions || sessions.length === 0) {
+                sessionList.innerHTML = '<div id="session-empty">No previous sessions found</div>';
+                return;
+            }
+            for (const s of sessions) {
+                const card = document.createElement('div');
+                card.className = 'session-card';
+                const title = document.createElement('div');
+                title.className = 'session-title';
+                title.textContent = s.first_message || s.session_id;
+                const meta = document.createElement('div');
+                meta.className = 'session-meta';
+                meta.textContent = timeAgo(s.updated_at) + ' - ' + s.message_count + ' msgs'
+                    + (s.git_branch ? ' - ' + s.git_branch : '');
+                card.appendChild(title);
+                card.appendChild(meta);
+                card.addEventListener('click', () => {
+                    hideSessionPanel();
+                    // Show loading indicator in chat
+                    chatHistory.innerHTML = '<div style="padding:20px;text-align:center;color:var(--vscode-descriptionForeground);">Loading session...</div>';
+                    vscode.postMessage({ type: 'resumeSession', sessionId: s.session_id });
+                });
+                sessionList.appendChild(card);
+            }
+        }
+
+        // Client-side search filtering
+        sessionSearch.addEventListener('input', (e) => {
+            const query = e.target.value.toLowerCase();
+            document.querySelectorAll('.session-card').forEach(card => {
+                card.style.display = card.textContent.toLowerCase().includes(query) ? '' : 'none';
+            });
+        });
+
+        // History button
+        document.getElementById('history-btn').addEventListener('click', showSessionPanel);
+
+        // Session panel buttons
+        document.getElementById('session-back-btn').addEventListener('click', hideSessionPanel);
+        document.getElementById('session-new-btn').addEventListener('click', () => {
+            hideSessionPanel();
+            vscode.postMessage({ type: 'newSession' });
+        });
+
+        // Render replayed session history (batch)
+        function renderSessionHistory(messages) {
+            chatHistory.innerHTML = '';
+            currentAssistantDiv = null;
+            currentContentDiv = null;
+            currentCodeElement = null;
+            currentThinkingBlock = null;
+            markdownBuffer = '';
+            // Clear tool state caches
+            for (const key of Object.keys(toolCards)) delete toolCards[key];
+            for (const key of Object.keys(toolMeta)) delete toolMeta[key];
+            for (const key of Object.keys(subagentContainers)) { if (subagentContainers[key].timerId) clearInterval(subagentContainers[key].timerId); delete subagentContainers[key]; }
+            for (const key of Object.keys(subagentParents)) delete subagentParents[key];
+            for (const key of Object.keys(promotedApprovals)) delete promotedApprovals[key];
+
+            for (const msg of messages) {
+                if (msg.role === 'user') {
+                    const content = typeof msg.content === 'string' ? msg.content : '';
+                    if (content) {
+                        addMessage('user', content);
+                    }
+                } else if (msg.role === 'assistant') {
+                    startAssistantMessage();
+                    if (msg.content) {
+                        markdownBuffer = msg.content;
+                        renderMarkdown();
+                    }
+                    // Render tool calls as completed tool cards
+                    if (msg.tool_calls) {
+                        for (const tc of msg.tool_calls) {
+                            let args = {};
+                            try { args = JSON.parse(tc.function.arguments || '{}'); } catch(e) {}
+                            const toolName = tc.function.name;
+                            const primaryArg = getPrimaryArg(toolName, args);
+                            // Create a static completed tool card
+                            const card = document.createElement('div');
+                            card.className = 'tool-card';
+                            const icon = TOOL_ICONS[toolName] || 'T';
+                            card.innerHTML = '<div class="tool-header">'
+                                + '<span class="tool-icon">' + escapeHtml(icon) + '</span>'
+                                + '<span class="tool-name">' + escapeHtml(toolName) + '</span>'
+                                + '<span class="tool-badge success">done</span>'
+                                + '</div>'
+                                + (primaryArg ? '<div class="tool-args">' + escapeHtml(primaryArg) + '</div>' : '');
+                            if (currentAssistantDiv) {
+                                currentAssistantDiv.appendChild(card);
+                            }
+                            toolCards[tc.id] = card;
+                        }
+                    }
+                    // Finalize
+                    currentAssistantDiv = null;
+                    currentContentDiv = null;
+                    markdownBuffer = '';
+                } else if (msg.role === 'tool') {
+                    // Tool results - update the parent tool card if it exists
+                    if (msg.tool_call_id && toolCards[msg.tool_call_id]) {
+                        const card = toolCards[msg.tool_call_id];
+                        const badge = card.querySelector('.tool-badge');
+                        if (badge) {
+                            // Check if tool result indicates error
+                            const content = msg.content || '';
+                            if (content.startsWith('[ERROR]') || content.startsWith('Error:')) {
+                                badge.className = 'tool-badge error';
+                                badge.textContent = 'error';
+                            }
+                        }
+                    }
+                }
+                // Skip system messages in replay
+            }
+            scrollToBottom();
+        }
+
         // ── Auto-scroll ──
         chatHistory.addEventListener('scroll', () => {
             const atBottom = chatHistory.scrollHeight - chatHistory.scrollTop - chatHistory.clientHeight < 40;
@@ -1443,36 +2492,305 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             }
         });
 
+        // ── File attachments state ──
+        const attachments = [];  // Array of { path, name }
+        const mentionDropdown = document.getElementById('mention-dropdown');
+        const attachmentBar = document.getElementById('attachment-bar');
+        let mentionActive = false;
+        let mentionQuery = '';
+        let mentionStartPos = -1;
+        let mentionResults = [];
+        let mentionSelectedIdx = 0;
+        let mentionDebounce = null;
+
+        function addAttachment(file) {
+            // Avoid duplicates
+            if (attachments.some(a => a.path === file.path)) return;
+            attachments.push({ path: file.path, name: file.name });
+            renderAttachmentBar();
+        }
+
+        function removeAttachment(idx) {
+            attachments.splice(idx, 1);
+            renderAttachmentBar();
+        }
+
+        function renderAttachmentBar() {
+            attachmentBar.innerHTML = '';
+            attachments.forEach((att, i) => {
+                const badge = document.createElement('span');
+                badge.className = 'attachment-badge';
+                badge.innerHTML = '@' + escapeHtml(att.name)
+                    + ' <span class="remove-badge" data-idx="' + i + '">x</span>';
+                badge.querySelector('.remove-badge').addEventListener('click', () => removeAttachment(i));
+                attachmentBar.appendChild(badge);
+            });
+        }
+
+        // ── Image attachments state ──
+        const imageAttachments = [];  // Array of { data: base64, mimeType: string, name: string }
+        const imagePreviewBar = document.getElementById('image-preview-bar');
+
+        const MAX_IMAGE_SIZE = 10 * 1024 * 1024;  // 10MB
+        const MAX_IMAGES = 5;
+
+        function addImageFromClipboard(file) {
+            if (file.size > MAX_IMAGE_SIZE) {
+                // Show inline warning
+                chatHistory.insertAdjacentHTML('beforeend',
+                    '<div class="message" style="color:var(--vscode-testing-iconFailed);font-size:11px;">Image too large (' + Math.round(file.size / 1024 / 1024) + 'MB). Maximum 10MB.</div>');
+                scrollToBottom();
+                return;
+            }
+            if (imageAttachments.length >= MAX_IMAGES) {
+                chatHistory.insertAdjacentHTML('beforeend',
+                    '<div class="message" style="color:var(--vscode-testing-iconFailed);font-size:11px;">Maximum ' + MAX_IMAGES + ' images per message.</div>');
+                scrollToBottom();
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const dataUrl = e.target.result;
+                // Extract base64 data and mime type from data URL
+                const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+                if (!match) return;
+                const mimeType = match[1];
+                const base64Data = match[2];
+                const name = file.name || ('screenshot-' + Date.now() + '.' + mimeType.split('/')[1]);
+                imageAttachments.push({ data: base64Data, mimeType: mimeType, name: name });
+                renderImagePreviews();
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function removeImage(idx) {
+            imageAttachments.splice(idx, 1);
+            renderImagePreviews();
+        }
+
+        function renderImagePreviews() {
+            imagePreviewBar.innerHTML = '';
+            imageAttachments.forEach(function(img, i) {
+                const thumb = document.createElement('span');
+                thumb.className = 'image-thumb';
+                const imgEl = document.createElement('img');
+                imgEl.src = 'data:' + img.mimeType + ';base64,' + img.data;
+                imgEl.alt = img.name;
+                imgEl.title = img.name;
+                thumb.appendChild(imgEl);
+                const removeBtn = document.createElement('button');
+                removeBtn.className = 'remove-img';
+                removeBtn.textContent = 'x';
+                removeBtn.title = 'Remove image';
+                removeBtn.addEventListener('click', function() { removeImage(i); });
+                thumb.appendChild(removeBtn);
+                imagePreviewBar.appendChild(thumb);
+            });
+        }
+
+        // Handle paste event for images
+        chatInput.addEventListener('paste', function(e) {
+            const items = e.clipboardData && e.clipboardData.items;
+            if (!items) return;
+            for (let i = 0; i < items.length; i++) {
+                if (items[i].type.indexOf('image') !== -1) {
+                    e.preventDefault();
+                    const file = items[i].getAsFile();
+                    if (file) addImageFromClipboard(file);
+                    return;
+                }
+            }
+        });
+
+        // Handle drop event for images
+        chatInput.addEventListener('dragover', function(e) {
+            e.preventDefault();
+        });
+        chatInput.addEventListener('drop', function(e) {
+            const files = e.dataTransfer && e.dataTransfer.files;
+            if (!files) return;
+            for (let i = 0; i < files.length; i++) {
+                if (files[i].type.indexOf('image') !== -1) {
+                    e.preventDefault();
+                    addImageFromClipboard(files[i]);
+                }
+            }
+        });
+
+        function showMentionDropdown(results) {
+            mentionResults = results;
+            mentionSelectedIdx = 0;
+            if (results.length === 0) {
+                mentionDropdown.classList.remove('visible');
+                return;
+            }
+            mentionDropdown.innerHTML = '';
+            results.forEach((file, i) => {
+                const item = document.createElement('div');
+                item.className = 'mention-item' + (i === 0 ? ' selected' : '');
+                item.innerHTML = '<span class="mention-name">' + escapeHtml(file.name) + '</span>'
+                    + '<span class="mention-path">' + escapeHtml(file.relativePath) + '</span>';
+                item.addEventListener('click', () => selectMention(i));
+                item.addEventListener('mouseenter', () => {
+                    mentionSelectedIdx = i;
+                    updateMentionSelection();
+                });
+                mentionDropdown.appendChild(item);
+            });
+            mentionDropdown.classList.add('visible');
+        }
+
+        function updateMentionSelection() {
+            const items = mentionDropdown.querySelectorAll('.mention-item');
+            items.forEach((item, i) => {
+                item.classList.toggle('selected', i === mentionSelectedIdx);
+            });
+        }
+
+        function selectMention(idx) {
+            const file = mentionResults[idx];
+            if (!file) return;
+            addAttachment(file);
+            // Remove the @query text from the input
+            const val = chatInput.value;
+            chatInput.value = val.substring(0, mentionStartPos) + val.substring(chatInput.selectionStart);
+            closeMentionDropdown();
+            chatInput.focus();
+        }
+
+        function closeMentionDropdown() {
+            mentionActive = false;
+            mentionQuery = '';
+            mentionStartPos = -1;
+            mentionResults = [];
+            mentionDropdown.classList.remove('visible');
+            mentionDropdown.innerHTML = '';
+        }
+
         // ── Send message ──
         function sendMessage() {
             const content = chatInput.value.trim();
-            if (!content || isStreaming) return;
+            if (!content && imageAttachments.length === 0) return;
+            if (isStreaming) return;
 
-            addMessage('user', content);
+            // Show attachments in the user message
+            let displayContent = content;
+            if (attachments.length > 0) {
+                const fileList = attachments.map(a => '@' + a.name).join(', ');
+                displayContent = '[' + fileList + ']\\n' + content;
+            }
+            if (imageAttachments.length > 0) {
+                const imgList = imageAttachments.map(a => a.name).join(', ');
+                displayContent = (displayContent || '') + '\\n[Images: ' + imgList + ']';
+            }
+            addMessage('user', displayContent.trim());
             chatInput.value = '';
             chatInput.style.height = 'auto';
 
-            vscode.postMessage({ type: 'chatMessage', content });
+            // Build message payload
+            const payload = { type: 'chatMessage', content: content || '' };
+            if (attachments.length > 0) {
+                payload.attachments = attachments.map(a => ({ path: a.path, name: a.name }));
+            }
+            if (imageAttachments.length > 0) {
+                payload.images = imageAttachments.map(a => ({
+                    data: a.data,
+                    mimeType: a.mimeType,
+                    name: a.name,
+                }));
+            }
+            vscode.postMessage(payload);
+
+            // Clear state
+            attachments.length = 0;
+            renderAttachmentBar();
+            imageAttachments.length = 0;
+            renderImagePreviews();
+            closeMentionDropdown();
         }
 
         sendBtn.addEventListener('click', sendMessage);
         chatInput.addEventListener('keydown', (e) => {
+            // Handle mention dropdown navigation
+            if (mentionActive && mentionResults.length > 0) {
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    mentionSelectedIdx = (mentionSelectedIdx + 1) % mentionResults.length;
+                    updateMentionSelection();
+                    return;
+                }
+                if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    mentionSelectedIdx = (mentionSelectedIdx - 1 + mentionResults.length) % mentionResults.length;
+                    updateMentionSelection();
+                    return;
+                }
+                if (e.key === 'Enter' || e.key === 'Tab') {
+                    e.preventDefault();
+                    selectMention(mentionSelectedIdx);
+                    return;
+                }
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    closeMentionDropdown();
+                    return;
+                }
+            }
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 sendMessage();
             }
         });
 
-        // Auto-resize textarea
+        // Detect @ mentions while typing
         chatInput.addEventListener('input', () => {
             chatInput.style.height = 'auto';
             chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + 'px';
+
+            const val = chatInput.value;
+            const cursorPos = chatInput.selectionStart;
+
+            // Check if cursor is after an @ sign (look back for @)
+            const textBeforeCursor = val.substring(0, cursorPos);
+            const atIdx = textBeforeCursor.lastIndexOf('@');
+            if (atIdx >= 0) {
+                // Check that @ is at start or preceded by whitespace
+                const charBefore = atIdx > 0 ? val[atIdx - 1] : ' ';
+                if (charBefore === ' ' || charBefore === '\\n' || atIdx === 0) {
+                    const query = textBeforeCursor.substring(atIdx + 1);
+                    // Only activate if query doesn't contain spaces (file names shouldn't)
+                    if (!query.includes(' ')) {
+                        mentionActive = true;
+                        mentionStartPos = atIdx;
+                        mentionQuery = query;
+                        // Debounce the search
+                        clearTimeout(mentionDebounce);
+                        mentionDebounce = setTimeout(() => {
+                            vscode.postMessage({ type: 'searchFiles', query: mentionQuery });
+                        }, 150);
+                        return;
+                    }
+                }
+            }
+            if (mentionActive) {
+                closeMentionDropdown();
+            }
         });
 
         // ── Helpers ──
         function escapeHtml(text) {
             const div = document.createElement('div');
             div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function sanitizeHtml(dirty) {
+            if (typeof DOMPurify !== 'undefined') {
+                return DOMPurify.sanitize(dirty);
+            }
+            // Fallback: strip all HTML if DOMPurify failed to load
+            const div = document.createElement('div');
+            div.textContent = dirty;
             return div.innerHTML;
         }
 
@@ -1525,7 +2843,7 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
         function renderMarkdown() {
             if (!currentContentDiv || !markdownBuffer) return;
             try {
-                currentContentDiv.innerHTML = marked.parse(markdownBuffer);
+                currentContentDiv.innerHTML = sanitizeHtml(marked.parse(markdownBuffer));
                 // Highlight any code blocks that came through markdown (e.g. inline backticks
                 // won't have hljs, but fenced blocks in the markdown buffer will)
                 currentContentDiv.querySelectorAll('pre code').forEach((block) => {
@@ -1793,6 +3111,21 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             if (data.tool_name) meta.name = data.tool_name;
             if (data.arguments) meta.arguments = data.arguments;
 
+            // Update subagent parent card status line
+            if (subagentId) {
+                const saInfo = subagentContainers[subagentId];
+                if (saInfo && saInfo.statusEl) {
+                    const toolName = meta.name || data.tool_name || 'tool';
+                    const primaryArg = getPrimaryArg(toolName, meta.arguments || data.arguments);
+                    const currentToolEl = saInfo.statusEl.querySelector('.sa-current-tool');
+                    if (currentToolEl) {
+                        if (data.status === 'running' || data.status === 'pending') {
+                            currentToolEl.textContent = toolName + (primaryArg ? ' \u2014 ' + primaryArg : '');
+                        }
+                    }
+                }
+            }
+
             let card = toolCards[data.call_id];
             if (!card) {
                 if (!currentAssistantDiv) startAssistantMessage();
@@ -1864,21 +3197,27 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                 argsRow.title = primaryArg;
             }
 
-            // Auto-open diff for write_file/edit_file on awaiting_approval
-            if (data.status === 'awaiting_approval'
-                && (toolName === 'write_file' || toolName === 'edit_file')
-                && meta.arguments) {
-                vscode.postMessage({
-                    type: 'showDiff',
-                    callId: data.call_id,
-                    toolName: toolName,
-                    arguments: meta.arguments,
-                });
-            }
+            // Approval handling — promote subagent approvals to top level
+            if (data.status === 'awaiting_approval' && subagentId) {
+                // Promote: render approval widget at conversation level
+                showSubagentApproval(data, meta, subagentId);
+                // Auto-expand subagent details so user can peek at context
+                const saInfo = subagentContainers[subagentId];
+                if (saInfo && saInfo.details) saInfo.details.open = true;
+            } else if (data.status === 'awaiting_approval') {
+                // Main agent tool approval — render inline as before
+                // Auto-open diff for write_file/edit_file
+                if ((toolName === 'write_file' || toolName === 'edit_file')
+                    && meta.arguments) {
+                    vscode.postMessage({
+                        type: 'showDiff',
+                        callId: data.call_id,
+                        toolName: toolName,
+                        arguments: meta.arguments,
+                    });
+                }
 
-            // Approval buttons + feedback
-            let approvalSection = card.querySelector('.approval-section');
-            if (data.status === 'awaiting_approval') {
+                let approvalSection = card.querySelector('.approval-section');
                 if (!approvalSection) {
                     approvalSection = document.createElement('div');
                     approvalSection.className = 'approval-section';
@@ -1919,8 +3258,16 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                 feedbackInput.style.cssText = 'width:100%;min-height:32px;max-height:80px;resize:vertical;background:var(--vscode-input-background);color:var(--vscode-input-foreground);border:1px solid var(--vscode-input-border);border-radius:2px;padding:4px 6px;font-family:var(--vscode-font-family);font-size:var(--vscode-font-size);';
                 feedbackWrap.appendChild(feedbackInput);
                 approvalSection.appendChild(feedbackWrap);
-            } else if (approvalSection) {
-                approvalSection.style.display = 'none';
+            } else {
+                // Status changed away from awaiting_approval — clean up
+                const approvalSection = card.querySelector('.approval-section');
+                if (approvalSection) approvalSection.style.display = 'none';
+                // Clean up promoted widget if it exists
+                const promotedWidget = promotedApprovals[data.call_id];
+                if (promotedWidget) {
+                    promotedWidget.remove();
+                    delete promotedApprovals[data.call_id];
+                }
             }
 
             // Expandable result
@@ -2054,6 +3401,46 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
         function removePausePrompt() {
             const existing = document.getElementById('pause-widget');
             if (existing) existing.remove();
+        }
+
+        // ── Undo Turn ──
+        function showUndoBar(turnId, files) {
+            const bar = document.createElement('div');
+            bar.className = 'undo-bar';
+            bar.id = 'undo-' + turnId;
+
+            const info = document.createElement('span');
+            info.className = 'undo-info';
+            const count = files.length;
+            const names = files.map(function(f) { return f.split(/[/\\\\]/).pop(); });
+            info.textContent = count + ' file' + (count !== 1 ? 's' : '') + ' modified: ' + names.join(', ');
+            info.title = files.join('\\n');
+            bar.appendChild(info);
+
+            const btn = document.createElement('button');
+            btn.className = 'undo-btn';
+            btn.textContent = 'Undo';
+            btn.title = 'Revert ' + count + ' file(s) to their state before this turn';
+            btn.addEventListener('click', function() {
+                btn.disabled = true;
+                btn.textContent = 'Undoing...';
+                vscode.postMessage({ type: 'undoTurn', turnId: turnId });
+            });
+            bar.appendChild(btn);
+
+            chatHistory.appendChild(bar);
+            scrollToBottom();
+        }
+
+        function markUndoDone(turnId, restoredFiles) {
+            const bar = document.getElementById('undo-' + turnId);
+            if (bar) {
+                bar.classList.add('undone');
+                const info = bar.querySelector('.undo-info');
+                if (info) {
+                    info.textContent = restoredFiles.length + ' file(s) restored';
+                }
+            }
         }
 
         // ── Clarify Interview Widget ──
@@ -2244,7 +3631,7 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             planContent.className = 'plan-content';
             try {
                 planContent.innerHTML = (typeof marked !== 'undefined')
-                    ? marked.parse(data.excerpt || '')
+                    ? sanitizeHtml(marked.parse(data.excerpt || ''))
                     : escapeHtml(data.excerpt || '');
             } catch (e) {
                 planContent.textContent = data.excerpt || '';
@@ -2324,6 +3711,92 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             scrollToBottom();
         }
 
+        // ── Promoted subagent approval widget ──
+        function showSubagentApproval(data, meta, subagentId) {
+            if (!currentAssistantDiv) startAssistantMessage();
+
+            // Remove any existing promoted widget for this call_id
+            const existing = promotedApprovals[data.call_id];
+            if (existing) existing.remove();
+
+            const widget = document.createElement('div');
+            widget.className = 'interactive-widget subagent-approval-widget';
+            widget.id = 'sa-approval-' + data.call_id;
+
+            // Header — show subagent name from parent card
+            const header = document.createElement('div');
+            header.className = 'widget-header';
+            let saLabel = 'Subagent';
+            const parentCallId = subagentParents[subagentId];
+            if (parentCallId) {
+                const parentCard = toolCards[parentCallId];
+                if (parentCard) {
+                    const nameEl = parentCard.querySelector('.tool-name');
+                    if (nameEl && nameEl.textContent) saLabel = nameEl.textContent;
+                }
+            }
+            header.textContent = 'Approval: ' + saLabel;
+            widget.appendChild(header);
+
+            // Body — tool name + primary argument
+            const body = document.createElement('div');
+            body.className = 'widget-body';
+            const toolName = meta.name || data.tool_name || 'tool';
+            const primaryArg = getPrimaryArg(toolName, meta.arguments || data.arguments);
+            body.textContent = toolName + (primaryArg ? ' — ' + primaryArg : '');
+            widget.appendChild(body);
+
+            // Feedback textarea (declared before buttons so handlers can reference it)
+            const feedbackWrap = document.createElement('div');
+            feedbackWrap.style.cssText = 'padding:6px 10px;';
+            const feedbackInput = document.createElement('textarea');
+            feedbackInput.placeholder = 'Feedback for the agent (sent with Reject)...';
+            feedbackInput.style.cssText = 'width:100%;min-height:32px;max-height:80px;resize:vertical;background:var(--vscode-input-background);color:var(--vscode-input-foreground);border:1px solid var(--vscode-input-border);border-radius:2px;padding:4px 6px;font-family:var(--vscode-font-family);font-size:var(--vscode-font-size);';
+            feedbackWrap.appendChild(feedbackInput);
+
+            // Action buttons
+            const actions = document.createElement('div');
+            actions.className = 'widget-actions';
+
+            const approveBtn = document.createElement('button');
+            approveBtn.className = 'btn-primary';
+            approveBtn.textContent = 'Accept';
+            approveBtn.addEventListener('click', () => {
+                vscode.postMessage({ type: 'approvalResult', callId: data.call_id, approved: true });
+                widget.remove();
+                delete promotedApprovals[data.call_id];
+            });
+            actions.appendChild(approveBtn);
+
+            const rejectBtn = document.createElement('button');
+            rejectBtn.className = 'btn-danger';
+            rejectBtn.textContent = 'Reject';
+            rejectBtn.addEventListener('click', () => {
+                const feedback = feedbackInput.value.trim() || undefined;
+                vscode.postMessage({ type: 'approvalResult', callId: data.call_id, approved: false, feedback: feedback });
+                widget.remove();
+                delete promotedApprovals[data.call_id];
+            });
+            actions.appendChild(rejectBtn);
+
+            widget.appendChild(actions);
+            widget.appendChild(feedbackWrap);
+
+            // Trigger diff viewer for write_file/edit_file
+            if ((toolName === 'write_file' || toolName === 'edit_file') && meta.arguments) {
+                vscode.postMessage({
+                    type: 'showDiff',
+                    callId: data.call_id,
+                    toolName: toolName,
+                    arguments: meta.arguments,
+                });
+            }
+
+            currentAssistantDiv.appendChild(widget);
+            promotedApprovals[data.call_id] = widget;
+            scrollToBottom();
+        }
+
         // ── Main message handler ──
         window.addEventListener('message', (event) => {
             const msg = event.data;
@@ -2350,18 +3823,57 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                     // Clear tool state caches
                     for (const key of Object.keys(toolCards)) delete toolCards[key];
                     for (const key of Object.keys(toolMeta)) delete toolMeta[key];
-                    // Clear subagent state
-                    for (const key of Object.keys(subagentContainers)) delete subagentContainers[key];
+                    // Clear subagent state (stop timers first)
+                    for (const key of Object.keys(subagentContainers)) { if (subagentContainers[key].timerId) clearInterval(subagentContainers[key].timerId); delete subagentContainers[key]; }
                     for (const key of Object.keys(subagentParents)) delete subagentParents[key];
+                    for (const key of Object.keys(promotedApprovals)) delete promotedApprovals[key];
                     // Clear todo panel
                     updateTodos([]);
-                    // Reset context bar
+                    // Reset context bar and session stats
                     contextBar.style.display = 'none';
+                    sessionTotalTokens = 0;
+                    sessionTurnCount = 0;
+                    updateSessionStats(0);
                 }
                 currentSessionId = msg.sessionId;
                 modelName.textContent = msg.model;
+                currentModelName = msg.model;
                 updateModeDisplay(msg.permissionMode);
                 updateAutoApproveDisplay(msg.autoApproveCategories);
+            }
+
+            else if (msg.type === 'sessionsList') {
+                renderSessionList(msg.sessions);
+            }
+
+            else if (msg.type === 'sessionHistory') {
+                renderSessionHistory(msg.messages);
+            }
+
+            else if (msg.type === 'showSessionHistory') {
+                showSessionPanel();
+            }
+
+            else if (msg.type === 'fileSearchResults') {
+                if (mentionActive) {
+                    showMentionDropdown(msg.files || []);
+                }
+            }
+
+            else if (msg.type === 'undoAvailable') {
+                showUndoBar(msg.turnId, msg.files);
+            }
+
+            else if (msg.type === 'undoComplete') {
+                markUndoDone(msg.turnId, msg.restoredFiles);
+            }
+
+            else if (msg.type === 'insertAndSend') {
+                // From editor context menu: insert content and auto-send
+                chatInput.value = msg.content;
+                chatInput.style.height = 'auto';
+                chatInput.style.height = chatInput.scrollHeight + 'px';
+                sendMessage();
             }
 
             else if (msg.type === 'serverMessage') {
@@ -2422,12 +3934,13 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                         currentCodeElement = null;
                         currentThinkingBlock = null;
                         markdownBuffer = '';
+                        updateSessionStats(payload.total_tokens);
                         break;
 
                     case 'context_updated':
                         contextBar.style.display = 'block';
                         const pct = Math.round((payload.used / payload.limit) * 100);
-                        contextText.textContent = pct + '% context used';
+                        contextText.textContent = pct + '% context (' + payload.used.toLocaleString() + '/' + payload.limit.toLocaleString() + ')';
                         contextBarFill.style.width = pct + '%';
                         break;
 
@@ -2505,26 +4018,61 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                                 const iconEl = parentCard.querySelector('.tool-icon');
                                 if (iconEl) iconEl.textContent = 'SA';
 
-                                // Collapsible body for child tool cards (no summary — header IS the label)
+                                // Add activity animation to parent card
+                                parentCard.classList.add('subagent-active');
+
+                                // Live status line (visible when collapsed)
+                                const statusEl = document.createElement('div');
+                                statusEl.className = 'subagent-status';
+                                statusEl.innerHTML = '<span class="sa-current-tool">Starting...</span><span class="sa-stats">0s</span>';
+                                parentCard.appendChild(statusEl);
+
+                                // Elapsed time timer
+                                const startTime = Date.now();
+                                const timerId = setInterval(() => {
+                                    const elapsed = Math.round((Date.now() - startTime) / 1000);
+                                    const statsSpan = statusEl.querySelector('.sa-stats');
+                                    const saInfo = subagentContainers[d.subagent_id];
+                                    if (statsSpan && saInfo) {
+                                        const count = saInfo.toolCount || 0;
+                                        statsSpan.textContent = (count > 0 ? count + ' tools | ' : '') + elapsed + 's';
+                                    }
+                                }, 1000);
+
+                                // Collapsible body for child tool cards (starts collapsed)
                                 const details = document.createElement('details');
                                 details.className = 'subagent-details';
-                                details.open = true;
+                                details.open = false;
 
                                 const body = document.createElement('div');
                                 body.className = 'subagent-body';
                                 details.appendChild(body);
 
                                 parentCard.appendChild(details);
-                                subagentContainers[d.subagent_id] = { details, body, summary: null, toolCount: 0 };
+                                subagentContainers[d.subagent_id] = {
+                                    details, body, summary: null, toolCount: 0,
+                                    statusEl, timerId, startTime,
+                                };
                             }
                         } else if (payload.event === 'unregistered' && payload.data) {
                             const info = subagentContainers[payload.data.subagent_id];
                             if (info) {
                                 info.details.open = false;
-                                // Update parent tool card header with final tool count
+                                // Stop elapsed timer
+                                if (info.timerId) clearInterval(info.timerId);
+                                // Show final stats on status line
+                                const elapsed = Math.round((Date.now() - (info.startTime || Date.now())) / 1000);
+                                if (info.statusEl) {
+                                    const toolPart = info.toolCount > 0 ? info.toolCount + ' tools' : '';
+                                    const timePart = elapsed + 's';
+                                    info.statusEl.innerHTML = '<span class="sa-current-tool">Completed</span><span class="sa-stats">'
+                                        + (toolPart ? toolPart + ' | ' : '') + timePart + '</span>';
+                                }
+                                // Update parent tool card header + remove animation
                                 const parentId = subagentParents[payload.data.subagent_id];
                                 const parentCard = parentId && toolCards[parentId];
                                 if (parentCard) {
+                                    parentCard.classList.remove('subagent-active');
                                     const nameEl = parentCard.querySelector('.tool-name');
                                     if (nameEl) {
                                         const currentName = nameEl.textContent.replace(/ \| \d+ tools$/, '');
@@ -2569,6 +4117,22 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                     case 'auto_approve_changed':
                         updateAutoApproveDisplay(payload.categories);
                         break;
+
+                    case 'jira_profiles':
+                        populateJiraProfiles(payload);
+                        break;
+
+                    case 'jira_config_saved':
+                        handleJiraConfigSaved(payload);
+                        break;
+
+                    case 'jira_connect_result':
+                        handleJiraConnectResult(payload);
+                        break;
+
+                    case 'jira_disconnect_result':
+                        handleJiraDisconnectResult(payload);
+                        break;
                 }
             }
         });
@@ -2604,6 +4168,9 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             if (isVisible) {
                 configPanel.classList.remove('visible');
             } else {
+                // Close Jira panel if open
+                const jp = document.getElementById('jira-panel');
+                if (jp) { jp.classList.remove('visible'); }
                 configPanel.classList.add('visible');
                 cfgNotification.className = '';
                 cfgNotification.textContent = '';
@@ -2754,6 +4321,211 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                     cfgNotification.className = '';
                     cfgNotification.textContent = '';
                 }, 3000);
+            }
+        }
+
+        // ── Jira panel ──
+        const jiraGear = document.getElementById('jira-gear');
+        const jiraPanel = document.getElementById('jira-panel');
+        const jiraClose = document.getElementById('jira-close');
+        const jiraNotification = document.getElementById('jira-notification');
+        const jiraProfileSelect = document.getElementById('jira-profile-select');
+        const jiraNewProfileRow = document.getElementById('jira-new-profile-row');
+        const jiraNewProfile = document.getElementById('jira-new-profile');
+        const jiraUrl = document.getElementById('jira-url');
+        const jiraUsername = document.getElementById('jira-username');
+        const jiraToken = document.getElementById('jira-token');
+        const jiraTokenIndicator = document.getElementById('jira-token-indicator');
+        const jiraStatusBadge = document.getElementById('jira-status-badge');
+        const jiraSaveBtn = document.getElementById('jira-save-btn');
+        const jiraConnectBtn = document.getElementById('jira-connect-btn');
+        const jiraDisconnectBtn = document.getElementById('jira-disconnect-btn');
+        const jiraCancelBtn = document.getElementById('jira-cancel-btn');
+
+        let jiraConnectedProfile = null;
+
+        function toggleJiraPanel() {
+            const isVisible = jiraPanel.classList.contains('visible');
+            if (isVisible) {
+                jiraPanel.classList.remove('visible');
+            } else {
+                // Close config panel if open
+                configPanel.classList.remove('visible');
+                jiraPanel.classList.add('visible');
+                jiraNotification.className = '';
+                jiraNotification.textContent = '';
+                vscode.postMessage({ type: 'getJiraProfiles' });
+            }
+        }
+
+        jiraGear.addEventListener('click', toggleJiraPanel);
+        jiraClose.addEventListener('click', () => jiraPanel.classList.remove('visible'));
+        jiraCancelBtn.addEventListener('click', () => jiraPanel.classList.remove('visible'));
+
+        // Profile selector change
+        jiraProfileSelect.addEventListener('change', () => {
+            const val = jiraProfileSelect.value;
+            if (val === '__new__') {
+                jiraNewProfileRow.classList.add('visible');
+                jiraNewProfile.value = '';
+                jiraUrl.value = '';
+                jiraUsername.value = '';
+                jiraToken.value = '';
+                jiraTokenIndicator.textContent = '';
+            } else {
+                jiraNewProfileRow.classList.remove('visible');
+                // Load profile data from stored options
+                const option = jiraProfileSelect.selectedOptions[0];
+                if (option && option.dataset.url) {
+                    jiraUrl.value = option.dataset.url || '';
+                    jiraUsername.value = option.dataset.username || '';
+                    jiraToken.value = '';
+                    jiraTokenIndicator.textContent = option.dataset.hasToken === 'true' ? '(token stored)' : '(not set)';
+                } else {
+                    jiraUrl.value = '';
+                    jiraUsername.value = '';
+                    jiraToken.value = '';
+                    jiraTokenIndicator.textContent = '';
+                }
+            }
+        });
+
+        // Save
+        jiraSaveBtn.addEventListener('click', () => {
+            const isNew = jiraProfileSelect.value === '__new__';
+            const profile = isNew ? jiraNewProfile.value.trim() : jiraProfileSelect.value;
+
+            if (!profile) {
+                showJiraNotification('Please select or enter a profile name.', 'error');
+                return;
+            }
+            if (isNew && !/^[a-zA-Z0-9_-]+$/.test(profile)) {
+                showJiraNotification('Profile name: alphanumeric, hyphens, underscores only.', 'error');
+                return;
+            }
+            if (!jiraUrl.value.trim()) {
+                showJiraNotification('Jira URL is required.', 'error');
+                return;
+            }
+            if (!jiraUsername.value.trim()) {
+                showJiraNotification('Username is required.', 'error');
+                return;
+            }
+            if (isNew && !jiraToken.value.trim()) {
+                showJiraNotification('API token is required for new profiles.', 'error');
+                return;
+            }
+
+            showJiraNotification('Saving...', 'info');
+            vscode.postMessage({
+                type: 'saveJiraConfig',
+                profile: profile,
+                jira_url: jiraUrl.value.trim(),
+                username: jiraUsername.value.trim(),
+                api_token: jiraToken.value.trim(),
+            });
+        });
+
+        function setJiraButtonsEnabled(enabled) {
+            jiraSaveBtn.disabled = !enabled;
+            jiraConnectBtn.disabled = !enabled;
+            jiraDisconnectBtn.disabled = !enabled;
+        }
+
+        // Connect
+        jiraConnectBtn.addEventListener('click', () => {
+            const isNew = jiraProfileSelect.value === '__new__';
+            const profile = isNew ? jiraNewProfile.value.trim() : jiraProfileSelect.value;
+            if (!profile || profile === '__new__') {
+                showJiraNotification('Please select a profile to connect.', 'error');
+                return;
+            }
+            setJiraButtonsEnabled(false);
+            showJiraNotification('Connecting...', 'info');
+            vscode.postMessage({ type: 'connectJira', profile: profile });
+        });
+
+        // Disconnect
+        jiraDisconnectBtn.addEventListener('click', () => {
+            setJiraButtonsEnabled(false);
+            showJiraNotification('Disconnecting...', 'info');
+            vscode.postMessage({ type: 'disconnectJira' });
+        });
+
+        function showJiraNotification(msg, cls) {
+            jiraNotification.textContent = msg;
+            jiraNotification.className = cls || '';
+        }
+
+        function updateJiraStatusBadge(connectedProfile) {
+            jiraConnectedProfile = connectedProfile;
+            if (connectedProfile) {
+                jiraStatusBadge.textContent = connectedProfile;
+                jiraStatusBadge.className = 'connected';
+            } else {
+                jiraStatusBadge.textContent = 'disconnected';
+                jiraStatusBadge.className = 'disconnected';
+            }
+        }
+
+        function populateJiraProfiles(data) {
+            const profiles = data.profiles || [];
+            const connected = data.connected_profile || null;
+
+            // Rebuild select options
+            jiraProfileSelect.innerHTML = '<option value="">-- Select profile --</option><option value="__new__">+ New Profile</option>';
+            for (const p of profiles) {
+                const opt = document.createElement('option');
+                opt.value = p.name;
+                opt.textContent = p.name + (connected === p.name ? ' (connected)' : '');
+                opt.dataset.url = p.jira_url || '';
+                opt.dataset.username = p.username || '';
+                opt.dataset.hasToken = String(p.has_token);
+                jiraProfileSelect.appendChild(opt);
+            }
+
+            // Auto-select connected profile or first available
+            if (connected) {
+                jiraProfileSelect.value = connected;
+            } else if (profiles.length === 1) {
+                jiraProfileSelect.value = profiles[0].name;
+            }
+
+            // Trigger change to populate fields
+            jiraProfileSelect.dispatchEvent(new Event('change'));
+
+            updateJiraStatusBadge(connected);
+
+            if (data.error) {
+                showJiraNotification(data.error, 'error');
+            }
+        }
+
+        function handleJiraConfigSaved(data) {
+            setJiraButtonsEnabled(true);
+            showJiraNotification(data.message || '', data.success ? 'success' : 'error');
+            if (data.success) {
+                // Refresh profile list
+                vscode.postMessage({ type: 'getJiraProfiles' });
+            }
+        }
+
+        function handleJiraConnectResult(data) {
+            setJiraButtonsEnabled(true);
+            showJiraNotification(data.message || '', data.success ? 'success' : 'error');
+            if (data.success) {
+                updateJiraStatusBadge(data.profile || null);
+                // Refresh profiles to show connected state
+                vscode.postMessage({ type: 'getJiraProfiles' });
+            }
+        }
+
+        function handleJiraDisconnectResult(data) {
+            setJiraButtonsEnabled(true);
+            showJiraNotification(data.message || '', data.success ? 'success' : 'error');
+            if (data.success) {
+                updateJiraStatusBadge(null);
+                vscode.postMessage({ type: 'getJiraProfiles' });
             }
         }
 

@@ -6,8 +6,9 @@ routing, and pending mount queues. Works with SubagentRegistry and SubAgentCard
 widgets to provide live subagent visibility in the TUI.
 """
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from src.observability import get_logger
 
@@ -15,10 +16,10 @@ logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from ..session.store.memory_store import StoreNotification
-    from .widgets.tool_card import ToolCard
-    from .widgets.subagent_card import SubAgentCard
-    from .subagent_registry import SubagentRegistry
     from .protocol import UIProtocol
+    from .subagent_registry import SubagentRegistry
+    from .widgets.subagent_card import SubAgentCard
+    from .widgets.tool_card import ToolCard
 
 
 class SubagentCoordinator:
@@ -48,9 +49,9 @@ class SubagentCoordinator:
         self._buffered_subagent_notifications: dict[str, list] = {}
 
         # Registry unsubscribe handles
-        self._unsubscribe_registry_reg: Optional[Callable[[], None]] = None
-        self._unsubscribe_registry_unreg: Optional[Callable[[], None]] = None
-        self._unsubscribe_registry_notif: Optional[Callable[[], None]] = None
+        self._unsubscribe_registry_reg: Callable[[], None] | None = None
+        self._unsubscribe_registry_unreg: Callable[[], None] | None = None
+        self._unsubscribe_registry_notif: Callable[[], None] | None = None
 
     @property
     def subscriptions(self) -> dict[str, dict]:
@@ -63,6 +64,7 @@ class SubagentCoordinator:
         agent: Any,
         ui_protocol: "UIProtocol",
         pause_callback: Callable,
+        approval_callback: Callable | None = None,
     ) -> None:
         """Subscribe to registry events and wire to delegation tool.
 
@@ -71,7 +73,9 @@ class SubagentCoordinator:
             agent: CodingAgent instance (for delegation tool wiring)
             ui_protocol: UIProtocol instance
             pause_callback: Callback for subagent pause requests
+            approval_callback: Callback for subagent approval requests (promoted to conversation)
         """
+        self._approval_callback = approval_callback
         self._unsubscribe_registry_reg = registry.subscribe_on_registered(
             self.on_subagent_registered
         )
@@ -90,7 +94,9 @@ class SubagentCoordinator:
                 delegation_tool.set_registry(registry)
                 delegation_tool.set_ui_protocol(ui_protocol)
                 ui_protocol.set_pause_requested_callback(pause_callback)
-                logger.info("Wired SubagentRegistry, UIProtocol, and pause callback to delegation tool")
+                logger.info(
+                    "Wired SubagentRegistry, UIProtocol, and pause callback to delegation tool"
+                )
             else:
                 logger.warning(
                     "delegate_to_subagent tool not found or missing set_registry - "
@@ -106,7 +112,7 @@ class SubagentCoordinator:
         if self._unsubscribe_registry_notif:
             self._unsubscribe_registry_notif()
 
-        for sub_id, sub_info in self._subagent_subscriptions.items():
+        for _sub_id, sub_info in self._subagent_subscriptions.items():
             if sub_info.get("unsubscribe"):
                 sub_info["unsubscribe"]()
 
@@ -193,7 +199,8 @@ class SubagentCoordinator:
                 buffered_notifications=buffered,
                 model_name=model_name,
                 subagent_name=subagent_name,
-                id=f"subagent-{subagent_id}"
+                approval_callback=getattr(self, "_approval_callback", None),
+                id=f"subagent-{subagent_id}",
             )
 
             if subagent_id in self._subagent_subscriptions:
@@ -202,8 +209,7 @@ class SubagentCoordinator:
             self._mount_callback(parent_tool_card.mount, card)
 
             logger.info(
-                f"TUI: Mounted SubAgentCard {subagent_id} "
-                f"inside ToolCard {parent_tool_call_id}"
+                f"TUI: Mounted SubAgentCard {subagent_id} inside ToolCard {parent_tool_call_id}"
             )
         else:
             self._pending_subagent_mounts[parent_tool_call_id] = {
@@ -264,9 +270,7 @@ class SubagentCoordinator:
             buf = self._buffered_subagent_notifications.setdefault(subagent_id, [])
             if len(buf) < 500:
                 buf.append(notification)
-            logger.debug(
-                f"TUI: Buffered notification for {subagent_id} (total={len(buf)})"
-            )
+            logger.debug(f"TUI: Buffered notification for {subagent_id} (total={len(buf)})")
 
     def find_subagent_tool_card(self, call_id: str):
         """Search active SubAgentCards for a tool card with the given call_id."""

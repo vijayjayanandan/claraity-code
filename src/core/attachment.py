@@ -10,11 +10,10 @@ The actual conversion to provider-specific formats (OpenAI, Anthropic, etc.)
 happens in the LLM adapter layer, NOT here.
 """
 
-from dataclasses import dataclass, field
-from typing import Literal, Optional, List
-from datetime import datetime
 import base64
-
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Literal, Optional
 
 # Size limits (configurable)
 MAX_IMAGE_SIZE_MB = 10  # 10MB max for images
@@ -28,7 +27,7 @@ class Attachment:
     Provider-agnostic attachment for multimodal LLM input.
 
     This is the ONLY attachment structure used in the pipeline.
-    UI and Agent layers pass List[Attachment] - never provider-specific schemas.
+    UI and Agent layers pass list[Attachment] - never provider-specific schemas.
 
     Attributes:
         kind: "image" or "text" - determines how it's sent to LLM
@@ -54,11 +53,12 @@ class Attachment:
             text="DEBUG = True\\n...",
         )
     """
+
     kind: Literal["image", "text"]
     filename: str
     mime: str
-    data: Optional[bytes] = None  # For binary (images)
-    text: Optional[str] = None    # For text files
+    data: bytes | None = None  # For binary (images)
+    text: str | None = None  # For text files
     created_at: datetime = field(default_factory=datetime.now)
 
     def __post_init__(self):
@@ -74,7 +74,7 @@ class Attachment:
         if self.data:
             return len(self.data)
         if self.text:
-            return len(self.text.encode('utf-8'))
+            return len(self.text.encode("utf-8"))
         return 0
 
     @property
@@ -91,7 +91,7 @@ class Attachment:
     def base64_data(self) -> str:
         """Base64 encoded data (for images)."""
         if self.data:
-            return base64.b64encode(self.data).decode('utf-8')
+            return base64.b64encode(self.data).decode("utf-8")
         return ""
 
     @property
@@ -108,7 +108,7 @@ class Attachment:
         else:
             return self.size_kb > MAX_TEXT_FILE_SIZE_KB
 
-    def get_size_limit_exceeded_msg(self) -> Optional[str]:
+    def get_size_limit_exceeded_msg(self) -> str | None:
         """Get human-readable message if size limit exceeded."""
         if self.kind == "image" and self.size_mb > MAX_IMAGE_SIZE_MB:
             return f"Image too large: {self.size_mb:.1f}MB (max {MAX_IMAGE_SIZE_MB}MB)"
@@ -130,16 +130,19 @@ class Attachment:
             return ""
         if len(self.text) <= max_chars:
             return self.text
-        return self.text[:max_chars] + f"\n\n[... TRUNCATED - {len(self.text) - max_chars} chars omitted ...]"
+        return (
+            self.text[:max_chars]
+            + f"\n\n[... TRUNCATED - {len(self.text) - max_chars} chars omitted ...]"
+        )
 
     def __repr__(self) -> str:
-        return f"Attachment(kind={self.kind!r}, filename={self.filename!r}, size={self.size_kb:.1f}KB)"
+        return (
+            f"Attachment(kind={self.kind!r}, filename={self.filename!r}, size={self.size_kb:.1f}KB)"
+        )
 
 
 def create_image_attachment(
-    image_bytes: bytes,
-    filename: str = "image.png",
-    mime: str = "image/png"
+    image_bytes: bytes, filename: str = "image.png", mime: str = "image/png"
 ) -> Attachment:
     """
     Factory function to create an image attachment.
@@ -160,11 +163,7 @@ def create_image_attachment(
     )
 
 
-def create_text_attachment(
-    text_content: str,
-    filename: str,
-    mime: Optional[str] = None
-) -> Attachment:
+def create_text_attachment(text_content: str, filename: str, mime: str | None = None) -> Attachment:
     """
     Factory function to create a text attachment.
 
@@ -179,6 +178,7 @@ def create_text_attachment(
     if mime is None:
         # Auto-detect from filename
         import mimetypes
+
         mime, _ = mimetypes.guess_type(filename)
         if mime is None:
             mime = "text/plain"
@@ -193,38 +193,38 @@ def create_text_attachment(
 
 # Additional text file extensions not in Python's mimetypes
 TEXT_FILE_EXTENSIONS = {
-    '.md': 'text/markdown',
-    '.markdown': 'text/markdown',
-    '.log': 'text/plain',
-    '.yml': 'text/yaml',
-    '.yaml': 'text/yaml',
-    '.toml': 'text/toml',
-    '.ini': 'text/plain',
-    '.cfg': 'text/plain',
-    '.conf': 'text/plain',
-    '.sh': 'text/x-shellscript',
-    '.bash': 'text/x-shellscript',
-    '.zsh': 'text/x-shellscript',
-    '.fish': 'text/x-shellscript',
-    '.ps1': 'text/x-powershell',
-    '.bat': 'text/x-batch',
-    '.cmd': 'text/x-batch',
-    '.env': 'text/plain',
-    '.gitignore': 'text/plain',
-    '.dockerignore': 'text/plain',
-    '.editorconfig': 'text/plain',
-    '.tsx': 'text/typescript-jsx',
-    '.jsx': 'text/javascript-jsx',
-    '.vue': 'text/vue',
-    '.svelte': 'text/svelte',
-    '.rs': 'text/x-rust',
-    '.go': 'text/x-go',
-    '.kt': 'text/x-kotlin',
-    '.scala': 'text/x-scala',
-    '.r': 'text/x-r',
-    '.sql': 'text/x-sql',
-    '.graphql': 'text/x-graphql',
-    '.proto': 'text/x-protobuf',
+    ".md": "text/markdown",
+    ".markdown": "text/markdown",
+    ".log": "text/plain",
+    ".yml": "text/yaml",
+    ".yaml": "text/yaml",
+    ".toml": "text/toml",
+    ".ini": "text/plain",
+    ".cfg": "text/plain",
+    ".conf": "text/plain",
+    ".sh": "text/x-shellscript",
+    ".bash": "text/x-shellscript",
+    ".zsh": "text/x-shellscript",
+    ".fish": "text/x-shellscript",
+    ".ps1": "text/x-powershell",
+    ".bat": "text/x-batch",
+    ".cmd": "text/x-batch",
+    ".env": "text/plain",
+    ".gitignore": "text/plain",
+    ".dockerignore": "text/plain",
+    ".editorconfig": "text/plain",
+    ".tsx": "text/typescript-jsx",
+    ".jsx": "text/javascript-jsx",
+    ".vue": "text/vue",
+    ".svelte": "text/svelte",
+    ".rs": "text/x-rust",
+    ".go": "text/x-go",
+    ".kt": "text/x-kotlin",
+    ".scala": "text/x-scala",
+    ".r": "text/x-r",
+    ".sql": "text/x-sql",
+    ".graphql": "text/x-graphql",
+    ".proto": "text/x-protobuf",
 }
 
 
@@ -244,8 +244,8 @@ def create_attachment_from_file(file_path: str) -> Attachment:
         FileNotFoundError: If file doesn't exist
         ValueError: If file type not supported
     """
-    from pathlib import Path
     import mimetypes
+    from pathlib import Path
 
     path = Path(file_path)
     if not path.exists():
@@ -272,11 +272,15 @@ def create_attachment_from_file(file_path: str) -> Attachment:
             mime=mime,
             data=content,
         )
-    elif mime.startswith("text/") or mime in ("application/json", "application/xml", "application/javascript"):
+    elif mime.startswith("text/") or mime in (
+        "application/json",
+        "application/xml",
+        "application/javascript",
+    ):
         try:
-            text = content.decode('utf-8')
+            text = content.decode("utf-8")
         except UnicodeDecodeError:
-            text = content.decode('latin-1')  # Fallback
+            text = content.decode("latin-1")  # Fallback
 
         return Attachment(
             kind="text",
@@ -288,20 +292,22 @@ def create_attachment_from_file(file_path: str) -> Attachment:
         raise ValueError(f"Unsupported file type: {mime} for {filename}")
 
 
-def validate_attachments(attachments: List[Attachment]) -> List[str]:
+def validate_attachments(attachments: list[Attachment]) -> list[str]:
     """
     Validate a list of attachments.
 
     Args:
-        attachments: List of attachments to validate
+        attachments: list of attachments to validate
 
     Returns:
-        List of error messages (empty if all valid)
+        list of error messages (empty if all valid)
     """
     errors = []
 
     if len(attachments) > MAX_ATTACHMENTS_PER_MESSAGE:
-        errors.append(f"Too many attachments: {len(attachments)} (max {MAX_ATTACHMENTS_PER_MESSAGE})")
+        errors.append(
+            f"Too many attachments: {len(attachments)} (max {MAX_ATTACHMENTS_PER_MESSAGE})"
+        )
 
     for att in attachments:
         size_error = att.get_size_limit_exceeded_msg()

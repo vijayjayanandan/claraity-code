@@ -14,21 +14,24 @@ Event loop strategy:
   the httpx loop-mismatch pitfall (httpx connection pool is bound to the
   loop it was created on).
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from src.llm.base import ToolDefinition
 
 from src.tools.base import Tool, ToolResult, ToolStatus
+
 from .adapter import McpToolAdapter
 from .client import McpClient, McpError
 
 try:
     from src.observability import get_logger
+
     logger = get_logger("integrations.mcp.bridge")
 except ImportError:
     logger = logging.getLogger(__name__)
@@ -48,7 +51,7 @@ class McpBridgeTool(Tool):
         adapter: McpToolAdapter,
         tool_definition: ToolDefinition,
         mcp_tool_name: str,
-        event_loop: Optional[asyncio.AbstractEventLoop] = None,
+        event_loop: asyncio.AbstractEventLoop | None = None,
     ):
         """Initialize bridge tool.
 
@@ -107,7 +110,7 @@ class McpBridgeTool(Tool):
                 metadata={"source": "mcp"},
             )
 
-    def _invoke_on_loop(self, kwargs: Dict[str, Any]) -> ToolResult:
+    def _invoke_on_loop(self, kwargs: dict[str, Any]) -> ToolResult:
         """Dispatch the async invoke to the correct event loop.
 
         If we have a reference to the original loop (normal TUI path),
@@ -132,8 +135,7 @@ class McpBridgeTool(Tool):
                 # Cancel the orphaned coroutine so it releases stdout.readline()
                 future.cancel()
                 raise TimeoutError(
-                    f"MCP tool '{self.name}' timed out after "
-                    f"{self._client.config.invoke_timeout}s"
+                    f"MCP tool '{self.name}' timed out after {self._client.config.invoke_timeout}s"
                 )
 
         # Fallback: no original loop (testing or pure-sync context)
@@ -143,16 +145,16 @@ class McpBridgeTool(Tool):
         finally:
             loop.close()
 
-    async def _async_invoke(self, kwargs: Dict[str, Any]) -> ToolResult:
+    async def _async_invoke(self, kwargs: dict[str, Any]) -> ToolResult:
         """Async core: invoke MCP tool and normalize result."""
         raw_result = await self._client.invoke(self._mcp_tool_name, kwargs)
         return self._adapter.adapt_result(self.name, raw_result)
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         """Return the adapted parameter schema."""
         return self._tool_def.parameters
 
-    def get_schema(self) -> Dict[str, Any]:
+    def get_schema(self) -> dict[str, Any]:
         """Return schema matching ToolDefinition format."""
         return {
             "name": self._tool_def.name,

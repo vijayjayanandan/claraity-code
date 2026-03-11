@@ -1,11 +1,12 @@
 """LLM tool for autonomous test execution."""
 
-from typing import Optional, List, Dict, Any
 import logging
+from typing import Any, Optional
 
 from src.tools.base import Tool, ToolResult, ToolStatus
-from .validation_engine import ValidationEngine
+
 from .test_runner import TestRunner
+from .validation_engine import ValidationEngine
 
 logger = logging.getLogger(__name__)
 
@@ -34,13 +35,12 @@ class RunTestsTool(Tool):
     def __init__(self, working_directory: str = "."):
         """Initialize run tests tool."""
         super().__init__(
-            name="run_tests",
-            description="Run tests autonomously and get feedback on failures"
+            name="run_tests", description="Run tests autonomously and get feedback on failures"
         )
         self.validation_engine = ValidationEngine(working_directory)
         self.test_runner = TestRunner(working_directory)
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         """Return parameter schema for this tool."""
         return {
             "type": "object",
@@ -48,26 +48,26 @@ class RunTestsTool(Tool):
                 "framework": {
                     "type": "string",
                     "description": "Optional: Override framework detection (pytest, jest, vitest, cargo)",
-                    "enum": ["pytest", "jest", "vitest", "cargo"]
+                    "enum": ["pytest", "jest", "vitest", "cargo"],
                 },
                 "file_pattern": {
                     "type": "string",
-                    "description": "Optional: Test file pattern to filter tests (e.g., 'tests/test_auth.py')"
+                    "description": "Optional: Test file pattern to filter tests (e.g., 'tests/test_auth.py')",
                 },
                 "files_changed": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Optional: List of changed files for validation context"
-                }
+                    "description": "Optional: list of changed files for validation context",
+                },
             },
-            "required": []
+            "required": [],
         }
 
     def execute(
         self,
-        framework: Optional[str] = None,
-        file_pattern: Optional[str] = None,
-        files_changed: Optional[List[str]] = None
+        framework: str | None = None,
+        file_pattern: str | None = None,
+        files_changed: list[str] | None = None,
     ) -> ToolResult:
         """
         Execute tests and return results with feedback.
@@ -87,25 +87,22 @@ class RunTestsTool(Tool):
             if files_changed:
                 result = self.validation_engine.validate_code(files_changed)
 
-                output = result['feedback']
+                output = result["feedback"]
 
-                status = ToolStatus.SUCCESS if result['all_passed'] else ToolStatus.ERROR
+                status = ToolStatus.SUCCESS if result["all_passed"] else ToolStatus.ERROR
 
                 return ToolResult(
                     tool_name=self.name,
                     status=status,
                     output=output,
                     metadata={
-                        'test_result': result['test_result'].to_dict(),
-                        'success_rate': result['success_rate']
-                    }
+                        "test_result": result["test_result"].to_dict(),
+                        "success_rate": result["success_rate"],
+                    },
                 )
 
             # Otherwise, just run tests
-            test_result = self.test_runner.run_tests(
-                framework=framework,
-                file_pattern=file_pattern
-            )
+            test_result = self.test_runner.run_tests(framework=framework, file_pattern=file_pattern)
 
             # Generate feedback if failures
             if not test_result.all_passed:
@@ -119,9 +116,7 @@ class RunTestsTool(Tool):
                 tool_name=self.name,
                 status=status,
                 output=feedback,
-                metadata={
-                    'test_result': test_result.to_dict()
-                }
+                metadata={"test_result": test_result.to_dict()},
             )
 
         except ValueError as e:
@@ -130,7 +125,7 @@ class RunTestsTool(Tool):
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 error=str(e),
-                output=f"[ERROR] {str(e)}"
+                output=f"[ERROR] {str(e)}",
             )
         except Exception as e:
             logger.error(f"Unexpected error running tests: {e}", exc_info=True)
@@ -138,7 +133,7 @@ class RunTestsTool(Tool):
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 error=str(e),
-                output=f"[ERROR] Unexpected error: {str(e)}"
+                output=f"[ERROR] Unexpected error: {str(e)}",
             )
 
 
@@ -153,18 +148,13 @@ class DetectTestFrameworkTool(Tool):
     def __init__(self, working_directory: str = "."):
         """Initialize detect framework tool."""
         super().__init__(
-            name="detect_test_framework",
-            description="Detect test framework from project files"
+            name="detect_test_framework", description="Detect test framework from project files"
         )
         self.test_runner = TestRunner(working_directory)
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         """Return parameter schema for this tool."""
-        return {
-            "type": "object",
-            "properties": {},
-            "required": []
-        }
+        return {"type": "object", "properties": {}, "required": []}
 
     def execute(self) -> ToolResult:
         """
@@ -181,13 +171,13 @@ class DetectTestFrameworkTool(Tool):
                     tool_name=self.name,
                     status=ToolStatus.SUCCESS,
                     output=f"[OK] Detected test framework: {framework}",
-                    metadata={'framework': framework}
+                    metadata={"framework": framework},
                 )
             else:
                 return ToolResult(
                     tool_name=self.name,
                     status=ToolStatus.ERROR,
-                    output="[WARN] No test framework detected. Supported: pytest, jest, vitest, cargo"
+                    output="[WARN] No test framework detected. Supported: pytest, jest, vitest, cargo",
                 )
 
         except Exception as e:
@@ -196,5 +186,5 @@ class DetectTestFrameworkTool(Tool):
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 error=str(e),
-                output=f"[ERROR] {str(e)}"
+                output=f"[ERROR] {str(e)}",
             )

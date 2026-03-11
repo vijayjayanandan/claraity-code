@@ -45,6 +45,7 @@ def _get_keyring():
     """Import and return the keyring module, or None if unavailable."""
     try:
         import keyring
+
         return keyring
     except ImportError:
         return None
@@ -52,10 +53,12 @@ def _get_keyring():
 
 # ---- config.yaml fallback ----
 
+
 def _save_to_config_yaml(api_key: str, config_path: str = DEFAULT_CONFIG_PATH) -> bool:
     """Save api_key into the llm section of config.yaml."""
     try:
         import yaml
+
         path = Path(config_path)
         path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -85,6 +88,7 @@ def _load_from_config_yaml(config_path: str = DEFAULT_CONFIG_PATH) -> str:
     """Load api_key from the llm section of config.yaml."""
     try:
         import yaml
+
         path = Path(config_path)
         if not path.exists():
             return ""
@@ -98,6 +102,7 @@ def _load_from_config_yaml(config_path: str = DEFAULT_CONFIG_PATH) -> str:
 
 
 # ---- Public API ----
+
 
 def save_api_key(api_key: str, username: str = USERNAME) -> bool:
     """

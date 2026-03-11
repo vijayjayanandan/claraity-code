@@ -1,26 +1,26 @@
 """Memory management system for the AI coding agent."""
 
-from .models import (
-    MemoryType,
-    MessageRole,
-    Message,
-    MemoryEntry,
-    ConversationTurn,
-    CodeContext,
-    TaskContext,
-)
-from .working_memory import WorkingMemory
+from .compaction import PrioritizedSummarizer, SummarySection
+from .context_injector import ContextInjector
 from .episodic_memory import EpisodicMemory
 from .memory_manager import MemoryManager
+from .models import (
+    CodeContext,
+    ConversationTurn,
+    MemoryEntry,
+    MemoryType,
+    Message,
+    MessageRole,
+    TaskContext,
+)
 from .observation_store import (
-    ObservationStore,
+    Importance,
     Observation,
     ObservationPointer,
-    Importance,
+    ObservationStore,
     classify_importance,
 )
-from .context_injector import ContextInjector
-from .compaction import PrioritizedSummarizer, SummarySection
+from .working_memory import WorkingMemory
 
 __all__ = [
     # Data models

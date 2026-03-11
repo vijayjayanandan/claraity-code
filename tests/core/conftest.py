@@ -66,6 +66,8 @@ API_CONFIG = _load_api_config()
 
 def _has_valid_api() -> bool:
     """Check if we have valid API credentials for live tests."""
+    if os.getenv("SKIP_INTEGRATION_TESTS"):
+        return False
     return bool(API_CONFIG.get("api_key") and API_CONFIG.get("base_url"))
 
 

@@ -34,9 +34,9 @@ import queue
 import sys
 import threading
 from contextvars import ContextVar
-from typing import Any, Dict, Optional, Set
+from typing import Any, Optional
 
-from .log_store import get_log_store, LogStore
+from .log_store import LogStore, get_log_store
 
 # =============================================================================
 # CONSTANTS
@@ -59,14 +59,12 @@ WRITER_SHUTDOWN_TIMEOUT = 5.0
 # MODULE-LEVEL STATE
 # =============================================================================
 
-_registered_handlers: Set["SQLiteLogHandler"] = set()
+_registered_handlers: set["SQLiteLogHandler"] = set()
 _atexit_registered: bool = False
 _atexit_lock = threading.Lock()
 
 # Separate re-entry guard from SQLiteErrorHandler to avoid interference
-_in_log_emit: ContextVar[bool] = ContextVar(
-    'sqlite_log_handler_in_emit', default=False
-)
+_in_log_emit: ContextVar[bool] = ContextVar("sqlite_log_handler_in_emit", default=False)
 
 
 class SQLiteLogHandler(logging.Handler):
@@ -191,9 +189,7 @@ class SQLiteLogHandler(logging.Handler):
             store = self._get_log_store()
             store.record_batch(batch)
         except Exception as e:
-            self._safe_stderr(
-                f"Failed to write log batch ({len(batch)} records): {e}"
-            )
+            self._safe_stderr(f"Failed to write log batch ({len(batch)} records): {e}")
 
     def _shutdown_handler(self):
         """Graceful shutdown -- flush remaining items."""
@@ -238,17 +234,14 @@ class SQLiteLogHandler(logging.Handler):
             try:
                 self._queue.put_nowait(record_data)
             except queue.Full:
-                self._safe_stderr(
-                    f"Queue full, dropping log: "
-                    f"{record.getMessage()[:80]}"
-                )
+                self._safe_stderr(f"Queue full, dropping log: {record.getMessage()[:80]}")
 
         except Exception as e:
             self._safe_stderr(f"Error in emit: {e}")
         finally:
             _in_log_emit.reset(token)
 
-    def _extract_record_data(self, record: logging.LogRecord) -> Dict[str, Any]:
+    def _extract_record_data(self, record: logging.LogRecord) -> dict[str, Any]:
         """
         Extract structured data from log record for LogStore.record_batch().
 
@@ -259,64 +252,68 @@ class SQLiteLogHandler(logging.Handler):
             record: Log record
 
         Returns:
-            Dict of fields for LogStore.record_from_dict() / record_batch()
+            dict of fields for LogStore.record_from_dict() / record_batch()
         """
-        data: Dict[str, Any] = {
-            'level': record.levelname,
-            'event': '',
+        data: dict[str, Any] = {
+            "level": record.levelname,
+            "event": "",
         }
 
         if isinstance(record.msg, dict):
             event_dict = record.msg.copy()
             # Remove internal structlog metadata
-            event_dict.pop('_record', None)
-            event_dict.pop('_from_structlog', None)
+            event_dict.pop("_record", None)
+            event_dict.pop("_from_structlog", None)
 
             # Event name
-            data['event'] = event_dict.pop('event', '')
+            data["event"] = event_dict.pop("event", "")
 
             # Logger name
-            if 'logger' in event_dict:
-                data['logger'] = event_dict.pop('logger')
+            if "logger" in event_dict:
+                data["logger"] = event_dict.pop("logger")
             else:
-                data['logger'] = record.name
+                data["logger"] = record.name
 
             # Timestamp (use structlog's if available)
-            if 'timestamp' in event_dict:
-                data['ts'] = event_dict.pop('timestamp')
+            if "timestamp" in event_dict:
+                data["ts"] = event_dict.pop("timestamp")
 
             # Pop 'level' to avoid passing it as extra
-            event_dict.pop('level', None)
+            event_dict.pop("level", None)
 
             # Context fields (named columns)
             for field in (
-                'run_id', 'session_id', 'stream_id', 'request_id',
-                'component', 'operation',
+                "run_id",
+                "session_id",
+                "stream_id",
+                "request_id",
+                "component",
+                "operation",
             ):
                 if field in event_dict:
                     data[field] = event_dict.pop(field)
 
             # Source location from structlog
-            if 'filename' in event_dict:
-                data['source_file'] = event_dict.pop('filename')
-            if 'lineno' in event_dict:
-                data['source_line'] = event_dict.pop('lineno')
-            if 'func_name' in event_dict:
-                data['source_function'] = event_dict.pop('func_name')
+            if "filename" in event_dict:
+                data["source_file"] = event_dict.pop("filename")
+            if "lineno" in event_dict:
+                data["source_line"] = event_dict.pop("lineno")
+            if "func_name" in event_dict:
+                data["source_function"] = event_dict.pop("func_name")
 
             # Everything else becomes extra_json (handled by record_batch)
             data.update(event_dict)
 
         else:
             # Plain string message
-            data['event'] = record.getMessage()
-            data['logger'] = record.name
+            data["event"] = record.getMessage()
+            data["logger"] = record.name
 
         # Source from LogRecord as fallback
-        if 'source_file' not in data:
-            data['source_file'] = record.filename
-            data['source_line'] = record.lineno
-            data['source_function'] = record.funcName
+        if "source_file" not in data:
+            data["source_file"] = record.filename
+            data["source_line"] = record.lineno
+            data["source_function"] = record.funcName
 
         return data
 
@@ -329,6 +326,7 @@ class SQLiteLogHandler(logging.Handler):
 # =============================================================================
 # MODULE-LEVEL SHUTDOWN HANDLER
 # =============================================================================
+
 
 def _module_shutdown_handler() -> None:
     """

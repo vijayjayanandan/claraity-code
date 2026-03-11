@@ -21,10 +21,10 @@ Example:
     >>> # Loads from enterprise → user → project hierarchy
 """
 
-from pathlib import Path
-from typing import List, Optional, Set
-import re
 import platform
+import re
+from pathlib import Path
+from typing import Optional
 
 from src.observability import get_logger
 
@@ -44,10 +44,10 @@ class MemoryFileLoader:
     MAX_IMPORT_DEPTH = 5
 
     def __init__(self):
-        self.loaded_files: Set[Path] = set()
-        self.import_chain: List[Path] = []
+        self.loaded_files: set[Path] = set()
+        self.import_chain: list[Path] = []
 
-    def load_hierarchy(self, starting_dir: Optional[Path] = None) -> str:
+    def load_hierarchy(self, starting_dir: Path | None = None) -> str:
         """
         Load memory files from all hierarchy levels.
 
@@ -104,11 +104,11 @@ class MemoryFileLoader:
         if not memories:
             return ""
 
-        combined = "\n\n" + ("="*80 + "\n\n").join(memories) + "\n" + "="*80 + "\n\n"
+        combined = "\n\n" + ("=" * 80 + "\n\n").join(memories) + "\n" + "=" * 80 + "\n\n"
         logger.info(f"Loaded {len(self.loaded_files)} memory files")
         return combined
 
-    def _get_enterprise_path(self) -> Optional[Path]:
+    def _get_enterprise_path(self) -> Path | None:
         """Get platform-specific enterprise memory path."""
         system = platform.system()
 
@@ -118,7 +118,7 @@ class MemoryFileLoader:
             return Path("C:/ProgramData/clarity") / self.MEMORY_FILENAME
         return None
 
-    def _load_project_hierarchy(self, starting_dir: Path) -> List[str]:
+    def _load_project_hierarchy(self, starting_dir: Path) -> list[str]:
         """
         Traverse upward from starting_dir to find project memories.
 
@@ -209,8 +209,8 @@ class MemoryFileLoader:
             return content
 
         # Pattern: @path/to/file.md at start of line
-        pattern = r'^@(.+\.md)\s*$'
-        lines = content.split('\n')
+        pattern = r"^@(.+\.md)\s*$"
+        lines = content.split("\n")
         processed = []
 
         for line in lines:
@@ -240,9 +240,9 @@ class MemoryFileLoader:
             else:
                 processed.append(line)
 
-        return '\n'.join(processed)
+        return "\n".join(processed)
 
-    def _resolve_import_path(self, import_path: str, base_dir: Path) -> Optional[Path]:
+    def _resolve_import_path(self, import_path: str, base_dir: Path) -> Path | None:
         """
         Resolve import path to absolute path.
 
@@ -257,21 +257,21 @@ class MemoryFileLoader:
             Resolved absolute path or None
         """
         # Security: only allow .md file extension
-        if not import_path.endswith('.md'):
+        if not import_path.endswith(".md"):
             logger.warning(f"[SECURITY] Blocked non-.md import: {import_path}")
             return None
 
         # Security: block absolute path imports entirely
-        if import_path.startswith('/') or (len(import_path) >= 3 and import_path[1] == ':'):
+        if import_path.startswith("/") or (len(import_path) >= 3 and import_path[1] == ":"):
             logger.warning(f"[SECURITY] Absolute path imports are not allowed: {import_path}")
             return None
 
         # Home directory: @~/path/to/file.md
-        if import_path.startswith('~/'):
+        if import_path.startswith("~/"):
             resolved = (Path.home() / import_path[2:]).resolve()
 
         # Relative: @./path or @../path
-        elif import_path.startswith('./') or import_path.startswith('../'):
+        elif import_path.startswith("./") or import_path.startswith("../"):
             resolved = (base_dir / import_path).resolve()
 
         # Default: treat as relative
@@ -297,9 +297,7 @@ class MemoryFileLoader:
                 pass
 
         if not is_safe:
-            logger.warning(
-                f"[SECURITY] Blocked import outside allowed directories: {import_path}"
-            )
+            logger.warning(f"[SECURITY] Blocked import outside allowed directories: {import_path}")
             return None
 
         return resolved
@@ -329,16 +327,16 @@ class MemoryFileLoader:
         # Create if doesn't exist
         if not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
-            initial_content = f"""# {'Project' if location == 'project' else 'User'} Memory
+            initial_content = f"""# {"Project" if location == "project" else "User"} Memory
 
 ## Quick Notes
 {text}
 """
-            path.write_text(initial_content, encoding='utf-8')
+            path.write_text(initial_content, encoding="utf-8")
             logger.info(f"Created new memory file: {path}")
         else:
             # Append to Quick Notes section or end of file
-            content = path.read_text(encoding='utf-8')
+            content = path.read_text(encoding="utf-8")
 
             # Try to find Quick Notes section
             if "## Quick Notes" in content:
@@ -346,15 +344,15 @@ class MemoryFileLoader:
                 parts = content.split("## Quick Notes", 1)
                 # Find next ## section or end
                 remainder = parts[1]
-                next_section = re.search(r'\n## ', remainder)
+                next_section = re.search(r"\n## ", remainder)
                 if next_section:
                     idx = next_section.start()
                     new_content = (
-                        parts[0] +
-                        "## Quick Notes" +
-                        remainder[:idx] +
-                        f"\n{text}\n" +
-                        remainder[idx:]
+                        parts[0]
+                        + "## Quick Notes"
+                        + remainder[:idx]
+                        + f"\n{text}\n"
+                        + remainder[idx:]
                     )
                 else:
                     new_content = content + f"\n{text}\n"
@@ -362,12 +360,12 @@ class MemoryFileLoader:
                 # Append to end
                 new_content = content.rstrip() + f"\n\n{text}\n"
 
-            path.write_text(new_content, encoding='utf-8')
+            path.write_text(new_content, encoding="utf-8")
             logger.info(f"Added to {path}")
 
         return path
 
-    def init_project_memory(self, path: Optional[Path] = None) -> Path:
+    def init_project_memory(self, path: Path | None = None) -> Path:
         """
         Initialize a new memory.md file with template.
 
@@ -439,6 +437,6 @@ class MemoryFileLoader:
         # Create directory if it doesn't exist
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        path.write_text(template, encoding='utf-8')
+        path.write_text(template, encoding="utf-8")
         logger.info(f"Created project memory template: {path}")
         return path

@@ -5,9 +5,10 @@ from enum import Enum
 
 class PermissionMode(Enum):
     """Controls whether the agent asks for user approval before executing tools."""
-    NORMAL = "normal"   # Asks approval for risky tools
-    AUTO = "auto"       # No approval needed
-    PLAN = "plan"       # Read-only, write tools gated
+
+    NORMAL = "normal"  # Asks approval for risky tools
+    AUTO = "auto"  # No approval needed
+    PLAN = "plan"  # Read-only, write tools gated
 
 
 class PermissionManager:

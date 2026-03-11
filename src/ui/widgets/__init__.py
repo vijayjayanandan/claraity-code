@@ -16,32 +16,32 @@ This package contains the visual components:
 - PlanApprovalWidget: Inline plan approval UI for plan mode
 """
 
+from .attachment_bar import AttachmentBar
+from .autocomplete_dropdown import AutocompleteDropdown
+from .clarify_widget import ClarifyWidget
 from .code_block import CodeBlock
-from .thinking import ThinkingBlock
-from .tool_card import ToolCard, ToolApprovalOptions
 from .diff_widget import DiffWidget, InlineDiffWidget
 from .message import MessageWidget
-from .status_bar import StatusBar
-from .autocomplete_dropdown import AutocompleteDropdown
-from .attachment_bar import AttachmentBar
-from .todo_bar import TodoBar
 from .pause_widget import PausePromptWidget
-from .clarify_widget import ClarifyWidget
 from .plan_approval_widget import PlanApprovalWidget
+from .status_bar import StatusBar
+from .thinking import ThinkingBlock
+from .todo_bar import TodoBar
+from .tool_card import ToolApprovalOptions, ToolCard
 
 __all__ = [
-    'CodeBlock',
-    'ThinkingBlock',
-    'ToolCard',
-    'ToolApprovalOptions',
-    'DiffWidget',
-    'InlineDiffWidget',
-    'MessageWidget',
-    'StatusBar',
-    'AutocompleteDropdown',
-    'AttachmentBar',
-    'TodoBar',
-    'PausePromptWidget',
-    'ClarifyWidget',
-    'PlanApprovalWidget',
+    "CodeBlock",
+    "ThinkingBlock",
+    "ToolCard",
+    "ToolApprovalOptions",
+    "DiffWidget",
+    "InlineDiffWidget",
+    "MessageWidget",
+    "StatusBar",
+    "AutocompleteDropdown",
+    "AttachmentBar",
+    "TodoBar",
+    "PausePromptWidget",
+    "ClarifyWidget",
+    "PlanApprovalWidget",
 ]

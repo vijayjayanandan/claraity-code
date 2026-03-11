@@ -11,9 +11,9 @@ NOT persisted to JSONL - ephemeral, session-scoped only.
 NO pub/sub - just a lookup table. MessageStore is the single notification system.
 """
 
-from dataclasses import dataclass
-from typing import Optional, Dict
 import threading
+from dataclasses import dataclass
+from typing import Optional
 
 
 @dataclass(frozen=True)
@@ -24,6 +24,7 @@ class ToolApprovalMeta:
         requires_approval: Whether this tool call needs user approval
         permission_mode: Mode at creation time (plan/normal/auto)
     """
+
     requires_approval: bool = False
     permission_mode: str = "normal"
 
@@ -49,7 +50,7 @@ class RenderMetaRegistry:
     """
 
     def __init__(self):
-        self._approval_meta: Dict[str, ToolApprovalMeta] = {}
+        self._approval_meta: dict[str, ToolApprovalMeta] = {}
         self._lock = threading.Lock()
 
     def set_approval_meta(self, tool_call_id: str, meta: ToolApprovalMeta) -> None:
@@ -60,7 +61,7 @@ class RenderMetaRegistry:
         with self._lock:
             self._approval_meta[tool_call_id] = meta
 
-    def get_approval_meta(self, tool_call_id: str) -> Optional[ToolApprovalMeta]:
+    def get_approval_meta(self, tool_call_id: str) -> ToolApprovalMeta | None:
         """Query frozen approval policy.
 
         Called by TUI when rendering tool cards.

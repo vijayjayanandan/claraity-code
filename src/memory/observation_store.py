@@ -13,25 +13,28 @@ import os
 import re
 import sqlite3
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
-from datetime import datetime
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class Importance(Enum):
     """Importance levels for observations."""
+
     CRITICAL = "critical"  # Never mask unless RED and last resort
-    NORMAL = "normal"      # Mask after OBSERVATION_MASK_AGE turns
-    LOW = "low"            # Mask first when under pressure
+    NORMAL = "normal"  # Mask after OBSERVATION_MASK_AGE turns
+    LOW = "low"  # Mask first when under pressure
 
 
 @dataclass
 class Observation:
     """Represents a stored tool observation."""
+
     observation_id: str
     tool_name: str
     args_hash: str
@@ -40,7 +43,7 @@ class Observation:
     importance: Importance
     token_count: int
     created_at: float
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_pointer(self) -> str:
         """Generate pointer format for this observation."""
@@ -48,10 +51,10 @@ class Observation:
             observation_id=self.observation_id,
             tool_name=self.tool_name,
             token_count=self.token_count,
-            importance=self.importance.value
+            importance=self.importance.value,
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
             "observation_id": self.observation_id,
@@ -71,24 +74,19 @@ class ObservationPointer:
 
     # Pointer format: [[OBS#<id> tool=<name> tokens=<count> importance=<level>]]
     POINTER_PATTERN = re.compile(
-        r'\[\[OBS#(?P<id>[a-f0-9]+)\s+'
-        r'tool=(?P<tool>\S+)\s+'
-        r'tokens=(?P<tokens>\d+)\s+'
-        r'importance=(?P<importance>\w+)\]\]'
+        r"\[\[OBS#(?P<id>[a-f0-9]+)\s+"
+        r"tool=(?P<tool>\S+)\s+"
+        r"tokens=(?P<tokens>\d+)\s+"
+        r"importance=(?P<importance>\w+)\]\]"
     )
 
     @staticmethod
-    def format(
-        observation_id: str,
-        tool_name: str,
-        token_count: int,
-        importance: str
-    ) -> str:
+    def format(observation_id: str, tool_name: str, token_count: int, importance: str) -> str:
         """Generate pointer string for an observation."""
         return f"[[OBS#{observation_id} tool={tool_name} tokens={token_count} importance={importance}]]"
 
     @classmethod
-    def parse(cls, pointer: str) -> Optional[Dict[str, Any]]:
+    def parse(cls, pointer: str) -> dict[str, Any] | None:
         """Parse a pointer string into its components."""
         match = cls.POINTER_PATTERN.search(pointer)
         if match:
@@ -106,16 +104,18 @@ class ObservationPointer:
         return bool(cls.POINTER_PATTERN.search(text))
 
     @classmethod
-    def extract_all(cls, text: str) -> List[Dict[str, Any]]:
+    def extract_all(cls, text: str) -> list[dict[str, Any]]:
         """Extract all pointers from text."""
         pointers = []
         for match in cls.POINTER_PATTERN.finditer(text):
-            pointers.append({
-                "observation_id": match.group("id"),
-                "tool_name": match.group("tool"),
-                "token_count": int(match.group("tokens")),
-                "importance": match.group("importance"),
-            })
+            pointers.append(
+                {
+                    "observation_id": match.group("id"),
+                    "tool_name": match.group("tool"),
+                    "token_count": int(match.group("tokens")),
+                    "importance": match.group("importance"),
+                }
+            )
         return pointers
 
 
@@ -129,8 +129,8 @@ class ObservationStore:
 
     def __init__(
         self,
-        db_path: Optional[str] = None,
-        token_counter: Optional[callable] = None,
+        db_path: str | None = None,
+        token_counter: Callable | None = None,
     ):
         """
         Initialize the observation store.
@@ -205,7 +205,7 @@ class ObservationStore:
         content: str,
         turn_id: int,
         importance: Importance = Importance.NORMAL,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> Observation:
         """
         Save a tool observation to the store.
@@ -245,7 +245,7 @@ class ObservationStore:
                     token_count,
                     created_at,
                     json.dumps(metadata),
-                )
+                ),
             )
             conn.commit()
 
@@ -269,7 +269,7 @@ class ObservationStore:
 
         return observation
 
-    def get(self, observation_id: str) -> Optional[Observation]:
+    def get(self, observation_id: str) -> Observation | None:
         """
         Retrieve an observation by ID.
 
@@ -282,8 +282,7 @@ class ObservationStore:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
-                "SELECT * FROM observations WHERE observation_id = ?",
-                (observation_id,)
+                "SELECT * FROM observations WHERE observation_id = ?", (observation_id,)
             )
             row = cursor.fetchone()
 
@@ -293,7 +292,7 @@ class ObservationStore:
 
         return self._row_to_observation(row)
 
-    def get_content(self, observation_id: str) -> Optional[str]:
+    def get_content(self, observation_id: str) -> str | None:
         """
         Retrieve just the content for an observation.
 
@@ -306,7 +305,7 @@ class ObservationStore:
         observation = self.get(observation_id)
         return observation.content if observation else None
 
-    def rehydrate(self, pointer: str) -> Optional[str]:
+    def rehydrate(self, pointer: str) -> str | None:
         """
         Rehydrate a pointer to its full content.
 
@@ -325,13 +324,13 @@ class ObservationStore:
 
     def find(
         self,
-        tool_name: Optional[str] = None,
-        turn_id: Optional[int] = None,
-        importance: Optional[Importance] = None,
-        min_turn_id: Optional[int] = None,
-        max_turn_id: Optional[int] = None,
+        tool_name: str | None = None,
+        turn_id: int | None = None,
+        importance: Importance | None = None,
+        min_turn_id: int | None = None,
+        max_turn_id: int | None = None,
         limit: int = 100,
-    ) -> List[Observation]:
+    ) -> list[Observation]:
         """
         Find observations matching criteria.
 
@@ -344,7 +343,7 @@ class ObservationStore:
             limit: Maximum number of results
 
         Returns:
-            List of matching Observation objects
+            list of matching Observation objects
         """
         conditions = []
         params = []
@@ -387,7 +386,7 @@ class ObservationStore:
         current_turn_id: int,
         mask_age: int = 15,
         exclude_critical: bool = True,
-    ) -> List[Observation]:
+    ) -> list[Observation]:
         """
         Find observations eligible for masking.
 
@@ -397,7 +396,7 @@ class ObservationStore:
             exclude_critical: If True, exclude critical observations
 
         Returns:
-            List of observations eligible for masking
+            list of observations eligible for masking
         """
         cutoff_turn = current_turn_id - mask_age
 
@@ -410,7 +409,7 @@ class ObservationStore:
 
         query = f"""
             SELECT * FROM observations
-            WHERE {' AND '.join(conditions)}
+            WHERE {" AND ".join(conditions)}
             ORDER BY importance ASC, turn_id ASC
         """
 
@@ -447,8 +446,7 @@ class ObservationStore:
         """
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
-                "DELETE FROM observations WHERE observation_id = ?",
-                (observation_id,)
+                "DELETE FROM observations WHERE observation_id = ?", (observation_id,)
             )
             conn.commit()
             deleted = cursor.rowcount > 0
@@ -469,17 +467,14 @@ class ObservationStore:
             Number of observations deleted
         """
         with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute(
-                "DELETE FROM observations WHERE turn_id < ?",
-                (turn_id,)
-            )
+            cursor = conn.execute("DELETE FROM observations WHERE turn_id < ?", (turn_id,))
             conn.commit()
             deleted = cursor.rowcount
 
         logger.info(f"[OBS] Deleted {deleted} observations before turn {turn_id}")
         return deleted
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get statistics about stored observations."""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row

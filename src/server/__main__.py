@@ -11,11 +11,11 @@ Windows note:
     aiohttp 3.9+ works correctly with ProactorEventLoop.
 """
 
-import sys
-import asyncio
 import argparse
+import asyncio
 import os
 import signal
+import sys
 
 
 def main():
@@ -24,13 +24,15 @@ def main():
     parser.add_argument("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=9120, help="Port (default: 9120)")
     parser.add_argument("--workdir", default=None, help="Working directory (default: cwd)")
-    parser.add_argument("--config", default=None, help="Config file path (default: .clarity/config.yaml)")
+    parser.add_argument(
+        "--config", default=None, help="Config file path (default: .clarity/config.yaml)"
+    )
     args = parser.parse_args()
 
     working_directory = args.workdir or os.getcwd()
 
     # Load LLM config from config.yaml (same as CLI)
-    from src.llm.config_loader import load_llm_config, SYSTEM_CONFIG_PATH
+    from src.llm.config_loader import SYSTEM_CONFIG_PATH, load_llm_config
 
     config_path = args.config or SYSTEM_CONFIG_PATH
     print(f"Loading config from: {config_path}")
@@ -61,6 +63,7 @@ def main():
         except Exception as e:
             print(f"\n[ERROR] Server failed to start: {e}")
             import traceback
+
             traceback.print_exc()
             return
 

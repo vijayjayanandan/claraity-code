@@ -12,7 +12,7 @@ import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Optional
 
 
 @dataclass
@@ -28,7 +28,7 @@ class CodeIntelligenceConfig:
     """
 
     # Language configuration
-    languages: List[str] = field(default_factory=list)  # ["python", "typescript"]
+    languages: list[str] = field(default_factory=list)  # ["python", "typescript"]
 
     # Resource limits
     max_servers: int = 3  # Max concurrent LSP servers
@@ -36,14 +36,14 @@ class CodeIntelligenceConfig:
     cache_ttl_seconds: int = 300  # Cache TTL (5 minutes)
 
     # Custom LSP paths (optional)
-    lsp_paths: Dict[str, str] = field(default_factory=dict)
+    lsp_paths: dict[str, str] = field(default_factory=dict)
     # Example: {"python": "/custom/path/to/pyright"}
 
     # Enabled features
     enabled: bool = True  # Master enable/disable
 
     @classmethod
-    def auto_detect(cls, repo_root: Optional[str] = None) -> "CodeIntelligenceConfig":
+    def auto_detect(cls, repo_root: str | None = None) -> "CodeIntelligenceConfig":
         """
         Auto-detect configuration from multiple sources.
 
@@ -228,13 +228,15 @@ class CodeIntelligenceConfig:
             languages=other.languages if other.languages else self.languages,
             max_servers=other.max_servers if other.max_servers != 3 else self.max_servers,
             cache_size_mb=other.cache_size_mb if other.cache_size_mb != 10 else self.cache_size_mb,
-            cache_ttl_seconds=other.cache_ttl_seconds if other.cache_ttl_seconds != 300 else self.cache_ttl_seconds,
+            cache_ttl_seconds=other.cache_ttl_seconds
+            if other.cache_ttl_seconds != 300
+            else self.cache_ttl_seconds,
             lsp_paths={**self.lsp_paths, **other.lsp_paths},  # Merge dicts
-            enabled=other.enabled if hasattr(other, 'enabled') else self.enabled,
+            enabled=other.enabled if hasattr(other, "enabled") else self.enabled,
         )
 
     @staticmethod
-    def detect_languages(repo_root: str) -> List[str]:
+    def detect_languages(repo_root: str) -> list[str]:
         """
         Detect languages from project files.
 
@@ -258,7 +260,7 @@ class CodeIntelligenceConfig:
             repo_root: Repository root path
 
         Returns:
-            List of detected languages (e.g., ["python", "typescript"])
+            list of detected languages (e.g., ["python", "typescript"])
 
         Example:
             >>> langs = CodeIntelligenceConfig.detect_languages("/path/to/repo")

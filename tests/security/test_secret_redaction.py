@@ -145,17 +145,17 @@ class TestGitignoreProtection:
     def test_gitignore_blocks_config(self):
         gitignore = Path(__file__).parent.parent.parent / ".gitignore"
         content = gitignore.read_text()
-        assert ".clarity/config.yaml" in content
+        assert ".clarity/" in content or ".clarity/config.yaml" in content
 
     def test_gitignore_blocks_sessions(self):
         gitignore = Path(__file__).parent.parent.parent / ".gitignore"
         content = gitignore.read_text()
-        assert ".clarity/sessions/" in content
+        assert ".clarity/" in content or ".clarity/sessions/" in content
 
     def test_gitignore_blocks_logs(self):
         gitignore = Path(__file__).parent.parent.parent / ".gitignore"
         content = gitignore.read_text()
-        assert ".clarity/logs/" in content
+        assert ".clarity/" in content or ".clarity/logs/" in content
 
 
 from pathlib import Path

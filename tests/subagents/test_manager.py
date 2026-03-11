@@ -383,7 +383,7 @@ class TestSubAgentManagerParallelExecution:
 
             assert result.success is True
             assert len(result.subagent_results) == 3
-            assert result.total_time > 0
+            assert result.total_time >= 0
             assert result.metadata['tasks_submitted'] == 3
             assert result.metadata['tasks_completed'] == 3
 

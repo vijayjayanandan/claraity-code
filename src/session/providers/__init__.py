@@ -9,8 +9,8 @@ Each translator provides:
 - to_<provider>(): Convert Messages to API request format
 """
 
-from .openai import from_openai, to_openai
 from .anthropic import from_anthropic, to_anthropic
+from .openai import from_openai, to_openai
 
 __all__ = [
     "from_openai",

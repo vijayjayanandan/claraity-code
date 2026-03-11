@@ -19,19 +19,20 @@ CONCURRENCY MODEL:
 """
 
 import asyncio
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any, Optional
 
-from aiohttp import web, WSMsgType
+from aiohttp import WSMsgType, web
 
-from src.core.protocol import UIProtocol, PauseResult
-from src.core.events import UIEvent, PausePromptStart
-from src.session.store.memory_store import MessageStore, StoreNotification
+from src.core.events import PausePromptStart, UIEvent
+from src.core.protocol import PauseResult, UIProtocol
+from src.observability import get_logger
 from src.server.serializers import (
+    deserialize_action,
     serialize_event,
     serialize_store_notification,
-    deserialize_action,
 )
-from src.observability import get_logger
+from src.session.store.memory_store import MessageStore, StoreNotification
 
 logger = get_logger("server.ws_protocol")
 
@@ -58,8 +59,10 @@ class WebSocketProtocol(UIProtocol):
         self._config_path = config_path
         self._send_lock = asyncio.Lock()
         self._loop = asyncio.get_event_loop()
-        self._unsubscribe: Optional[Callable[[], None]] = None
-        self._on_new_session: Optional[Callable[[], Any]] = None
+        self._unsubscribe: Callable[[], None] | None = None
+        self._on_new_session: Callable[[], Any] | None = None
+        self._on_list_sessions: Callable[[], Any] | None = None
+        self._on_resume_session: Callable[[str], Any] | None = None
 
     async def _safe_background_send(self, coro) -> None:
         """Run a coroutine in the background with error logging."""
@@ -79,6 +82,7 @@ class WebSocketProtocol(UIProtocol):
         so it uses loop.call_soon_threadsafe() to schedule the async send
         on the event loop.
         """
+
         def on_notification(notification: StoreNotification) -> None:
             self._loop.call_soon_threadsafe(
                 asyncio.ensure_future,
@@ -101,10 +105,16 @@ class WebSocketProtocol(UIProtocol):
 
     def notify_todos_updated(self, todos: list) -> None:
         """Send todo list to WebSocket client."""
-        asyncio.ensure_future(self._safe_background_send(self._send_json({
-            "type": "todos_updated",
-            "todos": todos,
-        })))
+        asyncio.ensure_future(
+            self._safe_background_send(
+                self._send_json(
+                    {
+                        "type": "todos_updated",
+                        "todos": todos,
+                    }
+                )
+            )
+        )
 
     # -----------------------------------------------------------------
     # Sending (Agent -> Client)
@@ -164,8 +174,7 @@ class WebSocketProtocol(UIProtocol):
     # Subagent Interactive Overrides
     # -----------------------------------------------------------------
 
-    async def request_pause(self, reason, reason_code, stats,
-                            pending_todos=None):
+    async def request_pause(self, reason, reason_code, stats, pending_todos=None):
         """Override base to send PausePromptStart directly over WebSocket.
 
         The base implementation calls ``_on_pause_requested`` callback (which
@@ -190,15 +199,17 @@ class WebSocketProtocol(UIProtocol):
         needs an explicit JSON message so the VS Code sidebar can render
         the clarify form.
         """
-        await self._send_json({
-            "type": "interactive",
-            "event": "clarify_request",
-            "data": {
-                "call_id": call_id,
-                "questions": questions or [],
-                "context": context,
-            },
-        })
+        await self._send_json(
+            {
+                "type": "interactive",
+                "event": "clarify_request",
+                "data": {
+                    "call_id": call_id,
+                    "questions": questions or [],
+                    "context": context,
+                },
+            }
+        )
 
     # -----------------------------------------------------------------
     # Receiving (Client -> Agent)
@@ -221,82 +232,132 @@ class WebSocketProtocol(UIProtocol):
                         # Chat messages go to a separate queue for the server
                         # to pick up and feed to agent.stream_response()
                         content = data.get("content", "")
+                        images = data.get("images", [])
                         if len(content) > 100_000:
-                            await self._send_json({
-                                "type": "error",
-                                "error_type": "message_too_large",
-                                "user_message": "Message too large. Maximum 100,000 characters.",
-                                "recoverable": True,
-                            })
+                            await self._send_json(
+                                {
+                                    "type": "error",
+                                    "error_type": "message_too_large",
+                                    "user_message": "Message too large. Maximum 100,000 characters.",
+                                    "recoverable": True,
+                                }
+                            )
                             continue
-                        if content.strip():
-                            await self._chat_queue.put(content)
+                        if content.strip() or images:
+                            await self._chat_queue.put(
+                                {
+                                    "content": content,
+                                    "images": images,
+                                }
+                            )
                     elif msg_type == "set_mode":
                         mode = data.get("mode", "")
                         VALID_MODES = {"plan", "normal", "auto"}
                         if mode not in VALID_MODES:
                             logger.warning(f"[WS] Invalid mode rejected: {mode!r}")
-                            await self._send_json({
-                                "type": "error",
-                                "error_type": "invalid_mode",
-                                "user_message": f"Invalid mode: {mode}. Valid modes: {', '.join(sorted(VALID_MODES))}",
-                                "recoverable": True,
-                            })
+                            await self._send_json(
+                                {
+                                    "type": "error",
+                                    "error_type": "invalid_mode",
+                                    "user_message": f"Invalid mode: {mode}. Valid modes: {', '.join(sorted(VALID_MODES))}",
+                                    "recoverable": True,
+                                }
+                            )
                             continue
                         if mode and self._agent:
                             try:
                                 self._agent.set_permission_mode(mode)
                                 # Confirm with the agent's actual mode
                                 actual = self._agent.get_permission_mode()
-                                await self._send_json({
-                                    "type": "interactive",
-                                    "event": "permission_mode_changed",
-                                    "data": {"new_mode": actual},
-                                })
+                                await self._send_json(
+                                    {
+                                        "type": "interactive",
+                                        "event": "permission_mode_changed",
+                                        "data": {"new_mode": actual},
+                                    }
+                                )
                             except ValueError:
-                                await self._send_json({
-                                    "type": "error",
-                                    "error_type": "invalid_mode",
-                                    "user_message": f"Invalid mode: {mode}",
-                                    "recoverable": True,
-                                })
+                                await self._send_json(
+                                    {
+                                        "type": "error",
+                                        "error_type": "invalid_mode",
+                                        "user_message": f"Invalid mode: {mode}",
+                                        "recoverable": True,
+                                    }
+                                )
                     elif msg_type == "set_auto_approve":
                         categories = data.get("categories", {})
                         if self._agent:
                             confirmed = self._agent.set_auto_approve_categories(categories)
-                            await self._send_json({
-                                "type": "auto_approve_changed",
-                                "categories": confirmed,
-                            })
+                            await self._send_json(
+                                {
+                                    "type": "auto_approve_changed",
+                                    "categories": confirmed,
+                                }
+                            )
 
                     elif msg_type == "get_auto_approve":
                         if self._agent:
-                            await self._send_json({
-                                "type": "auto_approve_changed",
-                                "categories": self._agent.get_auto_approve_categories(),
-                            })
+                            await self._send_json(
+                                {
+                                    "type": "auto_approve_changed",
+                                    "categories": self._agent.get_auto_approve_categories(),
+                                }
+                            )
 
                     elif msg_type == "get_config":
                         from src.server.config_handler import get_config_response
+
                         response = get_config_response(self._config_path)
                         await self._send_json(response)
 
                     elif msg_type == "save_config":
                         from src.server.config_handler import save_config_from_request
+
                         response = save_config_from_request(data, self._config_path)
                         await self._send_json(response)
 
                     elif msg_type == "list_models":
                         from src.server.config_handler import list_models_from_request
+
                         loop = asyncio.get_event_loop()
-                        response = await loop.run_in_executor(
-                            None, list_models_from_request, data
-                        )
+                        response = await loop.run_in_executor(None, list_models_from_request, data)
                         await self._send_json(response)
+
+                    elif msg_type == "get_jira_profiles":
+                        await self._handle_jira_profiles()
+
+                    elif msg_type == "save_jira_config":
+                        await self._handle_jira_save(data)
+
+                    elif msg_type == "connect_jira":
+                        profile = data.get("profile", "")
+                        if profile:
+                            await self._handle_jira_connect(profile)
+                        else:
+                            await self._send_json(
+                                {
+                                    "type": "jira_connect_result",
+                                    "success": False,
+                                    "message": "Profile name is required.",
+                                }
+                            )
+
+                    elif msg_type == "disconnect_jira":
+                        await self._handle_jira_disconnect()
 
                     elif msg_type == "new_session":
                         if self._on_new_session:
                             await self._on_new_session()
+
+                    elif msg_type == "list_sessions":
+                        if self._on_list_sessions:
+                            await self._on_list_sessions()
+
+                    elif msg_type == "resume_session":
+                        session_id = data.get("session_id", "")
+                        if session_id and self._on_resume_session:
+                            await self._on_resume_session(session_id)
 
                     else:
                         # All other messages are UserActions
@@ -318,13 +379,255 @@ class WebSocketProtocol(UIProtocol):
 
         logger.info("[WS] Receive loop ended")
 
-    async def wait_for_chat_message(self) -> str:
-        """Wait for the next chat message from the client."""
+    async def wait_for_chat_message(self) -> dict:
+        """Wait for the next chat message from the client.
+
+        Returns:
+            dict with 'content' (str) and 'images' (list of image dicts).
+        """
         return await self._chat_queue.get()
 
     @property
     def _chat_queue(self) -> asyncio.Queue:
         """Lazy-init chat message queue."""
         if not hasattr(self, "_chat_queue_impl"):
-            self._chat_queue_impl: asyncio.Queue[str] = asyncio.Queue()
+            self._chat_queue_impl: asyncio.Queue[dict] = asyncio.Queue()
         return self._chat_queue_impl
+
+    # -----------------------------------------------------------------
+    # Jira Integration Handlers
+    # -----------------------------------------------------------------
+
+    async def _handle_jira_profiles(self) -> None:
+        """List Jira profiles and their connection status."""
+        try:
+            from src.integrations.jira.connection import JiraConnection
+
+            profiles = JiraConnection.list_profiles()
+            profile_data = []
+            for name in profiles:
+                conn = JiraConnection(profile=name)
+                profile_data.append(
+                    {
+                        "name": name,
+                        "jira_url": conn.jira_url or "",
+                        "username": conn.username or "",
+                        "enabled": conn.enabled,
+                        "has_token": conn.has_api_token(),
+                        "is_configured": conn.is_configured(),
+                    }
+                )
+
+            # Check if any profile is currently connected
+            connected_profile = None
+            if self._agent:
+                mcp_conn = self._agent._mcp_manager.get_connection("jira")
+                if mcp_conn:
+                    # Extract profile from config name "mcp-atlassian-<profile>"
+                    config_name = mcp_conn.config.name
+                    if config_name.startswith("mcp-atlassian-"):
+                        connected_profile = config_name[len("mcp-atlassian-") :]
+
+            await self._send_json(
+                {
+                    "type": "jira_profiles",
+                    "profiles": profile_data,
+                    "connected_profile": connected_profile,
+                }
+            )
+        except Exception as e:
+            logger.warning(f"[WS] Failed to list Jira profiles: {e}")
+            await self._send_json(
+                {
+                    "type": "jira_profiles",
+                    "profiles": [],
+                    "connected_profile": None,
+                    "error": str(e),
+                }
+            )
+
+    async def _handle_jira_save(self, data: dict) -> None:
+        """Save Jira profile configuration."""
+        try:
+            import re
+
+            from src.integrations.jira.connection import JiraConnection
+
+            profile = data.get("profile", "").strip()
+            jira_url = data.get("jira_url", "").strip()
+            username = data.get("username", "").strip()
+            api_token = data.get("api_token", "").strip()
+
+            if not profile:
+                await self._send_json(
+                    {
+                        "type": "jira_config_saved",
+                        "success": False,
+                        "message": "Profile name is required.",
+                    }
+                )
+                return
+
+            # Validate profile name to prevent path traversal
+            if not re.match(r"^[a-zA-Z0-9_-]+$", profile):
+                await self._send_json(
+                    {
+                        "type": "jira_config_saved",
+                        "success": False,
+                        "message": "Invalid profile name. Use letters, numbers, hyphens, or underscores only.",
+                    }
+                )
+                return
+
+            conn = JiraConnection(profile=profile)
+
+            # If no new token provided, keep existing (update URL/username only)
+            if not api_token and conn.has_api_token():
+                # Update config fields only
+                conn._jira_url = jira_url or conn._jira_url
+                conn._username = username or conn._username
+                conn._enabled = True
+                conn._save_config()
+            else:
+                conn.configure(
+                    jira_url=jira_url,
+                    username=username,
+                    api_token=api_token,
+                )
+
+            await self._send_json(
+                {
+                    "type": "jira_config_saved",
+                    "success": True,
+                    "message": f"Profile '{profile}' saved.",
+                    "profile": profile,
+                }
+            )
+        except ValueError as e:
+            await self._send_json(
+                {
+                    "type": "jira_config_saved",
+                    "success": False,
+                    "message": str(e),
+                }
+            )
+        except Exception as e:
+            logger.warning(f"[WS] Failed to save Jira config: {e}")
+            await self._send_json(
+                {
+                    "type": "jira_config_saved",
+                    "success": False,
+                    "message": f"Save failed: {e}",
+                }
+            )
+
+    async def _handle_jira_connect(self, profile: str) -> None:
+        """Connect to Jira via MCP server for the given profile."""
+        if not self._agent:
+            await self._send_json(
+                {
+                    "type": "jira_connect_result",
+                    "success": False,
+                    "message": "No agent available.",
+                }
+            )
+            return
+
+        try:
+            from src.integrations.jira.connection import JiraConnection
+            from src.integrations.jira.tools import create_jira_policy_gate
+            from src.integrations.mcp.client import McpClient, StdioTransport
+            from src.integrations.mcp.registry import McpToolRegistry
+
+            conn = JiraConnection(profile=profile)
+            if not conn.is_configured():
+                await self._send_json(
+                    {
+                        "type": "jira_connect_result",
+                        "success": False,
+                        "message": f"Profile '{profile}' is not fully configured.",
+                    }
+                )
+                return
+
+            # Disconnect existing connection first
+            existing = self._agent._mcp_manager.get_connection("jira")
+            if existing:
+                await self._agent.disable_mcp_integration("jira")
+
+            config = conn.get_mcp_config()
+            transport = StdioTransport()
+            client = McpClient(config, transport)
+            policy_gate = create_jira_policy_gate()
+            registry = McpToolRegistry(config, policy_gate)
+
+            count = await asyncio.wait_for(
+                self._agent.enable_mcp_integration("jira", registry, client),
+                timeout=120,
+            )
+
+            await self._send_json(
+                {
+                    "type": "jira_connect_result",
+                    "success": True,
+                    "message": f"Connected to Jira ({profile}): {count} tools available.",
+                    "profile": profile,
+                    "tool_count": count,
+                }
+            )
+        except (asyncio.TimeoutError, TimeoutError):
+            await self._send_json(
+                {
+                    "type": "jira_connect_result",
+                    "success": False,
+                    "message": "Connection timed out (120s). Is mcp-atlassian installed?",
+                }
+            )
+        except Exception as e:
+            logger.warning(f"[WS] Jira connect failed: {e}")
+            await self._send_json(
+                {
+                    "type": "jira_connect_result",
+                    "success": False,
+                    "message": f"Connection failed: {e}",
+                }
+            )
+
+    async def _handle_jira_disconnect(self) -> None:
+        """Disconnect from Jira MCP server."""
+        if not self._agent:
+            await self._send_json(
+                {
+                    "type": "jira_disconnect_result",
+                    "success": False,
+                    "message": "No agent available.",
+                }
+            )
+            return
+
+        try:
+            await self._agent.disable_mcp_integration("jira")
+            await self._send_json(
+                {
+                    "type": "jira_disconnect_result",
+                    "success": True,
+                    "message": "Jira disconnected.",
+                }
+            )
+        except KeyError:
+            await self._send_json(
+                {
+                    "type": "jira_disconnect_result",
+                    "success": True,
+                    "message": "Jira was not connected.",
+                }
+            )
+        except Exception as e:
+            logger.warning(f"[WS] Jira disconnect failed: {e}")
+            await self._send_json(
+                {
+                    "type": "jira_disconnect_result",
+                    "success": False,
+                    "message": f"Disconnect failed: {e}",
+                }
+            )

@@ -12,22 +12,26 @@ Per v3.1 Patch 1: NO calls to reset_seq(). Store owns seq authority.
 """
 
 import os
-import re
-from pathlib import Path
-from datetime import datetime
-from typing import Optional, Callable, List
-from dataclasses import dataclass
-import subprocess
 import random
+import re
+import subprocess
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
 
 from src.observability import get_logger
+
 from ..models.base import SessionContext, generate_uuid
 
 # Security: Valid session ID pattern (UUID format)
-SESSION_ID_PATTERN = re.compile(r'^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$', re.IGNORECASE)
-from ..store.memory_store import MessageStore
-from ..persistence.parser import load_session, validate_session_file, get_session_info
+SESSION_ID_PATTERN = re.compile(
+    r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$", re.IGNORECASE
+)
+from ..persistence.parser import get_session_info, load_session, validate_session_file
 from ..persistence.writer import SessionWriter, create_session_file
+from ..store.memory_store import MessageStore
 
 logger = get_logger("session.manager")
 
@@ -35,6 +39,7 @@ logger = get_logger("session.manager")
 @dataclass
 class SessionInfo:
     """Session metadata."""
+
     session_id: str
     file_path: Path
     created_at: datetime
@@ -55,19 +60,15 @@ class SessionManager:
     Per v3.1 Patch 1: Store owns seq authority. No global reset_seq() calls.
     """
 
-    def __init__(
-        self,
-        sessions_dir: str = ".claraity/sessions",
-        version: str = "1.0.0"
-    ):
+    def __init__(self, sessions_dir: str = ".claraity/sessions", version: str = "1.0.0"):
         self._sessions_dir = Path(sessions_dir)
         self._version = version
 
         # Current session state
-        self._store: Optional[MessageStore] = None
-        self._writer: Optional[SessionWriter] = None
-        self._context: Optional[SessionContext] = None
-        self._session_info: Optional[SessionInfo] = None
+        self._store: MessageStore | None = None
+        self._writer: SessionWriter | None = None
+        self._context: SessionContext | None = None
+        self._session_info: SessionInfo | None = None
 
         # Ensure sessions directory exists
         self._sessions_dir.mkdir(parents=True, exist_ok=True)
@@ -77,17 +78,14 @@ class SessionManager:
     # =========================================================================
 
     def create_session(
-        self,
-        cwd: Optional[str] = None,
-        git_branch: Optional[str] = None,
-        slug: Optional[str] = None
+        self, cwd: str | None = None, git_branch: str | None = None, slug: str | None = None
     ) -> SessionInfo:
         """
         Create a new session.
 
         Store starts with _max_seq=0, so first message gets seq=1.
         Per v3.1 Patch 1: NO reset_seq() call - Store handles this internally.
-        
+
         Note: Session file is NOT created until the first message is written.
         This prevents empty session files from cluttering the sessions directory.
         """
@@ -100,7 +98,7 @@ class SessionManager:
             cwd=cwd or os.getcwd(),
             git_branch=git_branch or self._detect_git_branch(),
             version=self._version,
-            slug=slug or self._generate_slug()
+            slug=slug or self._generate_slug(),
         )
 
         # Create store (starts at _max_seq=0)
@@ -118,16 +116,14 @@ class SessionManager:
             file_path=file_path,
             created_at=datetime.utcnow(),
             message_count=0,
-            is_new=True
+            is_new=True,
         )
 
         logger.info(f"Created new session: {session_id}")
         return self._session_info
 
     def resume_session(
-        self,
-        session_id: str,
-        on_progress: Optional[Callable[[int, int], None]] = None
+        self, session_id: str, on_progress: Callable[[int, int], None] | None = None
     ) -> SessionInfo:
         """
         Resume an existing session from JSONL file.
@@ -162,17 +158,17 @@ class SessionManager:
             first_msg = messages[0]
             self._context = SessionContext(
                 session_id=session_id,
-                cwd=getattr(first_msg, 'cwd', os.getcwd()),
-                git_branch=getattr(first_msg, 'git_branch', ''),
-                version=getattr(first_msg, 'version', self._version),
-                slug=getattr(first_msg, 'slug', None)
+                cwd=getattr(first_msg, "cwd", os.getcwd()),
+                git_branch=getattr(first_msg, "git_branch", ""),
+                version=getattr(first_msg, "version", self._version),
+                slug=getattr(first_msg, "slug", None),
             )
         else:
             self._context = SessionContext(
                 session_id=session_id,
                 cwd=os.getcwd(),
                 git_branch=self._detect_git_branch(),
-                version=self._version
+                version=self._version,
             )
 
         # Create writer (not opened yet - call start_writer())
@@ -184,7 +180,7 @@ class SessionManager:
             file_path=file_path,
             created_at=datetime.utcnow(),
             message_count=self._store.message_count,
-            is_new=False
+            is_new=False,
         )
 
         logger.info(f"Resumed session: {session_id} with {self._store.message_count} messages")
@@ -216,8 +212,8 @@ class SessionManager:
     # Session Discovery
     # =========================================================================
 
-    def list_sessions(self, limit: Optional[int] = None) -> List[SessionInfo]:
-        """List all available sessions, sorted by modification time (newest first)."""
+    def list_sessions(self, limit: int | None = None) -> list[SessionInfo]:
+        """list all available sessions, sorted by modification time (newest first)."""
         sessions = []
 
         for file_path in self._sessions_dir.glob("*.jsonl"):
@@ -225,16 +221,18 @@ class SessionManager:
 
             try:
                 # Get line count efficiently
-                line_count = sum(1 for line in open(file_path, 'r', encoding='utf-8') if line.strip())
+                line_count = sum(1 for line in open(file_path, encoding="utf-8") if line.strip())
                 mtime = datetime.fromtimestamp(file_path.stat().st_mtime)
 
-                sessions.append(SessionInfo(
-                    session_id=session_id,
-                    file_path=file_path,
-                    created_at=mtime,
-                    message_count=line_count,
-                    is_new=False
-                ))
+                sessions.append(
+                    SessionInfo(
+                        session_id=session_id,
+                        file_path=file_path,
+                        created_at=mtime,
+                        message_count=line_count,
+                        is_new=False,
+                    )
+                )
             except Exception as e:
                 logger.warning(f"Error reading session {session_id}: {e}")
                 continue
@@ -247,7 +245,7 @@ class SessionManager:
 
         return sessions
 
-    def get_recent_session(self) -> Optional[str]:
+    def get_recent_session(self) -> str | None:
         """Get the most recent session ID."""
         sessions = self.list_sessions(limit=1)
         return sessions[0].session_id if sessions else None
@@ -315,15 +313,15 @@ class SessionManager:
     # =========================================================================
 
     @property
-    def store(self) -> Optional[MessageStore]:
+    def store(self) -> MessageStore | None:
         return self._store
 
     @property
-    def context(self) -> Optional[SessionContext]:
+    def context(self) -> SessionContext | None:
         return self._context
 
     @property
-    def info(self) -> Optional[SessionInfo]:
+    def info(self) -> SessionInfo | None:
         return self._session_info
 
     @property
@@ -362,7 +360,7 @@ class SessionManager:
                 capture_output=True,
                 text=True,
                 cwd=os.getcwd(),
-                timeout=5
+                timeout=5,
             )
             if result.returncode == 0:
                 return result.stdout.strip()

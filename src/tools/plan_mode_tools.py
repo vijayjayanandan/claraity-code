@@ -9,7 +9,8 @@ The tools interact with the agent's PlanModeState and persist events
 to MessageStore for UI rendering and session resume.
 """
 
-from typing import Any, Dict, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
 from .base import Tool, ToolResult, ToolStatus
 
 if TYPE_CHECKING:
@@ -41,7 +42,7 @@ class EnterPlanModeTool(Tool):
                 "Creates a plan file where you write your implementation plan. "
                 "While in plan mode, only read-only tools are available (plus writing to the plan file). "
                 "Use this for complex tasks that benefit from upfront planning."
-            )
+            ),
         )
         self.plan_mode_state = plan_mode_state
         self.session_id = session_id
@@ -61,7 +62,7 @@ class EnterPlanModeTool(Tool):
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 output=None,
-                error="Plan mode not initialized"
+                error="Plan mode not initialized",
             )
 
         if self.session_id is None:
@@ -69,7 +70,7 @@ class EnterPlanModeTool(Tool):
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 output=None,
-                error="Session ID not set"
+                error="Session ID not set",
             )
 
         if self.plan_mode_state.is_active:
@@ -77,7 +78,7 @@ class EnterPlanModeTool(Tool):
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 output=None,
-                error=f"Already in plan mode. Plan file: {self.plan_mode_state.plan_file_path}"
+                error=f"Already in plan mode. Plan file: {self.plan_mode_state.plan_file_path}",
             )
 
         try:
@@ -105,7 +106,7 @@ class EnterPlanModeTool(Tool):
                     "plan_path": result["plan_path"],
                     "reason": reason,
                     "event_type": "plan_mode_entered",
-                }
+                },
             )
 
         except Exception as e:
@@ -113,19 +114,19 @@ class EnterPlanModeTool(Tool):
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 output=None,
-                error=f"Failed to enter plan mode: {str(e)}"
+                error=f"Failed to enter plan mode: {str(e)}",
             )
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
                 "reason": {
                     "type": "string",
-                    "description": "Brief reason for entering plan mode (e.g., 'Complex refactoring with multiple dependencies')"
+                    "description": "Brief reason for entering plan mode (e.g., 'Complex refactoring with multiple dependencies')",
                 }
             },
-            "required": []
+            "required": [],
         }
 
 
@@ -153,7 +154,7 @@ class RequestPlanApprovalTool(Tool):
                 "Submit your implementation plan to the user for approval. "
                 "Call this after writing your plan to the plan file. "
                 "The user will review and either approve the plan, reject it, or provide feedback for revisions."
-            )
+            ),
         )
         self.plan_mode_state = plan_mode_state
 
@@ -169,7 +170,7 @@ class RequestPlanApprovalTool(Tool):
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 output=None,
-                error="Plan mode not initialized"
+                error="Plan mode not initialized",
             )
 
         if not self.plan_mode_state.is_active:
@@ -177,7 +178,7 @@ class RequestPlanApprovalTool(Tool):
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 output=None,
-                error="Not currently in plan mode. Use enter_plan_mode first."
+                error="Not currently in plan mode. Use enter_plan_mode first.",
             )
 
         try:
@@ -185,10 +186,7 @@ class RequestPlanApprovalTool(Tool):
 
             if "error" in result:
                 return ToolResult(
-                    tool_name=self.name,
-                    status=ToolStatus.ERROR,
-                    output=None,
-                    error=result["error"]
+                    tool_name=self.name, status=ToolStatus.ERROR, output=None, error=result["error"]
                 )
 
             output = (
@@ -212,7 +210,7 @@ class RequestPlanApprovalTool(Tool):
                     "truncated": result["truncated"],
                     "event_type": "plan_submitted",
                     "requires_user_approval": True,
-                }
+                },
             )
 
         except Exception as e:
@@ -220,19 +218,15 @@ class RequestPlanApprovalTool(Tool):
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 output=None,
-                error=f"Failed to request plan approval: {str(e)}"
+                error=f"Failed to request plan approval: {str(e)}",
             )
 
-    def _get_parameters(self) -> Dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {},
-            "required": []
-        }
+    def _get_parameters(self) -> dict[str, Any]:
+        return {"type": "object", "properties": {}, "required": []}
 
 
 # Export all
 __all__ = [
-    'EnterPlanModeTool',
-    'RequestPlanApprovalTool',
+    "EnterPlanModeTool",
+    "RequestPlanApprovalTool",
 ]

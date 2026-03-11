@@ -31,70 +31,77 @@ def classify_error(e: Exception) -> tuple[str, str]:
     error_type = type(e).__name__.lower()
 
     # Timeout errors
-    if any(x in error_str or x in error_type for x in ['timeout', 'timed out', 'deadline']):
+    if any(x in error_str or x in error_type for x in ["timeout", "timed out", "deadline"]):
         return (
             "Request timed out. The server took too long to respond. Please try again.",
-            "timeout"
+            "timeout",
         )
 
     # Rate limiting
-    if any(x in error_str for x in ['rate limit', 'rate_limit', 'too many requests', '429']):
-        return (
-            "Too many requests. Please wait a moment and try again.",
-            "rate_limit"
-        )
+    if any(x in error_str for x in ["rate limit", "rate_limit", "too many requests", "429"]):
+        return ("Too many requests. Please wait a moment and try again.", "rate_limit")
 
     # Authentication errors
-    if any(x in error_str for x in ['authentication', 'unauthorized', 'invalid api key', '401', '403']):
-        return (
-            "Authentication failed. Please check your API key configuration.",
-            "auth"
-        )
+    if any(
+        x in error_str for x in ["authentication", "unauthorized", "invalid api key", "401", "403"]
+    ):
+        return ("Authentication failed. Please check your API key configuration.", "auth")
 
     # Model/API service errors (like the LiteLLM "repeating chunk" error)
-    if any(x in error_str for x in [
-        'internal', 'server error', '500', '502', '503', '504',
-        'repeating', 'service unavailable', 'overloaded', 'capacity'
-    ]):
-        return (
-            "The AI service encountered a temporary issue. Please try again.",
-            "service"
-        )
+    if any(
+        x in error_str
+        for x in [
+            "internal",
+            "server error",
+            "500",
+            "502",
+            "503",
+            "504",
+            "repeating",
+            "service unavailable",
+            "overloaded",
+            "capacity",
+        ]
+    ):
+        return ("The AI service encountered a temporary issue. Please try again.", "service")
 
     # Network/Connection errors
-    if any(x in error_str or x in error_type for x in [
-        'connection', 'network', 'dns', 'resolve', 'refused',
-        'reset', 'broken pipe', 'eof', 'ssl', 'certificate'
-    ]):
-        return (
-            "Connection error. Please check your network and try again.",
-            "network"
-        )
+    if any(
+        x in error_str or x in error_type
+        for x in [
+            "connection",
+            "network",
+            "dns",
+            "resolve",
+            "refused",
+            "reset",
+            "broken pipe",
+            "eof",
+            "ssl",
+            "certificate",
+        ]
+    ):
+        return ("Connection error. Please check your network and try again.", "network")
 
     # Context/Token limit errors
-    if any(x in error_str for x in ['context', 'token', 'too long', 'maximum']):
+    if any(x in error_str for x in ["context", "token", "too long", "maximum"]):
         return (
             "The conversation is too long. Please start a new conversation or clear history.",
-            "context"
+            "context",
         )
 
     # Invalid request errors
-    if any(x in error_str for x in ['invalid', 'malformed', 'bad request', '400']):
-        return (
-            "Invalid request. Please try rephrasing your message.",
-            "invalid"
-        )
+    if any(x in error_str for x in ["invalid", "malformed", "bad request", "400"]):
+        return ("Invalid request. Please try rephrasing your message.", "invalid")
 
     # Default fallback - generic message
-    return (
-        "An unexpected error occurred. Please try again.",
-        "unexpected"
-    )
+    return ("An unexpected error occurred. Please try again.", "unexpected")
 
 
 def generate_error_reference() -> str:
     """Generate a short error reference ID for user support."""
     import uuid
+
     return uuid.uuid4().hex[:8]
 
 

@@ -5,14 +5,15 @@ Manages a single conversation between Testing Claude and AI Coding Agent,
 maintaining state across multiple turns.
 """
 
-from pathlib import Path
-from datetime import datetime
-from typing import List, Optional, Any
 import json
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Optional
 
-from .models import AgentMessage, AgentResponse, ConversationLog
 from src.core.agent import CodingAgent
 from src.execution.checkpoint.manager import CheckpointMetadata
+
+from .models import AgentMessage, AgentResponse, ConversationLog
 
 
 class ConversationSession:
@@ -31,8 +32,8 @@ class ConversationSession:
         conversation_id: str,
         working_directory: Path,
         agent: CodingAgent,
-        log_file: Optional[Path] = None,
-        controller: Optional[Any] = None
+        log_file: Path | None = None,
+        controller: Any | None = None,
     ):
         """
         Initialize conversation session.
@@ -49,7 +50,7 @@ class ConversationSession:
         self.agent = agent
         self.log_file = Path(log_file) if log_file else None
         self.controller = controller
-        self.messages: List[AgentMessage] = []
+        self.messages: list[AgentMessage] = []
         self.started_at = datetime.now()
 
         # Ensure working directory exists
@@ -73,11 +74,7 @@ class ConversationSession:
             AgentResponse with agent's reply and metadata
         """
         # Add user message to history
-        user_message = AgentMessage(
-            role="user",
-            content=content,
-            timestamp=datetime.now()
-        )
+        user_message = AgentMessage(role="user", content=content, timestamp=datetime.now())
         self.messages.append(user_message)
 
         # Send to agent and capture response
@@ -91,24 +88,6 @@ class ConversationSession:
                 "Use agent.stream_response() (async) instead."
             )
 
-            # Extract files generated from tool execution history
-            files_generated = self._extract_files_from_history()
-
-            # Extract tool calls from history
-            tool_calls = self._extract_tool_calls()
-
-            # Create successful response
-            # Extract content from AgentResponse object
-            response_content = agent_response_obj.content if agent_response_obj else ""
-
-            response = AgentResponse(
-                content=response_content,
-                files_generated=files_generated,
-                tool_calls=tool_calls,
-                success=True,
-                error=None
-            )
-
         except Exception as e:
             # Handle agent execution failure
             response = AgentResponse(
@@ -116,7 +95,7 @@ class ConversationSession:
                 files_generated=[],
                 tool_calls=[],
                 success=False,
-                error=f"{type(e).__name__}: {str(e)}"
+                error=f"{type(e).__name__}: {str(e)}",
             )
 
         # Add assistant message to history
@@ -127,8 +106,8 @@ class ConversationSession:
             metadata={
                 "files_generated": response.files_generated,
                 "tool_calls_count": len(response.tool_calls),
-                "success": response.success
-            }
+                "success": response.success,
+            },
         )
         self.messages.append(assistant_message)
 
@@ -138,19 +117,19 @@ class ConversationSession:
 
         return response
 
-    def _extract_files_from_history(self) -> List[str]:
+    def _extract_files_from_history(self) -> list[str]:
         """
         Extract files created/modified from agent's tool execution history.
 
         Looks for write_file and edit_file tool calls that succeeded.
 
         Returns:
-            List of file paths that were created or modified
+            list of file paths that were created or modified
         """
         files = []
 
         # Check if agent has tool execution history
-        if not hasattr(self.agent, 'tool_execution_history'):
+        if not hasattr(self.agent, "tool_execution_history"):
             return files
 
         # Parse tool execution history
@@ -171,29 +150,29 @@ class ConversationSession:
 
         return unique_files
 
-    def _extract_tool_calls(self) -> List[dict]:
+    def _extract_tool_calls(self) -> list[dict]:
         """
         Extract all tool calls from agent's execution history.
 
         Returns:
-            List of tool call dictionaries with tool name, arguments, and success status
+            list of tool call dictionaries with tool name, arguments, and success status
         """
-        if not hasattr(self.agent, 'tool_execution_history'):
+        if not hasattr(self.agent, "tool_execution_history"):
             return []
 
         # Return copy of tool execution history
         return [dict(call) for call in self.agent.tool_execution_history]
 
-    def get_history(self) -> List[AgentMessage]:
+    def get_history(self) -> list[AgentMessage]:
         """
         Get conversation history.
 
         Returns:
-            List of all messages in chronological order
+            list of all messages in chronological order
         """
         return self.messages.copy()
 
-    def save_log(self, custom_path: Optional[Path] = None) -> Path:
+    def save_log(self, custom_path: Path | None = None) -> Path:
         """
         Save conversation to JSON file.
 
@@ -214,7 +193,7 @@ class ConversationSession:
 
         # Save to JSON file
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(log_path, 'w', encoding='utf-8') as f:
+        with open(log_path, "w", encoding="utf-8") as f:
             f.write(log.to_json(pretty=True))
 
         return log_path
@@ -235,17 +214,14 @@ class ConversationSession:
             metadata={
                 "working_directory": str(self.working_directory),
                 "log_file": str(self.log_file) if self.log_file else None,
-                "agent_model": getattr(self.agent, 'model_name', 'unknown')
-            }
+                "agent_model": getattr(self.agent, "model_name", "unknown"),
+            },
         )
 
     # Checkpoint API Methods
 
     def save_checkpoint(
-        self,
-        description: str,
-        phase: Optional[str] = None,
-        pending_tasks: Optional[List[str]] = None
+        self, description: str, phase: str | None = None, pending_tasks: list[str] | None = None
     ) -> str:
         """
         Save checkpoint programmatically (API method).
@@ -271,9 +247,7 @@ class ConversationSession:
             )
 
         checkpoint_id = self.controller.create_checkpoint(
-            description=description,
-            current_phase=phase,
-            pending_tasks=pending_tasks
+            description=description, current_phase=phase, pending_tasks=pending_tasks
         )
 
         if not checkpoint_id:
@@ -281,12 +255,12 @@ class ConversationSession:
 
         return checkpoint_id
 
-    def list_checkpoints(self) -> List[CheckpointMetadata]:
+    def list_checkpoints(self) -> list[CheckpointMetadata]:
         """
-        List all checkpoints for this session (API method).
+        list all checkpoints for this session (API method).
 
         Returns:
-            List of CheckpointMetadata objects (newest first)
+            list of CheckpointMetadata objects (newest first)
 
         Raises:
             RuntimeError: If controller not initialized
@@ -339,13 +313,15 @@ class ConversationSession:
             # Convert checkpoint working_memory to AgentMessage objects
             for msg_dict in checkpoint.working_memory:
                 timestamp_str = msg_dict.get("timestamp")
-                timestamp = datetime.fromisoformat(timestamp_str) if timestamp_str else datetime.now()
+                timestamp = (
+                    datetime.fromisoformat(timestamp_str) if timestamp_str else datetime.now()
+                )
 
                 message = AgentMessage(
                     role=msg_dict["role"],
                     content=msg_dict["content"],
                     timestamp=timestamp,
-                    metadata=msg_dict.get("metadata", {})
+                    metadata=msg_dict.get("metadata", {}),
                 )
                 self.messages.append(message)
 
@@ -355,7 +331,7 @@ class ConversationSession:
             # If session restore fails, we've already restored agent
             # Log the error but still return True since agent was restored
             print(f"[WARN] Failed to restore session history: {e}")
-            print(f"[INFO] Agent state was restored successfully")
+            print("[INFO] Agent state was restored successfully")
             return True
 
     def clear_checkpoints(self) -> int:

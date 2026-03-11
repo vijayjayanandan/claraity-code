@@ -5,22 +5,22 @@ OpenAI is the primary/canonical format - responses are already correct shape.
 Just add meta and detect segments if needed.
 """
 
-from typing import Dict, Any, List, Optional
+from typing import Any, Optional
 
-from ..models.base import generate_uuid, now_iso, generate_stream_id
+from ..models.base import generate_stream_id, generate_uuid, now_iso
 from ..models.message import (
     Message,
     MessageMeta,
+    Segment,
+    TextSegment,
+    TokenUsage,
     ToolCall,
     ToolCallFunction,
-    TokenUsage,
-    TextSegment,
     ToolCallSegment,
-    Segment,
 )
 
 
-def map_stop_reason(finish_reason: Optional[str]) -> str:
+def map_stop_reason(finish_reason: str | None) -> str:
     """Map OpenAI finish_reason to our stop_reason."""
     mapping = {
         "stop": "complete",
@@ -33,11 +33,11 @@ def map_stop_reason(finish_reason: Optional[str]) -> str:
 
 
 def from_openai(
-    response: Dict[str, Any],
+    response: dict[str, Any],
     session_id: str,
-    parent_uuid: Optional[str],
+    parent_uuid: str | None,
     seq: int,
-    stream_id: Optional[str] = None,
+    stream_id: str | None = None,
 ) -> Message:
     """
     Convert OpenAI API response to Message.
@@ -67,19 +67,19 @@ def from_openai(
             id=tc.get("id", ""),
             function=ToolCallFunction(
                 name=tc.get("function", {}).get("name", ""),
-                arguments=tc.get("function", {}).get("arguments", "{}")
+                arguments=tc.get("function", {}).get("arguments", "{}"),
             ),
-            type=tc.get("type", "function")
+            type=tc.get("type", "function"),
         )
         for tc in raw_tool_calls
     ]
 
     # Build segments only if both content and tool_calls present (interleaving)
-    segments: Optional[List[Segment]] = None
+    segments: list[Segment] | None = None
     if content and tool_calls:
         segments = [
             TextSegment(content=content),
-            *[ToolCallSegment(tool_call_index=i) for i in range(len(tool_calls))]
+            *[ToolCallSegment(tool_call_index=i) for i in range(len(tool_calls))],
         ]
 
     # Parse usage
@@ -89,7 +89,7 @@ def from_openai(
         usage = TokenUsage(
             input_tokens=usage_data.get("prompt_tokens", 0),
             output_tokens=usage_data.get("completion_tokens", 0),
-            reasoning_tokens=usage_data.get("reasoning_tokens")
+            reasoning_tokens=usage_data.get("reasoning_tokens"),
         )
 
     # Build message
@@ -111,7 +111,7 @@ def from_openai(
             usage=usage,
             segments=segments,
             provider_message_id=response.get("id"),
-        )
+        ),
     )
 
     # Store raw response for runtime debugging (NOT persisted)
@@ -121,13 +121,13 @@ def from_openai(
 
 
 def from_openai_stream_chunk(
-    chunk: Dict[str, Any],
+    chunk: dict[str, Any],
     session_id: str,
-    parent_uuid: Optional[str],
+    parent_uuid: str | None,
     seq: int,
     stream_id: str,
     accumulated_content: str = "",
-    accumulated_tool_calls: Optional[List[ToolCall]] = None,
+    accumulated_tool_calls: list[ToolCall] | None = None,
 ) -> Message:
     """
     Convert OpenAI streaming chunk to Message.
@@ -166,10 +166,7 @@ def from_openai_stream_chunk(
             # Extend list if needed
             while len(accumulated_tool_calls) <= index:
                 accumulated_tool_calls.append(
-                    ToolCall(
-                        id="",
-                        function=ToolCallFunction(name="", arguments="")
-                    )
+                    ToolCall(id="", function=ToolCallFunction(name="", arguments=""))
                 )
 
             tc = accumulated_tool_calls[index]
@@ -177,9 +174,7 @@ def from_openai_stream_chunk(
             # Update fields
             if tc_delta.get("id"):
                 accumulated_tool_calls[index] = ToolCall(
-                    id=tc_delta["id"],
-                    function=tc.function,
-                    type=tc_delta.get("type", tc.type)
+                    id=tc_delta["id"], function=tc.function, type=tc_delta.get("type", tc.type)
                 )
                 tc = accumulated_tool_calls[index]
 
@@ -189,17 +184,17 @@ def from_openai_stream_chunk(
                     id=tc.id,
                     function=ToolCallFunction(
                         name=tc.function.name + func.get("name", ""),
-                        arguments=tc.function.arguments + func.get("arguments", "")
+                        arguments=tc.function.arguments + func.get("arguments", ""),
                     ),
-                    type=tc.type
+                    type=tc.type,
                 )
 
     # Build segments if both present
-    segments: Optional[List[Segment]] = None
+    segments: list[Segment] | None = None
     if accumulated_content and accumulated_tool_calls:
         segments = [
             TextSegment(content=accumulated_content),
-            *[ToolCallSegment(tool_call_index=i) for i in range(len(accumulated_tool_calls))]
+            *[ToolCallSegment(tool_call_index=i) for i in range(len(accumulated_tool_calls))],
         ]
 
     # Determine stop reason
@@ -224,20 +219,20 @@ def from_openai_stream_chunk(
             stop_reason=stop_reason,
             segments=segments,
             provider_message_id=chunk.get("id"),
-        )
+        ),
     )
 
 
-def to_openai(messages: List[Message]) -> List[Dict[str, Any]]:
+def to_openai(messages: list[Message]) -> list[dict[str, Any]]:
     """
     Convert Messages to OpenAI API request format.
 
     Strips meta - only includes OpenAI core fields.
 
     Args:
-        messages: List of Message objects
+        messages: list of Message objects
 
     Returns:
-        List of dicts ready for OpenAI API
+        list of dicts ready for OpenAI API
     """
     return [msg.to_llm_dict() for msg in messages]

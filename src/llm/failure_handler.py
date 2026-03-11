@@ -28,12 +28,13 @@ Thread Safety:
 """
 
 import asyncio
-import time
 import logging
 import random
 import re
-from typing import Callable, Any, Tuple, Optional
+import time
+from collections.abc import Callable
 from functools import wraps
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -43,53 +44,64 @@ from src.platform import safe_print
 # Langfuse observability (optional, graceful degradation)
 try:
     from langfuse import observe
+
     LANGFUSE_AVAILABLE = True
 except ImportError:
     # Create a no-op decorator if Langfuse not available
     def observe(*args, **kwargs):
         def decorator(func):
             return func
+
         return decorator
+
     LANGFUSE_AVAILABLE = False
 
 
 class LLMError(Exception):
     """Base exception for LLM errors."""
+
     pass
 
 
 class RateLimitError(LLMError):
     """Rate limit exceeded error."""
+
     pass
 
 
 class TimeoutError(LLMError):
     """Timeout error."""
+
     pass
 
 
 class ValidationError(LLMError):
     """Response validation error."""
+
     pass
 
 
 class InvalidAPIKeyError(LLMError):
     """Invalid API key error (fatal)."""
+
     pass
 
 
 class InvalidModelError(LLMError):
     """Invalid model error (fatal)."""
+
     pass
 
 
 class ContextLengthExceededError(LLMError):
     """Context length exceeded error (fatal)."""
+
     pass
 
 
 class ContentPolicyViolationError(LLMError):
     """Content policy violation error (fatal)."""
+
     pass
 
 
@@ -167,7 +179,7 @@ class LLMFailureHandler:
 
     def __init__(
         self,
-        logger_instance: Optional[logging.Logger] = None,
+        logger_instance: logging.Logger | None = None,
         max_backoff_delay: float = 15.0,
         max_rate_limit_delay: float = 30.0,
         rate_limit_base_delay: float = 10.0,
@@ -175,7 +187,7 @@ class LLMFailureHandler:
         enable_jitter: bool = True,
         jitter_type: str = "full",
         show_progress: bool = True,
-        progress_countdown_threshold: float = 10.0
+        progress_countdown_threshold: float = 10.0,
     ):
         """
         Initialize failure handler with configurable retry behavior.
@@ -247,7 +259,7 @@ class LLMFailureHandler:
         message = str(error)
 
         # Remove ANSI escape codes
-        message = re.sub(r'\x1b\[[0-9;]*m', '', message)
+        message = re.sub(r"\x1b\[[0-9;]*m", "", message)
 
         # Truncate long messages
         if len(message) > max_length:
@@ -273,13 +285,13 @@ class LLMFailureHandler:
             safe_print(
                 f"[RETRY] {message}. "
                 f"Retrying in {delay:.0f}s... (attempt {attempt + 1}/{max_attempts})",
-                flush=True
+                flush=True,
             )
 
             # Show countdown for long delays
             if delay >= self.progress_countdown_threshold:
                 for remaining in range(int(delay), 0, -1):
-                    safe_print(f"  Retrying in {remaining}s...    ", end='\r', flush=True)
+                    safe_print(f"  Retrying in {remaining}s...    ", end="\r", flush=True)
                     time.sleep(1)
                 safe_print("  Retrying now...                ", flush=True)
                 return  # Already slept during countdown
@@ -289,10 +301,7 @@ class LLMFailureHandler:
 
     @observe(name="llm_retry_handler", as_type="span")
     def execute_with_retry(
-        self,
-        func: Callable,
-        max_attempts: int = 3,
-        backoff_base: float = 2.0
+        self, func: Callable, max_attempts: int = 3, backoff_base: float = 2.0
     ) -> Any:
         """
         Execute function with exponential backoff retry on failure.
@@ -333,9 +342,7 @@ class LLMFailureHandler:
                 if attempt > 0:
                     if self.show_progress:
                         safe_print(f"[OK] Request succeeded after {attempt + 1} attempts")
-                    self.logger.info(
-                        f"[OK] Retry successful after {attempt + 1} attempts"
-                    )
+                    self.logger.info(f"[OK] Retry successful after {attempt + 1} attempts")
 
                 return result
 
@@ -349,9 +356,7 @@ class LLMFailureHandler:
                 if not is_retryable:
                     if self.show_progress:
                         safe_print(f"[FAIL] {error_message}")
-                    self.logger.error(
-                        f"[FAIL] Fatal error (not retrying): {error_message}"
-                    )
+                    self.logger.error(f"[FAIL] Fatal error (not retrying): {error_message}")
                     raise LLMError(error_message) from e
 
                 # If last attempt, raise error
@@ -366,7 +371,7 @@ class LLMFailureHandler:
                     raise LLMError(f"Failed after {max_attempts} attempts: {error_message}") from e
 
                 # Calculate exponential backoff delay with cap and jitter
-                base_delay = backoff_base ** attempt  # 1s, 2s, 4s, 8s...
+                base_delay = backoff_base**attempt  # 1s, 2s, 4s, 8s...
                 delay = self._calculate_delay(base_delay, self.max_backoff_delay)
 
                 # Log for debugging
@@ -382,10 +387,7 @@ class LLMFailureHandler:
         raise LLMError(f"Failed after {max_attempts} attempts") from last_error
 
     async def execute_with_retry_async(
-        self,
-        func: Callable,
-        max_attempts: int = 3,
-        backoff_base: float = 2.0
+        self, func: Callable, max_attempts: int = 3, backoff_base: float = 2.0
     ) -> Any:
         """Async version of execute_with_retry using asyncio.sleep instead of time.sleep.
 
@@ -414,9 +416,7 @@ class LLMFailureHandler:
                 result = await func()
 
                 if attempt > 0:
-                    self.logger.info(
-                        f"[OK] Async retry successful after {attempt + 1} attempts"
-                    )
+                    self.logger.info(f"[OK] Async retry successful after {attempt + 1} attempts")
 
                 return result
 
@@ -426,9 +426,7 @@ class LLMFailureHandler:
                 is_retryable, error_message = self.handle_api_error(e)
 
                 if not is_retryable:
-                    self.logger.error(
-                        f"[FAIL] Fatal error (not retrying): {error_message}"
-                    )
+                    self.logger.error(f"[FAIL] Fatal error (not retrying): {error_message}")
                     raise LLMError(error_message) from e
 
                 if attempt == max_attempts - 1:
@@ -437,7 +435,7 @@ class LLMFailureHandler:
                     )
                     raise LLMError(f"Failed after {max_attempts} attempts: {error_message}") from e
 
-                base_delay = backoff_base ** attempt
+                base_delay = backoff_base**attempt
                 delay = self._calculate_delay(base_delay, self.max_backoff_delay)
 
                 self.logger.warning(
@@ -449,7 +447,7 @@ class LLMFailureHandler:
 
         raise LLMError(f"Failed after {max_attempts} attempts") from last_error
 
-    def handle_api_error(self, error: Exception) -> Tuple[bool, str]:
+    def handle_api_error(self, error: Exception) -> tuple[bool, str]:
         """
         Classify API error as retryable or fatal.
 
@@ -469,7 +467,7 @@ class LLMFailureHandler:
             error: API error to classify
 
         Returns:
-            Tuple of (is_retryable, error_message)
+            tuple of (is_retryable, error_message)
             - is_retryable: True if error can be retried, False if fatal
             - error_message: Human-readable error description (sanitized)
 
@@ -506,11 +504,7 @@ class LLMFailureHandler:
         return True, f"Unknown error ({error_type}): {sanitized_error}"
 
     @observe(name="rate_limit_handler", as_type="span")
-    def handle_rate_limit(
-        self,
-        func: Callable,
-        max_retries: int = 5
-    ) -> Any:
+    def handle_rate_limit(self, func: Callable, max_retries: int = 5) -> Any:
         """
         Execute function with automatic retry on rate limit errors.
 
@@ -579,12 +573,10 @@ class LLMFailureHandler:
                     self.logger.error(
                         f"[FAIL] Rate limit: All {max_retries} retry attempts exhausted"
                     )
-                    raise RateLimitError(
-                        f"Rate limit persists after {max_retries} attempts"
-                    ) from e
+                    raise RateLimitError(f"Rate limit persists after {max_retries} attempts") from e
 
                 # Exponential backoff with base=10s for rate limits, with cap and jitter
-                base_delay = self.rate_limit_base_delay * (2 ** attempt)  # 10s, 20s, 40s...
+                base_delay = self.rate_limit_base_delay * (2**attempt)  # 10s, 20s, 40s...
                 delay = self._calculate_delay(base_delay, self.max_rate_limit_delay)
 
                 # Log for debugging
@@ -602,10 +594,7 @@ class LLMFailureHandler:
 
     @observe(name="timeout_handler", as_type="span")
     def handle_timeout(
-        self,
-        func: Callable,
-        timeout_seconds: float = 30.0,
-        max_retries: int = 3
+        self, func: Callable, timeout_seconds: float = 30.0, max_retries: int = 3
     ) -> Any:
         """
         Execute function with timeout and automatic retry on TimeoutError.
@@ -641,7 +630,7 @@ class LLMFailureHandler:
         for attempt in range(max_retries):
             try:
                 # Increase timeout on each retry (1x, 1.5x, 2.25x, 3.375x)
-                current_timeout = timeout_seconds * (self.timeout_multiplier ** attempt)
+                current_timeout = timeout_seconds * (self.timeout_multiplier**attempt)
 
                 # Note: Timeout enforcement must be done in LLM backend
                 # This method only handles retry logic for timeout errors
@@ -652,18 +641,13 @@ class LLMFailureHandler:
                 if attempt > 0:
                     if self.show_progress:
                         safe_print(f"[OK] Request succeeded after {attempt + 1} timeout retries")
-                    self.logger.info(
-                        f"[OK] Timeout retry successful after {attempt + 1} attempts"
-                    )
+                    self.logger.info(f"[OK] Timeout retry successful after {attempt + 1} attempts")
 
                 return result
 
             except Exception as e:
                 error_str = str(e).lower()
-                is_timeout = any(
-                    keyword in error_str
-                    for keyword in ["timeout", "timed out"]
-                )
+                is_timeout = any(keyword in error_str for keyword in ["timeout", "timed out"])
 
                 # If not a timeout error, re-raise
                 if not is_timeout:
@@ -682,12 +666,8 @@ class LLMFailureHandler:
                         safe_print(
                             f"[FAIL] Timeout persists after {max_retries} attempts: {sanitized_error}"
                         )
-                    self.logger.error(
-                        f"[FAIL] Timeout: All {max_retries} retry attempts exhausted"
-                    )
-                    raise TimeoutError(
-                        f"Timeout persists after {max_retries} attempts"
-                    ) from e
+                    self.logger.error(f"[FAIL] Timeout: All {max_retries} retry attempts exhausted")
+                    raise TimeoutError(f"Timeout persists after {max_retries} attempts") from e
 
                 # Calculate next timeout (no sleep, retry immediately with longer timeout)
                 next_timeout = timeout_seconds * (self.timeout_multiplier ** (attempt + 1))
@@ -715,9 +695,9 @@ class LLMFailureHandler:
     def validate_response(
         self,
         response: str,
-        expected_format: Optional[str] = None,
+        expected_format: str | None = None,
         check_truncation: bool = True,
-        check_repetition: bool = True
+        check_repetition: bool = True,
     ) -> bool:
         """
         Validate LLM response is well-formed with enhanced checks.
@@ -762,17 +742,15 @@ class LLMFailureHandler:
         if check_truncation and len(response) > 100:
             # Check if response ends mid-sentence (common truncation indicator)
             last_char = response.strip()[-1]
-            if last_char not in ['.', '!', '?', '"', "'", '`', '}', ']', ')']:
-                self.logger.warning(
-                    f"[WARN] Response may be truncated (ends with '{last_char}')"
-                )
+            if last_char not in [".", "!", "?", '"', "'", "`", "}", "]", ")"]:
+                self.logger.warning(f"[WARN] Response may be truncated (ends with '{last_char}')")
 
         if check_repetition:
             # Check for repetition loops (5+ consecutive repeated tokens)
             words = response.split()
             if len(words) >= 5:
                 for i in range(len(words) - 4):
-                    if len(set(words[i:i+5])) == 1:  # All 5 words identical
+                    if len(set(words[i : i + 5])) == 1:  # All 5 words identical
                         raise ValidationError(
                             f"Response contains repetition loop: '{words[i]}' repeated 5+ times"
                         )
@@ -780,6 +758,7 @@ class LLMFailureHandler:
         # Format-specific validation
         if expected_format == "json":
             import json
+
             try:
                 json.loads(response)
             except json.JSONDecodeError as e:
@@ -788,23 +767,17 @@ class LLMFailureHandler:
         elif expected_format == "code":
             # Check for unclosed brackets (common truncation pattern in code)
             unclosed = {
-                '{': response.count('{') - response.count('}'),
-                '[': response.count('[') - response.count(']'),
-                '(': response.count('(') - response.count(')')
+                "{": response.count("{") - response.count("}"),
+                "[": response.count("[") - response.count("]"),
+                "(": response.count("(") - response.count(")"),
             }
             if any(count > 2 for count in unclosed.values()):  # Allow small imbalance
-                self.logger.warning(
-                    f"[WARN] Code response has unclosed brackets: {unclosed}"
-                )
+                self.logger.warning(f"[WARN] Code response has unclosed brackets: {unclosed}")
 
         # Response is valid
         return True
 
-    def with_retry(
-        self,
-        max_attempts: int = 3,
-        backoff_base: float = 2.0
-    ):
+    def with_retry(self, max_attempts: int = 3, backoff_base: float = 2.0):
         """
         Decorator to add retry logic to any function.
 
@@ -824,13 +797,16 @@ class LLMFailureHandler:
 
             result = call_llm()
         """
+
         def decorator(func: Callable) -> Callable:
             @wraps(func)
             def wrapper(*args, **kwargs):
                 return self.execute_with_retry(
                     lambda: func(*args, **kwargs),
                     max_attempts=max_attempts,
-                    backoff_base=backoff_base
+                    backoff_base=backoff_base,
                 )
+
             return wrapper
+
         return decorator

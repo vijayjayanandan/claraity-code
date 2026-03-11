@@ -6,7 +6,7 @@ writer for use in subagent execution which runs synchronously.
 
 import json
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from src.observability import get_logger
 
@@ -54,17 +54,16 @@ class SyncJSONLWriter:
             return
         try:
             record = {
-                "event": notification.event.value if hasattr(notification.event, 'value') else str(notification.event),
+                "event": notification.event.value
+                if hasattr(notification.event, "value")
+                else str(notification.event),
             }
             if notification.message:
                 msg = notification.message
                 record["role"] = msg.role
                 record["content"] = msg.content
-                if hasattr(msg, 'meta') and msg.meta:
-                    record["meta"] = {
-                        k: v for k, v in vars(msg.meta).items()
-                        if v is not None
-                    }
+                if hasattr(msg, "meta") and msg.meta:
+                    record["meta"] = {k: v for k, v in vars(msg.meta).items() if v is not None}
             self.write(record)
         except Exception as e:
             logger.error(f"Failed to write notification: {e}")

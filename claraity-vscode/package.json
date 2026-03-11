@@ -2,14 +2,37 @@
   "name": "claraity-vscode",
   "displayName": "ClarAIty",
   "description": "AI Coding Agent - VS Code Integration",
-  "version": "0.1.0",
-  "publisher": "claraity",
+  "version": "0.1.2",
+  "publisher": "VijayJayanandan",
+  "license": "MIT",
+  "author": {
+    "name": "ClarAIty"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vijayjayanandan/claraity-code"
+  },
+  "homepage": "https://github.com/vijayjayanandan/claraity-code#readme",
+  "bugs": {
+    "url": "https://github.com/vijayjayanandan/claraity-code/issues"
+  },
+  "keywords": [
+    "ai",
+    "coding-agent",
+    "copilot",
+    "assistant",
+    "chat",
+    "code-generation",
+    "refactoring"
+  ],
+  "icon": "media/icon.png",
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": [
     "AI",
-    "Chat"
+    "Chat",
+    "Programming Languages"
   ],
   "activationEvents": [
     "onView:claraity.chatView"
@@ -42,6 +65,101 @@
       {
         "command": "claraity.interrupt",
         "title": "ClarAIty: Interrupt"
+      },
+      {
+        "command": "claraity.sessionHistory",
+        "title": "ClarAIty: Session History"
+      },
+      {
+        "command": "claraity.acceptChange",
+        "title": "ClarAIty: Accept Change"
+      },
+      {
+        "command": "claraity.rejectChange",
+        "title": "ClarAIty: Reject Change"
+      },
+      {
+        "command": "claraity.viewDiff",
+        "title": "ClarAIty: View Diff"
+      },
+      {
+        "command": "claraity.undoTurn",
+        "title": "ClarAIty: Undo Last Turn"
+      },
+      {
+        "command": "claraity.explainCode",
+        "title": "ClarAIty: Explain Code"
+      },
+      {
+        "command": "claraity.refactorCode",
+        "title": "ClarAIty: Refactor Code"
+      },
+      {
+        "command": "claraity.fixCode",
+        "title": "ClarAIty: Fix Code"
+      },
+      {
+        "command": "claraity.addToChat",
+        "title": "ClarAIty: Add to Chat"
+      }
+    ],
+    "submenus": [
+      {
+        "id": "claraity.editorContext",
+        "label": "ClarAIty"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "submenu": "claraity.editorContext",
+          "group": "1_modification@0"
+        }
+      ],
+      "claraity.editorContext": [
+        {
+          "command": "claraity.explainCode",
+          "group": "1@1",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "claraity.fixCode",
+          "group": "1@2",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "claraity.refactorCode",
+          "group": "1@3",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "claraity.addToChat",
+          "group": "2@1",
+          "when": "editorHasSelection"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "claraity.newChat",
+        "key": "ctrl+shift+l",
+        "mac": "cmd+shift+l"
+      },
+      {
+        "command": "claraity.interrupt",
+        "key": "ctrl+shift+.",
+        "mac": "cmd+shift+."
+      },
+      {
+        "command": "claraity.sessionHistory",
+        "key": "ctrl+shift+h",
+        "mac": "cmd+shift+h"
+      },
+      {
+        "command": "claraity.addToChat",
+        "key": "ctrl+'",
+        "mac": "cmd+'",
+        "when": "editorHasSelection"
       }
     ],
     "configuration": {
@@ -74,7 +192,11 @@
         },
         "claraity.devMode": {
           "type": "string",
-          "enum": ["auto", "always", "never"],
+          "enum": [
+            "auto",
+            "always",
+            "never"
+          ],
           "default": "auto",
           "description": "Server launch mode. 'auto' detects source vs installed, 'always' forces source mode, 'never' skips source detection"
         }
@@ -85,12 +207,21 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "build:webview": "cd webview-ui && npm run build"
+    "test": "jest",
+    "test:coverage": "jest --coverage",
+    "build:webview": "cd webview-ui && npm run build",
+    "package": "vsce package --no-dependencies",
+    "publish": "vsce publish --no-dependencies"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
     "@types/ws": "^8.18.1",
+    "@vscode/codicons": "^0.0.44",
+    "@vscode/vsce": "^3.0.0",
+    "jest": "^30.2.0",
+    "ts-jest": "^29.4.6",
     "typescript": "^5.3.0"
   },
   "dependencies": {

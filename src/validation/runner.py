@@ -4,17 +4,18 @@ Validation Runner
 CLI interface for running validation scenarios and generating reports.
 """
 
-import asyncio
 import argparse
-import sys
+import asyncio
 import os
-from pathlib import Path
+import sys
 from datetime import datetime
-from typing import List, Optional
+from pathlib import Path
+from typing import Optional
 
 # Load environment variables from .env file
 try:
     from dotenv import load_dotenv
+
     load_dotenv()
 except ImportError:
     # If python-dotenv not installed, try manual .env loading
@@ -23,25 +24,17 @@ except ImportError:
         with open(env_path) as f:
             for line in f:
                 line = line.strip()
-                if line and not line.startswith('#') and '=' in line:
-                    key, value = line.split('=', 1)
+                if line and not line.startswith("#") and "=" in line:
+                    key, value = line.split("=", 1)
                     os.environ[key] = value
 
-from .scenario import (
-    ValidationScenario,
-    ValidationResult,
-    ValidationReport,
-    DifficultyLevel
-)
-from .orchestrator import ValidationOrchestrator
-from .judge import ValidationJudge
-from .scenarios import (
-    VALIDATION_SCENARIOS,
-    get_scenario_by_id,
-    get_scenarios_by_difficulty
-)
-from .report_generator import ReportGenerator
 from src.platform import safe_print
+
+from .judge import ValidationJudge
+from .orchestrator import ValidationOrchestrator
+from .report_generator import ReportGenerator
+from .scenario import DifficultyLevel, ValidationReport, ValidationResult, ValidationScenario
+from .scenarios import VALIDATION_SCENARIOS, get_scenario_by_id, get_scenarios_by_difficulty
 
 
 class ValidationRunner:
@@ -70,12 +63,12 @@ class ValidationRunner:
             safe_print("[FAIL] No scenarios selected")
             return 1
 
-        safe_print(f"\n{'='*70}")
-        safe_print(f"[TEST] Autonomous Validation Framework")
-        safe_print(f"{'='*70}")
+        safe_print(f"\n{'=' * 70}")
+        safe_print("[TEST] Autonomous Validation Framework")
+        safe_print(f"{'=' * 70}")
         safe_print(f"Scenarios: {len(scenarios)}")
         safe_print(f"Output: {self.orchestrator.output_dir}")
-        safe_print(f"{'='*70}\n")
+        safe_print(f"{'=' * 70}\n")
 
         # Run all scenarios
         results = []
@@ -84,10 +77,7 @@ class ValidationRunner:
 
             try:
                 # Run orchestrator
-                result = await self.orchestrator.run_scenario(
-                    scenario,
-                    verbose=args.verbose
-                )
+                result = await self.orchestrator.run_scenario(scenario, verbose=args.verbose)
 
                 # Run judge evaluation (if API key available)
                 if args.judge:
@@ -124,7 +114,7 @@ class ValidationRunner:
                         "completeness": 0.0,
                         "correctness": 0.0,
                         "quality": 0.0,
-                        "autonomy": result.autonomous_percentage
+                        "autonomy": result.autonomous_percentage,
                     }
                     result.overall_score = 0.0
 
@@ -147,38 +137,36 @@ class ValidationRunner:
                     success=False,
                     overall_score=0.0,
                     failure_reason=str(e),
-                    failure_stage="orchestration"
+                    failure_stage="orchestration",
                 )
                 results.append(failure_result)
 
         # Generate report
-        safe_print(f"\n{'='*70}")
-        safe_print(f"[REPORT] Generating Report...")
-        safe_print(f"{'='*70}\n")
+        safe_print(f"\n{'=' * 70}")
+        safe_print("[REPORT] Generating Report...")
+        safe_print(f"{'=' * 70}\n")
 
         report = self._create_report(results)
         report_path = self.report_generator.generate_report(
-            report,
-            format=args.format,
-            output_dir=self.orchestrator.output_dir
+            report, format=args.format, output_dir=self.orchestrator.output_dir
         )
 
         safe_print(f"[OK] Report saved: {report_path}")
-        safe_print(f"\n{'='*70}")
-        safe_print(f"[TARGET] Summary")
-        safe_print(f"{'='*70}")
+        safe_print(f"\n{'=' * 70}")
+        safe_print("[TARGET] Summary")
+        safe_print(f"{'=' * 70}")
         safe_print(f"Scenarios: {report.total_scenarios}")
         safe_print(f"Passed: {report.scenarios_passed}")
         safe_print(f"Failed: {report.scenarios_failed}")
         safe_print(f"Pass Rate: {report.pass_rate():.1%}")
         safe_print(f"Average Score: {report.average_score:.1%}")
         safe_print(f"Total Cost: ${report.total_cost_usd:.2f}")
-        safe_print(f"{'='*70}\n")
+        safe_print(f"{'=' * 70}\n")
 
         # Exit code based on results
         return 0 if report.scenarios_passed == report.total_scenarios else 1
 
-    def _select_scenarios(self, args) -> List[ValidationScenario]:
+    def _select_scenarios(self, args) -> list[ValidationScenario]:
         """Select scenarios based on CLI args"""
 
         if args.all:
@@ -189,7 +177,7 @@ class ValidationRunner:
                 return [get_scenario_by_id(args.scenario)]
             except ValueError:
                 safe_print(f"[FAIL] Unknown scenario: {args.scenario}")
-                safe_print(f"Available scenarios:")
+                safe_print("Available scenarios:")
                 for s in VALIDATION_SCENARIOS:
                     safe_print(f"  - {s.id} ({s.difficulty.value}): {s.name}")
                 sys.exit(1)
@@ -200,13 +188,13 @@ class ValidationRunner:
                 return get_scenarios_by_difficulty(diff)
             except ValueError:
                 safe_print(f"[FAIL] Unknown difficulty: {args.difficulty}")
-                safe_print(f"Available: easy, medium, hard")
+                safe_print("Available: easy, medium, hard")
                 sys.exit(1)
 
         # Default: show help
         return []
 
-    def _create_report(self, results: List[ValidationResult]) -> ValidationReport:
+    def _create_report(self, results: list[ValidationResult]) -> ValidationReport:
         """Create aggregated report from results"""
 
         total = len(results)
@@ -232,11 +220,7 @@ class ValidationRunner:
             weakness_counts[normalized] = weakness_counts.get(normalized, 0) + 1
 
         # Top 5 most common weaknesses = critical gaps
-        critical_gaps = sorted(
-            weakness_counts.items(),
-            key=lambda x: x[1],
-            reverse=True
-        )[:5]
+        critical_gaps = sorted(weakness_counts.items(), key=lambda x: x[1], reverse=True)[:5]
         critical_gaps = [gap[0] for gap in critical_gaps]
 
         # Recommended priorities based on failures
@@ -259,7 +243,7 @@ class ValidationRunner:
             total_cost_usd=total_cost,
             strengths=list(set(all_strengths))[:10],  # Top 10 unique strengths
             critical_gaps=critical_gaps,
-            recommended_priorities=priorities
+            recommended_priorities=priorities,
         )
 
         return report
@@ -292,26 +276,18 @@ Available Scenarios:
   - easy_cli_weather: CLI Weather Tool (2 hours)
   - medium_rest_api: Task Management REST API (4 hours)
   - hard_web_scraper: Hacker News Scraper (6 hours)
-        """
+        """,
     )
 
     # Scenario selection (mutually exclusive)
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument(
-        "--all",
-        action="store_true",
-        help="Run all validation scenarios"
-    )
-    group.add_argument(
-        "--scenario",
-        type=str,
-        help="Run specific scenario by ID"
-    )
+    group.add_argument("--all", action="store_true", help="Run all validation scenarios")
+    group.add_argument("--scenario", type=str, help="Run specific scenario by ID")
     group.add_argument(
         "--difficulty",
         type=str,
         choices=["easy", "medium", "hard"],
-        help="Run all scenarios of given difficulty"
+        help="Run all scenarios of given difficulty",
     )
 
     # Options
@@ -319,32 +295,27 @@ Available Scenarios:
         "--judge",
         action="store_true",
         default=True,
-        help="Enable Claude judge evaluation (requires ANTHROPIC_API_KEY)"
+        help="Enable Claude judge evaluation (requires ANTHROPIC_API_KEY)",
     )
     parser.add_argument(
         "--no-judge",
         action="store_false",
         dest="judge",
-        help="Disable judge evaluation (automated checks only)"
+        help="Disable judge evaluation (automated checks only)",
     )
     parser.add_argument(
         "--format",
         type=str,
         choices=["markdown", "html", "json"],
         default="markdown",
-        help="Report format (default: markdown)"
+        help="Report format (default: markdown)",
     )
-    parser.add_argument(
-        "--verbose",
-        action="store_true",
-        default=True,
-        help="Verbose output"
-    )
+    parser.add_argument("--verbose", action="store_true", default=True, help="Verbose output")
     parser.add_argument(
         "--output-dir",
         type=str,
         default="./validation-results",
-        help="Output directory for results"
+        help="Output directory for results",
     )
 
     args = parser.parse_args()

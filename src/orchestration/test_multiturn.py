@@ -18,16 +18,16 @@ from src.orchestration import AgentOrchestrator
 def test_multiturn_conversation():
     """Test multi-turn conversation with context preservation"""
 
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("PHASE 2 TEST: Multi-Turn Conversations with Context Preservation")
-    print("="*70 + "\n")
+    print("=" * 70 + "\n")
 
     # Step 1: Initialize orchestrator
     print("[1/8] Initializing orchestrator...")
     try:
         orchestrator = AgentOrchestrator(
             output_dir="./test-orchestration-logs",
-            working_directory="./test-orchestration-workspace"
+            working_directory="./test-orchestration-workspace",
         )
         print("   [OK] Orchestrator initialized")
         print(f"   Model: {orchestrator.model_name}")
@@ -39,10 +39,8 @@ def test_multiturn_conversation():
     # Step 2: Start conversation
     print("[2/8] Starting conversation...")
     try:
-        session = orchestrator.start_conversation(
-            task_description="Multi-turn calculator test"
-        )
-        print(f"   [OK] Conversation started")
+        session = orchestrator.start_conversation(task_description="Multi-turn calculator test")
+        print("   [OK] Conversation started")
         print(f"   ID: {session.conversation_id}")
         print(f"   Workspace: {session.working_directory}\n")
     except Exception as e:
@@ -55,7 +53,7 @@ def test_multiturn_conversation():
     print(f"   Message: '{turn1_message}'")
     try:
         response1 = session.send_message(turn1_message)
-        print(f"   [OK] Agent responded")
+        print("   [OK] Agent responded")
         print(f"   Success: {response1.success}")
         if response1.success:
             print(f"   Files generated: {response1.files_generated}")
@@ -67,11 +65,11 @@ def test_multiturn_conversation():
         # Verify calculator.py was created
         calc_file = session.working_directory / "calculator.py"
         if not calc_file.exists():
-            print(f"   [FAIL] calculator.py not found!")
+            print("   [FAIL] calculator.py not found!")
             return False
 
         # Read and check content
-        with open(calc_file, 'r', encoding='utf-8') as f:
+        with open(calc_file, encoding="utf-8") as f:
             content1 = f.read()
 
         has_add = "def add" in content1
@@ -79,17 +77,20 @@ def test_multiturn_conversation():
         has_multiply = "def multiply" in content1
         has_divide = "def divide" in content1
 
-        print(f"   Functions present: add={has_add}, subtract={has_subtract}, multiply={has_multiply}, divide={has_divide}")
+        print(
+            f"   Functions present: add={has_add}, subtract={has_subtract}, multiply={has_multiply}, divide={has_divide}"
+        )
 
         if not (has_add and has_subtract):
-            print(f"   [FAIL] Missing required functions in Turn 1!")
+            print("   [FAIL] Missing required functions in Turn 1!")
             return False
 
-        print(f"   [OK] Turn 1 complete - Basic calculator created")
+        print("   [OK] Turn 1 complete - Basic calculator created")
         print()
     except Exception as e:
         print(f"   [FAIL] Turn 1 failed: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -104,7 +105,7 @@ def test_multiturn_conversation():
         if len(history) != 2:  # 1 user + 1 assistant
             print(f"   [WARN] Expected 2 messages, got {len(history)}")
         else:
-            print(f"   [OK] History tracking working")
+            print("   [OK] History tracking working")
         print()
     except Exception as e:
         print(f"   [FAIL] Failed to get history: {e}")
@@ -114,10 +115,10 @@ def test_multiturn_conversation():
     print("[5/8] Turn 2: Add multiply and divide functions...")
     turn2_message = "Now add multiply(a, b) and divide(a, b) functions to the calculator. Make sure divide handles division by zero."
     print(f"   Message: '{turn2_message}'")
-    print(f"   [TEST] This requires the agent to remember calculator.py from Turn 1")
+    print("   [TEST] This requires the agent to remember calculator.py from Turn 1")
     try:
         response2 = session.send_message(turn2_message)
-        print(f"   [OK] Agent responded")
+        print("   [OK] Agent responded")
         print(f"   Success: {response2.success}")
         if response2.success:
             print(f"   Files modified: {response2.files_generated}")
@@ -129,11 +130,11 @@ def test_multiturn_conversation():
         # Verify calculator.py was modified (not recreated)
         calc_file = session.working_directory / "calculator.py"
         if not calc_file.exists():
-            print(f"   [FAIL] calculator.py disappeared!")
+            print("   [FAIL] calculator.py disappeared!")
             return False
 
         # Read and check content
-        with open(calc_file, 'r', encoding='utf-8') as f:
+        with open(calc_file, encoding="utf-8") as f:
             content2 = f.read()
 
         has_add = "def add" in content2
@@ -142,24 +143,27 @@ def test_multiturn_conversation():
         has_divide = "def divide" in content2
         has_zero_check = "ZeroDivisionError" in content2 or "== 0" in content2
 
-        print(f"   Functions present: add={has_add}, subtract={has_subtract}, multiply={has_multiply}, divide={has_divide}")
+        print(
+            f"   Functions present: add={has_add}, subtract={has_subtract}, multiply={has_multiply}, divide={has_divide}"
+        )
         print(f"   Division by zero handling: {has_zero_check}")
 
         # Check context preservation: all 4 functions should exist
         if not (has_add and has_subtract and has_multiply and has_divide):
-            print(f"   [FAIL] Missing functions! Agent didn't preserve context from Turn 1!")
-            print(f"   Content preview:")
+            print("   [FAIL] Missing functions! Agent didn't preserve context from Turn 1!")
+            print("   Content preview:")
             print(f"   {content2[:500]}")
             return False
 
         if not has_zero_check:
-            print(f"   [WARN] Division by zero handling may be missing")
+            print("   [WARN] Division by zero handling may be missing")
 
-        print(f"   [OK] Turn 2 complete - Context preserved, functions added")
+        print("   [OK] Turn 2 complete - Context preserved, functions added")
         print()
     except Exception as e:
         print(f"   [FAIL] Turn 2 failed: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -173,10 +177,10 @@ def test_multiturn_conversation():
         if len(history) != 4:  # 2 user + 2 assistant
             print(f"   [WARN] Expected 4 messages, got {len(history)}")
         else:
-            print(f"   [OK] Multi-turn history tracking working")
+            print("   [OK] Multi-turn history tracking working")
 
         # Verify messages contain expected content
-        user_messages = [m for m in history if m.role == 'user']
+        user_messages = [m for m in history if m.role == "user"]
         if len(user_messages) >= 2:
             print(f"   Turn 1 message preview: '{user_messages[0].content[:50]}...'")
             print(f"   Turn 2 message preview: '{user_messages[1].content[:50]}...'")
@@ -189,10 +193,10 @@ def test_multiturn_conversation():
     print("[7/8] Turn 3: Add test file for the calculator...")
     turn3_message = "Create a test file test_calculator.py with tests for all calculator functions, including the division by zero case."
     print(f"   Message: '{turn3_message}'")
-    print(f"   [TEST] This requires context from BOTH previous turns")
+    print("   [TEST] This requires context from BOTH previous turns")
     try:
         response3 = session.send_message(turn3_message)
-        print(f"   [OK] Agent responded")
+        print("   [OK] Agent responded")
         print(f"   Success: {response3.success}")
         if response3.success:
             print(f"   Files generated: {response3.files_generated}")
@@ -204,11 +208,11 @@ def test_multiturn_conversation():
         # Verify test file was created
         test_file = session.working_directory / "test_calculator.py"
         if not test_file.exists():
-            print(f"   [FAIL] test_calculator.py not found!")
+            print("   [FAIL] test_calculator.py not found!")
             return False
 
         # Read and check content
-        with open(test_file, 'r', encoding='utf-8') as f:
+        with open(test_file, encoding="utf-8") as f:
             test_content = f.read()
 
         # Check that test file references all functions
@@ -218,22 +222,25 @@ def test_multiturn_conversation():
         tests_divide = "divide" in test_content.lower()
         tests_zero = "zero" in test_content.lower()
 
-        print(f"   Tests cover: add={tests_add}, subtract={tests_subtract}, multiply={tests_multiply}, divide={tests_divide}, zero_div={tests_zero}")
+        print(
+            f"   Tests cover: add={tests_add}, subtract={tests_subtract}, multiply={tests_multiply}, divide={tests_divide}, zero_div={tests_zero}"
+        )
 
         if not (tests_add and tests_subtract and tests_multiply and tests_divide):
-            print(f"   [WARN] Test file may not cover all functions")
+            print("   [WARN] Test file may not cover all functions")
 
         # Verify calculator.py still exists
         calc_file = session.working_directory / "calculator.py"
         if not calc_file.exists():
-            print(f"   [FAIL] calculator.py disappeared during Turn 3!")
+            print("   [FAIL] calculator.py disappeared during Turn 3!")
             return False
 
-        print(f"   [OK] Turn 3 complete - Test file created with context from all turns")
+        print("   [OK] Turn 3 complete - Test file created with context from all turns")
         print()
     except Exception as e:
         print(f"   [FAIL] Turn 3 failed: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -241,7 +248,7 @@ def test_multiturn_conversation():
     print("[8/8] Ending conversation and verifying log...")
     try:
         log = orchestrator.end_conversation(session.conversation_id)
-        print(f"   [OK] Conversation ended")
+        print("   [OK] Conversation ended")
         print(f"   Total turns: {log.total_turns}")
         print(f"   Total messages: {len(log.messages)}")
         print(f"   Duration: {(log.ended_at - log.started_at).total_seconds():.1f}s")
@@ -251,30 +258,32 @@ def test_multiturn_conversation():
             print(f"   [WARN] Expected 3 turns, got {log.total_turns}")
 
         # Verify log file
-        log_path = Path(log.metadata.get('log_path'))
+        log_path = Path(log.metadata.get("log_path"))
         if log_path.exists():
             print(f"   [OK] Log file exists ({log_path.stat().st_size} bytes)")
 
             # Read and parse log to verify structure
             import json
-            with open(log_path, 'r', encoding='utf-8') as f:
+
+            with open(log_path, encoding="utf-8") as f:
                 log_data = json.load(f)
 
             print(f"   Log contains {len(log_data['messages'])} messages")
             print(f"   Conversation ID: {log_data['conversation_id']}")
         else:
-            print(f"   [WARN] Log file not found")
+            print("   [WARN] Log file not found")
         print()
     except Exception as e:
         print(f"   [FAIL] Failed to end conversation: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
     # Success summary
-    print("="*70)
+    print("=" * 70)
     print("SUCCESS: Phase 2 Multi-Turn Conversations WORKING!")
-    print("="*70)
+    print("=" * 70)
     print("\nContext Preservation Evidence:")
     print("  - Turn 1: Created calculator.py with add() and subtract()")
     print("  - Turn 2: Added multiply() and divide() WITHOUT recreating file")
@@ -284,10 +293,10 @@ def test_multiturn_conversation():
     print("\nConversation Tracking:")
     print(f"  - Total turns: {log.total_turns}")
     print(f"  - Total messages: {len(log.messages)}")
-    print(f"  - History preserved: YES")
+    print("  - History preserved: YES")
     print(f"  - Log saved: {log.metadata.get('log_path')}")
     print("\nPhase 2 is COMPLETE!")
-    print("="*70 + "\n")
+    print("=" * 70 + "\n")
 
     return True
 
@@ -295,28 +304,32 @@ def test_multiturn_conversation():
 def test_context_independence():
     """Test that separate conversations are independent"""
 
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("BONUS TEST: Context Independence Between Conversations")
-    print("="*70 + "\n")
+    print("=" * 70 + "\n")
 
     print("[1/3] Testing that separate conversations don't share context...")
 
     try:
         orchestrator = AgentOrchestrator(
             output_dir="./test-orchestration-logs",
-            working_directory="./test-orchestration-workspace"
+            working_directory="./test-orchestration-workspace",
         )
 
         # Start first conversation
         print("   [OK] Starting conversation A...")
         session_a = orchestrator.start_conversation()
-        response_a = session_a.send_message("Create a file called file_a.txt with text 'From conversation A'")
+        response_a = session_a.send_message(
+            "Create a file called file_a.txt with text 'From conversation A'"
+        )
         print(f"   [OK] Conversation A: {response_a.files_generated}")
 
         # Start second conversation
         print("   [OK] Starting conversation B...")
         session_b = orchestrator.start_conversation()
-        response_b = session_b.send_message("Create a file called file_b.txt with text 'From conversation B'")
+        response_b = session_b.send_message(
+            "Create a file called file_b.txt with text 'From conversation B'"
+        )
         print(f"   [OK] Conversation B: {response_b.files_generated}")
 
         # Verify both files exist in their respective workspaces
@@ -325,36 +338,37 @@ def test_context_independence():
 
         print("\n[2/3] Verifying workspace isolation...")
         if file_a.exists() and file_b.exists():
-            print(f"   [OK] Both files exist in separate workspaces")
+            print("   [OK] Both files exist in separate workspaces")
             print(f"   Workspace A: {session_a.working_directory}")
             print(f"   Workspace B: {session_b.working_directory}")
 
             # Verify workspaces are different
             if session_a.working_directory != session_b.working_directory:
-                print(f"   [OK] Workspaces are isolated")
+                print("   [OK] Workspaces are isolated")
             else:
-                print(f"   [FAIL] Workspaces are the same!")
+                print("   [FAIL] Workspaces are the same!")
                 return False
         else:
-            print(f"   [FAIL] Files not found in expected locations")
+            print("   [FAIL] Files not found in expected locations")
             return False
 
         print("\n[3/3] Ending conversations...")
         log_a = orchestrator.end_conversation(session_a.conversation_id)
         log_b = orchestrator.end_conversation(session_b.conversation_id)
-        print(f"   [OK] Both conversations ended")
+        print("   [OK] Both conversations ended")
         print(f"   Conversation A turns: {log_a.total_turns}")
         print(f"   Conversation B turns: {log_b.total_turns}")
 
-        print("\n" + "="*70)
+        print("\n" + "=" * 70)
         print("SUCCESS: Context independence verified!")
-        print("="*70 + "\n")
+        print("=" * 70 + "\n")
 
         return True
 
     except Exception as e:
         print(f"   [FAIL] Test failed: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 

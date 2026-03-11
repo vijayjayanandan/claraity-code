@@ -1,46 +1,48 @@
 """Command-line interface for the AI coding agent (TUI-only)."""
 
-import sys
-import os
 import asyncio
+import os
+import sys
 
 # CRITICAL: Remove TERM on Windows BEFORE importing prompt_toolkit
 # This prevents prompt_toolkit from thinking we're in a Unix terminal
-if sys.platform == 'win32' and 'TERM' in os.environ:
-    del os.environ['TERM']
+if sys.platform == "win32" and "TERM" in os.environ:
+    del os.environ["TERM"]
 
 # CRITICAL: Set Windows event loop policy for proper async I/O
 # This must be done before any asyncio operations
-if sys.platform == 'win32':
+if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-from pathlib import Path
-from typing import Optional
 import argparse
+from pathlib import Path
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from src.llm.config_loader import LLMConfigData
 
 # CRITICAL: Load .env BEFORE any imports that initialize observability
 # Langfuse/OTEL SDK reads env vars at import time
 from dotenv import load_dotenv
+
 load_dotenv()
 
 # CRITICAL: Import platform module early to activate global print() override
 # This prevents Windows encoding crashes throughout the entire codebase
-import src.platform  # noqa: F401 (unused import - side effect only)
-
 from rich.console import Console
 
+import src.platform  # noqa: F401 (unused import - side effect only)
 from src.core import CodingAgent
 from src.execution.controller import LongRunningController
 from src.ui.app import CodingAgentApp
-
 
 console = Console()
 
 
 def chat_mode(
-    agent: Optional[CodingAgent] = None,
-    controller: Optional[LongRunningController] = None,
-    log_level: Optional[str] = None,
+    agent: CodingAgent | None = None,
+    controller: LongRunningController | None = None,
+    log_level: str | None = None,
     llm_config: Optional["LLMConfigData"] = None,
 ) -> None:
     """Interactive chat mode with Textual TUI and async streaming.
@@ -60,12 +62,14 @@ def chat_mode(
     try:
         # Configure logging - all logs go to JSONL file only, no console output
         from src.observability.logging_config import configure_logging, install_asyncio_handler
+
         configure_logging(mode="tui", log_level=log_level)
 
-        from src.session.store.memory_store import MessageStore
-        from src.session.persistence.writer import SessionWriter
         import uuid
         from datetime import datetime
+
+        from src.session.persistence.writer import SessionWriter
+        from src.session.store.memory_store import MessageStore
 
         if agent:
             # Full mode: agent already has session_id + message_store from from_config()
@@ -73,7 +77,9 @@ def chat_mode(
             store = agent.message_store
         else:
             # Setup mode: create session scaffolding for TUI (agent will be wired later)
-            session_id = f"session-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
+            session_id = (
+                f"session-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
+            )
             store = MessageStore()
 
         # Prepare session writer (directory created on first write, not now)
@@ -115,41 +121,37 @@ def main() -> None:
     )
 
     parser.add_argument(
-        "--model",
-        default=None,
-        help="Model name (from .env: LLM_MODEL, or .clarity/config.yaml)"
+        "--model", default=None, help="Model name (from .env: LLM_MODEL, or .clarity/config.yaml)"
     )
 
     parser.add_argument(
         "--backend",
         default=None,
         choices=["ollama", "openai"],
-        help="LLM backend (from .env: LLM_BACKEND, or .clarity/config.yaml)"
+        help="LLM backend (from .env: LLM_BACKEND, or .clarity/config.yaml)",
     )
 
     parser.add_argument(
-        "--url",
-        default=None,
-        help="Backend API URL (from .env: LLM_HOST, or .clarity/config.yaml)"
+        "--url", default=None, help="Backend API URL (from .env: LLM_HOST, or .clarity/config.yaml)"
     )
 
     parser.add_argument(
         "--context",
         type=int,
         default=None,
-        help="Context window size (from .env: MAX_CONTEXT_TOKENS, or .clarity/config.yaml)"
+        help="Context window size (from .env: MAX_CONTEXT_TOKENS, or .clarity/config.yaml)",
     )
 
     parser.add_argument(
         "--api-key",
         default=None,
-        help="API key for OpenAI-compatible backends (optional, can use env var)"
+        help="API key for OpenAI-compatible backends (optional, can use env var)",
     )
 
     parser.add_argument(
         "--api-key-env",
         default=None,
-        help="Environment variable name for API key (default: OPENAI_API_KEY)"
+        help="Environment variable name for API key (default: OPENAI_API_KEY)",
     )
 
     # LLM generation parameters
@@ -157,35 +159,35 @@ def main() -> None:
         "--temperature",
         type=float,
         default=None,
-        help="LLM temperature (from .env: LLM_TEMPERATURE, or .clarity/config.yaml)"
+        help="LLM temperature (from .env: LLM_TEMPERATURE, or .clarity/config.yaml)",
     )
 
     parser.add_argument(
         "--max-tokens",
         type=int,
         default=None,
-        help="Max output tokens (from .env: LLM_MAX_TOKENS, or .clarity/config.yaml)"
+        help="Max output tokens (from .env: LLM_MAX_TOKENS, or .clarity/config.yaml)",
     )
 
     parser.add_argument(
         "--top-p",
         type=float,
         default=None,
-        help="Top-p sampling (from .env: LLM_TOP_P, or .clarity/config.yaml)"
+        help="Top-p sampling (from .env: LLM_TOP_P, or .clarity/config.yaml)",
     )
 
     parser.add_argument(
         "--permission",
         default=os.environ.get("PERMISSION_MODE", "normal"),
         choices=["plan", "normal", "auto"],
-        help="Permission mode (from .env: PERMISSION_MODE, or normal by default)"
+        help="Permission mode (from .env: PERMISSION_MODE, or normal by default)",
     )
 
     parser.add_argument(
         "--log-level",
         default=None,
         choices=["debug", "info", "warning", "error", "critical"],
-        help="Override log level (overrides .clarity/config.yaml, overridden by LOG_LEVEL env var)"
+        help="Override log level (overrides .clarity/config.yaml, overridden by LOG_LEVEL env var)",
     )
 
     args = parser.parse_args()
@@ -197,6 +199,7 @@ def main() -> None:
 
     # Secure the .clarity workspace directory permissions at startup
     from src.security.file_permissions import secure_clarity_workspace
+
     clarity_dir = Path(".clarity")
     if clarity_dir.exists():
         secure_clarity_workspace(clarity_dir)
@@ -237,12 +240,13 @@ def main() -> None:
         console.print("[yellow]No LLM configured. Launching setup wizard...[/yellow]")
         cli_log_level = args.log_level
         from src.observability.logging_config import configure_logging
+
         configure_logging(mode="tui", log_level=cli_log_level)
         chat_mode(agent=None, controller=None, log_level=cli_log_level, llm_config=llm_config)
         return
 
     # Initialize agent
-    console.print(f"\n[cyan]Initializing AI Coding Agent...[/cyan]")
+    console.print("\n[cyan]Initializing AI Coding Agent...[/cyan]")
     console.print(f"Model: {llm_config.model}")
     console.print(f"Backend: {llm_config.backend_type}")
     console.print(f"URL: {llm_config.base_url}")
@@ -260,30 +264,29 @@ def main() -> None:
 
         # Check if backend is available
         if not agent.llm.is_available():
-            console.print(f"[red]Error: {llm_config.backend_type} backend not available at {llm_config.base_url}[/red]")
-            console.print(f"[yellow]This is usually caused by:[/yellow]")
-            console.print(f"  - Incorrect API key")
-            console.print(f"  - Wrong base URL")
-            console.print(f"  - Network/firewall issues")
-            console.print(f"\n[cyan]Opening LLM configuration wizard...[/cyan]\n")
+            console.print(
+                f"[red]Error: {llm_config.backend_type} backend not available at {llm_config.base_url}[/red]"
+            )
+            console.print("[yellow]This is usually caused by:[/yellow]")
+            console.print("  - Incorrect API key")
+            console.print("  - Wrong base URL")
+            console.print("  - Network/firewall issues")
+            console.print("\n[cyan]Opening LLM configuration wizard...[/cyan]\n")
 
             # Configure logging for TUI mode
             cli_log_level = args.log_level
             from src.observability.logging_config import configure_logging
+
             configure_logging(mode="tui", log_level=cli_log_level)
 
             # Launch TUI with config wizard (agent will be None to trigger wizard)
             chat_mode(agent=None, controller=None, log_level=cli_log_level, llm_config=llm_config)
             return
 
-        console.print(f"[green]Agent initialized successfully![/green]\n")
+        console.print("[green]Agent initialized successfully![/green]\n")
 
         # Initialize Long Running Controller for checkpoints
-        controller = LongRunningController(
-            agent=agent,
-            project_dir=".",
-            max_checkpoints=10
-        )
+        controller = LongRunningController(agent=agent, project_dir=".", max_checkpoints=10)
 
         # Wire controller to checkpoint tool
         for tool in agent.tool_executor.tools.values():
@@ -294,6 +297,7 @@ def main() -> None:
         # Configure logging
         cli_log_level = args.log_level
         from src.observability.logging_config import configure_logging
+
         configure_logging(mode="tui", log_level=cli_log_level)
 
         # Always launch TUI

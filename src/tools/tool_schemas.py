@@ -5,9 +5,9 @@ This module defines all available tools in OpenAI's function calling format.
 These schemas are used by the LLM to understand what tools are available and how to call them.
 """
 
-from typing import List, Optional
-from src.llm.base import ToolDefinition
+from typing import Optional
 
+from src.llm.base import ToolDefinition
 
 # File Operations Tools
 
@@ -19,23 +19,23 @@ READ_FILE_TOOL = ToolDefinition(
         "properties": {
             "file_path": {
                 "type": "string",
-                "description": "Absolute or relative path to the file to read"
+                "description": "Absolute or relative path to the file to read",
             },
             "start_line": {
                 "type": "integer",
-                "description": "Start line number (1-indexed, inclusive). Default: 1"
+                "description": "Start line number (1-indexed, inclusive). Default: 1",
             },
             "end_line": {
                 "type": "integer",
-                "description": "End line number (1-indexed, EXCLUSIVE). Default: start_line + max_lines"
+                "description": "End line number (1-indexed, EXCLUSIVE). Default: start_line + max_lines",
             },
             "max_lines": {
                 "type": "integer",
-                "description": "Maximum lines to return (default: 1000, limit: 2000 per read)."
-            }
+                "description": "Maximum lines to return (default: 1000, limit: 2000 per read).",
+            },
         },
-        "required": ["file_path"]
-    }
+        "required": ["file_path"],
+    },
 )
 
 WRITE_FILE_TOOL = ToolDefinition(
@@ -44,17 +44,14 @@ WRITE_FILE_TOOL = ToolDefinition(
     parameters={
         "type": "object",
         "properties": {
-            "file_path": {
-                "type": "string",
-                "description": "Path where the file should be created"
-            },
+            "file_path": {"type": "string", "description": "Path where the file should be created"},
             "content": {
                 "type": "string",
-                "description": "Full content to write to the file. Keep under 100 lines if possible - break large files into skeleton + edits."
-            }
+                "description": "Full content to write to the file. Keep under 100 lines if possible - break large files into skeleton + edits.",
+            },
         },
-        "required": ["file_path", "content"]
-    }
+        "required": ["file_path", "content"],
+    },
 )
 
 EDIT_FILE_TOOL = ToolDefinition(
@@ -63,21 +60,15 @@ EDIT_FILE_TOOL = ToolDefinition(
     parameters={
         "type": "object",
         "properties": {
-            "file_path": {
-                "type": "string",
-                "description": "Path to the file to edit"
-            },
+            "file_path": {"type": "string", "description": "Path to the file to edit"},
             "old_text": {
                 "type": "string",
-                "description": "Exact text to find and replace (must match exactly including whitespace)"
+                "description": "Exact text to find and replace (must match exactly including whitespace)",
             },
-            "new_text": {
-                "type": "string",
-                "description": "New text to replace the old text with"
-            }
+            "new_text": {"type": "string", "description": "New text to replace the old text with"},
         },
-        "required": ["file_path", "old_text", "new_text"]
-    }
+        "required": ["file_path", "old_text", "new_text"],
+    },
 )
 
 APPEND_TO_FILE_TOOL = ToolDefinition(
@@ -88,30 +79,27 @@ APPEND_TO_FILE_TOOL = ToolDefinition(
         "properties": {
             "file_path": {
                 "type": "string",
-                "description": "Path to the file to append to (creates if doesn't exist)"
+                "description": "Path to the file to append to (creates if doesn't exist)",
             },
             "content": {
                 "type": "string",
-                "description": "Content to append to the file. Will be added at the end with proper newline handling."
-            }
+                "description": "Content to append to the file. Will be added at the end with proper newline handling.",
+            },
         },
-        "required": ["file_path", "content"]
-    }
+        "required": ["file_path", "content"],
+    },
 )
 
 LIST_DIRECTORY_TOOL = ToolDefinition(
     name="list_directory",
-    description="List all files and subdirectories in a directory",
+    description="list all files and subdirectories in a directory",
     parameters={
         "type": "object",
         "properties": {
-            "directory_path": {
-                "type": "string",
-                "description": "Path to the directory to list"
-            }
+            "directory_path": {"type": "string", "description": "Path to the directory to list"}
         },
-        "required": ["directory_path"]
-    }
+        "required": ["directory_path"],
+    },
 )
 
 RUN_COMMAND_TOOL = ToolDefinition(
@@ -136,23 +124,32 @@ RUN_COMMAND_TOOL = ToolDefinition(
         "properties": {
             "command": {
                 "type": "string",
-                "description": "Shell command to execute (e.g., 'python test.py', 'npm install', 'pytest tests/ -v')"
+                "description": "Shell command to execute (e.g., 'python test.py', 'npm install', 'pytest tests/ -v')",
             },
             "description": {
                 "type": "string",
-                "description": "Brief description of what this command does (e.g., 'Run unit tests', 'Install dependencies'). Helps with auditability."
+                "description": "Brief description of what this command does (e.g., 'Run unit tests', 'Install dependencies'). Helps with auditability.",
             },
             "working_directory": {
                 "type": "string",
-                "description": "Directory to run the command in. Use this instead of 'cd' commands. Must be a valid existing directory path."
+                "description": "Directory to run the command in. Use this instead of 'cd' commands. Must be a valid existing directory path.",
             },
             "timeout": {
                 "type": "number",
-                "description": "Timeout in seconds (default: 120). Use higher values for long-running commands like test suites or builds (max: 600)"
-            }
+                "description": "Timeout in seconds (default: 120). Use higher values for long-running commands like test suites or builds (max: 600)",
+            },
+            "background": {
+                "type": "boolean",
+                "description": (
+                    "Set true to run in background (non-blocking). Returns immediately with a task ID. "
+                    "You will be automatically notified via a [BACKGROUND TASK UPDATE] message when the "
+                    "task completes. Use for long-running operations like test suites, builds, or linters "
+                    "while you continue other work."
+                ),
+            },
         },
-        "required": ["command"]
-    }
+        "required": ["command"],
+    },
 )
 
 
@@ -166,60 +163,54 @@ GREP_TOOL = ToolDefinition(
         "properties": {
             "pattern": {
                 "type": "string",
-                "description": "Regex pattern to search for (e.g., '^class \w+', 'TODO|FIXME', 'def authenticate')"
+                "description": r"Regex pattern to search for (e.g., '^class \w+', 'TODO|FIXME', 'def authenticate')",
             },
             "path": {
                 "type": "string",
-                "description": "File or directory to search (default: current directory)"
+                "description": "File or directory to search (default: current directory)",
             },
             "file_type": {
                 "type": "string",
-                "description": "File type filter: 'py', 'js', 'ts', 'java', 'cpp', 'go', 'rust', etc."
+                "description": "File type filter: 'py', 'js', 'ts', 'java', 'cpp', 'go', 'rust', etc.",
             },
             "glob": {
                 "type": "string",
-                "description": "Glob pattern to filter files (e.g., '*.py', 'src/**/*.ts')"
+                "description": "Glob pattern to filter files (e.g., '*.py', 'src/**/*.ts')",
             },
             "output_mode": {
                 "type": "string",
                 "enum": ["content", "files_with_matches", "count"],
-                "description": "'content' (show matching lines), 'files_with_matches' (file paths only), 'count' (match counts per file)"
+                "description": "'content' (show matching lines), 'files_with_matches' (file paths only), 'count' (match counts per file)",
             },
             "context_before": {
                 "type": "number",
-                "description": "Lines of context before match (like -B)"
+                "description": "Lines of context before match (like -B)",
             },
             "context_after": {
                 "type": "number",
-                "description": "Lines of context after match (like -A)"
+                "description": "Lines of context after match (like -A)",
             },
             "context": {
                 "type": "number",
-                "description": "Lines of context before AND after match (like -C)"
+                "description": "Lines of context before AND after match (like -C)",
             },
             "case_insensitive": {
                 "type": "boolean",
-                "description": "Ignore case when searching (like -i)"
+                "description": "Ignore case when searching (like -i)",
             },
             "line_numbers": {
                 "type": "boolean",
-                "description": "Show line numbers in output (default: true for content mode)"
+                "description": "Show line numbers in output (default: true for content mode)",
             },
             "multiline": {
                 "type": "boolean",
-                "description": "Enable multiline matching (pattern can span lines)"
+                "description": "Enable multiline matching (pattern can span lines)",
             },
-            "head_limit": {
-                "type": "number",
-                "description": "Limit output to first N results"
-            },
-            "offset": {
-                "type": "number",
-                "description": "Skip first N results"
-            }
+            "head_limit": {"type": "number", "description": "Limit output to first N results"},
+            "offset": {"type": "number", "description": "Skip first N results"},
         },
-        "required": ["pattern"]
-    }
+        "required": ["pattern"],
+    },
 )
 
 GLOB_TOOL = ToolDefinition(
@@ -230,19 +221,19 @@ GLOB_TOOL = ToolDefinition(
         "properties": {
             "pattern": {
                 "type": "string",
-                "description": "Glob pattern (e.g., '*.py', '**/*.js', 'src/**/*.{ts,tsx}' for brace expansion)"
+                "description": "Glob pattern (e.g., '*.py', '**/*.js', 'src/**/*.{ts,tsx}' for brace expansion)",
             },
             "path": {
                 "type": "string",
-                "description": "Directory to search in (default: current directory)"
+                "description": "Directory to search in (default: current directory)",
             },
             "sort_by_mtime": {
                 "type": "boolean",
-                "description": "Sort results by modification time, newest first (default: true)"
-            }
+                "description": "Sort results by modification time, newest first (default: true)",
+            },
         },
-        "required": ["pattern"]
-    }
+        "required": ["pattern"],
+    },
 )
 
 # LSP-Based Semantic Code Analysis Tools
@@ -255,11 +246,11 @@ GET_FILE_OUTLINE_TOOL = ToolDefinition(
         "properties": {
             "file_path": {
                 "type": "string",
-                "description": "Path to file to analyze (e.g., 'src/core/agent.py', 'lib/utils.ts')"
+                "description": "Path to file to analyze (e.g., 'src/core/agent.py', 'lib/utils.ts')",
             }
         },
-        "required": ["file_path"]
-    }
+        "required": ["file_path"],
+    },
 )
 
 GET_SYMBOL_CONTEXT_TOOL = ToolDefinition(
@@ -270,23 +261,23 @@ GET_SYMBOL_CONTEXT_TOOL = ToolDefinition(
         "properties": {
             "symbol_name": {
                 "type": "string",
-                "description": "Symbol name to search for (e.g., 'authenticate', 'User', 'parse_config', 'LSPClientManager')"
+                "description": "Symbol name to search for (e.g., 'authenticate', 'User', 'parse_config', 'LSPClientManager')",
             },
             "file_hint": {
                 "type": "string",
-                "description": "Optional file path hint to narrow search (e.g., 'auth.py', 'src/core/', 'models/user.py'). Use when symbol appears in multiple files."
+                "description": "Optional file path hint to narrow search (e.g., 'auth.py', 'src/core/', 'models/user.py'). Use when symbol appears in multiple files.",
             },
             "include_references": {
                 "type": "boolean",
-                "description": "Include where symbol is used/called (default: true). Set false for faster queries."
+                "description": "Include where symbol is used/called (default: true). Set false for faster queries.",
             },
             "include_implementation": {
                 "type": "boolean",
-                "description": "Include actual code implementation (default: true). Set false if you only need signature/location."
-            }
+                "description": "Include actual code implementation (default: true). Set false if you only need signature/location.",
+            },
         },
-        "required": ["symbol_name"]
-    }
+        "required": ["symbol_name"],
+    },
 )
 
 
@@ -300,15 +291,15 @@ DELEGATE_TO_SUBAGENT_TOOL = ToolDefinition(
         "properties": {
             "subagent": {
                 "type": "string",
-                "description": "Name of the subagent: 'code-writer' (implement code), 'test-writer' (write tests), 'code-reviewer' (review quality), 'explore' (read-only codebase search), 'planner' (design plans), 'doc-writer' (documentation), 'general-purpose' (multi-step tasks)"
+                "description": "Name of the subagent: 'code-writer' (implement code), 'test-writer' (write tests), 'code-reviewer' (review quality), 'explore' (read-only codebase search), 'planner' (design plans), 'doc-writer' (documentation), 'general-purpose' (multi-step tasks)",
             },
             "task": {
                 "type": "string",
-                "description": "Clear, detailed description of the task to delegate to the subagent"
-            }
+                "description": "Clear, detailed description of the task to delegate to the subagent",
+            },
         },
-        "required": ["subagent", "task"]
-    }
+        "required": ["subagent", "task"],
+    },
 )
 
 CREATE_CHECKPOINT_TOOL = ToolDefinition(
@@ -319,20 +310,20 @@ CREATE_CHECKPOINT_TOOL = ToolDefinition(
         "properties": {
             "description": {
                 "type": "string",
-                "description": "What was accomplished in this session (e.g., 'Completed authentication module', 'Fixed memory leak in context builder')"
+                "description": "What was accomplished in this session (e.g., 'Completed authentication module', 'Fixed memory leak in context builder')",
             },
             "current_phase": {
                 "type": "string",
-                "description": "Optional: Current development phase (e.g., 'Phase 1', 'Phase 0.4')"
+                "description": "Optional: Current development phase (e.g., 'Phase 1', 'Phase 0.4')",
             },
             "pending_tasks": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "Optional: List of tasks remaining to complete"
-            }
+                "description": "Optional: list of tasks remaining to complete",
+            },
         },
-        "required": ["description"]
-    }
+        "required": ["description"],
+    },
 )
 
 
@@ -347,30 +338,26 @@ RUN_TESTS_TOOL = ToolDefinition(
             "framework": {
                 "type": "string",
                 "description": "Optional: Override framework detection (pytest, jest, vitest, cargo)",
-                "enum": ["pytest", "jest", "vitest", "cargo"]
+                "enum": ["pytest", "jest", "vitest", "cargo"],
             },
             "file_pattern": {
                 "type": "string",
-                "description": "Optional: Test file pattern to filter tests (e.g., 'tests/test_auth.py')"
+                "description": "Optional: Test file pattern to filter tests (e.g., 'tests/test_auth.py')",
             },
             "files_changed": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "Optional: List of changed files for validation context"
-            }
+                "description": "Optional: list of changed files for validation context",
+            },
         },
-        "required": []
-    }
+        "required": [],
+    },
 )
 
 DETECT_TEST_FRAMEWORK_TOOL = ToolDefinition(
     name="detect_test_framework",
     description="Detect test framework from project files (pytest.ini, package.json, Cargo.toml, etc.). Returns framework name or None if not detected.",
-    parameters={
-        "type": "object",
-        "properties": {},
-        "required": []
-    }
+    parameters={"type": "object", "properties": {}, "required": []},
 )
 
 
@@ -384,30 +371,30 @@ WEB_SEARCH_TOOL = ToolDefinition(
         "properties": {
             "query": {
                 "type": "string",
-                "description": "Search query (e.g., 'Python 3.12 new features', 'React 19 hooks')"
+                "description": "Search query (e.g., 'Python 3.12 new features', 'React 19 hooks')",
             },
             "max_results": {
                 "type": "number",
-                "description": "Results to return (1-10, default: 5)"
+                "description": "Results to return (1-10, default: 5)",
             },
             "search_depth": {
                 "type": "string",
                 "enum": ["basic", "advanced"],
-                "description": "'basic' (fast) or 'advanced' (thorough). Default: basic"
+                "description": "'basic' (fast) or 'advanced' (thorough). Default: basic",
             },
             "include_domains": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "Only include results from these domains (e.g., ['github.com', 'stackoverflow.com'])"
+                "description": "Only include results from these domains (e.g., ['github.com', 'stackoverflow.com'])",
             },
             "exclude_domains": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "Exclude results from these domains"
-            }
+                "description": "Exclude results from these domains",
+            },
         },
-        "required": ["query"]
-    }
+        "required": ["query"],
+    },
 )
 
 WEB_FETCH_TOOL = ToolDefinition(
@@ -418,15 +405,15 @@ WEB_FETCH_TOOL = ToolDefinition(
         "properties": {
             "url": {
                 "type": "string",
-                "description": "URL to fetch (http/https only, ports 80/443)"
+                "description": "URL to fetch (http/https only, ports 80/443)",
             },
             "extract_text": {
                 "type": "boolean",
-                "description": "Extract plain text from HTML (default: true)"
-            }
+                "description": "Extract plain text from HTML (default: true)",
+            },
         },
-        "required": ["url"]
-    }
+        "required": ["url"],
+    },
 )
 
 
@@ -440,21 +427,17 @@ ENTER_PLAN_MODE_TOOL = ToolDefinition(
         "properties": {
             "reason": {
                 "type": "string",
-                "description": "Brief reason for entering plan mode (e.g., 'Complex refactoring with multiple dependencies')"
+                "description": "Brief reason for entering plan mode (e.g., 'Complex refactoring with multiple dependencies')",
             }
         },
-        "required": []
-    }
+        "required": [],
+    },
 )
 
 EXIT_PLAN_MODE_TOOL = ToolDefinition(
     name="request_plan_approval",
     description="Submit your implementation plan for user approval. Call this after writing your plan to the plan file. The user will review and either approve, reject, or request changes.",
-    parameters={
-        "type": "object",
-        "properties": {},
-        "required": []
-    }
+    parameters={"type": "object", "properties": {}, "required": []},
 )
 
 
@@ -476,15 +459,15 @@ CLARIFY_TOOL = ToolDefinition(
                     "properties": {
                         "id": {
                             "type": "string",
-                            "description": "Unique identifier for this question (e.g., 'approach', 'framework')"
+                            "description": "Unique identifier for this question (e.g., 'approach', 'framework')",
                         },
                         "label": {
                             "type": "string",
-                            "description": "Short tab label (max 12 chars, e.g., 'Approach', 'Framework')"
+                            "description": "Short tab label (max 12 chars, e.g., 'Approach', 'Framework')",
                         },
                         "question": {
                             "type": "string",
-                            "description": "The full question text to display"
+                            "description": "The full question text to display",
                         },
                         "options": {
                             "type": "array",
@@ -495,43 +478,43 @@ CLARIFY_TOOL = ToolDefinition(
                                 "properties": {
                                     "id": {
                                         "type": "string",
-                                        "description": "Unique identifier for this option"
+                                        "description": "Unique identifier for this option",
                                     },
                                     "label": {
                                         "type": "string",
-                                        "description": "Short option label"
+                                        "description": "Short option label",
                                     },
                                     "description": {
                                         "type": "string",
-                                        "description": "Detailed description of this option"
+                                        "description": "Detailed description of this option",
                                     },
                                     "recommended": {
                                         "type": "boolean",
-                                        "description": "Mark this option as recommended (shows '(Recommended)' tag)"
-                                    }
+                                        "description": "Mark this option as recommended (shows '(Recommended)' tag)",
+                                    },
                                 },
-                                "required": ["id", "label"]
-                            }
+                                "required": ["id", "label"],
+                            },
                         },
                         "multi_select": {
                             "type": "boolean",
-                            "description": "Allow multiple options to be selected (default: false)"
+                            "description": "Allow multiple options to be selected (default: false)",
                         },
                         "allow_custom": {
                             "type": "boolean",
-                            "description": "Allow user to type a custom response (default: false)"
-                        }
+                            "description": "Allow user to type a custom response (default: false)",
+                        },
                     },
-                    "required": ["id", "label", "question", "options"]
-                }
+                    "required": ["id", "label", "question", "options"],
+                },
             },
             "context": {
                 "type": "string",
-                "description": "Brief explanation of why clarification is needed (shown to user)"
-            }
+                "description": "Brief explanation of why clarification is needed (shown to user)",
+            },
         },
-        "required": ["questions"]
-    }
+        "required": ["questions"],
+    },
 )
 
 
@@ -601,7 +584,7 @@ DIRECTOR_COMPLETE_PLAN_TOOL = ToolDefinition(
             },
             "slices": {
                 "type": "array",
-                "description": "List of vertical slices for execution tracking (3-5 recommended)",
+                "description": "list of vertical slices for execution tracking (3-5 recommended)",
                 "items": {
                     "type": "object",
                     "properties": {
@@ -655,6 +638,33 @@ DIRECTOR_COMPLETE_INTEGRATION_TOOL = ToolDefinition(
         "required": [],
     },
 )
+
+# Background Task Tools
+
+CHECK_BACKGROUND_TASK_TOOL = ToolDefinition(
+    name="check_background_task",
+    description=(
+        "Check status or get full output of a background task. "
+        "Returns status, exit code, stdout, and stderr. "
+        "You will be automatically notified when background tasks complete, "
+        "then use this tool to retrieve the full output."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "task_id": {
+                "type": "string",
+                "description": "Background task ID (e.g., 'bg-1')",
+            },
+        },
+        "required": ["task_id"],
+    },
+)
+
+BACKGROUND_TOOLS = [
+    CHECK_BACKGROUND_TASK_TOOL,
+]
+
 
 # Tool Collections
 
@@ -721,7 +731,7 @@ TESTING_TOOLS = [
 ]
 
 
-def get_tools_for_task(task_type: str) -> List[ToolDefinition]:
+def get_tools_for_task(task_type: str) -> list[ToolDefinition]:
     """
     Get relevant tools based on task type.
 
@@ -729,7 +739,7 @@ def get_tools_for_task(task_type: str) -> List[ToolDefinition]:
         task_type: Type of task (feature, bug_fix, refactor, etc.)
 
     Returns:
-        List of relevant tool definitions
+        list of relevant tool definitions
     """
     # For most tasks, return all tools
     # Can be refined later based on task analysis
@@ -737,8 +747,8 @@ def get_tools_for_task(task_type: str) -> List[ToolDefinition]:
 
 
 def get_all_tools(
-    mcp_definitions: Optional[List[ToolDefinition]] = None,
-) -> List[ToolDefinition]:
+    mcp_definitions: list[ToolDefinition] | None = None,
+) -> list[ToolDefinition]:
     """Return native tools merged with any active MCP tool definitions.
 
     This is the single function that builds the tool list for LLM requests.

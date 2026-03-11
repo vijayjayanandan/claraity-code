@@ -11,11 +11,10 @@ with bonuses for:
 - Shorter paths (normalized by length)
 """
 
-from pathlib import Path
-from typing import List, Optional, Set
-from dataclasses import dataclass
 import asyncio
-
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
 
 # Scoring constants (based on fzy algorithm)
 SCORE_GAP_LEADING = -0.005
@@ -39,10 +38,11 @@ class FileSuggestion:
         score: Match score (higher = better match)
         match_positions: Character positions that matched (for highlighting)
     """
+
     path: str
     filename: str
     score: float
-    match_positions: List[int]
+    match_positions: list[int]
 
     def __repr__(self) -> str:
         return f"FileSuggestion({self.path}, score={self.score:.2f})"
@@ -62,18 +62,45 @@ class FileAutocomplete:
     """
 
     # Directories to ignore during indexing
-    IGNORE_DIRS: Set[str] = {
-        '.git', '__pycache__', '.venv', 'venv', 'node_modules',
-        '.env', '.pytest_cache', 'dist', 'build', '.idea',
-        '.mypy_cache', '.tox', 'eggs', '*.egg-info',
-        '.checkpoints', '.screenshots',
+    IGNORE_DIRS: set[str] = {
+        ".git",
+        "__pycache__",
+        ".venv",
+        "venv",
+        "node_modules",
+        ".env",
+        ".pytest_cache",
+        "dist",
+        "build",
+        ".idea",
+        ".mypy_cache",
+        ".tox",
+        "eggs",
+        "*.egg-info",
+        ".checkpoints",
+        ".screenshots",
     }
 
     # File extensions to ignore
-    IGNORE_EXTENSIONS: Set[str] = {
-        '.pyc', '.pyo', '.exe', '.dll', '.so', '.o', '.obj',
-        '.class', '.jar', '.war', '.ear', '.db', '.sqlite',
-        '.log', '.tmp', '.swp', '.swo', '.bak',
+    IGNORE_EXTENSIONS: set[str] = {
+        ".pyc",
+        ".pyo",
+        ".exe",
+        ".dll",
+        ".so",
+        ".o",
+        ".obj",
+        ".class",
+        ".jar",
+        ".war",
+        ".ear",
+        ".db",
+        ".sqlite",
+        ".log",
+        ".tmp",
+        ".swp",
+        ".swo",
+        ".bak",
     }
 
     # Maximum files to index (prevents memory issues on huge repos)
@@ -87,7 +114,7 @@ class FileAutocomplete:
             root: Project root directory
         """
         self.root = root.resolve()
-        self._files: List[str] = []
+        self._files: list[str] = []
         self._indexed = False
 
     async def index(self) -> None:
@@ -99,7 +126,7 @@ class FileAutocomplete:
         if self._indexed:
             return
 
-        def _scan() -> List[str]:
+        def _scan() -> list[str]:
             files = []
             try:
                 for path in self.root.rglob("*"):
@@ -107,7 +134,7 @@ class FileAutocomplete:
                         if path.is_file() and not self._should_ignore(path):
                             # Store relative path with forward slashes (consistent)
                             rel = path.relative_to(self.root)
-                            files.append(str(rel).replace('\\', '/'))
+                            files.append(str(rel).replace("\\", "/"))
 
                         if len(files) >= self.MAX_FILES:
                             break
@@ -130,7 +157,7 @@ class FileAutocomplete:
                 return True
             # Handle wildcard patterns like *.egg-info
             for pattern in self.IGNORE_DIRS:
-                if '*' in pattern and path.match(pattern):
+                if "*" in pattern and path.match(pattern):
                     return True
 
         # Check extension
@@ -139,7 +166,7 @@ class FileAutocomplete:
 
         return False
 
-    def suggest(self, query: str, limit: int = 8) -> List[FileSuggestion]:
+    def suggest(self, query: str, limit: int = 8) -> list[FileSuggestion]:
         """
         Get fuzzy matches for query using fzy algorithm.
 
@@ -148,27 +175,23 @@ class FileAutocomplete:
             limit: Maximum number of suggestions
 
         Returns:
-            List of FileSuggestion sorted by score (best first)
+            list of FileSuggestion sorted by score (best first)
         """
         if not query:
             # Show first files when no query (most recently modified would be ideal)
-            return [
-                FileSuggestion(p, Path(p).name, 0.0, [])
-                for p in self._files[:limit]
-            ]
+            return [FileSuggestion(p, Path(p).name, 0.0, []) for p in self._files[:limit]]
 
         query_lower = query.lower()
         results = []
 
         for path in self._files:
             score, positions = self._fzy_score(query_lower, path.lower())
-            if score > float('-inf'):
-                results.append(FileSuggestion(
-                    path=path,
-                    filename=Path(path).name,
-                    score=score,
-                    match_positions=positions
-                ))
+            if score > float("-inf"):
+                results.append(
+                    FileSuggestion(
+                        path=path, filename=Path(path).name, score=score, match_positions=positions
+                    )
+                )
 
         # Sort by score (descending), then by path length (prefer shorter)
         results.sort(key=lambda x: (-x.score, len(x.path)))
@@ -190,7 +213,7 @@ class FileAutocomplete:
         if n == 0:
             return 0.0, []
         if n > m:
-            return float('-inf'), []
+            return float("-inf"), []
 
         # First pass: check if all query chars exist in target (in order)
         positions = []
@@ -202,13 +225,13 @@ class FileAutocomplete:
 
         if j < n:
             # Not all query chars matched
-            return float('-inf'), []
+            return float("-inf"), []
 
         # Second pass: calculate score based on match positions
         score = 0.0
         prev_pos = -1
 
-        for idx, pos in enumerate(positions):
+        for _idx, pos in enumerate(positions):
             # Gap penalty (characters skipped between matches)
             if prev_pos >= 0:
                 gap = pos - prev_pos - 1
@@ -219,13 +242,13 @@ class FileAutocomplete:
             if pos == 0:
                 # Start of string - strong bonus
                 score += SCORE_MATCH_SLASH
-            elif target[pos - 1] == '/':
+            elif target[pos - 1] == "/":
                 # After path separator - strong bonus
                 score += SCORE_MATCH_SLASH
-            elif target[pos - 1] in '_- ':
+            elif target[pos - 1] in "_- ":
                 # Word boundary - good bonus
                 score += SCORE_MATCH_WORD
-            elif target[pos - 1] == '.':
+            elif target[pos - 1] == ".":
                 # After dot (extension) - moderate bonus
                 score += SCORE_MATCH_DOT
             elif target[pos].isupper():
@@ -251,7 +274,7 @@ class FileAutocomplete:
         # Normalize by target length (prefer shorter paths)
         # Using sqrt to not penalize long paths too heavily
         if m > 0:
-            score = score / (m ** 0.5)
+            score = score / (m**0.5)
 
         return score, positions
 

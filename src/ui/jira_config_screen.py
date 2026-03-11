@@ -11,16 +11,15 @@ Follows the ConfigLLMScreen pattern (ModalScreen with dismiss).
 """
 
 from pathlib import Path
-from typing import Optional, List
 
 from textual.app import ComposeResult
-from textual.screen import ModalScreen
-from textual.widgets import Static, Input, Button, Select
-from textual.containers import Vertical, Horizontal
 from textual.binding import Binding
+from textual.containers import Horizontal, Vertical
+from textual.screen import ModalScreen
+from textual.widgets import Button, Input, Select, Static
 
+from src.integrations.jira.connection import DEFAULT_CONFIG_DIR, JiraConnection
 from src.observability import get_logger
-from src.integrations.jira.connection import JiraConnection, DEFAULT_CONFIG_DIR
 
 logger = get_logger("ui.jira_config_screen")
 
@@ -43,7 +42,7 @@ class JiraConfigResult:
         self.disconnect = disconnect
 
 
-class ConfigJiraScreen(ModalScreen[Optional[JiraConfigResult]]):
+class ConfigJiraScreen(ModalScreen[JiraConfigResult | None]):
     """Modal screen for configuring a Jira connection profile.
 
     Fields:
@@ -129,11 +128,11 @@ class ConfigJiraScreen(ModalScreen[Optional[JiraConfigResult]]):
 
     def __init__(
         self,
-        profile: Optional[str] = None,
-        connected_profile: Optional[str] = None,
-        name: Optional[str] = None,
-        id: Optional[str] = None,
-        classes: Optional[str] = None,
+        profile: str | None = None,
+        connected_profile: str | None = None,
+        name: str | None = None,
+        id: str | None = None,
+        classes: str | None = None,
     ):
         super().__init__(name=name, id=id, classes=classes)
         self._initial_profile = profile or connected_profile
@@ -254,16 +253,13 @@ class ConfigJiraScreen(ModalScreen[Optional[JiraConfigResult]]):
         select = self.query_one("#profile-select", Select)
         profile_name = select.value
         is_connected = (
-            self._connected_profile is not None
-            and profile_name == self._connected_profile
+            self._connected_profile is not None and profile_name == self._connected_profile
         )
         try:
             status_label = self.query_one("#connection-status", Static)
             disconnect_btn = self.query_one("#btn-disconnect", Button)
             if is_connected:
-                status_label.update(
-                    f"[green]Connected[/green] to {self._connected_profile}"
-                )
+                status_label.update(f"[green]Connected[/green] to {self._connected_profile}")
                 disconnect_btn.display = True
             else:
                 status_label.update("")
@@ -274,10 +270,12 @@ class ConfigJiraScreen(ModalScreen[Optional[JiraConfigResult]]):
     def _disconnect_profile(self) -> None:
         """Signal the app to disconnect the current profile."""
         if self._connected_profile:
-            self.dismiss(JiraConfigResult(
-                profile=self._connected_profile,
-                disconnect=True,
-            ))
+            self.dismiss(
+                JiraConfigResult(
+                    profile=self._connected_profile,
+                    disconnect=True,
+                )
+            )
 
     def _load_profile_data(self) -> None:
         """Populate fields from the selected profile's config."""
@@ -298,14 +296,14 @@ class ConfigJiraScreen(ModalScreen[Optional[JiraConfigResult]]):
             # Show dots if token exists, empty if not
             if conn.has_api_token():
                 self.query_one("#jira-api-token", Input).value = ""
-                self.query_one("#jira-api-token", Input).placeholder = (
-                    "Token stored securely (leave blank to keep)"
-                )
+                self.query_one(
+                    "#jira-api-token", Input
+                ).placeholder = "Token stored securely (leave blank to keep)"
             else:
                 self.query_one("#jira-api-token", Input).value = ""
-                self.query_one("#jira-api-token", Input).placeholder = (
-                    "Paste API token from id.atlassian.com"
-                )
+                self.query_one(
+                    "#jira-api-token", Input
+                ).placeholder = "Paste API token from id.atlassian.com"
         except Exception as e:
             logger.warning(f"Failed to load profile: {e}")
 
@@ -322,7 +320,9 @@ class ConfigJiraScreen(ModalScreen[Optional[JiraConfigResult]]):
                 return
             # Sanitize: only allow alphanumeric, hyphens, underscores
             if not all(c.isalnum() or c in "-_" for c in profile):
-                status.update("[red]Profile name: only letters, numbers, hyphens, underscores[/red]")
+                status.update(
+                    "[red]Profile name: only letters, numbers, hyphens, underscores[/red]"
+                )
                 return
         else:
             profile = str(select.value)
@@ -363,12 +363,14 @@ class ConfigJiraScreen(ModalScreen[Optional[JiraConfigResult]]):
             logger.info("jira_profile_saved", profile=profile)
 
             if connect_after:
-                self.dismiss(JiraConfigResult(
-                    profile=profile,
-                    jira_url=jira_url,
-                    username=username,
-                    api_token=api_token,
-                ))
+                self.dismiss(
+                    JiraConfigResult(
+                        profile=profile,
+                        jira_url=jira_url,
+                        username=username,
+                        api_token=api_token,
+                    )
+                )
             else:
                 self.dismiss(None)
                 self.app.notify(

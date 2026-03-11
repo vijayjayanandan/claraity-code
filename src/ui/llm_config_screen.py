@@ -11,32 +11,30 @@ Follows the SessionPickerScreen pattern (ModalScreen with dismiss).
 """
 
 from pathlib import Path
-from typing import Optional, List
 
 from textual.app import ComposeResult
+from textual.binding import Binding
+from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
+from textual.suggester import SuggestFromList
 from textual.widgets import (
-    Static,
-    Input,
     Button,
-    Select,
-    OptionList,
     Checkbox,
+    Input,
+    OptionList,
+    Select,
+    Static,
 )
 from textual.widgets.option_list import Option
-from textual.containers import Vertical, Horizontal
-from textual.binding import Binding
 
-from textual.suggester import SuggestFromList
-
-from src.observability import get_logger
 from src.llm.config_loader import (
+    DEFAULT_CONFIG_PATH,
     LLMConfigData,
     SubAgentLLMOverride,
     load_llm_config,
     save_llm_config,
-    DEFAULT_CONFIG_PATH,
 )
+from src.observability import get_logger
 
 logger = get_logger("ui.llm_config_screen")
 
@@ -48,7 +46,7 @@ BACKEND_CHOICES = [
 ]
 
 
-class ConfigLLMScreen(ModalScreen[Optional[LLMConfigData]]):
+class ConfigLLMScreen(ModalScreen[LLMConfigData | None]):
     """
     Modal screen for configuring the LLM backend, model selection,
     and per-subagent model overrides.
@@ -142,17 +140,17 @@ class ConfigLLMScreen(ModalScreen[Optional[LLMConfigData]]):
     def __init__(
         self,
         config_path: str = DEFAULT_CONFIG_PATH,
-        subagent_names: Optional[List[str]] = None,
-        name: Optional[str] = None,
-        id: Optional[str] = None,
-        classes: Optional[str] = None,
+        subagent_names: list[str] | None = None,
+        name: str | None = None,
+        id: str | None = None,
+        classes: str | None = None,
     ):
         super().__init__(name=name, id=id, classes=classes)
         self._config_path = config_path
         self._config: LLMConfigData = load_llm_config(config_path)
-        self._fetched_models: List[str] = []
+        self._fetched_models: list[str] = []
         # Hardcoded fallback ensures subagents always show
-        self._subagent_names: List[str] = subagent_names or [
+        self._subagent_names: list[str] = subagent_names or [
             "code-reviewer",
             "test-writer",
             "doc-writer",
@@ -292,7 +290,9 @@ class ConfigLLMScreen(ModalScreen[Optional[LLMConfigData]]):
             # Suggest a default URL if the current URL is empty or a known default
             current = url_input.value.strip()
             known_defaults = {
-                "", "http://localhost:8000/v1", "http://localhost:11434",
+                "",
+                "http://localhost:8000/v1",
+                "http://localhost:11434",
             }
             if current in known_defaults:
                 if backend == "ollama":
@@ -374,9 +374,9 @@ class ConfigLLMScreen(ModalScreen[Optional[LLMConfigData]]):
             status.update(f"[red]Error: {e}[/red]")
 
     @staticmethod
-    def _list_models(backend: str, base_url: str, api_key: str) -> List[str]:
+    def _list_models(backend: str, base_url: str, api_key: str) -> list[str]:
         """
-        List models from the backend.
+        list models from the backend.
 
         Reuses existing backend classes for the actual API call.
 
@@ -385,7 +385,7 @@ class ConfigLLMScreen(ModalScreen[Optional[LLMConfigData]]):
             base_url: API endpoint URL
             api_key: Actual API key (not an env var name)
         """
-        from src.llm.base import LLMConfig, LLMBackendType
+        from src.llm.base import LLMBackendType, LLMConfig
 
         if backend == "ollama":
             from src.llm.ollama_backend import OllamaBackend
@@ -471,7 +471,7 @@ class ConfigLLMScreen(ModalScreen[Optional[LLMConfigData]]):
         config = LLMConfigData(
             backend_type=backend,
             base_url=base_url,
-            api_key=api_key,           # Runtime only -- not persisted to YAML
+            api_key=api_key,  # Runtime only -- not persisted to YAML
             api_key_env=self._config.api_key_env,  # Preserve existing env var fallback
             model=model,
             context_window=context_window,
@@ -485,6 +485,7 @@ class ConfigLLMScreen(ModalScreen[Optional[LLMConfigData]]):
         # Save API key to OS credential store (not config.yaml)
         if api_key:
             from src.llm.credential_store import save_api_key
+
             if not save_api_key(api_key):
                 logger.warning("Failed to save API key to credential store")
 

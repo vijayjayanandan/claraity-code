@@ -15,24 +15,26 @@ Architecture:
 - Configurable tool allowlist (config.tools) -- filters available tools
 """
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Any, Optional, Callable, TYPE_CHECKING
-from pathlib import Path
 import time
 import uuid
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Optional
 
-from src.observability import get_logger
+from src.core.cancel_token import CancelledException, CancelToken
 from src.core.events import ToolStatus
-from src.core.cancel_token import CancelToken, CancelledException
 from src.core.tool_metadata import build_tool_metadata
+from src.observability import get_logger
+
 from .sync_writer import SyncJSONLWriter
 
 if TYPE_CHECKING:
     from src.core.agent_interface import AgentInterface
-    from src.subagents.config import SubAgentConfig
     from src.memory.memory_manager import MemoryManager
     from src.session.store.memory_store import MessageStore
     from src.session.subagent_registry import SubAgentSessionInfo
+    from src.subagents.config import SubAgentConfig
 
 logger = get_logger(__name__)
 
@@ -54,12 +56,13 @@ class SubAgentResult:
         tool_calls: Tools that were called
         execution_time: Time taken in seconds
     """
+
     success: bool
     subagent_name: str
     output: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    error: Optional[str] = None
-    tool_calls: List[Dict[str, Any]] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
     execution_time: float = 0.0
 
     def __str__(self) -> str:
@@ -107,27 +110,33 @@ class SubAgent:
     """
 
     # Tools that require user approval in NORMAL permission mode
-    RISKY_TOOLS = frozenset({
-        'write_file', 'edit_file', 'append_to_file', 'run_command', 'git_commit',
-    })
+    RISKY_TOOLS = frozenset(
+        {
+            "write_file",
+            "edit_file",
+            "append_to_file",
+            "run_command",
+            "git_commit",
+        }
+    )
 
     # No safety cap — user decides how many times to continue.
     MAX_PAUSE_CONTINUES = None
 
     def __init__(
         self,
-        config: 'SubAgentConfig',
-        main_agent: Optional['AgentInterface'] = None,
-        transcript_dir: Optional[Path] = None,
+        config: "SubAgentConfig",
+        main_agent: Optional["AgentInterface"] = None,
+        transcript_dir: Path | None = None,
         *,
-        llm: Optional[Any] = None,
-        tool_executor: Optional[Any] = None,
-        working_directory: Optional[str] = None,
+        llm: Any | None = None,
+        tool_executor: Any | None = None,
+        working_directory: str | None = None,
         permission_mode: str = "normal",
-        approval_callback: Optional[Callable[[str, Dict[str, Any], str], tuple]] = None,
-        auto_approve_tools: Optional[set] = None,
-        pause_callback: Optional[Callable[[str, str, dict], tuple]] = None,
-        max_wall_time: Optional[float] = 300.0,
+        approval_callback: Callable[[str, dict[str, Any], str], tuple] | None = None,
+        auto_approve_tools: set | None = None,
+        pause_callback: Callable[[str, str, dict], tuple] | None = None,
+        max_wall_time: float | None = 300.0,
     ):
         """Initialize subagent with own persistence and configurable LLM/tools.
 
@@ -168,7 +177,7 @@ class SubAgent:
         if main_agent is not None:
             self._llm_source = main_agent.llm
             self._tool_executor = main_agent.tool_executor
-            self._working_directory = getattr(main_agent, 'working_directory', None)
+            self._working_directory = getattr(main_agent, "working_directory", None)
         else:
             if llm is None or tool_executor is None:
                 raise ValueError(
@@ -184,6 +193,7 @@ class SubAgent:
         # Own persistence stack (same architecture as main session)
         # Import here to avoid circular import
         from src.session.store.memory_store import MessageStore
+
         self._message_store = MessageStore()
 
         # Transcript path
@@ -191,16 +201,16 @@ class SubAgent:
         self._transcript_path = self._transcript_dir / f"{config.name}-{self.session_id}.jsonl"
 
         # Transcript writer (opened during execute())
-        self._transcript_writer: Optional[SyncJSONLWriter] = None
+        self._transcript_writer: SyncJSONLWriter | None = None
 
         # Store subscription unsubscribe function
-        self._store_unsubscribe: Optional[Callable[[], None]] = None
+        self._store_unsubscribe: Callable[[], None] | None = None
 
         # Cancellation support
         self._cancel_token = CancelToken()
 
         # Track execution history
-        self.execution_history: List[SubAgentResult] = []
+        self.execution_history: list[SubAgentResult] = []
 
         # Per-subagent LLM: create separate backend if llm overrides are set
         self._override_llm = None
@@ -209,7 +219,11 @@ class SubAgent:
 
         # Log initialization with actual LLM and tool info
         model_name = self.llm.config.model_name
-        model_source = "override" if self._override_llm else ("injected" if main_agent is None else "main agent")
+        model_source = (
+            "override"
+            if self._override_llm
+            else ("injected" if main_agent is None else "main agent")
+        )
         tool_info = (
             f"{len(self.config.tools)} configured"
             if self.config.tools
@@ -245,7 +259,7 @@ class SubAgent:
             LLMBackend instance with overrides applied, or None on failure.
         """
         try:
-            from src.llm import OpenAIBackend, OllamaBackend, LLMConfig
+            from src.llm import LLMConfig, OllamaBackend, OpenAIBackend
 
             llm_overrides = self.config.llm
             main_llm = self._llm_source
@@ -256,7 +270,7 @@ class SubAgent:
             model_name = llm_overrides.model or main_config.model_name
             base_url = llm_overrides.base_url or main_config.base_url
             context_window = llm_overrides.context_window or main_config.context_window
-            api_key = llm_overrides.api_key or getattr(main_llm, 'api_key', None)
+            api_key = llm_overrides.api_key or getattr(main_llm, "api_key", None)
 
             override_config = LLMConfig(
                 backend_type=backend_type,
@@ -272,7 +286,8 @@ class SubAgent:
             OPENAI_COMPATIBLE = {"openai", "vllm", "localai", "llamacpp"}
             if backend_type in OPENAI_COMPATIBLE:
                 override_llm = OpenAIBackend(
-                    config=override_config, api_key=api_key,
+                    config=override_config,
+                    api_key=api_key,
                 )
             elif backend_type == "ollama":
                 override_llm = OllamaBackend(config=override_config)
@@ -297,7 +312,7 @@ class SubAgent:
             )
             return None
 
-    def _needs_approval(self, tool_name: str, tool_args: Dict[str, Any]) -> bool:
+    def _needs_approval(self, tool_name: str, tool_args: dict[str, Any]) -> bool:
         """Check if a tool call requires user approval before execution.
 
         Mirrors the parent agent's needs_approval() logic:
@@ -313,6 +328,7 @@ class SubAgent:
             return False
 
         from src.core.plan_mode import is_agent_internal_write
+
         if is_agent_internal_write(tool_name, tool_args):
             return False
 
@@ -333,17 +349,15 @@ class SubAgent:
             SubAgentSessionInfo with subagent_id, store, and transcript_path
         """
         from src.session.subagent_registry import SubAgentSessionInfo
+
         return SubAgentSessionInfo(
             subagent_id=self.session_id,
             store=self._message_store,
-            transcript_path=self._transcript_path
+            transcript_path=self._transcript_path,
         )
 
     def execute(
-        self,
-        task_description: str,
-        context: Optional[Dict[str, Any]] = None,
-        max_iterations: int = 50
+        self, task_description: str, context: dict[str, Any] | None = None, max_iterations: int = 50
     ) -> SubAgentResult:
         """Execute a task with this subagent.
 
@@ -369,9 +383,7 @@ class SubAgent:
             self._transcript_writer.open()
 
             # Subscribe to store notifications for transcript persistence
-            self._store_unsubscribe = self._message_store.subscribe(
-                self._on_store_notification
-            )
+            self._store_unsubscribe = self._message_store.subscribe(self._on_store_notification)
             # Check cancellation before starting
             self._cancel_token.check_cancelled()
 
@@ -403,7 +415,7 @@ class SubAgent:
                     "transcript_path": str(self._transcript_path),
                 },
                 tool_calls=tool_calls,
-                execution_time=execution_time
+                execution_time=execution_time,
             )
 
             # Track in history
@@ -430,7 +442,7 @@ class SubAgent:
                     "transcript_path": str(self._transcript_path),
                 },
                 error="Cancelled by user",
-                execution_time=execution_time
+                execution_time=execution_time,
             )
             self.execution_history.append(result)
             return result
@@ -451,7 +463,7 @@ class SubAgent:
                     "transcript_path": str(self._transcript_path),
                 },
                 error=str(e),
-                execution_time=execution_time
+                execution_time=execution_time,
             )
 
             self.execution_history.append(result)
@@ -484,7 +496,7 @@ class SubAgent:
         if self._transcript_writer:
             self._transcript_writer.write_notification(notification)
 
-    def _resolve_tools(self, all_tools: List) -> List:
+    def _resolve_tools(self, all_tools: list) -> list:
         """Build the filtered tool list for this subagent.
 
         1. Exclude tools that subagents must never use (delegation, plan mode)
@@ -497,7 +509,9 @@ class SubAgent:
             Filtered list of ToolDefinition objects
         """
         SUBAGENT_EXCLUDED_TOOLS = {
-            "delegate_to_subagent", "enter_plan_mode", "request_plan_approval"
+            "delegate_to_subagent",
+            "enter_plan_mode",
+            "request_plan_approval",
         }
         tools = [t for t in all_tools if t.name not in SUBAGENT_EXCLUDED_TOOLS]
 
@@ -544,12 +558,11 @@ class SubAgent:
                         return content.strip()
             except (OSError, UnicodeDecodeError) as e:
                 logger.warning(
-                    f"SubAgent [{self.config.name}]: Failed to read "
-                    f"{instructions_path}: {e}"
+                    f"SubAgent [{self.config.name}]: Failed to read {instructions_path}: {e}"
                 )
         return ""
 
-    def _build_context(self, task_description: str) -> tuple[List[Dict[str, str]], str]:
+    def _build_context(self, task_description: str) -> tuple[list[dict[str, str]], str]:
         """Build fresh LLM context with specialized system prompt.
 
         Assembles the system message from three layers:
@@ -566,14 +579,14 @@ class SubAgent:
         Returns:
             Tuple of (messages for LLM, last message UUID for parent chaining)
         """
-        from src.session.models.message import Message
         from src.prompts.subagents import SUBAGENT_BASE_PROMPT
+        from src.session.models.message import Message
 
         # Layer 1: Universal base prompt + Layer 2: Role-specific prompt
         system_message = SUBAGENT_BASE_PROMPT + "\n\n" + self.config.system_prompt
 
         # Defensive check: warn if tool_executor has no workspace_root
-        if self._tool_executor and getattr(self._tool_executor, '_workspace_root', None) is None:
+        if self._tool_executor and getattr(self._tool_executor, "_workspace_root", None) is None:
             logger.warning(
                 f"SubAgent [{self.config.name}]: tool_executor._workspace_root is None - "
                 f"file operations may use incorrect paths"
@@ -583,8 +596,7 @@ class SubAgent:
         project_instructions = self._load_project_instructions()
         if project_instructions:
             system_message += (
-                "\n\n# Project Instructions (from CLARAITY.md)\n\n"
-                + project_instructions
+                "\n\n# Project Instructions (from CLARAITY.md)\n\n" + project_instructions
             )
 
         # Layer 4: Working directory context so LLM uses correct paths
@@ -612,18 +624,18 @@ class SubAgent:
         # Build fresh context (no conversation history - that's the point!)
         messages = [
             {"role": "system", "content": system_message},
-            {"role": "user", "content": task_description}
+            {"role": "user", "content": task_description},
         ]
 
         return messages, user_msg.uuid
 
     def _generate_summary(
         self,
-        current_context: List[Dict[str, str]],
-        subagent_tools: List,
+        current_context: list[dict[str, str]],
+        subagent_tools: list,
         parent_uuid: str,
-        all_tool_calls: List[Dict[str, Any]],
-    ) -> tuple[str, List[Dict[str, Any]]]:
+        all_tool_calls: list[dict[str, Any]],
+    ) -> tuple[str, list[dict[str, Any]]]:
         """Generate a forced summary when the subagent must stop.
 
         Appends a summary-request user message, calls the LLM with
@@ -640,10 +652,12 @@ class SubAgent:
         """
         from src.session.models.message import Message
 
-        current_context.append({
-            "role": "user",
-            "content": "You've reached the maximum number of tool iterations. Based on the information gathered, provide a clear, concise answer."
-        })
+        current_context.append(
+            {
+                "role": "user",
+                "content": "You've reached the maximum number of tool iterations. Based on the information gathered, provide a clear, concise answer.",
+            }
+        )
 
         summary_msg = Message.create_user(
             content="You've reached the maximum number of tool iterations. Based on the information gathered, provide a clear, concise answer.",
@@ -673,8 +687,8 @@ class SubAgent:
         self,
         reason: str,
         reason_code: str,
-        stats: Dict[str, Any],
-    ) -> tuple[bool, Optional[str]]:
+        stats: dict[str, Any],
+    ) -> tuple[bool, str | None]:
         """Handle a pause event when a limit is hit.
 
         Checks the safety cap, then delegates to the pause callback.
@@ -683,13 +697,16 @@ class SubAgent:
         Args:
             reason: Human-readable reason for the pause
             reason_code: Machine-readable code ("iteration_limit" or "wall_time_limit")
-            stats: Dict with iteration/time stats
+            stats: dict with iteration/time stats
 
         Returns:
             Tuple of (continue_work, feedback_or_None)
         """
         # Safety cap (if configured): force stop after N continues
-        if self.MAX_PAUSE_CONTINUES is not None and self._pause_continue_count >= self.MAX_PAUSE_CONTINUES:
+        if (
+            self.MAX_PAUSE_CONTINUES is not None
+            and self._pause_continue_count >= self.MAX_PAUSE_CONTINUES
+        ):
             logger.warning(
                 f"SubAgent [{self.config.name}]: Safety cap reached "
                 f"({self.MAX_PAUSE_CONTINUES} continues) - forcing summary"
@@ -698,9 +715,7 @@ class SubAgent:
 
         # No callback = auto-summarize (backwards compatible)
         if self._pause_callback is None:
-            logger.info(
-                f"SubAgent [{self.config.name}]: No pause callback - auto-summarizing"
-            )
+            logger.info(f"SubAgent [{self.config.name}]: No pause callback - auto-summarizing")
             return False, None
 
         try:
@@ -712,9 +727,7 @@ class SubAgent:
                     f"(count={self._pause_continue_count}/{self.MAX_PAUSE_CONTINUES})"
                 )
             else:
-                logger.info(
-                    f"SubAgent [{self.config.name}]: User chose Stop"
-                )
+                logger.info(f"SubAgent [{self.config.name}]: User chose Stop")
             return continue_work, feedback
         except Exception as e:
             logger.error(
@@ -724,10 +737,10 @@ class SubAgent:
 
     def _execute_with_tools(
         self,
-        context: List[Dict[str, str]],
+        context: list[dict[str, str]],
         max_iterations: int,
         last_parent_uuid: str = "",
-    ) -> tuple[str, List[Dict[str, Any]]]:
+    ) -> tuple[str, list[dict[str, Any]]]:
         """Execute with tool calling loop using native function calling.
 
         Uses a while-loop with iteration and wall-clock limit checks.
@@ -756,8 +769,7 @@ class SubAgent:
 
         # Build tool definitions from the tool executor's registered tools
         all_tool_defs = [
-            ToolDefinition(**t.get_schema())
-            for t in self._tool_executor.tools.values()
+            ToolDefinition(**t.get_schema()) for t in self._tool_executor.tools.values()
         ]
         # Filter using existing _resolve_tools logic
         subagent_tools = self._resolve_tools(all_tool_defs)
@@ -773,9 +785,7 @@ class SubAgent:
             # --- Limit checks at top of each iteration ---
             elapsed = time.time() - wall_start
             hit_iteration_limit = iteration >= max_iterations
-            hit_wall_time = (
-                self._max_wall_time is not None and elapsed >= self._max_wall_time
-            )
+            hit_wall_time = self._max_wall_time is not None and elapsed >= self._max_wall_time
 
             if hit_iteration_limit or hit_wall_time:
                 if hit_iteration_limit:
@@ -806,10 +816,12 @@ class SubAgent:
                     wall_start = time.time()
                     # Inject feedback into context if provided
                     if feedback:
-                        current_context.append({
-                            "role": "user",
-                            "content": f"User feedback: {feedback}\n\nContinue working on the task.",
-                        })
+                        current_context.append(
+                            {
+                                "role": "user",
+                                "content": f"User feedback: {feedback}\n\nContinue working on the task.",
+                            }
+                        )
                         fb_msg = Message.create_user(
                             content=f"User feedback: {feedback}\n\nContinue working on the task.",
                             session_id=self.session_id,
@@ -829,13 +841,13 @@ class SubAgent:
             # Check cancellation before each LLM call
             self._cancel_token.check_cancelled()
 
-            logger.debug(f"SubAgent [{self.config.name}]: Iteration {iteration + 1}/{max_iterations}")
+            logger.debug(
+                f"SubAgent [{self.config.name}]: Iteration {iteration + 1}/{max_iterations}"
+            )
 
             # Native function calling with this subagent's LLM
             llm_response = self.llm.generate_with_tools(
-                messages=current_context,
-                tools=subagent_tools,
-                tool_choice="auto"
+                messages=current_context, tools=subagent_tools, tool_choice="auto"
             )
 
             response_content = llm_response.content or ""
@@ -864,13 +876,10 @@ class SubAgent:
                     {
                         "id": tc.id,
                         "type": "function",
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments
-                        }
+                        "function": {"name": tc.function.name, "arguments": tc.function.arguments},
                     }
                     for tc in tool_calls
-                ]
+                ],
             }
             current_context.append(assistant_dict)
 
@@ -881,7 +890,7 @@ class SubAgent:
                 session_id=self.session_id,
                 parent_uuid=parent_uuid,
                 seq=self._message_store.next_seq(),
-                tool_calls=tool_calls  # Pass ToolCall objects directly
+                tool_calls=tool_calls,  # Pass ToolCall objects directly
             )
             self._message_store.add_message(assistant_msg)
             parent_uuid = assistant_msg.uuid
@@ -908,19 +917,26 @@ class SubAgent:
                 # subprocess (it calls input()). Route through same IPC callback.
                 if tool_name == "clarify" and self._approval_callback:
                     import json as _json
+
                     self._message_store.update_tool_state(
-                        tool_call_id=tool_call_id, status=ToolStatus.AWAITING_APPROVAL,
+                        tool_call_id=tool_call_id,
+                        status=ToolStatus.AWAITING_APPROVAL,
                         tool_name=tool_name,
                         extra_metadata=build_tool_metadata(tool_name, tool_args, args_summary),
                     )
                     _, clarify_result = self._approval_callback(tool_name, tool_args, tool_call_id)
                     result_dict = clarify_result if isinstance(clarify_result, dict) else {}
-                    tool_messages.append({
-                        "role": "tool", "tool_call_id": tool_call_id,
-                        "name": tool_name, "content": _json.dumps(result_dict),
-                    })
+                    tool_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "name": tool_name,
+                            "content": _json.dumps(result_dict),
+                        }
+                    )
                     self._message_store.update_tool_state(
-                        tool_call_id=tool_call_id, status=ToolStatus.SUCCESS,
+                        tool_call_id=tool_call_id,
+                        status=ToolStatus.SUCCESS,
                         tool_name=tool_name,
                     )
                     continue
@@ -931,7 +947,9 @@ class SubAgent:
                         tool_call_id=tool_call_id,
                         status=ToolStatus.AWAITING_APPROVAL,
                         tool_name=tool_name,
-                        extra_metadata=build_tool_metadata(tool_name, tool_args, args_summary, requires_approval=True),
+                        extra_metadata=build_tool_metadata(
+                            tool_name, tool_args, args_summary, requires_approval=True
+                        ),
                     )
 
                     if self._approval_callback:
@@ -953,18 +971,25 @@ class SubAgent:
                             status=ToolStatus.REJECTED,
                             tool_name=tool_name,
                         )
-                        tool_messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call_id,
-                            "name": tool_name,
-                            "content": rejection_msg,
-                        })
-                        all_tool_calls.append({
-                            "tool": tool_name, "arguments": tool_args,
-                            "args_summary": args_summary, "success": False,
-                            "result": None, "error": rejection_msg,
-                            "tool_call_id": tool_call_id,
-                        })
+                        tool_messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tool_call_id,
+                                "name": tool_name,
+                                "content": rejection_msg,
+                            }
+                        )
+                        all_tool_calls.append(
+                            {
+                                "tool": tool_name,
+                                "arguments": tool_args,
+                                "args_summary": args_summary,
+                                "success": False,
+                                "result": None,
+                                "error": rejection_msg,
+                                "tool_call_id": tool_call_id,
+                            }
+                        )
                         if feedback:
                             # Feedback: LLM sees the guidance and can retry
                             continue
@@ -996,70 +1021,105 @@ class SubAgent:
                             f"Config allowlist: {self.config.tools}"
                         )
                         raise PermissionError(
-                            f"Tool '{tool_name}' is not allowed for "
-                            f"subagent '{self.config.name}'"
+                            f"Tool '{tool_name}' is not allowed for subagent '{self.config.name}'"
                         )
 
-                    result = self._tool_executor.execute_tool(
-                        tool_name, **tool_args
-                    )
+                    # Force background=False for subagent tool calls.
+                    # Background mode relies on a shared BackgroundTaskRegistry
+                    # whose drain_completed() is global — completions would be
+                    # stolen by whichever caller (main agent or another subagent)
+                    # drains first.  Subagents don't benefit from background mode
+                    # anyway: they loop on tool calls with no user interaction,
+                    # so foreground execution (waiting for the result) is correct.
+                    if tool_name == "run_command" and tool_args.get("background"):
+                        tool_args["background"] = False
+                        logger.debug(
+                            f"SubAgent [{self.config.name}]: Forced background=False "
+                            f"for run_command (subagents use foreground execution)"
+                        )
+
+                    result = self._tool_executor.execute_tool(tool_name, **tool_args)
 
                     if result.is_success():
                         output = str(result.output)
-                        tool_messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call_id,
-                            "name": tool_name,
-                            "content": output,
-                        })
-                        all_tool_calls.append({
-                            "tool": tool_name, "arguments": tool_args,
-                            "args_summary": args_summary, "success": True,
-                            "result": result.output, "error": None,
-                            "tool_call_id": tool_call_id,
-                        })
+                        tool_messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tool_call_id,
+                                "name": tool_name,
+                                "content": output,
+                            }
+                        )
+                        all_tool_calls.append(
+                            {
+                                "tool": tool_name,
+                                "arguments": tool_args,
+                                "args_summary": args_summary,
+                                "success": True,
+                                "result": result.output,
+                                "error": None,
+                                "tool_call_id": tool_call_id,
+                            }
+                        )
                         self._message_store.update_tool_state(
                             tool_call_id=tool_call_id,
                             status=ToolStatus.SUCCESS,
-                            result=output, tool_name=tool_name,
+                            result=output,
+                            tool_name=tool_name,
                         )
                     else:
                         error_content = f"Error: {result.error}"
-                        tool_messages.append({
+                        tool_messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tool_call_id,
+                                "name": tool_name,
+                                "content": error_content,
+                            }
+                        )
+                        all_tool_calls.append(
+                            {
+                                "tool": tool_name,
+                                "arguments": tool_args,
+                                "args_summary": args_summary,
+                                "success": False,
+                                "result": None,
+                                "error": result.error,
+                                "tool_call_id": tool_call_id,
+                            }
+                        )
+                        self._message_store.update_tool_state(
+                            tool_call_id=tool_call_id,
+                            status=ToolStatus.ERROR,
+                            error=result.error,
+                            tool_name=tool_name,
+                        )
+                except Exception as e:
+                    error_content = f"Exception: {str(e)}"
+                    tool_messages.append(
+                        {
                             "role": "tool",
                             "tool_call_id": tool_call_id,
                             "name": tool_name,
                             "content": error_content,
-                        })
-                        all_tool_calls.append({
-                            "tool": tool_name, "arguments": tool_args,
-                            "args_summary": args_summary, "success": False,
-                            "result": None, "error": result.error,
+                        }
+                    )
+                    all_tool_calls.append(
+                        {
+                            "tool": tool_name,
+                            "arguments": tool_args,
+                            "args_summary": args_summary,
+                            "success": False,
+                            "result": None,
+                            "error": str(e),
                             "tool_call_id": tool_call_id,
-                        })
-                        self._message_store.update_tool_state(
-                            tool_call_id=tool_call_id,
-                            status=ToolStatus.ERROR,
-                            error=result.error, tool_name=tool_name,
-                        )
-                except Exception as e:
-                    error_content = f"Exception: {str(e)}"
-                    tool_messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call_id,
-                        "name": tool_name,
-                        "content": error_content,
-                    })
-                    all_tool_calls.append({
-                        "tool": tool_name, "arguments": tool_args,
-                        "args_summary": args_summary, "success": False,
-                        "result": None, "error": str(e),
-                        "tool_call_id": tool_call_id,
-                    })
+                        }
+                    )
                     self._message_store.update_tool_state(
                         tool_call_id=tool_call_id,
                         status=ToolStatus.ERROR,
-                        error=str(e), tool_name=tool_name,
+                        error=str(e),
+                        tool_name=tool_name,
                     )
 
             # Add tool messages to context (role: "tool")
@@ -1080,7 +1140,7 @@ class SubAgent:
             # Increment iteration counter
             iteration += 1
 
-    def get_statistics(self) -> Dict[str, Any]:
+    def get_statistics(self) -> dict[str, Any]:
         """Get subagent statistics.
 
         Returns:

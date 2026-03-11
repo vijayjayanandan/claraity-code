@@ -12,17 +12,18 @@ Features:
 - Collapsible command preview for run_command
 """
 
-from textual.app import ComposeResult
-from textual.widgets import Static
-from textual.containers import Vertical, VerticalScroll
-from textual.reactive import reactive
-from textual.binding import Binding
-from rich.text import Text
-from rich.console import RenderableType
-from rich.syntax import Syntax
-from typing import Any
 import difflib
 import os
+from typing import Any
+
+from rich.console import RenderableType
+from rich.syntax import Syntax
+from rich.text import Text
+from textual.app import ComposeResult
+from textual.binding import Binding
+from textual.containers import Vertical, VerticalScroll
+from textual.reactive import reactive
+from textual.widgets import Static
 
 from ..events import ToolStatus
 from ..messages import ApprovalResponseMessage
@@ -91,25 +92,28 @@ class CommandPreviewBlock(Static):
         t.append("$ ", style="bold #73c991")
 
         if self._collapsed:
-            preview = self.command.replace('\n', ' ')[:self.PREVIEW_LENGTH]
+            preview = self.command.replace("\n", " ")[: self.PREVIEW_LENGTH]
             if len(self.command) > self.PREVIEW_LENGTH:
                 preview += "..."
             t.append(preview, style="#d4d4d4")
             # Show output summary when collapsed
             if self._output:
-                line_count = self._output.count('\n') + 1
+                line_count = self._output.count("\n") + 1
                 t.append(f"  ({line_count} lines)", style="#6e7681")
         else:
             t.append(self.command, style="#d4d4d4")
             # Show full output when expanded
             if self._output:
                 t.append("\n", style="")
-                lines = self._output.split('\n')
+                lines = self._output.split("\n")
                 truncated = len(lines) > self.MAX_OUTPUT_LINES
-                for line in lines[:self.MAX_OUTPUT_LINES]:
+                for line in lines[: self.MAX_OUTPUT_LINES]:
                     t.append(f"  {line}\n", style="#a0a0a0")
                 if truncated:
-                    t.append(f"  ... ({len(lines) - self.MAX_OUTPUT_LINES} more lines)\n", style="#6e7681")
+                    t.append(
+                        f"  ... ({len(lines) - self.MAX_OUTPUT_LINES} more lines)\n",
+                        style="#6e7681",
+                    )
         return t
 
     def on_click(self) -> None:
@@ -163,14 +167,14 @@ class ToolCard(Static):
     # Status display configuration: color for the dot indicator
     # Subtle colored dot instead of badge - status is conveyed by color alone
     STATUS_COLORS = {
-        ToolStatus.PENDING:           "#888888",
+        ToolStatus.PENDING: "#888888",
         ToolStatus.AWAITING_APPROVAL: "#cca700",
-        ToolStatus.APPROVED:          "#3794ff",
-        ToolStatus.REJECTED:          "#3a3a3a",
-        ToolStatus.RUNNING:           "#cca700",
-        ToolStatus.SUCCESS:           "#73c991",
-        ToolStatus.FAILED:            "#f14c4c",
-        ToolStatus.CANCELLED:         "#666666",
+        ToolStatus.APPROVED: "#3794ff",
+        ToolStatus.REJECTED: "#3a3a3a",
+        ToolStatus.RUNNING: "#cca700",
+        ToolStatus.SUCCESS: "#73c991",
+        ToolStatus.FAILED: "#f14c4c",
+        ToolStatus.CANCELLED: "#666666",
     }
 
     DEFAULT_CSS = """
@@ -187,7 +191,8 @@ class ToolCard(Static):
         tool_name: str,
         args: dict[str, Any],
         requires_approval: bool = False,
-        **kwargs
+        suppress_approval_ui: bool = False,
+        **kwargs,
     ):
         """
         Initialize ToolCard.
@@ -197,6 +202,8 @@ class ToolCard(Static):
             tool_name: Tool function name
             args: Tool arguments dictionary
             requires_approval: Whether user must approve
+            suppress_approval_ui: If True, don't mount ToolApprovalOptions/ClarifyWidget
+                on AWAITING_APPROVAL (used for subagent cards where approval is promoted)
             **kwargs: Additional arguments for Static
         """
         # Initialize instance attributes BEFORE super().__init__
@@ -205,6 +212,7 @@ class ToolCard(Static):
         self._defer_diff_mount: bool = False  # Set True during bulk load for performance
         self._diff_mounted: bool = False  # Track if diff already mounted
         self._header_widget: Static | None = None  # Mounted header for tools with children
+        self._suppress_approval_ui = suppress_approval_ui
 
         super().__init__(**kwargs)
         self.call_id = call_id
@@ -234,6 +242,7 @@ class ToolCard(Static):
         independent of the initial requires_approval value at card creation.
         """
         from src.observability import get_logger
+
         logger = get_logger("tool_card")
 
         self._update_classes()
@@ -251,10 +260,12 @@ class ToolCard(Static):
 
         if new_status == ToolStatus.AWAITING_APPROVAL:
             # Show interaction widget - clarify or approval depending on tool
-            if not self._approval_widget and self.is_attached:
+            # (skip for subagent cards where approval is promoted to conversation level)
+            if not self._suppress_approval_ui and not self._approval_widget and self.is_attached:
                 if self.tool_name == "clarify":
                     logger.info(f"[WATCH_STATUS] {self.call_id}: Creating clarify widget")
                     from .clarify_widget import ClarifyWidget
+
                     questions = self.args.get("questions", [])
                     context = self.args.get("context")
                     self._approval_widget = ClarifyWidget(
@@ -265,15 +276,15 @@ class ToolCard(Static):
                 else:
                     logger.info(f"[WATCH_STATUS] {self.call_id}: Creating approval widget")
                     self._approval_widget = ToolApprovalOptions(
-                        call_id=self.call_id,
-                        tool_name=self.tool_name,
-                        args=self.args
+                        call_id=self.call_id, tool_name=self.tool_name, args=self.args
                     )
                 # Diff already mounted above; mount approval widget after it
                 self.mount(self._approval_widget)
                 self.call_after_refresh(self._focus_approval)
             elif not self.is_attached:
-                logger.warning(f"[WATCH_STATUS] {self.call_id}: NOT ATTACHED - cannot create approval widget!")
+                logger.warning(
+                    f"[WATCH_STATUS] {self.call_id}: NOT ATTACHED - cannot create approval widget!"
+                )
             elif self._approval_widget:
                 logger.info(f"[WATCH_STATUS] {self.call_id}: Approval widget already exists")
         else:
@@ -314,10 +325,12 @@ class ToolCard(Static):
         # (watch_status may have been called before mount when is_attached=False)
         if self.status == ToolStatus.AWAITING_APPROVAL and not self._approval_widget:
             from src.observability import get_logger
+
             logger = get_logger("tool_card")
             logger.info(f"[ON_MOUNT] {self.call_id}: Creating widget (status was set before mount)")
             if self.tool_name == "clarify":
                 from .clarify_widget import ClarifyWidget
+
                 self._approval_widget = ClarifyWidget(
                     call_id=self.call_id,
                     questions=self.args.get("questions", []),
@@ -325,9 +338,7 @@ class ToolCard(Static):
                 )
             else:
                 self._approval_widget = ToolApprovalOptions(
-                    call_id=self.call_id,
-                    tool_name=self.tool_name,
-                    args=self.args
+                    call_id=self.call_id, tool_name=self.tool_name, args=self.args
                 )
             # Approval should appear AFTER diff - defer if diff mount was deferred
             if self._defer_diff_mount and not self._diff_mounted:
@@ -381,15 +392,15 @@ class ToolCard(Static):
         if self._diff_mounted or not self.is_attached:
             return
 
-        if self.tool_name == 'write_file':
-            content = self.args.get('content', '')
+        if self.tool_name == "write_file":
+            content = self.args.get("content", "")
             if content:
                 self._mount_header()
                 diff_widget = DiffWidget(
-                    file_path=self.args.get('file_path', ''),
+                    file_path=self.args.get("file_path", ""),
                     new_content=content,
                     old_content=None,
-                    max_lines=500  # Large value - scrolling handles overflow
+                    max_lines=500,  # Large value - scrolling handles overflow
                 )
                 scroll_container = ScrollableDiffContainer()
                 self.mount(scroll_container)
@@ -399,17 +410,17 @@ class ToolCard(Static):
                 # Empty file creation — show minimal info so approval dialog
                 # has context about what's being approved
                 self._mount_header()
-                file_name = os.path.basename(self.args.get('file_path', ''))
+                file_name = os.path.basename(self.args.get("file_path", ""))
                 label = Static(f"  [dim]{file_name} (empty file)[/dim]")
                 self.mount(label)
                 self._diff_mounted = True
 
-        elif self.tool_name == 'edit_file':
-            old_text = self.args.get('old_text', '')
-            new_text = self.args.get('new_text', '')
+        elif self.tool_name == "edit_file":
+            old_text = self.args.get("old_text", "")
+            new_text = self.args.get("new_text", "")
             if old_text or new_text:
                 self._mount_header()
-                file_path = self.args.get('file_path', '')
+                file_path = self.args.get("file_path", "")
                 start_line = self._find_line_offset(file_path, old_text)
                 diff_widget = DiffWidget(
                     file_path=file_path,
@@ -423,8 +434,8 @@ class ToolCard(Static):
                 scroll_container.mount(diff_widget)
                 self._diff_mounted = True
 
-        elif self.tool_name == 'run_command':
-            command = self.args.get('command', '')
+        elif self.tool_name == "run_command":
+            command = self.args.get("command", "")
             if command:
                 self._mount_header()
                 scroll_container = ScrollableDiffContainer()
@@ -451,12 +462,12 @@ class ToolCard(Static):
         if not file_path or not old_text:
             return 1
         try:
-            with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+            with open(file_path, encoding="utf-8", errors="replace") as f:
                 content = f.read()
             pos = content.find(old_text)
             if pos == -1:
                 return 1
-            return content[:pos].count('\n') + 1
+            return content[:pos].count("\n") + 1
         except Exception:
             return 1
 
@@ -468,7 +479,7 @@ class ToolCard(Static):
 
     def _focus_approval(self) -> None:
         """Focus the approval widget after it's rendered."""
-        if self._approval_widget and hasattr(self._approval_widget, 'focus'):
+        if self._approval_widget and hasattr(self._approval_widget, "focus"):
             self._approval_widget.focus()
             self._approval_widget.scroll_visible()
 
@@ -484,15 +495,15 @@ class ToolCard(Static):
 
     def _get_content_preview(self) -> Text | None:
         """Get content preview for write_file tool."""
-        if self.tool_name != 'write_file':
+        if self.tool_name != "write_file":
             return None
 
-        content = self.args.get('content', '')
+        content = self.args.get("content", "")
         if not content:
             return None
 
         # Limit preview to 15 lines for compact display
-        lines = content.split('\n')
+        lines = content.split("\n")
         max_lines = 15
         if len(lines) > max_lines:
             preview_lines = lines[:max_lines]
@@ -516,24 +527,27 @@ class ToolCard(Static):
 
     def _get_diff_preview(self) -> Text | None:
         """Get diff preview for edit_file tool."""
-        if self.tool_name != 'edit_file':
+        if self.tool_name != "edit_file":
             return None
 
-        old_text = self.args.get('old_text', '')
-        new_text = self.args.get('new_text', '')
+        old_text = self.args.get("old_text", "")
+        new_text = self.args.get("new_text", "")
 
         if not old_text and not new_text:
             return None
 
         # Generate unified diff
-        old_lines = old_text.split('\n')
-        new_lines = new_text.split('\n')
+        old_lines = old_text.split("\n")
+        new_lines = new_text.split("\n")
 
-        diff = list(difflib.unified_diff(
-            old_lines, new_lines,
-            lineterm='',
-            n=1  # Minimal context for compact display
-        ))
+        diff = list(
+            difflib.unified_diff(
+                old_lines,
+                new_lines,
+                lineterm="",
+                n=1,  # Minimal context for compact display
+            )
+        )
 
         if not diff:
             # If no diff generated but texts differ, show simple before/after
@@ -553,13 +567,13 @@ class ToolCard(Static):
 
         # Skip the first 2 lines (--- and +++ headers)
         for line in diff[2:]:
-            if line.startswith('@@'):
+            if line.startswith("@@"):
                 # Hunk header - skip for cleaner display
                 continue
-            elif line.startswith('-'):
+            elif line.startswith("-"):
                 # Deleted line - red
                 result.append(f"    {line}\n", style="red")
-            elif line.startswith('+'):
+            elif line.startswith("+"):
                 # Added line - green
                 result.append(f"    {line}\n", style="green")
             else:
@@ -625,16 +639,28 @@ class ToolCard(Static):
             return ""
 
         # run_command: full command shown on dedicated line in render(), skip inline
-        if self.tool_name == 'run_command':
+        if self.tool_name == "run_command":
             return ""
 
         # delegate_to_subagent: show subagent type prominently
-        if self.tool_name == 'delegate_to_subagent' and 'subagent' in self.args:
-            return self.args['subagent']
+        if self.tool_name == "delegate_to_subagent" and "subagent" in self.args:
+            return self.args["subagent"]
 
         # Common main argument names by priority
-        main_keys = ['subagent', 'file_path', 'path', 'filename', 'command', 'query', 'pattern',
-                     'url', 'name', 'content', 'message', 'text']
+        main_keys = [
+            "subagent",
+            "file_path",
+            "path",
+            "filename",
+            "command",
+            "query",
+            "pattern",
+            "url",
+            "name",
+            "content",
+            "message",
+            "text",
+        ]
 
         for key in main_keys:
             if key in self.args:
@@ -647,7 +673,7 @@ class ToolCard(Static):
                 return str(value)[:50]
 
         # Fallback: use first string argument
-        for key, value in self.args.items():
+        for _key, value in self.args.items():
             if isinstance(value, str) and value:
                 if len(value) > 50:
                     return value[:47] + "..."
@@ -663,9 +689,21 @@ class ToolCard(Static):
         # Keys to exclude from secondary args display
         # - main_keys: shown as the main argument in parentheses
         # - preview_keys: shown in content/diff preview section
-        main_keys = ['subagent', 'file_path', 'path', 'filename', 'command', 'query', 'pattern',
-                     'url', 'name', 'content', 'message', 'text']
-        preview_keys = ['old_text', 'new_text']  # Shown in diff preview
+        main_keys = [
+            "subagent",
+            "file_path",
+            "path",
+            "filename",
+            "command",
+            "query",
+            "pattern",
+            "url",
+            "name",
+            "content",
+            "message",
+            "text",
+        ]
+        preview_keys = ["old_text", "new_text"]  # Shown in diff preview
 
         parts = []
         for key, value in self.args.items():
@@ -679,7 +717,7 @@ class ToolCard(Static):
                 parts.append(f'{key}="{value}"')
             elif isinstance(value, bool):
                 parts.append(f"{key}={str(value).lower()}")
-            elif isinstance(value, (int, float)):
+            elif isinstance(value, int | float):
                 parts.append(f"{key}={value}")
             elif isinstance(value, list):
                 parts.append(f"{key}=[{len(value)}]")
@@ -706,7 +744,7 @@ class ToolCard(Static):
                 parts.append(f'{key}="{value}"')
             elif isinstance(value, bool):
                 parts.append(f"{key}={str(value).lower()}")
-            elif isinstance(value, (int, float)):
+            elif isinstance(value, int | float):
                 parts.append(f"{key}={value}")
             elif isinstance(value, list):
                 parts.append(f"{key}=[{len(value)} items]")
@@ -737,7 +775,7 @@ class ToolCard(Static):
             self.duration_ms = duration_ms
 
         # For run_command, pass output to the CommandPreviewBlock
-        if self.tool_name == 'run_command' and isinstance(result, str) and result:
+        if self.tool_name == "run_command" and isinstance(result, str) and result:
             for child in self.query(CommandPreviewBlock):
                 child.set_output(result)
                 break
@@ -756,27 +794,27 @@ class ToolCard(Static):
 
         # For run_command, extract command output and show in the preview block.
         # The error content format is: "Command output:\n<output>\n\n<tool_failure>..."
-        if self.tool_name == 'run_command' and error:
+        if self.tool_name == "run_command" and error:
             output_text = error
             # Strip the <tool_failure> metadata block (designed for LLM, not user)
-            if '<tool_failure>' in error:
-                output_text = error.split('<tool_failure>')[0].strip()
+            if "<tool_failure>" in error:
+                output_text = error.split("<tool_failure>")[0].strip()
             # Strip the "Command output:" prefix
-            if output_text.startswith('Command output:\n'):
-                output_text = output_text[len('Command output:\n'):]
+            if output_text.startswith("Command output:\n"):
+                output_text = output_text[len("Command output:\n") :]
             if output_text:
                 for child in self.query(CommandPreviewBlock):
                     child.set_output(output_text)
                     break
 
         # Extract "error: ..." line from structured <tool_failure> blocks
-        if error and '<tool_failure>' in error:
-            for line in error.split('\n'):
+        if error and "<tool_failure>" in error:
+            for line in error.split("\n"):
                 stripped = line.strip()
-                if stripped.startswith('error:'):
+                if stripped.startswith("error:"):
                     self.error_message = stripped[6:].strip()[:100]
                     return
-        self.error_message = error.split('\n')[0].strip()[:100] if error else "(unknown error)"
+        self.error_message = error.split("\n")[0].strip()[:100] if error else "(unknown error)"
 
     def _format_result(self, result: Any) -> str:
         """Format result for preview."""
@@ -784,7 +822,7 @@ class ToolCard(Static):
             return "(no output)"
 
         if isinstance(result, str):
-            lines = result.count('\n') + 1
+            lines = result.count("\n") + 1
             if lines > 1:
                 return f"({lines} lines)"
             elif len(result) > 60:
@@ -801,7 +839,7 @@ class ToolCard(Static):
         elif isinstance(result, bool):
             return str(result).lower()
 
-        elif isinstance(result, (int, float)):
+        elif isinstance(result, int | float):
             return str(result)
 
         else:
@@ -978,7 +1016,7 @@ class ToolApprovalOptions(Static, can_focus=True):
         if self.selected_index == 1:
             lines.append(Text("  ", style=""))
             lines.append(Text(" 2 ", style="bold #1e1e1e on #3794ff"))
-            lines.append(Text(f" Yes, allow all ", style="bold #3794ff"))
+            lines.append(Text(" Yes, allow all ", style="bold #3794ff"))
             lines.append(Text(tool_display, style="bold #9cdcfe"))
             lines.append(Text(" this session\n", style="bold #3794ff"))
         else:
@@ -1000,7 +1038,9 @@ class ToolApprovalOptions(Static, can_focus=True):
                 lines.append(Text("\n"))
             else:
                 lines.append(Text("   3  ", style="#6e7681"))
-                lines.append(Text(self.feedback_text or self.FEEDBACK_PLACEHOLDER, style="italic #6e7681"))
+                lines.append(
+                    Text(self.feedback_text or self.FEEDBACK_PLACEHOLDER, style="italic #6e7681")
+                )
                 lines.append(Text("\n"))
         else:
             lines.append(Text("   3  ", style="#6e7681"))
@@ -1036,11 +1076,7 @@ class ToolApprovalOptions(Static, can_focus=True):
         if self.selected_index == 2:
             # Feedback mode - reject with feedback text
             feedback = self.feedback_text.strip() if self.feedback_text else None
-            self.post_message(ApprovalResponseMessage(
-                self.call_id,
-                "no",
-                feedback=feedback
-            ))
+            self.post_message(ApprovalResponseMessage(self.call_id, "no", feedback=feedback))
         else:
             # Regular option
             action, _ = self.OPTIONS[self.selected_index]

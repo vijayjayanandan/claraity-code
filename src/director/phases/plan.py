@@ -25,7 +25,7 @@ class PlanPhaseHandler(PhaseHandler):
     def phase(self) -> DirectorPhase:
         return DirectorPhase.PLAN
 
-    def validate_input(self, input_data: Any) -> Optional[str]:
+    def validate_input(self, input_data: Any) -> str | None:
         """Must have a ContextDocument with a task description."""
         if not isinstance(input_data, ContextDocument):
             return "PLAN phase requires a ContextDocument from UNDERSTAND phase"
@@ -43,16 +43,18 @@ class PlanPhaseHandler(PhaseHandler):
 
         slices = []
         for i, s in enumerate(raw_output.get("slices", []), start=1):
-            slices.append(VerticalSlice(
-                id=s.get("id", i),
-                title=s["title"],
-                description=s.get("description", ""),
-                files_to_create=s.get("files_to_create", []),
-                files_to_modify=s.get("files_to_modify", []),
-                test_criteria=s.get("test_criteria", []),
-                depends_on=s.get("depends_on", []),
-                status=SliceStatus.PENDING,
-            ))
+            slices.append(
+                VerticalSlice(
+                    id=s.get("id", i),
+                    title=s["title"],
+                    description=s.get("description", ""),
+                    files_to_create=s.get("files_to_create", []),
+                    files_to_modify=s.get("files_to_modify", []),
+                    test_criteria=s.get("test_criteria", []),
+                    depends_on=s.get("depends_on", []),
+                    status=SliceStatus.PENDING,
+                )
+            )
 
         return DirectorPlan(
             slices=slices,

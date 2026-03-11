@@ -7,13 +7,13 @@ Provides multi-tier context loading combining:
 - ClarAIty for architectural context
 """
 
-from src.code_intelligence.cache import LSPCache, CacheEntry
+from src.code_intelligence.cache import CacheEntry, LSPCache
 from src.code_intelligence.lsp_client_manager import (
     LSPClientManager,
     LSPError,
+    LSPQueryError,
     LSPServerNotFoundError,
     LSPServerStartupError,
-    LSPQueryError,
     LSPTimeoutError,
 )
 

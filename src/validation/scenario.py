@@ -6,24 +6,26 @@ and success criteria.
 """
 
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Any
-from enum import Enum
 from datetime import datetime
+from enum import Enum
+from typing import Any, Optional
 
 
 class DifficultyLevel(Enum):
     """Test difficulty levels"""
-    EASY = "easy"           # 1-2 hours, single component
-    MEDIUM = "medium"       # 3-4 hours, multiple components
-    HARD = "hard"           # 5-8 hours, full application
+
+    EASY = "easy"  # 1-2 hours, single component
+    MEDIUM = "medium"  # 3-4 hours, multiple components
+    HARD = "hard"  # 5-8 hours, full application
 
 
 class StepType(Enum):
     """Types of validation steps"""
-    BASH = "bash"           # Run shell command
-    PYTEST = "pytest"       # Run pytest tests
-    INSPECT = "inspect"     # Inspect file contents
-    API_CALL = "api_call"   # Test API endpoint
+
+    BASH = "bash"  # Run shell command
+    PYTEST = "pytest"  # Run pytest tests
+    INSPECT = "inspect"  # Inspect file contents
+    API_CALL = "api_call"  # Test API endpoint
 
 
 @dataclass
@@ -34,17 +36,17 @@ class ValidationStep:
     description: str
 
     # For BASH/PYTEST steps
-    command: Optional[str] = None
+    command: str | None = None
     expected_exit_code: int = 0
     timeout_seconds: int = 60
 
     # For INSPECT steps
-    file_path: Optional[str] = None
-    check_criteria: Optional[str] = None  # e.g., "has_error_handling", "has_docstrings"
+    file_path: str | None = None
+    check_criteria: str | None = None  # e.g., "has_error_handling", "has_docstrings"
 
     # For API_CALL steps
-    endpoint: Optional[str] = None
-    method: Optional[str] = "GET"
+    endpoint: str | None = None
+    method: str | None = "GET"
     expected_status: int = 200
 
 
@@ -53,7 +55,7 @@ class SuccessCriteria:
     """Automated success criteria for validation"""
 
     # File existence checks
-    required_files: List[str] = field(default_factory=list)
+    required_files: list[str] = field(default_factory=list)
 
     # Test requirements
     tests_must_pass: bool = False
@@ -63,7 +65,7 @@ class SuccessCriteria:
     must_run_without_error: bool = False
 
     # Dependency requirements
-    required_dependencies: List[str] = field(default_factory=list)
+    required_dependencies: list[str] = field(default_factory=list)
 
     # Documentation requirements
     must_have_readme: bool = False
@@ -86,26 +88,28 @@ class ValidationScenario:
     estimated_hours: float
 
     # Task definition
-    prompt: str                          # What to ask the agent
-    context_files: List[str] = field(default_factory=list)  # Starting files
-    initial_setup: Optional[str] = None  # Setup commands (e.g., "mkdir project")
+    prompt: str  # What to ask the agent
+    context_files: list[str] = field(default_factory=list)  # Starting files
+    initial_setup: str | None = None  # Setup commands (e.g., "mkdir project")
 
     # Success criteria
     success_criteria: SuccessCriteria = field(default_factory=SuccessCriteria)
 
     # Validation steps
-    validation_steps: List[ValidationStep] = field(default_factory=list)
+    validation_steps: list[ValidationStep] = field(default_factory=list)
 
     # Scoring weights (must sum to 1.0)
-    scoring_weights: Dict[str, float] = field(default_factory=lambda: {
-        "completeness": 0.30,    # Did it finish all requirements?
-        "correctness": 0.30,     # Does the code work?
-        "quality": 0.25,         # Code quality (structure, docs, tests)
-        "autonomy": 0.15         # How much human intervention needed?
-    })
+    scoring_weights: dict[str, float] = field(
+        default_factory=lambda: {
+            "completeness": 0.30,  # Did it finish all requirements?
+            "correctness": 0.30,  # Does the code work?
+            "quality": 0.25,  # Code quality (structure, docs, tests)
+            "autonomy": 0.15,  # How much human intervention needed?
+        }
+    )
 
     # Metadata
-    tags: List[str] = field(default_factory=list)  # e.g., ["cli", "api", "database"]
+    tags: list[str] = field(default_factory=list)  # e.g., ["cli", "api", "database"]
     created_at: datetime = field(default_factory=datetime.now)
 
     def __post_init__(self):
@@ -137,7 +141,7 @@ class ValidationResult:
     overall_score: float  # 0.0 - 1.0
 
     # Detailed scores (0.0 - 1.0)
-    scores: Dict[str, float] = field(default_factory=dict)
+    scores: dict[str, float] = field(default_factory=dict)
     # {
     #   "completeness": 0.85,
     #   "correctness": 0.90,
@@ -148,19 +152,19 @@ class ValidationResult:
     # Execution metrics
     duration_seconds: float = 0.0
     start_time: datetime = field(default_factory=datetime.now)
-    end_time: Optional[datetime] = None
+    end_time: datetime | None = None
 
     # Cost tracking
     tokens_used: int = 0
     estimated_cost_usd: float = 0.0
 
     # Agent behavior
-    tool_calls: Dict[str, int] = field(default_factory=dict)  # {tool_name: count}
-    errors_encountered: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
+    tool_calls: dict[str, int] = field(default_factory=dict)  # {tool_name: count}
+    errors_encountered: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
     # Code output
-    files_created: List[str] = field(default_factory=list)
+    files_created: list[str] = field(default_factory=list)
     lines_of_code: int = 0
 
     # Test results
@@ -169,13 +173,13 @@ class ValidationResult:
     test_output: str = ""
 
     # Validation checks
-    check_results: Dict[str, Any] = field(default_factory=dict)
+    check_results: dict[str, Any] = field(default_factory=dict)
 
     # Judge evaluation (from Claude API)
-    judge_scores: Dict[str, float] = field(default_factory=dict)
+    judge_scores: dict[str, float] = field(default_factory=dict)
     judge_feedback: str = ""
-    strengths: List[str] = field(default_factory=list)
-    weaknesses: List[str] = field(default_factory=list)
+    strengths: list[str] = field(default_factory=list)
+    weaknesses: list[str] = field(default_factory=list)
 
     # Autonomy metrics
     autonomous_percentage: float = 0.0  # % of time without human input
@@ -188,10 +192,10 @@ class ValidationResult:
     judge_report_path: str = ""
 
     # Failure analysis (if failed)
-    failure_reason: Optional[str] = None
-    failure_stage: Optional[str] = None  # "setup", "execution", "validation", "judging"
+    failure_reason: str | None = None
+    failure_stage: str | None = None  # "setup", "execution", "validation", "judging"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization"""
         return {
             "scenario_id": self.scenario_id,
@@ -240,7 +244,7 @@ class ValidationReport:
     scenarios_passed: int
     scenarios_failed: int
 
-    results: List[ValidationResult] = field(default_factory=list)
+    results: list[ValidationResult] = field(default_factory=list)
 
     # Aggregate metrics
     average_score: float = 0.0
@@ -248,9 +252,9 @@ class ValidationReport:
     total_cost_usd: float = 0.0
 
     # Key findings
-    strengths: List[str] = field(default_factory=list)
-    critical_gaps: List[str] = field(default_factory=list)
-    recommended_priorities: List[str] = field(default_factory=list)
+    strengths: list[str] = field(default_factory=list)
+    critical_gaps: list[str] = field(default_factory=list)
+    recommended_priorities: list[str] = field(default_factory=list)
 
     def pass_rate(self) -> float:
         """Calculate overall pass rate"""
@@ -258,7 +262,7 @@ class ValidationReport:
             return 0.0
         return self.scenarios_passed / self.total_scenarios
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary"""
         return {
             "generated_at": self.generated_at.isoformat(),

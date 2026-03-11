@@ -1,0 +1,29 @@
+# Source files (compiled output is in out/)
+src/**
+**/*.ts
+!out/**/*.d.ts
+tsconfig.json
+
+# Webview -- only dist/ is needed at runtime; exclude everything else
+webview-ui/src/**
+webview-ui/node_modules/**
+webview-ui/tsconfig.json
+webview-ui/vite.config.ts
+webview-ui/package-lock.json
+webview-ui/GAP_ANALYSIS.md
+
+# Development files
+.vscode/**
+node_modules/**
+.gitignore
+
+# Test files
+__mocks__/**
+jest.config.*
+**/__tests__/**
+*.test.*
+
+# Package manager locks (not needed at runtime)
+package-lock.json
+
+# Documentation source (README and CHANGELOG included by default)

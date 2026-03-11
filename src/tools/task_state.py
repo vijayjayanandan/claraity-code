@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import Any, Optional
 
 from src.observability import get_logger
 
@@ -22,29 +22,34 @@ class TaskState:
     """
 
     def __init__(self):
-        self._tasks: Dict[str, Dict[str, Any]] = {}  # id -> task dict
+        self._tasks: dict[str, dict[str, Any]] = {}  # id -> task dict
         self._next_id: int = 1
-        self.current_task_id: Optional[str] = None
-        self.last_stop_reason: Optional[str] = None
+        self.current_task_id: str | None = None
+        self.last_stop_reason: str | None = None
         self.error_budget_resume_count: int = 0
         self.successful_tools_since_resume: int = 0
-        self._persistence_path: Optional[Path] = None
+        self._persistence_path: Path | None = None
 
     # -- CRUD operations --
 
-    def create(self, subject: str, description: str = "",
-               active_form: str = "", metadata: Optional[Dict] = None) -> Dict[str, Any]:
+    def create(
+        self,
+        subject: str,
+        description: str = "",
+        active_form: str = "",
+        metadata: dict | None = None,
+    ) -> dict[str, Any]:
         """Create a new task and return it.
 
         Automatically clears completed tasks before creating the new one,
         keeping the todo list tidy without needing a separate clear tool.
         """
         # Auto-cleanup: remove completed tasks before adding new work
-        completed_ids = [tid for tid, t in self._tasks.items()
-                         if t.get("status") == "completed"]
+        completed_ids = [tid for tid, t in self._tasks.items() if t.get("status") == "completed"]
         if completed_ids:
-            logger.debug("Auto-cleanup: removing %d completed task(s): %s",
-                         len(completed_ids), completed_ids)
+            logger.debug(
+                "Auto-cleanup: removing %d completed task(s): %s", len(completed_ids), completed_ids
+            )
         for tid in completed_ids:
             del self._tasks[tid]
 
@@ -64,12 +69,12 @@ class TaskState:
         self._save()
         return dict(task)
 
-    def get(self, task_id: str) -> Optional[Dict[str, Any]]:
+    def get(self, task_id: str) -> dict[str, Any] | None:
         """Get a task by ID, or None if not found."""
         task = self._tasks.get(task_id)
         return dict(task) if task else None
 
-    def update(self, task_id: str, **fields) -> Optional[Dict[str, Any]]:
+    def update(self, task_id: str, **fields) -> dict[str, Any] | None:
         """
         Update fields on an existing task. Returns updated task or None.
 
@@ -116,13 +121,13 @@ class TaskState:
         self._save()
         return dict(task)
 
-    def list_all(self) -> List[Dict[str, Any]]:
+    def list_all(self) -> list[dict[str, Any]]:
         """Return all non-deleted tasks."""
         return [dict(t) for t in self._tasks.values()]
 
     # -- Convenience methods used by CodingAgent --
 
-    def get_todos_list(self) -> List[Dict[str, Any]]:
+    def get_todos_list(self) -> list[dict[str, Any]]:
         """Return tasks formatted for serialization (session persistence)."""
         return self.list_all()
 
@@ -147,9 +152,12 @@ class TaskState:
             return ""
         return "\n".join(lines)
 
-    def restore(self, todos: List[Dict[str, Any]],
-                current_id: Optional[str] = None,
-                stop_reason: Optional[str] = None):
+    def restore(
+        self,
+        todos: list[dict[str, Any]],
+        current_id: str | None = None,
+        stop_reason: str | None = None,
+    ):
         """Restore state from a previous session (deserialized from JSONL)."""
         self._tasks.clear()
         max_id = 0
@@ -190,9 +198,7 @@ class TaskState:
         try:
             self._persistence_path.parent.mkdir(parents=True, exist_ok=True)
             data = self.list_all()
-            self._persistence_path.write_text(
-                json.dumps(data, indent=2), encoding="utf-8"
-            )
+            self._persistence_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except Exception as e:
             logger.warning(f"Failed to save todos to {self._persistence_path}: {e}")
 
@@ -204,8 +210,9 @@ class TaskState:
             text = self._persistence_path.read_text(encoding="utf-8")
             data = json.loads(text)
             if isinstance(data, list) and data:
-                self.restore(data, current_id=self.current_task_id,
-                             stop_reason=self.last_stop_reason)
+                self.restore(
+                    data, current_id=self.current_task_id, stop_reason=self.last_stop_reason
+                )
                 logger.info(f"Loaded {len(data)} tasks from {self._persistence_path}")
         except Exception as e:
             logger.warning(f"Failed to load todos from {self._persistence_path}: {e}")

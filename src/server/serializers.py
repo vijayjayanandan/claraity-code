@@ -17,32 +17,41 @@ from enum import Enum
 from typing import Optional
 
 from src.core.events import (
-    UIEvent,
-    StreamStart, StreamEnd,
-    TextDelta,
-    CodeBlockStart, CodeBlockDelta, CodeBlockEnd,
-    ToolCallStart, ToolCallStatus, ToolCallResult,
-    ThinkingStart, ThinkingDelta, ThinkingEnd,
-    PausePromptStart, PausePromptEnd,
-    ContextUpdated, ContextCompacting, ContextCompacted,
-    FileReadEvent,
+    CodeBlockDelta,
+    CodeBlockEnd,
+    CodeBlockStart,
+    ContextCompacted,
+    ContextCompacting,
+    ContextUpdated,
     ErrorEvent,
+    FileReadEvent,
+    PausePromptEnd,
+    PausePromptStart,
+    StreamEnd,
+    StreamStart,
+    TextDelta,
+    ThinkingDelta,
+    ThinkingEnd,
+    ThinkingStart,
+    ToolCallResult,
+    ToolCallStart,
+    ToolCallStatus,
+    UIEvent,
 )
 from src.core.protocol import (
-    UserAction,
     ApprovalResult,
-    InterruptSignal,
-    RetrySignal,
-    PauseResult,
     ClarifyResult,
+    InterruptSignal,
+    PauseResult,
     PlanApprovalResult,
+    RetrySignal,
+    UserAction,
 )
 from src.session.store.memory_store import (
-    StoreNotification,
     StoreEvent,
+    StoreNotification,
     ToolExecutionState,
 )
-
 
 # ============================================================================
 # UIEvent type name mapping
@@ -83,7 +92,7 @@ def _normalize_value(value):
         return value.name.lower()
     if isinstance(value, dict):
         return {k: _normalize_value(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list | tuple):
         return [_normalize_value(item) for item in value]
     return value
 
@@ -92,14 +101,15 @@ def _normalize_value(value):
 # UIEvent -> JSON
 # ============================================================================
 
-def serialize_event(event: UIEvent) -> Optional[dict]:
+
+def serialize_event(event: UIEvent) -> dict | None:
     """Convert UIEvent to JSON-serializable dict.
 
     Uses dataclasses.asdict() with special-case overrides.
     Returns None for legacy event types (ToolCallStart/Status/Result).
     """
     # Skip legacy tool events (handled via StoreNotification)
-    if isinstance(event, (ToolCallStart, ToolCallStatus, ToolCallResult)):
+    if isinstance(event, ToolCallStart | ToolCallStatus | ToolCallResult):
         return None
 
     data = asdict(event)
@@ -118,6 +128,7 @@ def serialize_event(event: UIEvent) -> Optional[dict]:
 # StoreNotification -> JSON
 # ============================================================================
 
+
 def serialize_tool_status(status) -> str:
     """Convert ToolStatus enum to wire string.
 
@@ -130,7 +141,7 @@ def serialize_tool_status(status) -> str:
     return name
 
 
-def serialize_store_notification(notification: StoreNotification) -> Optional[dict]:
+def serialize_store_notification(notification: StoreNotification) -> dict | None:
     """Convert StoreNotification to JSON-serializable dict.
 
     Returns None for events not relevant to the wire protocol
@@ -179,7 +190,7 @@ def serialize_store_notification(notification: StoreNotification) -> Optional[di
             return None
 
         # Detect interactive system events (clarify, plan approval)
-        if (msg.is_system and msg.meta and msg.meta.event_type):
+        if msg.is_system and msg.meta and msg.meta.event_type:
             event_type = msg.meta.event_type
             extra = msg.meta.extra or {}
 
@@ -263,7 +274,8 @@ def serialize_store_notification(notification: StoreNotification) -> Optional[di
 # JSON -> UserAction
 # ============================================================================
 
-def deserialize_action(data: dict) -> Optional[UserAction]:
+
+def deserialize_action(data: dict) -> UserAction | None:
     """Convert JSON dict to UserAction. Returns None for unknown types."""
     msg_type = data.get("type")
 

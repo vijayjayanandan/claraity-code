@@ -15,14 +15,14 @@ import asyncio
 import hashlib
 import json
 import os
-from typing import Any, Dict, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from src.observability import get_logger
 
 if TYPE_CHECKING:
-    from src.core.protocol import UIProtocol
-    from src.core.plan_mode import PlanModeState
     from src.core.permission_mode import PermissionManager
+    from src.core.plan_mode import PlanModeState
+    from src.core.protocol import UIProtocol
     from src.director.adapter import DirectorAdapter
     from src.memory import MemoryManager
     from src.tools import ToolExecutor
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 # The set of tool names handled by this module
-HANDLED_TOOLS = frozenset({'clarify', 'request_plan_approval', 'director_complete_plan'})
+HANDLED_TOOLS = frozenset({"clarify", "request_plan_approval", "director_complete_plan"})
 
 
 class SpecialToolHandlers:
@@ -69,9 +69,9 @@ class SpecialToolHandlers:
     async def handle_clarify(
         self,
         call_id: str,
-        tool_args: Dict[str, Any],
+        tool_args: dict[str, Any],
         ui_protocol: "UIProtocol",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Handle the clarify tool - ask structured questions before proceeding.
 
         Args:
@@ -80,7 +80,7 @@ class SpecialToolHandlers:
             ui_protocol: UIProtocol for TUI interaction.
 
         Returns:
-            Dict with user responses or error/cancellation status.
+            dict with user responses or error/cancellation status.
         """
         questions = tool_args.get("questions", [])
         context = tool_args.get("context")
@@ -108,11 +108,16 @@ class SpecialToolHandlers:
         # 2. Wait for user response via UIProtocol
         try:
             from src.core.protocol import ClarifyResult
+
             result = await ui_protocol.wait_for_clarify_response(call_id)
 
             # 3. Persist clarify_response via MemoryManager (SINGLE WRITER)
             if self._memory.has_message_store:
-                status = "submitted" if result.submitted else ("chat" if result.chat_instead else "cancelled")
+                status = (
+                    "submitted"
+                    if result.submitted
+                    else ("chat" if result.chat_instead else "cancelled")
+                )
                 self._memory.persist_system_event(
                     event_type="clarify_response",
                     content=f"[Clarification {status}]",
@@ -144,11 +149,11 @@ class SpecialToolHandlers:
         self,
         call_id: str,
         ui_protocol: "UIProtocol",
-    ) -> Tuple[str, bool]:
+    ) -> tuple[str, bool]:
         """Handle request_plan_approval tool.
 
         Returns:
-            Tuple of (result_text, rejected_without_feedback).
+            tuple of (result_text, rejected_without_feedback).
             - result_text: Human-readable string for LLM
             - rejected_without_feedback: True if user rejected without feedback
               (caller should stop tool loop and wait for user input)
@@ -201,6 +206,7 @@ class SpecialToolHandlers:
         # 4. Wait for user approval via UIProtocol
         try:
             from src.core.protocol import PlanApprovalResult
+
             approval = await ui_protocol.wait_for_plan_approval(plan_hash)
 
             if approval.approved:
@@ -223,9 +229,7 @@ class SpecialToolHandlers:
                         extra={"old_mode": "plan", "new_mode": new_mode},
                         include_in_llm_context=False,
                     )
-                    self._permission_manager.set_mode(
-                        PermissionManager.from_string(new_mode)
-                    )
+                    self._permission_manager.set_mode(PermissionManager.from_string(new_mode))
 
                 result_text = (
                     "User has approved your plan. You can now start coding. "
@@ -280,11 +284,11 @@ class SpecialToolHandlers:
         call_id: str,
         tool_result,
         ui_protocol: "UIProtocol",
-    ) -> Tuple[str, bool]:
+    ) -> tuple[str, bool]:
         """Handle director plan approval flow after director_complete_plan executes.
 
         Returns:
-            Tuple of (result_text, rejected_without_feedback).
+            tuple of (result_text, rejected_without_feedback).
         """
         # Build plan excerpt for the approval widget
         plan = self._director_adapter._protocol.plan
@@ -295,7 +299,7 @@ class SpecialToolHandlers:
         if plan and plan.plan_document:
             try:
                 if os.path.isfile(plan.plan_document):
-                    with open(plan.plan_document, "r", encoding="utf-8") as f:
+                    with open(plan.plan_document, encoding="utf-8") as f:
                         excerpt = f.read()
                     logger.info(
                         "director_plan_approval: read plan document (%d chars)",
@@ -310,11 +314,7 @@ class SpecialToolHandlers:
             if plan:
                 for s in plan.slices:
                     slices_text += f"\n- Slice {s.id}: {s.title}"
-            excerpt = (
-                f"## Director Plan\n\n"
-                f"{plan_summary}\n\n"
-                f"### Vertical Slices:{slices_text}"
-            )
+            excerpt = f"## Director Plan\n\n{plan_summary}\n\n### Vertical Slices:{slices_text}"
         plan_hash = hashlib.sha256(excerpt.encode()).hexdigest()
 
         # Persist event for TUI to mount approval widget
@@ -334,6 +334,7 @@ class SpecialToolHandlers:
         # Wait for user approval via UIProtocol
         try:
             from src.core.protocol import PlanApprovalResult
+
             approval = await ui_protocol.wait_for_plan_approval(plan_hash)
 
             if approval.approved:

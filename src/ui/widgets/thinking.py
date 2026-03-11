@@ -9,12 +9,12 @@ Features:
 - Streams content progressively
 """
 
-from textual.widgets import Static
-from textual.reactive import reactive
-from rich.panel import Panel
-from rich.markdown import Markdown as RichMarkdown
-from rich.text import Text
 from rich.console import RenderableType
+from rich.markdown import Markdown as RichMarkdown
+from rich.panel import Panel
+from rich.text import Text
+from textual.reactive import reactive
+from textual.widgets import Static
 
 
 class ThinkingBlock(Static):
@@ -82,12 +82,7 @@ class ThinkingBlock(Static):
     # Preview length when collapsed
     PREVIEW_LENGTH = 100
 
-    def __init__(
-        self,
-        content: str = "",
-        expanded: bool = False,
-        **kwargs
-    ):
+    def __init__(self, content: str = "", expanded: bool = False, **kwargs):
         """
         Initialize ThinkingBlock.
 
@@ -169,7 +164,7 @@ class ThinkingBlock(Static):
             return "..."
 
         # Take first N characters, clean up
-        preview = self.content[:self.PREVIEW_LENGTH]
+        preview = self.content[: self.PREVIEW_LENGTH]
         preview = preview.replace("\n", " ").strip()
 
         if len(self.content) > self.PREVIEW_LENGTH:

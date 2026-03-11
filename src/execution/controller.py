@@ -15,7 +15,7 @@ Phase: 1 - Self-Testing & Long-Running Execution
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 from src.execution.checkpoint import CheckpointManager, CheckpointMetadata
 
@@ -49,7 +49,7 @@ class LongRunningController:
         self,
         agent: Any,  # CodingAgent instance
         project_dir: str = ".",
-        max_checkpoints: int = 10
+        max_checkpoints: int = 10,
     ):
         """
         Initialize controller with agent.
@@ -65,20 +65,19 @@ class LongRunningController:
         # Initialize checkpoint manager
         checkpoint_dir = self.project_dir / ".checkpoints"
         self.checkpoint_manager = CheckpointManager(
-            checkpoint_dir=str(checkpoint_dir),
-            max_checkpoints=max_checkpoints
+            checkpoint_dir=str(checkpoint_dir), max_checkpoints=max_checkpoints
         )
 
         # Track last checkpoint for metadata
-        self.last_checkpoint_time: Optional[datetime] = None
-        self.current_checkpoint_id: Optional[str] = None
+        self.last_checkpoint_time: datetime | None = None
+        self.current_checkpoint_id: str | None = None
 
     def create_checkpoint(
         self,
         description: str = "Ongoing work",
-        current_phase: Optional[str] = None,
-        pending_tasks: Optional[List[str]] = None
-    ) -> Optional[str]:
+        current_phase: str | None = None,
+        pending_tasks: list[str] | None = None,
+    ) -> str | None:
         """
         Create checkpoint of current agent state.
 
@@ -109,7 +108,7 @@ class LongRunningController:
                 execution_progress=description,
                 task_description=description,
                 current_phase=current_phase,
-                pending_tasks=pending_tasks
+                pending_tasks=pending_tasks,
             )
 
             # Update tracking
@@ -154,9 +153,7 @@ class LongRunningController:
             self.checkpoint_manager.restore_to_agent(checkpoint, self.agent)
 
             # Update tracking
-            self.last_checkpoint_time = datetime.fromisoformat(
-                checkpoint.metadata.timestamp
-            )
+            self.last_checkpoint_time = datetime.fromisoformat(checkpoint.metadata.timestamp)
             self.current_checkpoint_id = checkpoint_id
 
             print(f"[OK] Checkpoint restored: {checkpoint_id}")
@@ -172,12 +169,12 @@ class LongRunningController:
             print(f"[ERROR] Failed to restore checkpoint: {e}")
             return False
 
-    def list_checkpoints(self) -> List[CheckpointMetadata]:
+    def list_checkpoints(self) -> list[CheckpointMetadata]:
         """
-        List all available checkpoints (newest first).
+        list all available checkpoints (newest first).
 
         Returns:
-            List of checkpoint metadata (sorted by timestamp, newest first)
+            list of checkpoint metadata (sorted by timestamp, newest first)
 
         Example:
             >>> checkpoints = controller.list_checkpoints()
@@ -211,8 +208,8 @@ class LongRunningController:
                 continue
 
             checkpoint_file = (
-                self.checkpoint_manager.checkpoint_dir /
-                f"checkpoint_{checkpoint_meta.checkpoint_id}.json"
+                self.checkpoint_manager.checkpoint_dir
+                / f"checkpoint_{checkpoint_meta.checkpoint_id}.json"
             )
 
             # Security: Verify file is inside checkpoint directory
@@ -242,7 +239,8 @@ class LongRunningController:
             True if checkpoint_id is safe (8-char hex), False otherwise
         """
         import re
-        return bool(re.match(r'^[a-f0-9]{8}$', checkpoint_id))
+
+        return bool(re.match(r"^[a-f0-9]{8}$", checkpoint_id))
 
     def get_status(self) -> dict:
         """
@@ -263,12 +261,11 @@ class LongRunningController:
             }
         """
         return {
-            'project_dir': str(self.project_dir),
-            'checkpoint_dir': str(self.checkpoint_manager.checkpoint_dir),
-            'last_checkpoint': self.current_checkpoint_id,
-            'last_checkpoint_time': (
-                self.last_checkpoint_time.isoformat()
-                if self.last_checkpoint_time else None
+            "project_dir": str(self.project_dir),
+            "checkpoint_dir": str(self.checkpoint_manager.checkpoint_dir),
+            "last_checkpoint": self.current_checkpoint_id,
+            "last_checkpoint_time": (
+                self.last_checkpoint_time.isoformat() if self.last_checkpoint_time else None
             ),
-            'total_checkpoints': len(self.list_checkpoints())
+            "total_checkpoints": len(self.list_checkpoints()),
         }

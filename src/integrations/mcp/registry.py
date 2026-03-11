@@ -3,12 +3,13 @@
 Session-scoped: one registry per agent instance. Handles discovery,
 caching, and provides the merged tool list for LLM requests.
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 
 from src.tools.base import ToolExecutor
 
@@ -23,6 +24,7 @@ from .policy import McpPolicyGate
 
 try:
     from src.observability import get_logger
+
     logger = get_logger("integrations.mcp.registry")
 except ImportError:
     logger = logging.getLogger(__name__)
@@ -43,7 +45,7 @@ class McpToolRegistry:
         self._config = config
         self._policy_gate = policy_gate
         self._adapter = McpToolAdapter(config)
-        self._tool_definitions: List[ToolDefinition] = []
+        self._tool_definitions: list[ToolDefinition] = []
         self._mcp_tool_names: set = set()
         self._last_discovery: float = 0.0
         self._enabled = False
@@ -64,7 +66,7 @@ class McpToolRegistry:
         """Check if a tool name belongs to MCP (vs native)."""
         return tool_name in self._mcp_tool_names
 
-    def get_tool_definitions(self) -> List[ToolDefinition]:
+    def get_tool_definitions(self) -> list[ToolDefinition]:
         """Return adapted MCP tool schemas for LLM requests.
 
         Only returns tools when the integration is enabled.
@@ -115,7 +117,7 @@ class McpToolRegistry:
         self._tool_definitions.clear()
         self._mcp_tool_names.clear()
 
-        for raw_tool, tool_def in zip(raw_tools, adapted):
+        for raw_tool, tool_def in zip(raw_tools, adapted, strict=False):
             # Register tool in policy gate using MCP annotations
             annotations = raw_tool.get("annotations", {})
             policy = self._policy_gate.register_tool(tool_def.name, annotations)

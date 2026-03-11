@@ -24,10 +24,11 @@ import os
 import sqlite3
 import threading
 from contextlib import contextmanager
-from dataclasses import dataclass, asdict, fields as dataclass_fields
+from dataclasses import asdict, dataclass
+from dataclasses import fields as dataclass_fields
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 # =============================================================================
 # CONSTANTS
@@ -51,29 +52,31 @@ MAX_EXTRA_JSON_LENGTH = 16384
 # DATA MODEL
 # =============================================================================
 
+
 @dataclass
 class LogRecord:
     """Structured log record for storage and queries."""
-    id: Optional[int]  # AUTOINCREMENT, assigned by SQLite (None on insert)
+
+    id: int | None  # AUTOINCREMENT, assigned by SQLite (None on insert)
     ts: str
     level: str
     event: str
-    logger: Optional[str] = None
+    logger: str | None = None
     # Context
-    run_id: Optional[str] = None
-    session_id: Optional[str] = None
-    stream_id: Optional[str] = None
-    request_id: Optional[str] = None
-    component: Optional[str] = None
-    operation: Optional[str] = None
+    run_id: str | None = None
+    session_id: str | None = None
+    stream_id: str | None = None
+    request_id: str | None = None
+    component: str | None = None
+    operation: str | None = None
     # Source location
-    source_file: Optional[str] = None
-    source_line: Optional[int] = None
-    source_function: Optional[str] = None
+    source_file: str | None = None
+    source_line: int | None = None
+    source_function: str | None = None
     # Extra data as JSON (everything that doesn't fit named columns)
-    extra_json: Optional[str] = None
+    extra_json: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return asdict(self)
 
@@ -81,6 +84,7 @@ class LogRecord:
 # =============================================================================
 # LOG STORE
 # =============================================================================
+
 
 class LogStore:
     """
@@ -144,16 +148,11 @@ class LogStore:
             """)
 
             # Create indexes for common queries
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_logs_ts ON logs(ts)")
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_logs_session ON logs(session_id)")
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_logs_level ON logs(level)")
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_logs_event ON logs(event)")
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_logs_component ON logs(component)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_logs_ts ON logs(ts)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_logs_session ON logs(session_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_logs_level ON logs(level)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_logs_event ON logs(event)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_logs_component ON logs(component)")
 
             conn.commit()
 
@@ -169,7 +168,8 @@ class LogStore:
         """
         try:
             with self._get_connection() as conn:
-                cursor = conn.execute("""
+                cursor = conn.execute(
+                    """
                     INSERT INTO logs (
                         ts, level, event, logger,
                         run_id, session_id, stream_id, request_id,
@@ -177,23 +177,32 @@ class LogStore:
                         source_file, source_line, source_function,
                         extra_json
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    log.ts, log.level, log.event, log.logger,
-                    log.run_id, log.session_id, log.stream_id, log.request_id,
-                    log.component, log.operation,
-                    log.source_file, log.source_line, log.source_function,
-                    log.extra_json
-                ))
+                """,
+                    (
+                        log.ts,
+                        log.level,
+                        log.event,
+                        log.logger,
+                        log.run_id,
+                        log.session_id,
+                        log.stream_id,
+                        log.request_id,
+                        log.component,
+                        log.operation,
+                        log.source_file,
+                        log.source_line,
+                        log.source_function,
+                        log.extra_json,
+                    ),
+                )
                 conn.commit()
                 return cursor.lastrowid
         except Exception as e:
             # Use stderr to avoid recursion (this module is used by logging)
             import sys
+
             try:
-                print(
-                    f"[LogStore] Failed to record log: {e}",
-                    file=sys.__stderr__
-                )
+                print(f"[LogStore] Failed to record log: {e}", file=sys.__stderr__)
             except Exception:
                 pass
             return -1
@@ -212,19 +221,24 @@ class LogStore:
         Returns:
             Row ID of inserted record
         """
-        ts = kwargs.pop('ts', None) or (
-            datetime.utcnow().isoformat() + 'Z'
-        )
+        ts = kwargs.pop("ts", None) or (datetime.utcnow().isoformat() + "Z")
 
         # Truncate event to prevent DB bloat
         if len(event) > MAX_EVENT_LENGTH:
-            event = event[:MAX_EVENT_LENGTH] + '...[truncated]'
+            event = event[:MAX_EVENT_LENGTH] + "...[truncated]"
 
         # Separate known fields from extras
         known_fields = {
-            'logger', 'run_id', 'session_id', 'stream_id', 'request_id',
-            'component', 'operation',
-            'source_file', 'source_line', 'source_function',
+            "logger",
+            "run_id",
+            "session_id",
+            "stream_id",
+            "request_id",
+            "component",
+            "operation",
+            "source_file",
+            "source_line",
+            "source_function",
         }
         record_kwargs = {}
         extra_fields = {}
@@ -241,12 +255,11 @@ class LogStore:
             try:
                 raw = json.dumps(extra_fields, default=str)
                 if len(raw) > MAX_EXTRA_JSON_LENGTH:
-                    raw = raw[:MAX_EXTRA_JSON_LENGTH] + '...[truncated]'
+                    raw = raw[:MAX_EXTRA_JSON_LENGTH] + "...[truncated]"
                 extra_json = raw
             except (TypeError, ValueError):
                 extra_json = json.dumps(
-                    {"_serialization_error": str(extra_fields)[:500]},
-                    default=str
+                    {"_serialization_error": str(extra_fields)[:500]}, default=str
                 )
 
         log = LogRecord(
@@ -259,12 +272,12 @@ class LogStore:
         )
         return self.record(log)
 
-    def record_batch(self, records: List[Dict[str, Any]]) -> int:
+    def record_batch(self, records: list[dict[str, Any]]) -> int:
         """
         Insert multiple log records in a single transaction.
 
         Args:
-            records: List of dicts with fields for record_from_dict()
+            records: list of dicts with fields for record_from_dict()
 
         Returns:
             Number of records inserted
@@ -276,24 +289,29 @@ class LogStore:
             with self._get_connection() as conn:
                 inserted = 0
                 # Fields extracted separately (not stored as extras)
-                skip_fields = {'level', 'event', 'ts'}
+                skip_fields = {"level", "event", "ts"}
                 known_fields = {
-                    'logger', 'run_id', 'session_id', 'stream_id',
-                    'request_id', 'component', 'operation',
-                    'source_file', 'source_line', 'source_function',
+                    "logger",
+                    "run_id",
+                    "session_id",
+                    "stream_id",
+                    "request_id",
+                    "component",
+                    "operation",
+                    "source_file",
+                    "source_line",
+                    "source_function",
                 }
 
                 for rec in records:
                     # Use .get() to avoid mutating input dicts
-                    level = rec.get('level', 'INFO')
-                    event = rec.get('event', '')
-                    ts = rec.get('ts') or (
-                        datetime.utcnow().isoformat() + 'Z'
-                    )
+                    level = rec.get("level", "INFO")
+                    event = rec.get("event", "")
+                    ts = rec.get("ts") or (datetime.utcnow().isoformat() + "Z")
 
                     # Truncate
                     if len(event) > MAX_EVENT_LENGTH:
-                        event = event[:MAX_EVENT_LENGTH] + '...[truncated]'
+                        event = event[:MAX_EVENT_LENGTH] + "...[truncated]"
 
                     # Separate known from extras
                     named = {}
@@ -311,15 +329,13 @@ class LogStore:
                         try:
                             raw = json.dumps(extras, default=str)
                             if len(raw) > MAX_EXTRA_JSON_LENGTH:
-                                raw = (
-                                    raw[:MAX_EXTRA_JSON_LENGTH]
-                                    + '...[truncated]'
-                                )
+                                raw = raw[:MAX_EXTRA_JSON_LENGTH] + "...[truncated]"
                             extra_json = raw
                         except (TypeError, ValueError):
                             extra_json = None
 
-                    conn.execute("""
+                    conn.execute(
+                        """
                         INSERT INTO logs (
                             ts, level, event, logger,
                             run_id, session_id, stream_id, request_id,
@@ -327,26 +343,33 @@ class LogStore:
                             source_file, source_line, source_function,
                             extra_json
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (
-                        ts, level, event, named.get('logger'),
-                        named.get('run_id'), named.get('session_id'),
-                        named.get('stream_id'), named.get('request_id'),
-                        named.get('component'), named.get('operation'),
-                        named.get('source_file'), named.get('source_line'),
-                        named.get('source_function'),
-                        extra_json,
-                    ))
+                    """,
+                        (
+                            ts,
+                            level,
+                            event,
+                            named.get("logger"),
+                            named.get("run_id"),
+                            named.get("session_id"),
+                            named.get("stream_id"),
+                            named.get("request_id"),
+                            named.get("component"),
+                            named.get("operation"),
+                            named.get("source_file"),
+                            named.get("source_line"),
+                            named.get("source_function"),
+                            extra_json,
+                        ),
+                    )
                     inserted += 1
 
                 conn.commit()
                 return inserted
         except Exception as e:
             import sys
+
             try:
-                print(
-                    f"[LogStore] Failed to record batch: {e}",
-                    file=sys.__stderr__
-                )
+                print(f"[LogStore] Failed to record batch: {e}", file=sys.__stderr__)
             except Exception:
                 pass
             return 0
@@ -360,14 +383,14 @@ class LogStore:
 
     def query(
         self,
-        session_id: Optional[str] = None,
-        level: Optional[str] = None,
-        component: Optional[str] = None,
-        event: Optional[str] = None,
-        text: Optional[str] = None,
-        since_minutes: Optional[int] = None,
+        session_id: str | None = None,
+        level: str | None = None,
+        component: str | None = None,
+        event: str | None = None,
+        text: str | None = None,
+        since_minutes: int | None = None,
         limit: int = DEFAULT_LOG_QUERY_LIMIT,
-    ) -> List[LogRecord]:
+    ) -> list[LogRecord]:
         """
         Query logs with filters.
 
@@ -381,7 +404,7 @@ class LogStore:
             limit: Maximum results
 
         Returns:
-            List of LogRecord
+            list of LogRecord
         """
         try:
             with self._get_connection() as conn:
@@ -413,7 +436,7 @@ class LogStore:
                 if since_minutes:
                     cutoff = (
                         datetime.utcnow() - timedelta(minutes=since_minutes)
-                    ).isoformat() + 'Z'
+                    ).isoformat() + "Z"
                     sql += " AND ts >= ?"
                     params.append(cutoff)
 
@@ -425,18 +448,14 @@ class LogStore:
 
         except Exception as e:
             import sys
+
             try:
-                print(
-                    f"[LogStore] Failed to query logs: {e}",
-                    file=sys.__stderr__
-                )
+                print(f"[LogStore] Failed to query logs: {e}", file=sys.__stderr__)
             except Exception:
                 pass
             return []
 
-    def count_by_level(
-        self, since_minutes: Optional[int] = None
-    ) -> Dict[str, int]:
+    def count_by_level(self, since_minutes: int | None = None) -> dict[str, int]:
         """
         Count logs by level.
 
@@ -444,7 +463,7 @@ class LogStore:
             since_minutes: Filter to last N minutes
 
         Returns:
-            Dict mapping level to count
+            dict mapping level to count
         """
         try:
             with self._get_connection() as conn:
@@ -454,30 +473,25 @@ class LogStore:
                 if since_minutes:
                     cutoff = (
                         datetime.utcnow() - timedelta(minutes=since_minutes)
-                    ).isoformat() + 'Z'
+                    ).isoformat() + "Z"
                     sql += " WHERE ts >= ?"
                     params.append(cutoff)
 
                 sql += " GROUP BY level"
 
                 cursor = conn.execute(sql, params)
-                return {
-                    row['level']: row['count']
-                    for row in cursor.fetchall()
-                }
+                return {row["level"]: row["count"] for row in cursor.fetchall()}
 
         except Exception as e:
             import sys
+
             try:
-                print(
-                    f"[LogStore] Failed to count logs: {e}",
-                    file=sys.__stderr__
-                )
+                print(f"[LogStore] Failed to count logs: {e}", file=sys.__stderr__)
             except Exception:
                 pass
             return {}
 
-    def get_recent(self, count: int = 10) -> List[LogRecord]:
+    def get_recent(self, count: int = 10) -> list[LogRecord]:
         """Get most recent log entries."""
         return self.query(limit=count)
 
@@ -492,24 +506,17 @@ class LogStore:
             Number of deleted records
         """
         try:
-            cutoff = (
-                datetime.utcnow() - timedelta(days=days)
-            ).isoformat() + 'Z'
+            cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat() + "Z"
             with self._get_connection() as conn:
-                cursor = conn.execute(
-                    "DELETE FROM logs WHERE ts < ?",
-                    (cutoff,)
-                )
+                cursor = conn.execute("DELETE FROM logs WHERE ts < ?", (cutoff,))
                 deleted = cursor.rowcount
                 conn.commit()
                 return deleted
         except Exception as e:
             import sys
+
             try:
-                print(
-                    f"[LogStore] Failed to clear old logs: {e}",
-                    file=sys.__stderr__
-                )
+                print(f"[LogStore] Failed to clear old logs: {e}", file=sys.__stderr__)
             except Exception:
                 pass
             return 0
@@ -526,7 +533,7 @@ class LogStore:
 # GLOBAL INSTANCE
 # =============================================================================
 
-_log_store_instance: Optional[LogStore] = None
+_log_store_instance: LogStore | None = None
 _log_store_lock = threading.Lock()
 
 

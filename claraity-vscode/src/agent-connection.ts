@@ -29,7 +29,14 @@ export class AgentConnection {
     private _onDisconnected = new vscode.EventEmitter<void>();
     public readonly onDisconnected = this._onDisconnected.event;
 
-    constructor(private url: string = 'ws://localhost:9120/ws') {}
+    constructor(
+        private url: string = 'ws://localhost:9120/ws',
+        private log?: vscode.OutputChannel,
+    ) {}
+
+    private logLine(msg: string): void {
+        this.log?.appendLine(msg);
+    }
 
     /** Store the auth token for use on connect/reconnect. */
     setAuthToken(token: string): void {
@@ -48,7 +55,7 @@ export class AgentConnection {
             this.ws = new WebSocket(this.url);
 
             this.ws.on('open', () => {
-                console.log('[ClarAIty] WebSocket open, sending auth handshake...');
+                this.logLine('[WS] WebSocket open, sending auth handshake...');
                 this.reconnectDelay = 1000; // Reset backoff
                 // Send auth as first message instead of URL param
                 if (this.authToken) {
@@ -59,7 +66,7 @@ export class AgentConnection {
                     this.awaitingAuth = true;
                 } else {
                     // No token available -- fire connected and hope for the best
-                    console.warn('[ClarAIty] No auth token set, connection may be rejected');
+                    this.logLine('[WARN] No auth token set, connection may be rejected');
                     this._onConnected.fire();
                 }
             });
@@ -72,7 +79,7 @@ export class AgentConnection {
                     if (this.awaitingAuth) {
                         this.awaitingAuth = false;
                         if (msg.type === 'error' && (msg as any).error_type === 'auth_failed') {
-                            console.error('[ClarAIty] Authentication failed');
+                            this.logLine('[ERROR] Authentication failed');
                             this.shouldReconnect = false;
                             this.ws?.close();
                             return;
@@ -85,12 +92,12 @@ export class AgentConnection {
 
                     this._onMessage.fire(msg);
                 } catch (e) {
-                    console.error('[ClarAIty] Failed to parse message:', e);
+                    this.logLine('[ERROR] Failed to parse message: ' + e);
                 }
             });
 
             this.ws.on('close', () => {
-                console.log('[ClarAIty] Disconnected from server');
+                this.logLine('[WS] Disconnected from server');
                 this.awaitingAuth = false;
                 this._onDisconnected.fire();
                 if (this.shouldReconnect) {
@@ -99,12 +106,12 @@ export class AgentConnection {
             });
 
             this.ws.on('error', (err: Error) => {
-                console.error('[ClarAIty] WebSocket error:', err.message);
+                this.logLine('[ERROR] WebSocket error: ' + err.message);
                 // Close event will follow and trigger reconnect
             });
 
         } catch (e) {
-            console.error('[ClarAIty] Failed to create WebSocket:', e);
+            this.logLine('[ERROR] Failed to create WebSocket: ' + e);
             if (this.shouldReconnect) {
                 this.scheduleReconnect();
             }
@@ -127,7 +134,7 @@ export class AgentConnection {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify(message));
         } else {
-            console.warn('[ClarAIty] Cannot send: not connected');
+            this.logLine('[WARN] Cannot send: not connected');
         }
     }
 
@@ -143,7 +150,7 @@ export class AgentConnection {
         if (this.reconnectTimer) {
             return;
         }
-        console.log(`[ClarAIty] Reconnecting in ${this.reconnectDelay}ms...`);
+        this.logLine(`[WS] Reconnecting in ${this.reconnectDelay}ms...`);
         this.reconnectTimer = setTimeout(() => {
             this.reconnectTimer = null;
             this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30000);

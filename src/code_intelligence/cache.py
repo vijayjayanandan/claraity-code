@@ -8,22 +8,23 @@ Features:
 - Memory management (configurable size limit, default 10MB)
 """
 
-from collections import OrderedDict
-from typing import Optional, Any
-from dataclasses import dataclass
-from pathlib import Path
-import time
 import logging
 import threading
+import time
+from collections import OrderedDict
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Optional
 
 
 @dataclass
 class CacheEntry:
     """Single cache entry with metadata."""
+
     value: Any
     timestamp: float
-    file_path: Optional[str]
-    file_mtime: Optional[float]
+    file_path: str | None
+    file_mtime: float | None
 
 
 class LSPCache:
@@ -37,12 +38,7 @@ class LSPCache:
     - Memory limit (default 10MB)
     """
 
-    def __init__(
-        self,
-        max_size_mb: int = 10,
-        ttl_seconds: int = 300,
-        repo_root: Optional[str] = None
-    ):
+    def __init__(self, max_size_mb: int = 10, ttl_seconds: int = 300, repo_root: str | None = None):
         """
         Initialize LSP cache.
 
@@ -66,12 +62,13 @@ class LSPCache:
         # Log repo_root at init (helps debug path issues)
         if self.repo_root:
             from src.code_intelligence.path_utils import normalize_path
+
             self.logger.info(
                 f"LSPCache init: repo_root={self.repo_root}, "
                 f"normalized={normalize_path(self.repo_root)}"
             )
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         """
         Get value from cache (thread-safe).
 
@@ -113,12 +110,7 @@ class LSPCache:
             self.logger.debug(f"Cache hit: {key}")
             return entry.value
 
-    def set(
-        self,
-        key: str,
-        value: Any,
-        file_path: Optional[str] = None
-    ) -> None:
+    def set(self, key: str, value: Any, file_path: str | None = None) -> None:
         """
         Set cache entry (thread-safe).
 
@@ -134,6 +126,7 @@ class LSPCache:
             normalized_file_path = None
             if file_path:
                 from src.code_intelligence.path_utils import normalize_path
+
                 normalized_file_path = str(normalize_path(file_path))
 
             # Get file modification time (for invalidation)
@@ -151,7 +144,7 @@ class LSPCache:
                 value=value,
                 timestamp=time.time(),
                 file_path=normalized_file_path,
-                file_mtime=file_mtime
+                file_mtime=file_mtime,
             )
 
             # Add to cache
@@ -198,7 +191,7 @@ class LSPCache:
             ValueError: If path is outside repo_root (security check)
         """
         # Normalize path
-        from src.code_intelligence.path_utils import normalize_path, is_within_repo
+        from src.code_intelligence.path_utils import is_within_repo, normalize_path
 
         normalized_path = normalize_path(file_path)
 
@@ -211,7 +204,8 @@ class LSPCache:
 
         # Find all entries for this file
         keys_to_delete = [
-            key for key, entry in self.cache.items()
+            key
+            for key, entry in self.cache.items()
             if entry.file_path and str(normalize_path(entry.file_path)) == normalized_path_str
         ]
 
@@ -301,12 +295,11 @@ class LSPCache:
         """
         if isinstance(obj, str):
             return len(obj)
-        elif isinstance(obj, (int, float)):
+        elif isinstance(obj, int | float):
             return 8
         elif isinstance(obj, dict):
             return 100 + sum(
-                self._estimate_size(k) + self._estimate_size(v)
-                for k, v in obj.items()
+                self._estimate_size(k) + self._estimate_size(v) for k, v in obj.items()
             )
         elif isinstance(obj, list):
             return 100 + sum(self._estimate_size(item) for item in obj)

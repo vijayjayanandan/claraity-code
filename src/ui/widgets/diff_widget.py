@@ -10,20 +10,22 @@ Features:
 - Windows ANSI compatibility
 """
 
-from textual.widgets import Static
-from rich.text import Text
-from rich.console import RenderableType
-from typing import Optional, List
-from dataclasses import dataclass
 import difflib
 import re
+from dataclasses import dataclass
+from typing import Optional
+
+from rich.console import RenderableType
+from rich.text import Text
+from textual.widgets import Static
 
 
 @dataclass
 class DiffLine:
     """Single diff line with metadata."""
-    line_num_old: Optional[int]  # Line number in old file (None for additions)
-    line_num_new: Optional[int]  # Line number in new file (None for deletions)
+
+    line_num_old: int | None  # Line number in old file (None for additions)
+    line_num_new: int | None  # Line number in new file (None for deletions)
     marker: str  # '+' for addition, '-' for deletion, ' ' for context
     content: str  # Line content (without the marker prefix)
 
@@ -68,11 +70,11 @@ class DiffWidget(Static):
         self,
         file_path: str,
         new_content: str,
-        old_content: Optional[str] = None,
+        old_content: str | None = None,
         max_lines: int = 30,
         context_lines: int = 3,
         start_line: int = 1,
-        **kwargs
+        **kwargs,
     ):
         """
         Initialize DiffWidget.
@@ -95,7 +97,7 @@ class DiffWidget(Static):
         self.start_line = start_line
 
         # Pre-compute diff lines for rendering
-        self._diff_lines: List[DiffLine] = []
+        self._diff_lines: list[DiffLine] = []
         self._additions = 0
         self._deletions = 0
         self._truncated = False
@@ -105,17 +107,14 @@ class DiffWidget(Static):
         """Compute diff lines and statistics."""
         if self.old_content is None:
             # New file - all lines are additions
-            lines = self.new_content.split('\n')
+            lines = self.new_content.split("\n")
             total_lines = len(lines)
 
             if total_lines > self.max_lines:
-                lines = lines[:self.max_lines]
+                lines = lines[: self.max_lines]
                 self._truncated = True
 
-            self._diff_lines = [
-                DiffLine(None, i + 1, '+', line)
-                for i, line in enumerate(lines)
-            ]
+            self._diff_lines = [DiffLine(None, i + 1, "+", line) for i, line in enumerate(lines)]
             self._additions = total_lines
             self._deletions = 0
         else:
@@ -124,15 +123,11 @@ class DiffWidget(Static):
 
     def _compute_unified_diff(self) -> None:
         """Compute unified diff with line numbers."""
-        old_lines = self.old_content.split('\n') if self.old_content else []
-        new_lines = self.new_content.split('\n')
+        old_lines = self.old_content.split("\n") if self.old_content else []
+        new_lines = self.new_content.split("\n")
 
         # Generate unified diff
-        diff = list(difflib.unified_diff(
-            old_lines, new_lines,
-            lineterm='',
-            n=self.context_lines
-        ))
+        diff = list(difflib.unified_diff(old_lines, new_lines, lineterm="", n=self.context_lines))
 
         if not diff:
             # No differences
@@ -146,29 +141,29 @@ class DiffWidget(Static):
         # Apply start_line offset for snippet diffs (e.g. edit_file)
         offset = self.start_line - 1
         for line in diff:
-            if line.startswith('@@'):
+            if line.startswith("@@"):
                 # Parse @@ -start,count +start,count @@
-                match = re.match(r'@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@', line)
+                match = re.match(r"@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@", line)
                 if match:
                     old_num = int(match.group(1)) - 1 + offset
                     new_num = int(match.group(2)) - 1 + offset
                 continue
-            elif line.startswith('---') or line.startswith('+++'):
+            elif line.startswith("---") or line.startswith("+++"):
                 continue
-            elif line.startswith('+'):
+            elif line.startswith("+"):
                 new_num += 1
                 self._additions += 1
-                result.append(DiffLine(None, new_num, '+', line[1:]))
-            elif line.startswith('-'):
+                result.append(DiffLine(None, new_num, "+", line[1:]))
+            elif line.startswith("-"):
                 old_num += 1
                 self._deletions += 1
-                result.append(DiffLine(old_num, None, '-', line[1:]))
+                result.append(DiffLine(old_num, None, "-", line[1:]))
             else:
                 # Context line
                 old_num += 1
                 new_num += 1
-                content = line[1:] if len(line) > 0 else ''
-                result.append(DiffLine(old_num, new_num, ' ', content))
+                content = line[1:] if len(line) > 0 else ""
+                result.append(DiffLine(old_num, new_num, " ", content))
 
             if len(result) >= self.max_lines:
                 self._truncated = True
@@ -199,6 +194,7 @@ class DiffWidget(Static):
 
         # File header with operation type - VS Code style
         from pathlib import Path
+
         filename = Path(self.file_path).name if self.file_path else "unknown"
 
         if self.old_content is None:
@@ -245,13 +241,13 @@ class DiffWidget(Static):
         # Determine which line number to show (prefer new, fallback to old)
         line_num = line.line_num_new or line.line_num_old or 0
 
-        if line.marker == '+':
+        if line.marker == "+":
             # Addition - muted green background with green-tinted text
             # Line number in green
             text.append(f" {line_num:4} ", style="#6a9955 on #1e2d1e")
             text.append("+", style="bold #73c991 on #2d4a2d")
             text.append(f"{line.content}\n", style="#c5e1c5 on #2d4a2d")
-        elif line.marker == '-':
+        elif line.marker == "-":
             # Deletion - muted red background with red-tinted text
             # Line number in red
             text.append(f" {line_num:4} ", style="#ce9178 on #2d1e1e")
@@ -272,13 +268,7 @@ class InlineDiffWidget(Static):
     - Key changes highlighted
     """
 
-    def __init__(
-        self,
-        old_text: str,
-        new_text: str,
-        max_preview_chars: int = 60,
-        **kwargs
-    ):
+    def __init__(self, old_text: str, new_text: str, max_preview_chars: int = 60, **kwargs):
         """
         Initialize inline diff widget.
 
@@ -298,8 +288,8 @@ class InlineDiffWidget(Static):
         result = Text()
 
         # Truncate for preview
-        old_preview = self.old_text[:self.max_preview_chars]
-        new_preview = self.new_text[:self.max_preview_chars]
+        old_preview = self.old_text[: self.max_preview_chars]
+        new_preview = self.new_text[: self.max_preview_chars]
 
         if len(self.old_text) > self.max_preview_chars:
             old_preview += "..."

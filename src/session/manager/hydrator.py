@@ -18,9 +18,10 @@ Usage:
 """
 
 import os
-from pathlib import Path
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Dict, List, Any, Optional, Tuple, Set
+from pathlib import Path
+from typing import Any, Optional
 
 from src.observability import get_logger
 from src.session.persistence.parser import load_session
@@ -35,9 +36,10 @@ DEFAULT_MAX_CONTEXT_MESSAGES = int(os.getenv("SESSION_MAX_CONTEXT_MESSAGES", "10
 @dataclass
 class AgentState:
     """Restored agent runtime state."""
-    todos: List[Dict[str, Any]] = field(default_factory=list)
-    current_todo_id: Optional[str] = None
-    last_stop_reason: Optional[str] = None
+
+    todos: list[dict[str, Any]] = field(default_factory=list)
+    current_todo_id: str | None = None
+    last_stop_reason: str | None = None
 
     @property
     def has_todos(self) -> bool:
@@ -47,13 +49,14 @@ class AgentState:
 @dataclass
 class HydrationReport:
     """Summary of hydration results."""
+
     session_id: str
     total_messages: int
     context_messages: int
     has_compaction: bool
-    compaction_boundary_seq: Optional[int]
+    compaction_boundary_seq: int | None
     agent_state_restored: bool
-    errors: List[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
     def __str__(self) -> str:
         lines = [
@@ -73,8 +76,9 @@ class HydrationReport:
 @dataclass
 class HydrationResult:
     """Complete result of session hydration."""
+
     store: MessageStore
-    base_llm_messages: List[Dict[str, Any]]
+    base_llm_messages: list[dict[str, Any]]
     agent_state: AgentState
     report: HydrationReport
 
@@ -89,7 +93,7 @@ class SessionHydrator:
     - Find and restore agent_state events
     """
 
-    def __init__(self, max_context_messages: Optional[int] = None):
+    def __init__(self, max_context_messages: int | None = None):
         """
         Initialize hydrator.
 
@@ -99,11 +103,7 @@ class SessionHydrator:
         """
         self.max_context_messages = max_context_messages or DEFAULT_MAX_CONTEXT_MESSAGES
 
-    def hydrate(
-        self,
-        jsonl_path: Path,
-        on_progress: Optional[callable] = None
-    ) -> HydrationResult:
+    def hydrate(self, jsonl_path: Path, on_progress: Callable | None = None) -> HydrationResult:
         """
         Hydrate session from JSONL file.
 
@@ -121,7 +121,7 @@ class SessionHydrator:
         if not jsonl_path.exists():
             raise FileNotFoundError(f"Session file not found: {jsonl_path}")
 
-        errors: List[str] = []
+        errors: list[str] = []
 
         # Extract session_id from path
         # Supports both: .clarity/sessions/abc123/session.jsonl and .clarity/sessions/abc123.jsonl
@@ -162,17 +162,16 @@ class SessionHydrator:
             has_compaction=store._last_compact_boundary_seq is not None,
             compaction_boundary_seq=store._last_compact_boundary_seq,
             agent_state_restored=agent_state_restored,
-            errors=errors
+            errors=errors,
         )
 
-        logger.info(f"Hydration complete: {report.context_messages} context messages, "
-                   f"agent_state_restored={agent_state_restored}")
+        logger.info(
+            f"Hydration complete: {report.context_messages} context messages, "
+            f"agent_state_restored={agent_state_restored}"
+        )
 
         return HydrationResult(
-            store=store,
-            base_llm_messages=base_llm_messages,
-            agent_state=agent_state,
-            report=report
+            store=store, base_llm_messages=base_llm_messages, agent_state=agent_state, report=report
         )
 
     def _extract_agent_state(self, store: MessageStore) -> AgentState:
@@ -195,25 +194,25 @@ class SessionHydrator:
                 continue
 
             # Check for agent_state event type
-            event_type = getattr(meta, 'event_type', None)
+            event_type = getattr(meta, "event_type", None)
             if event_type != "agent_state":
                 continue
 
             # Extract state from meta.extra
-            extra = getattr(meta, 'extra', None) or {}
+            extra = getattr(meta, "extra", None) or {}
 
-            if 'todos' in extra:
-                agent_state.todos = extra['todos']
-            if 'current_todo_id' in extra:
-                agent_state.current_todo_id = extra['current_todo_id']
-            if 'last_stop_reason' in extra:
-                agent_state.last_stop_reason = extra['last_stop_reason']
+            if "todos" in extra:
+                agent_state.todos = extra["todos"]
+            if "current_todo_id" in extra:
+                agent_state.current_todo_id = extra["current_todo_id"]
+            if "last_stop_reason" in extra:
+                agent_state.last_stop_reason = extra["last_stop_reason"]
 
         return agent_state
 
     def _validate_tool_sequences(
-        self, messages: List[Dict[str, Any]]
-    ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+        self, messages: list[dict[str, Any]]
+    ) -> tuple[list[dict[str, Any]], str | None]:
         """
         Validate that all tool_use blocks have corresponding tool_result blocks.
 
@@ -222,16 +221,16 @@ class SessionHydrator:
         was interrupted mid-tool-execution, we need to truncate to a valid point.
 
         Args:
-            messages: List of OpenAI-format messages
+            messages: list of OpenAI-format messages
 
         Returns:
-            Tuple of (validated_messages, warning_message_or_none)
+            tuple of (validated_messages, warning_message_or_none)
         """
         if not messages:
             return messages, None
 
         # Track tool_use IDs and their positions
-        pending_tool_ids: Set[str] = set()
+        pending_tool_ids: set[str] = set()
         last_valid_index = -1  # Index of last message with complete tool sequences
 
         for i, msg in enumerate(messages):
@@ -275,7 +274,7 @@ class SessionHydrator:
             logger.info(f"Pending tool IDs: {list(pending_tool_ids)[:5]}...")  # Log first 5
 
             if last_valid_index >= 0:
-                return messages[:last_valid_index + 1], warning
+                return messages[: last_valid_index + 1], warning
             else:
                 # No valid boundary found - return empty to avoid API error
                 logger.warning("No valid tool sequence boundary found, returning empty context")
@@ -283,7 +282,7 @@ class SessionHydrator:
 
         return messages, None
 
-    def _extract_tool_use_ids(self, msg: Dict[str, Any]) -> Set[str]:
+    def _extract_tool_use_ids(self, msg: dict[str, Any]) -> set[str]:
         """Extract tool_use IDs from message (handles both OpenAI and Anthropic formats).
 
         OpenAI format: tool_calls array at message level
@@ -293,9 +292,9 @@ class SessionHydrator:
             msg: Full message dict (not just content)
 
         Returns:
-            Set of tool_call IDs found in the message
+            set of tool_call IDs found in the message
         """
-        tool_ids: Set[str] = set()
+        tool_ids: set[str] = set()
 
         # OpenAI format: tool_calls array at message level
         tool_calls = msg.get("tool_calls", [])
@@ -324,9 +323,9 @@ class SessionHydrator:
 
         return tool_ids
 
-    def _extract_tool_result_ids(self, content: Any) -> Set[str]:
+    def _extract_tool_result_ids(self, content: Any) -> set[str]:
         """Extract tool_result IDs from message content (handles various formats)."""
-        result_ids: Set[str] = set()
+        result_ids: set[str] = set()
 
         if isinstance(content, list):
             # Multi-part content (Anthropic format)

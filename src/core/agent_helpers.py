@@ -5,7 +5,8 @@ Provides utility classes that depend on AgentInterface instead of CodingAgent,
 showing how to build loosely-coupled subsystems.
 """
 
-from typing import Dict, Any, List, Optional
+from typing import Any, Optional
+
 from .agent_interface import AgentInterface
 
 
@@ -37,7 +38,7 @@ class AgentContextProvider:
         """
         self.agent = agent
 
-    def get_full_context(self) -> Dict[str, Any]:
+    def get_full_context(self) -> dict[str, Any]:
         """
         Get complete execution context for monitoring/observability.
 
@@ -45,7 +46,7 @@ class AgentContextProvider:
         session info, and active task.
 
         Returns:
-            Dict[str, Any]: Complete context dictionary
+            dict[str, Any]: Complete context dictionary
         """
         return self.agent.get_context()
 
@@ -57,7 +58,7 @@ class AgentContextProvider:
             int: Number of messages
         """
         context = self.agent.get_context()
-        return len(context.get('conversation_history', []))
+        return len(context.get("conversation_history", []))
 
     def get_working_directory(self) -> str:
         """
@@ -67,7 +68,7 @@ class AgentContextProvider:
             str: Working directory path
         """
         context = self.agent.get_context()
-        return context.get('working_directory', '.')
+        return context.get("working_directory", ".")
 
     def get_session_id(self) -> str:
         """
@@ -77,7 +78,7 @@ class AgentContextProvider:
             str: Session ID
         """
         context = self.agent.get_context()
-        return context.get('session_id', 'unknown')
+        return context.get("session_id", "unknown")
 
 
 class AgentLLMProxy:
@@ -103,11 +104,7 @@ class AgentLLMProxy:
         self.call_count = 0
         self.error_count = 0
 
-    def call_llm(
-        self,
-        messages: List[Dict[str, str]],
-        **kwargs
-    ) -> str:
+    def call_llm(self, messages: list[dict[str, str]], **kwargs) -> str:
         """
         Call LLM with tracking.
 
@@ -131,11 +128,8 @@ class AgentLLMProxy:
             raise
 
     def call_with_retry(
-        self,
-        messages: List[Dict[str, str]],
-        max_retries: int = 3,
-        **kwargs
-    ) -> Optional[str]:
+        self, messages: list[dict[str, str]], max_retries: int = 3, **kwargs
+    ) -> str | None:
         """
         Call LLM with automatic retry on failure.
 
@@ -159,12 +153,12 @@ class AgentLLMProxy:
 
         return None
 
-    def get_statistics(self) -> Dict[str, int]:
+    def get_statistics(self) -> dict[str, int]:
         """
         Get proxy statistics.
 
         Returns:
-            Dict[str, int]: Call count and error count
+            dict[str, int]: Call count and error count
         """
         return {
             "call_count": self.call_count,
@@ -173,7 +167,7 @@ class AgentLLMProxy:
                 (self.call_count - self.error_count) / self.call_count
                 if self.call_count > 0
                 else 0.0
-            )
+            ),
         }
 
 
@@ -197,13 +191,9 @@ class AgentToolProxy:
             agent: Agent instance (implements AgentInterface)
         """
         self.agent = agent
-        self.execution_history: List[Dict[str, Any]] = []
+        self.execution_history: list[dict[str, Any]] = []
 
-    def execute_tool(
-        self,
-        tool_name: str,
-        **params
-    ) -> Any:
+    def execute_tool(self, tool_name: str, **params) -> Any:
         """
         Execute tool with tracking.
 
@@ -217,18 +207,10 @@ class AgentToolProxy:
             Any: Tool result
         """
         result = self.agent.execute_tool(tool_name, **params)
-        self.execution_history.append({
-            "tool": tool_name,
-            "params": params,
-            "result": result
-        })
+        self.execution_history.append({"tool": tool_name, "params": params, "result": result})
         return result
 
-    def execute_with_validation(
-        self,
-        tool_name: str,
-        **params
-    ) -> Any:
+    def execute_with_validation(self, tool_name: str, **params) -> Any:
         """
         Execute tool with parameter validation.
 
@@ -243,8 +225,8 @@ class AgentToolProxy:
             ValueError: Invalid parameters
         """
         # Example validation: check required params
-        if tool_name == 'write_file':
-            if 'file_path' not in params or 'content' not in params:
+        if tool_name == "write_file":
+            if "file_path" not in params or "content" not in params:
                 raise ValueError("write_file requires file_path and content")
 
         return self.execute_tool(tool_name, **params)
@@ -258,15 +240,15 @@ class AgentToolProxy:
         """
         return len(self.execution_history)
 
-    def get_tool_usage(self) -> Dict[str, int]:
+    def get_tool_usage(self) -> dict[str, int]:
         """
         Get tool usage statistics.
 
         Returns:
-            Dict[str, int]: Tool name -> execution count
+            dict[str, int]: Tool name -> execution count
         """
         usage = {}
         for entry in self.execution_history:
-            tool = entry['tool']
+            tool = entry["tool"]
             usage[tool] = usage.get(tool, 0) + 1
         return usage

@@ -1,8 +1,9 @@
 """Prompt optimizer for token efficiency and effectiveness."""
 
 import re
+from typing import Any, Optional
+
 import tiktoken
-from typing import List, Dict, Any, Optional
 
 
 class PromptOptimizer:
@@ -27,7 +28,7 @@ class PromptOptimizer:
     def compress_prompt(
         self,
         prompt: str,
-        target_tokens: Optional[int] = None,
+        target_tokens: int | None = None,
         preserve_structure: bool = True,
     ) -> str:
         """
@@ -75,12 +76,12 @@ class PromptOptimizer:
     def _remove_redundant_whitespace(self, text: str) -> str:
         """Remove redundant whitespace while preserving structure."""
         # Remove multiple blank lines
-        text = re.sub(r'\n{3,}', '\n\n', text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
 
         # Remove trailing whitespace
-        lines = [line.rstrip() for line in text.split('\n')]
+        lines = [line.rstrip() for line in text.split("\n")]
 
-        return '\n'.join(lines)
+        return "\n".join(lines)
 
     def _abbreviate_terms(self, text: str) -> str:
         """Abbreviate common programming terms."""
@@ -108,7 +109,7 @@ class PromptOptimizer:
         for full, abbr in abbreviations.items():
             # Only abbreviate in comments and documentation
             text = re.sub(
-                rf'\b{full}\b(?=[^<]*(?:<code>|$))',
+                rf"\b{full}\b(?=[^<]*(?:<code>|$))",
                 abbr,
                 text,
                 flags=re.IGNORECASE,
@@ -119,29 +120,27 @@ class PromptOptimizer:
     def _compress_code_blocks(self, text: str) -> str:
         """Compress code blocks by removing comments and docstrings."""
         # Pattern to find code blocks
-        code_pattern = r'```[\w]*\n(.*?)\n```'
+        code_pattern = r"```[\w]*\n(.*?)\n```"
 
         def compress_code(match: re.Match) -> str:
             code = match.group(1)
 
             # Remove single-line comments
-            code = re.sub(r'^\s*#.*$', '', code, flags=re.MULTILINE)
-            code = re.sub(r'^\s*//.*$', '', code, flags=re.MULTILINE)
+            code = re.sub(r"^\s*#.*$", "", code, flags=re.MULTILINE)
+            code = re.sub(r"^\s*//.*$", "", code, flags=re.MULTILINE)
 
             # Remove docstrings
-            code = re.sub(r'""".*?"""', '', code, flags=re.DOTALL)
-            code = re.sub(r"'''.*?'''", '', code, flags=re.DOTALL)
+            code = re.sub(r'""".*?"""', "", code, flags=re.DOTALL)
+            code = re.sub(r"'''.*?'''", "", code, flags=re.DOTALL)
 
             # Remove blank lines
-            lines = [line for line in code.split('\n') if line.strip()]
+            lines = [line for line in code.split("\n") if line.strip()]
 
-            return f'```\n{chr(10).join(lines)}\n```'
+            return f"```\n{chr(10).join(lines)}\n```"
 
         return re.sub(code_pattern, compress_code, text, flags=re.DOTALL)
 
-    def _truncate_to_tokens(
-        self, text: str, max_tokens: int, preserve_structure: bool
-    ) -> str:
+    def _truncate_to_tokens(self, text: str, max_tokens: int, preserve_structure: bool) -> str:
         """Truncate text to fit within token budget."""
         tokens = self.encoding.encode(text)
 
@@ -155,14 +154,14 @@ class PromptOptimizer:
         if preserve_structure:
             # Try to end at a complete tag or line
             # Find last complete line
-            lines = truncated_text.split('\n')
+            lines = truncated_text.split("\n")
             if len(lines) > 1:
                 # Remove potentially incomplete last line
-                truncated_text = '\n'.join(lines[:-1])
+                truncated_text = "\n".join(lines[:-1])
 
         return truncated_text + "\n[...]"
 
-    def deduplicate_context(self, context_items: List[str]) -> List[str]:
+    def deduplicate_context(self, context_items: list[str]) -> list[str]:
         """Remove duplicate information from context items."""
         seen = set()
         deduplicated = []
@@ -177,14 +176,14 @@ class PromptOptimizer:
 
         return deduplicated
 
-    def optimize_for_attention(self, text: str, key_info: List[str]) -> str:
+    def optimize_for_attention(self, text: str, key_info: list[str]) -> str:
         """
         Optimize text to guide LLM attention.
         Places important info at start and end (primacy/recency effect).
 
         Args:
             text: Text to optimize
-            key_info: List of key information pieces
+            key_info: list of key information pieces
 
         Returns:
             Optimized text
@@ -233,9 +232,7 @@ class PromptOptimizer:
             task_description, task_tokens, preserve_structure=True
         )
 
-        compressed_code = self.compress_prompt(
-            code_context, code_tokens, preserve_structure=True
-        )
+        compressed_code = self.compress_prompt(code_context, code_tokens, preserve_structure=True)
 
         compressed_history = self.compress_prompt(
             conversation_history, history_tokens, preserve_structure=False

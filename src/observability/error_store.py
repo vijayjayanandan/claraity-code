@@ -25,10 +25,11 @@ import sqlite3
 import threading
 import uuid
 from contextlib import contextmanager
-from dataclasses import dataclass, asdict, fields as dataclass_fields
+from dataclasses import asdict, dataclass
+from dataclasses import fields as dataclass_fields
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -53,54 +54,57 @@ DEFAULT_QUERY_LIMIT = 100
 # ERROR TAXONOMY
 # =============================================================================
 
+
 class ErrorCategory:
     """Controlled error taxonomy for meaningful queries."""
-    PROVIDER_TIMEOUT = 'provider_timeout'  # WriteTimeout, ReadTimeout from httpx
-    PROVIDER_ERROR = 'provider_error'      # HTTP 5xx, invalid response
-    TOOL_TIMEOUT = 'tool_timeout'          # Tool exceeded timeout_s
-    TOOL_ERROR = 'tool_error'              # Tool execution failed
-    UI_GUARD_SKIPPED = 'ui_guard_skipped'  # Pause widget not mounted
-    BUDGET_PAUSE = 'budget_pause'          # Max wall time / max tool calls
-    UNEXPECTED = 'unexpected'              # Uncategorized
+
+    PROVIDER_TIMEOUT = "provider_timeout"  # WriteTimeout, ReadTimeout from httpx
+    PROVIDER_ERROR = "provider_error"  # HTTP 5xx, invalid response
+    TOOL_TIMEOUT = "tool_timeout"  # Tool exceeded timeout_s
+    TOOL_ERROR = "tool_error"  # Tool execution failed
+    UI_GUARD_SKIPPED = "ui_guard_skipped"  # Pause widget not mounted
+    BUDGET_PAUSE = "budget_pause"  # Max wall time / max tool calls
+    UNEXPECTED = "unexpected"  # Uncategorized
 
 
 @dataclass
 class ErrorRecord:
     """Structured error record for storage and queries."""
+
     id: str
     ts: str
     level: str
     category: str
     error_type: str
     message: str
-    traceback: Optional[str] = None
-    component: Optional[str] = None
-    operation: Optional[str] = None
-    run_id: Optional[str] = None  # Process-level identifier
-    session_id: Optional[str] = None
-    stream_id: Optional[str] = None
-    request_id: Optional[str] = None
-    model: Optional[str] = None
-    backend: Optional[str] = None
-    tool_name: Optional[str] = None
-    tool_timeout_s: Optional[float] = None
-    elapsed_ms: Optional[float] = None  # Standardized to milliseconds
-    payload_bytes: Optional[int] = None
-    prompt_tokens: Optional[int] = None
-    completion_tokens: Optional[int] = None
+    traceback: str | None = None
+    component: str | None = None
+    operation: str | None = None
+    run_id: str | None = None  # Process-level identifier
+    session_id: str | None = None
+    stream_id: str | None = None
+    request_id: str | None = None
+    model: str | None = None
+    backend: str | None = None
+    tool_name: str | None = None
+    tool_timeout_s: float | None = None
+    elapsed_ms: float | None = None  # Standardized to milliseconds
+    payload_bytes: int | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
     # Timeout debugging fields
-    timeout_read_s: Optional[float] = None
-    timeout_write_s: Optional[float] = None
-    timeout_connect_s: Optional[float] = None
-    timeout_pool_s: Optional[float] = None
-    retry_attempt: Optional[int] = None
-    retry_max: Optional[int] = None
-    root_cause_type: Optional[str] = None
-    root_cause_message: Optional[str] = None
-    tool_args_keys: Optional[str] = None  # JSON list of arg keys
-    extra_json: Optional[str] = None
+    timeout_read_s: float | None = None
+    timeout_write_s: float | None = None
+    timeout_connect_s: float | None = None
+    timeout_pool_s: float | None = None
+    retry_attempt: int | None = None
+    retry_max: int | None = None
+    root_cause_type: str | None = None
+    root_cause_message: str | None = None
+    tool_args_keys: str | None = None  # JSON list of arg keys
+    extra_json: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return asdict(self)
 
@@ -108,6 +112,7 @@ class ErrorRecord:
 # =============================================================================
 # ERROR STORE
 # =============================================================================
+
 
 class ErrorStore:
     """
@@ -224,7 +229,8 @@ class ErrorStore:
         """
         try:
             with self._get_connection() as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO errors (
                         id, ts, level, category, error_type, message, traceback,
                         component, operation, run_id, session_id, stream_id, request_id,
@@ -234,17 +240,41 @@ class ErrorStore:
                         retry_attempt, retry_max, root_cause_type, root_cause_message,
                         tool_args_keys, extra_json
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    error.id, error.ts, error.level, error.category, error.error_type,
-                    error.message, error.traceback, error.component, error.operation,
-                    error.run_id, error.session_id, error.stream_id, error.request_id,
-                    error.model, error.backend, error.tool_name, error.tool_timeout_s,
-                    error.elapsed_ms, error.payload_bytes, error.prompt_tokens,
-                    error.completion_tokens, error.timeout_read_s, error.timeout_write_s,
-                    error.timeout_connect_s, error.timeout_pool_s, error.retry_attempt,
-                    error.retry_max, error.root_cause_type, error.root_cause_message,
-                    error.tool_args_keys, error.extra_json
-                ))
+                """,
+                    (
+                        error.id,
+                        error.ts,
+                        error.level,
+                        error.category,
+                        error.error_type,
+                        error.message,
+                        error.traceback,
+                        error.component,
+                        error.operation,
+                        error.run_id,
+                        error.session_id,
+                        error.stream_id,
+                        error.request_id,
+                        error.model,
+                        error.backend,
+                        error.tool_name,
+                        error.tool_timeout_s,
+                        error.elapsed_ms,
+                        error.payload_bytes,
+                        error.prompt_tokens,
+                        error.completion_tokens,
+                        error.timeout_read_s,
+                        error.timeout_write_s,
+                        error.timeout_connect_s,
+                        error.timeout_pool_s,
+                        error.retry_attempt,
+                        error.retry_max,
+                        error.root_cause_type,
+                        error.root_cause_message,
+                        error.tool_args_keys,
+                        error.extra_json,
+                    ),
+                )
                 conn.commit()
             return error.id
         except Exception as e:
@@ -252,12 +282,7 @@ class ErrorStore:
             return error.id
 
     def record_from_dict(
-        self,
-        level: str,
-        category: str,
-        error_type: str,
-        message: str,
-        **kwargs
+        self, level: str, category: str, error_type: str, message: str, **kwargs
     ) -> str:
         """
         Record an error from individual fields.
@@ -273,39 +298,57 @@ class ErrorStore:
             Error ID
         """
         error_id = str(uuid.uuid4())
-        ts = datetime.utcnow().isoformat() + 'Z'
+        ts = datetime.utcnow().isoformat() + "Z"
 
         # Truncate traceback to prevent DB bloat
-        traceback_str = kwargs.get('traceback')
+        traceback_str = kwargs.get("traceback")
         if traceback_str and len(traceback_str) > MAX_TRACEBACK_LENGTH:
-            traceback_str = traceback_str[:MAX_TRACEBACK_LENGTH] + '\n...[truncated]'
-            kwargs['traceback'] = traceback_str
+            traceback_str = traceback_str[:MAX_TRACEBACK_LENGTH] + "\n...[truncated]"
+            kwargs["traceback"] = traceback_str
 
         # Handle extra fields as JSON (avoid duplicating traceback/exception)
         extra_fields = {}
         known_fields = {
             # Core fields
-            'traceback', 'exception',  # Exception blobs - never duplicate
-            'component', 'operation', 'run_id', 'session_id', 'stream_id',
-            'request_id', 'model', 'backend', 'tool_name', 'tool_timeout_s',
-            'elapsed_ms', 'payload_bytes', 'prompt_tokens', 'completion_tokens',
+            "traceback",
+            "exception",  # Exception blobs - never duplicate
+            "component",
+            "operation",
+            "run_id",
+            "session_id",
+            "stream_id",
+            "request_id",
+            "model",
+            "backend",
+            "tool_name",
+            "tool_timeout_s",
+            "elapsed_ms",
+            "payload_bytes",
+            "prompt_tokens",
+            "completion_tokens",
             # Timeout debugging fields
-            'timeout_read_s', 'timeout_write_s', 'timeout_connect_s', 'timeout_pool_s',
-            'retry_attempt', 'retry_max', 'root_cause_type', 'root_cause_message',
-            'tool_args_keys',
+            "timeout_read_s",
+            "timeout_write_s",
+            "timeout_connect_s",
+            "timeout_pool_s",
+            "retry_attempt",
+            "retry_max",
+            "root_cause_type",
+            "root_cause_message",
+            "tool_args_keys",
         }
         for key, value in list(kwargs.items()):
             if key not in known_fields:
                 extra_fields[key] = value
                 del kwargs[key]
-            elif key == 'exception':
+            elif key == "exception":
                 # 'exception' is an alias for 'traceback', extract if needed
-                if 'traceback' not in kwargs and value:
-                    kwargs['traceback'] = value
+                if "traceback" not in kwargs and value:
+                    kwargs["traceback"] = value
                 del kwargs[key]
 
         if extra_fields:
-            kwargs['extra_json'] = json.dumps(extra_fields, default=str)
+            kwargs["extra_json"] = json.dumps(extra_fields, default=str)
 
         error = ErrorRecord(
             id=error_id,
@@ -314,7 +357,7 @@ class ErrorStore:
             category=category,
             error_type=error_type,
             message=message,
-            **kwargs
+            **kwargs,
         )
 
         return self.record(error)
@@ -328,10 +371,10 @@ class ErrorStore:
         data = dict(row)
 
         # Handle backward compatibility: elapsed_s -> elapsed_ms
-        if 'elapsed_s' in data and 'elapsed_ms' not in data:
-            elapsed_s = data.pop('elapsed_s')
+        if "elapsed_s" in data and "elapsed_ms" not in data:
+            elapsed_s = data.pop("elapsed_s")
             if elapsed_s is not None:
-                data['elapsed_ms'] = elapsed_s * 1000.0  # Convert seconds to milliseconds
+                data["elapsed_ms"] = elapsed_s * 1000.0  # Convert seconds to milliseconds
 
         # Remove any columns that don't exist in ErrorRecord
         valid_fields = {f.name for f in dataclass_fields(ErrorRecord)}
@@ -341,12 +384,12 @@ class ErrorStore:
 
     def query(
         self,
-        session_id: Optional[str] = None,
-        category: Optional[str] = None,
-        component: Optional[str] = None,
-        since_minutes: Optional[int] = None,
+        session_id: str | None = None,
+        category: str | None = None,
+        component: str | None = None,
+        since_minutes: int | None = None,
         limit: int = DEFAULT_QUERY_LIMIT,
-    ) -> List[ErrorRecord]:
+    ) -> list[ErrorRecord]:
         """
         Query errors with filters.
 
@@ -358,7 +401,7 @@ class ErrorStore:
             limit: Maximum results
 
         Returns:
-            List of ErrorRecord
+            list of ErrorRecord
         """
         try:
             with self._get_connection() as conn:
@@ -378,7 +421,9 @@ class ErrorStore:
                     params.append(component)
 
                 if since_minutes:
-                    cutoff = (datetime.utcnow() - timedelta(minutes=since_minutes)).isoformat() + 'Z'
+                    cutoff = (
+                        datetime.utcnow() - timedelta(minutes=since_minutes)
+                    ).isoformat() + "Z"
                     query += " AND ts >= ?"
                     params.append(cutoff)
 
@@ -394,7 +439,7 @@ class ErrorStore:
             logger.error(f"[FAIL] Failed to query errors: {e}")
             return []
 
-    def count_by_category(self, since_minutes: Optional[int] = None) -> Dict[str, int]:
+    def count_by_category(self, since_minutes: int | None = None) -> dict[str, int]:
         """
         Count errors by category.
 
@@ -402,7 +447,7 @@ class ErrorStore:
             since_minutes: Filter to last N minutes
 
         Returns:
-            Dict mapping category to count
+            dict mapping category to count
         """
         try:
             with self._get_connection() as conn:
@@ -410,20 +455,22 @@ class ErrorStore:
                 params = []
 
                 if since_minutes:
-                    cutoff = (datetime.utcnow() - timedelta(minutes=since_minutes)).isoformat() + 'Z'
+                    cutoff = (
+                        datetime.utcnow() - timedelta(minutes=since_minutes)
+                    ).isoformat() + "Z"
                     query += " WHERE ts >= ?"
                     params.append(cutoff)
 
                 query += " GROUP BY category"
 
                 cursor = conn.execute(query, params)
-                return {row['category']: row['count'] for row in cursor.fetchall()}
+                return {row["category"]: row["count"] for row in cursor.fetchall()}
 
         except Exception as e:
             logger.error(f"[FAIL] Failed to count errors: {e}")
             return {}
 
-    def get_recent(self, count: int = 10) -> List[ErrorRecord]:
+    def get_recent(self, count: int = 10) -> list[ErrorRecord]:
         """
         Get most recent errors.
 
@@ -431,7 +478,7 @@ class ErrorStore:
             count: Number of errors to return
 
         Returns:
-            List of ErrorRecord
+            list of ErrorRecord
         """
         return self.query(limit=count)
 
@@ -446,12 +493,9 @@ class ErrorStore:
             Number of deleted records
         """
         try:
-            cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat() + 'Z'
+            cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat() + "Z"
             with self._get_connection() as conn:
-                cursor = conn.execute(
-                    "DELETE FROM errors WHERE ts < ?",
-                    (cutoff,)
-                )
+                cursor = conn.execute("DELETE FROM errors WHERE ts < ?", (cutoff,))
                 deleted = cursor.rowcount
                 conn.commit()
                 logger.info(f"[OK] Deleted {deleted} errors older than {days} days")
@@ -465,7 +509,7 @@ class ErrorStore:
 # GLOBAL INSTANCE
 # =============================================================================
 
-_error_store_instance: Optional[ErrorStore] = None
+_error_store_instance: ErrorStore | None = None
 _error_store_lock = threading.Lock()
 
 

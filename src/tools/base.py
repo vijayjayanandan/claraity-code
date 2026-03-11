@@ -3,28 +3,31 @@
 import asyncio
 import json
 import logging
+import time
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
-from pydantic import BaseModel, Field
 from enum import Enum
-import time
+from typing import TYPE_CHECKING, Any, Optional
+
+from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
-    from src.hooks import HookManager, HookDecision, HookBlockedError
+    from src.hooks import HookBlockedError, HookDecision, HookManager
 
 # Try to import structured logging with get_logger
 try:
-    from src.observability import get_logger, ErrorCategory
+    from src.observability import ErrorCategory, get_logger
+
     logger = get_logger("tools.base")
     STRUCTURED_LOGGING = True
 except ImportError:
     # Fallback to stdlib logger
     logger = logging.getLogger(__name__)
     STRUCTURED_LOGGING = False
+
     class ErrorCategory:
-        TOOL_TIMEOUT = 'tool_timeout'
-        TOOL_ERROR = 'tool_error'
+        TOOL_TIMEOUT = "tool_timeout"
+        TOOL_ERROR = "tool_error"
 
 # =============================================================================
 # Tool Timeout Configuration
@@ -38,36 +41,35 @@ DEFAULT_TOOL_TIMEOUT_S = 120  # 2 minutes default for most tools
 TOOL_TIMEOUT_OVERRIDES = {
     # Commands can run long (builds, tests, etc.)
     "run_command": 600,  # 10 minutes
-
     # Subagent delegation: None disables outer timeout (internal pause handles limits)
     "delegate_to_subagent": None,
-
     # LSP tools need extra time for server startup (jedi-language-server ~25s)
     "get_file_outline": 90,
     "get_symbol_context": 90,
-
     # File operations are usually fast, but large files need some buffer
     "write_file": 60,
     "read_file": 30,
-
     # Search tools can be slow on large codebases
     "search_code": 60,
     "glob_files": 30,
-
     # Web tools need network time
     "web_search": 45,  # API call + processing
-    "web_fetch": 60,   # Large pages can be slow
+    "web_fetch": 60,  # Large pages can be slow
+    # Background task check is instant
+    "check_background_task": 10,
 }
 
 
 # Tool Exceptions
 class ToolNotFoundError(Exception):
     """Tool does not exist in registry."""
+
     pass
 
 
 class ToolExecutionError(Exception):
     """Tool execution failed."""
+
     pass
 
 
@@ -85,8 +87,8 @@ class ToolResult(BaseModel):
     tool_name: str
     status: ToolStatus
     output: Any
-    error: Optional[str] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    error: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     def is_success(self) -> bool:
         """Check if execution was successful."""
@@ -120,7 +122,7 @@ class Tool(ABC):
         """
         pass
 
-    def get_schema(self) -> Dict[str, Any]:
+    def get_schema(self) -> dict[str, Any]:
         """
         Get tool schema for LLM.
 
@@ -130,11 +132,11 @@ class Tool(ABC):
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": self._get_parameters()
+            "parameters": self._get_parameters(),
         }
 
     @abstractmethod
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         """Get parameter schema."""
         pass
 
@@ -142,7 +144,7 @@ class Tool(ABC):
 class ToolExecutor:
     """Executor for managing and running tools."""
 
-    def __init__(self, hook_manager: Optional['HookManager'] = None, max_workers: int = 4):
+    def __init__(self, hook_manager: Optional["HookManager"] = None, max_workers: int = 4):
         """
         Initialize tool executor.
 
@@ -150,7 +152,7 @@ class ToolExecutor:
             hook_manager: Optional hook manager for event hooks
             max_workers: Max threads for async tool execution (default: 4)
         """
-        self.tools: Dict[str, Tool] = {}
+        self.tools: dict[str, Tool] = {}
         self.hook_manager = hook_manager
         # ThreadPoolExecutor for running sync tools in async context
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
@@ -167,6 +169,17 @@ class ToolExecutor:
     def unregister_tool(self, tool_name: str) -> None:
         """Remove a tool by name. No-op if not registered."""
         self.tools.pop(tool_name, None)
+
+    def get_tool(self, tool_name: str) -> Tool | None:
+        """Get a tool by name.
+
+        Args:
+            tool_name: Name of tool to retrieve
+
+        Returns:
+            Tool instance or None if not registered
+        """
+        return self.tools.get(tool_name)
 
     def execute_tool(self, tool_name: str, **kwargs: Any) -> ToolResult:
         """
@@ -186,11 +199,10 @@ class ToolExecutor:
         # PRE-TOOL-USE HOOK
         if self.hook_manager:
             try:
-                from src.hooks import HookDecision, HookBlockedError
+                from src.hooks import HookBlockedError, HookDecision
 
                 decision, modified_kwargs = self.hook_manager.emit_pre_tool_use(
-                    tool=tool_name,
-                    arguments=kwargs
+                    tool=tool_name, arguments=kwargs
                 )
 
                 if decision == HookDecision.DENY:
@@ -198,7 +210,7 @@ class ToolExecutor:
                         tool_name=tool_name,
                         status=ToolStatus.ERROR,
                         output=None,
-                        error="Operation denied by hook"
+                        error="Operation denied by hook",
                     )
 
                 # Use modified arguments if hook modified them
@@ -206,15 +218,16 @@ class ToolExecutor:
 
             except Exception as e:
                 # Check if it's a HookBlockedError
-                if e.__class__.__name__ == 'HookBlockedError':
+                if e.__class__.__name__ == "HookBlockedError":
                     return ToolResult(
                         tool_name=tool_name,
                         status=ToolStatus.ERROR,
                         output=None,
-                        error=f"Operation blocked by hook: {str(e)}"
+                        error=f"Operation blocked by hook: {str(e)}",
                     )
                 # Other errors, log and continue
                 import logging
+
                 logging.getLogger(__name__).warning(f"PreToolUse hook error: {e}")
 
         # Check if tool exists
@@ -223,7 +236,7 @@ class ToolExecutor:
                 tool_name=tool_name,
                 status=ToolStatus.ERROR,
                 output=None,
-                error=f"Tool '{tool_name}' not found"
+                error=f"Tool '{tool_name}' not found",
             )
 
         tool = self.tools[tool_name]
@@ -236,10 +249,7 @@ class ToolExecutor:
             error = result.error
         except Exception as e:
             result = ToolResult(
-                tool_name=tool_name,
-                status=ToolStatus.ERROR,
-                output=None,
-                error=str(e)
+                tool_name=tool_name, status=ToolStatus.ERROR, output=None, error=str(e)
             )
             success = False
             error = str(e)
@@ -255,7 +265,7 @@ class ToolExecutor:
                     result=result.output,
                     success=success,
                     duration=duration,
-                    error=error
+                    error=error,
                 )
 
                 # If hook modified the result, use it
@@ -264,6 +274,7 @@ class ToolExecutor:
 
             except Exception as e:
                 import logging
+
                 logging.getLogger(__name__).warning(f"PostToolUse hook error: {e}")
 
         return result
@@ -302,7 +313,7 @@ class ToolExecutor:
         try:
             # Check for native async tool (subprocess delegation)
             tool = self.tools.get(tool_name)
-            if tool and hasattr(tool, 'execute_async'):
+            if tool and hasattr(tool, "execute_async"):
                 # Native async path - runs directly on event loop, no thread pool
                 return await asyncio.wait_for(
                     tool.execute_async(**kwargs),
@@ -313,10 +324,9 @@ class ToolExecutor:
             loop = asyncio.get_running_loop()
             return await asyncio.wait_for(
                 loop.run_in_executor(
-                    self._executor,
-                    lambda: self.execute_tool(tool_name, **kwargs)
+                    self._executor, lambda: self.execute_tool(tool_name, **kwargs)
                 ),
-                timeout=timeout_s
+                timeout=timeout_s,
             )
         except asyncio.TimeoutError:
             # Calculate elapsed time (should be ~timeout_s)
@@ -339,7 +349,7 @@ class ToolExecutor:
                 error=(
                     f"Tool timed out after {timeout_s}s. "
                     "Try a simpler operation or break into smaller steps."
-                )
+                ),
             )
         except asyncio.CancelledError:
             # Propagate cancellation cleanly (user interrupt via Ctrl+C)
@@ -366,12 +376,12 @@ class ToolExecutor:
         """Shutdown the thread pool executor."""
         self._executor.shutdown(wait=True)
 
-    def get_available_tools(self) -> List[Dict[str, Any]]:
+    def get_available_tools(self) -> list[dict[str, Any]]:
         """
         Get list of available tools with schemas.
 
         Returns:
-            List of tool schemas
+            list of tool schemas
         """
         return [tool.get_schema() for tool in self.tools.values()]
 

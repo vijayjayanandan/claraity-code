@@ -1,40 +1,40 @@
 """Memory Manager - Orchestrates all memory layers."""
 
-from typing import List, Optional, Dict, Any, Tuple, TYPE_CHECKING
-from pathlib import Path
-from datetime import datetime
 import uuid
+from datetime import datetime
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Optional
 
 from src.observability import get_logger
 
 logger = get_logger("memory")
 
-from .working_memory import WorkingMemory
+from src.core.render_meta import RenderMetaRegistry
+from src.session.models.message import Message as SessionMessage
+
 from .episodic_memory import EpisodicMemory
 from .file_loader import MemoryFileLoader
-from .observation_store import (
-    ObservationStore,
-    Observation,
-    ObservationPointer,
-    Importance,
-    classify_importance,
-)
 from .models import (
+    CodeContext,
+    ConversationTurn,
+    MemoryType,
     Message,
     MessageRole,
-    ConversationTurn,
-    CodeContext,
     TaskContext,
-    MemoryType,
 )
-
-from src.core.render_meta import RenderMetaRegistry
+from .observation_store import (
+    Importance,
+    Observation,
+    ObservationPointer,
+    ObservationStore,
+    classify_importance,
+)
+from .working_memory import WorkingMemory
 
 if TYPE_CHECKING:
-    from src.session.store.memory_store import MessageStore
-    from src.session.models.message import Message as SessionMessage
     from src.core.streaming import StreamingPipeline
-    from src.llm.base import ProviderDelta, LLMBackend
+    from src.llm.base import LLMBackend, ProviderDelta
+    from src.session.store.memory_store import MessageStore
 
 
 class MemoryManager:
@@ -51,7 +51,7 @@ class MemoryManager:
         system_prompt_tokens: int = 300,
         persist_directory: str = "./data",
         load_file_memories: bool = True,
-        starting_directory: Optional[Path] = None,
+        starting_directory: Path | None = None,
     ):
         """
         Initialize memory manager.
@@ -81,10 +81,12 @@ class MemoryManager:
         self.file_memory_content = ""
 
         # Knowledge base cache
-        self._knowledge_core_content: Optional[str] = None
+        self._knowledge_core_content: str | None = None
 
         # Project root for knowledge base loading (avoids Path.cwd() dependency)
-        self._project_root: Path = Path(starting_directory).resolve() if starting_directory else Path.cwd()
+        self._project_root: Path = (
+            Path(starting_directory).resolve() if starting_directory else Path.cwd()
+        )
 
         # Load file memories if requested
         if load_file_memories:
@@ -96,8 +98,9 @@ class MemoryManager:
         self.persist_directory = Path(persist_directory)
 
         # Key-value store for structured data
-        self._key_value_store: Dict[str, Any] = {}
+        self._key_value_store: dict[str, Any] = {}
         import threading
+
         self._kv_lock = threading.RLock()  # Thread safety for key-value store
 
         # Phase 2: ObservationStore for reversible tool output masking
@@ -108,13 +111,13 @@ class MemoryManager:
 
         # MessageStore integration (Option A: Single Source of Truth)
         # When set, this becomes the primary source for conversation history
-        self._message_store: Optional["MessageStore"] = None
-        self._message_store_session_id: Optional[str] = None
-        self._last_parent_uuid: Optional[str] = None  # Track threading for new messages
+        self._message_store: MessageStore | None = None
+        self._message_store_session_id: str | None = None
+        self._last_parent_uuid: str | None = None  # Track threading for new messages
 
         # StreamingPipeline (Unified Persistence Architecture)
         # Owned by MemoryManager - the single canonical parser for LLM deltas
-        self._streaming_pipeline: Optional["StreamingPipeline"] = None
+        self._streaming_pipeline: StreamingPipeline | None = None
 
         # Ephemeral render metadata registry (session-scoped)
         # Agent writes approval policy when tool name becomes known during streaming.
@@ -180,7 +183,7 @@ class MemoryManager:
         return self._render_meta
 
     def add_user_message(
-        self, content: str, metadata: Optional[Dict] = None, attachments: Optional[List] = None
+        self, content: str, metadata: dict | None = None, attachments: list | None = None
     ) -> Optional["SessionMessage"]:
         """
         Add user message to memory.
@@ -199,15 +202,13 @@ class MemoryManager:
         # Increment turn_id for each user message (stable turn tracking)
         self._current_turn_id += 1
 
-        session_message: Optional["SessionMessage"] = None
+        session_message: SessionMessage | None = None
 
         # Build multimodal content if attachments present
         message_content = self._build_multimodal_content(content, attachments)
 
         # Add to MessageStore if configured (Option A: Single Source of Truth)
         if self._message_store is not None and self._message_store_session_id is not None:
-            from src.session.models.message import Message as SessionMessage
-
             session_message = SessionMessage.create_user(
                 content=message_content,  # Can be str or list (multimodal)
                 session_id=self._message_store_session_id,
@@ -228,10 +229,8 @@ class MemoryManager:
         return session_message
 
     def _build_multimodal_content(
-        self,
-        user_input: str,
-        attachments: Optional[List] = None
-    ) -> 'str | list':
+        self, user_input: str, attachments: list | None = None
+    ) -> "str | list":
         """
         Convert user text + attachments to OpenAI-compatible multimodal format.
 
@@ -257,34 +256,37 @@ class MemoryManager:
 
         # Add user text first (if any)
         if user_input.strip():
-            content.append({
-                "type": "text",
-                "text": user_input
-            })
+            content.append({"type": "text", "text": user_input})
 
         # Add each attachment
         for att in attachments:
             if att.kind == "image":
                 # Image attachment - use OpenAI vision format with data URL
                 # Enhanced: Add structured filename and mime fields
-                content.append({
-                    "type": "image_url",
-                    "image_url": {
-                        "url": att.data_url  # data:image/png;base64,...
-                    },
-                    "filename": att.filename,  # Structured field for TUI rendering
-                    "mime": att.mime  # Structured field for file type
-                })
+                content.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": att.data_url  # data:image/png;base64,...
+                        },
+                        "filename": att.filename,  # Structured field for TUI rendering
+                        "mime": att.mime,  # Structured field for file type
+                    }
+                )
             else:
                 # Text file attachment - include as text block with filename context
                 # Enhanced: Add structured filename and mime fields
-                text_content = att.truncated_text() if hasattr(att, 'truncated_text') else (att.text or "")
-                content.append({
-                    "type": "text",
-                    "text": f"--- BEGIN FILE: {att.filename} ---\n{text_content}\n--- END FILE: {att.filename} ---",
-                    "filename": att.filename,  # Structured field (no parsing needed)
-                    "mime": att.mime  # Structured field for file type
-                })
+                text_content = (
+                    att.truncated_text() if hasattr(att, "truncated_text") else (att.text or "")
+                )
+                content.append(
+                    {
+                        "type": "text",
+                        "text": f"--- BEGIN FILE: {att.filename} ---\n{text_content}\n--- END FILE: {att.filename} ---",
+                        "filename": att.filename,  # Structured field (no parsing needed)
+                        "mime": att.mime,  # Structured field for file type
+                    }
+                )
 
         return content
 
@@ -296,10 +298,10 @@ class MemoryManager:
     def add_assistant_message(
         self,
         content: str,
-        tool_calls: Optional[List[Dict]] = None,
-        metadata: Optional[Dict] = None,
-        stream_id: Optional[str] = None,
-        stop_reason: Optional[str] = None,
+        tool_calls: list[dict] | None = None,
+        metadata: dict | None = None,
+        stream_id: str | None = None,
+        stop_reason: str | None = None,
     ) -> Optional["SessionMessage"]:
         """
         Add assistant message and create conversation turn.
@@ -317,25 +319,27 @@ class MemoryManager:
         Returns:
             SessionMessage if MessageStore is configured, None otherwise
         """
-        session_message: Optional["SessionMessage"] = None
+        session_message: SessionMessage | None = None
 
         # Add to MessageStore if configured (Option A: Single Source of Truth)
         if self._message_store is not None and self._message_store_session_id is not None:
-            from src.session.models.message import Message as SessionMessage, ToolCall, ToolCallFunction
+            from src.session.models.message import ToolCall, ToolCallFunction
 
             # Convert tool_calls dicts to ToolCall objects
             session_tool_calls = []
             if tool_calls:
                 for tc in tool_calls:
                     function_data = tc.get("function", {})
-                    session_tool_calls.append(ToolCall(
-                        id=tc.get("id", ""),
-                        function=ToolCallFunction(
-                            name=function_data.get("name", ""),
-                            arguments=function_data.get("arguments", "{}")
-                        ),
-                        type=tc.get("type", "function")
-                    ))
+                    session_tool_calls.append(
+                        ToolCall(
+                            id=tc.get("id", ""),
+                            function=ToolCallFunction(
+                                name=function_data.get("name", ""),
+                                arguments=function_data.get("arguments", "{}"),
+                            ),
+                            type=tc.get("type", "function"),
+                        )
+                    )
 
             session_message = SessionMessage.create_assistant(
                 content=content,
@@ -386,7 +390,7 @@ class MemoryManager:
         *,
         event_type: str,
         content: str,
-        extra: Dict[str, Any],
+        extra: dict[str, Any],
         include_in_llm_context: bool = False,
     ) -> Optional["SessionMessage"]:
         """
@@ -408,8 +412,6 @@ class MemoryManager:
         if self._message_store is None or self._message_store_session_id is None:
             return None
 
-        from src.session.models.message import Message as SessionMessage
-
         msg = SessionMessage.create_system(
             content=content,
             session_id=self._message_store_session_id,
@@ -425,10 +427,10 @@ class MemoryManager:
         self,
         tool_call_id: str,
         content: str,
-        tool_name: Optional[str] = None,
+        tool_name: str | None = None,
         status: str = "success",
-        duration_ms: Optional[int] = None,
-        exit_code: Optional[int] = None,
+        duration_ms: int | None = None,
+        exit_code: int | None = None,
     ) -> Optional["SessionMessage"]:
         """
         Add tool result message to MessageStore.
@@ -447,11 +449,9 @@ class MemoryManager:
         Returns:
             SessionMessage if MessageStore is configured, None otherwise
         """
-        session_message: Optional["SessionMessage"] = None
+        session_message: SessionMessage | None = None
 
         if self._message_store is not None and self._message_store_session_id is not None:
-            from src.session.models.message import Message as SessionMessage
-
             session_message = SessionMessage.create_tool(
                 tool_call_id=tool_call_id,
                 content=content,
@@ -473,8 +473,8 @@ class MemoryManager:
 
     def start_assistant_stream(
         self,
-        provider: Optional[str] = None,
-        model: Optional[str] = None,
+        provider: str | None = None,
+        model: str | None = None,
     ) -> None:
         """
         Initialize streaming pipeline for new assistant message.
@@ -497,9 +497,7 @@ class MemoryManager:
         from src.core.streaming import StreamingPipeline
 
         if self._message_store is None or self._message_store_session_id is None:
-            raise RuntimeError(
-                "MessageStore not configured. Call set_message_store() first."
-            )
+            raise RuntimeError("MessageStore not configured. Call set_message_store() first.")
 
         self._streaming_pipeline = StreamingPipeline(
             session_id=self._message_store_session_id,
@@ -541,14 +539,10 @@ class MemoryManager:
             ...             print(f"Segment: {type(seg).__name__}")
         """
         if self._streaming_pipeline is None:
-            raise RuntimeError(
-                "No active stream. Call start_assistant_stream() first."
-            )
+            raise RuntimeError("No active stream. Call start_assistant_stream() first.")
 
         if self._message_store is None:
-            raise RuntimeError(
-                "MessageStore not configured. Call set_message_store() first."
-            )
+            raise RuntimeError("MessageStore not configured. Call set_message_store() first.")
 
         # Process delta through canonical pipeline
         message = self._streaming_pipeline.process_delta(delta)
@@ -612,10 +606,10 @@ class MemoryManager:
         tool_name: str,
         args: Any,
         content: str,
-        importance: Optional[Importance] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        importance: Importance | None = None,
+        metadata: dict[str, Any] | None = None,
         inline_threshold_tokens: int = 500,
-    ) -> Tuple[str, bool]:
+    ) -> tuple[str, bool]:
         """
         Store tool output in ObservationStore and decide inline vs pointer.
 
@@ -631,7 +625,7 @@ class MemoryManager:
             inline_threshold_tokens: Token threshold for inline vs pointer decision
 
         Returns:
-            Tuple of (content_to_use, is_pointer):
+            tuple of (content_to_use, is_pointer):
                 - content_to_use: Either full content or pointer string
                 - is_pointer: True if content was stored as pointer
 
@@ -672,7 +666,7 @@ class MemoryManager:
             pointer = observation.to_pointer()
             return pointer, True
 
-    def rehydrate_observation(self, pointer: str) -> Optional[str]:
+    def rehydrate_observation(self, pointer: str) -> str | None:
         """
         Rehydrate a pointer to its full content.
 
@@ -709,7 +703,7 @@ class MemoryManager:
         )
         return len(maskable)
 
-    def get_observation_stats(self) -> Dict[str, Any]:
+    def get_observation_stats(self) -> dict[str, Any]:
         """Get statistics about stored observations."""
         return self.observation_store.get_stats()
 
@@ -736,8 +730,8 @@ class MemoryManager:
         system_prompt: str,
         include_episodic: bool = True,
         include_file_memories: bool = True,
-        max_context_messages: Optional[int] = None,
-    ) -> List[Dict[str, str]]:
+        max_context_messages: int | None = None,
+    ) -> list[dict[str, str]]:
         """
         Build complete context for LLM from all memory layers.
 
@@ -754,7 +748,7 @@ class MemoryManager:
             max_context_messages: Optional limit on conversation messages
 
         Returns:
-            List of message dictionaries for LLM
+            list of message dictionaries for LLM
         """
         context = []
 
@@ -775,7 +769,11 @@ class MemoryManager:
 
         # 3. Episodic memory summary (if requested)
         # Skip if using MessageStore (it has its own compaction handling)
-        if include_episodic and self._message_store is None and self.episodic_memory.conversation_turns:
+        if (
+            include_episodic
+            and self._message_store is None
+            and self.episodic_memory.conversation_turns
+        ):
             episodic_summary = self.episodic_memory.get_context_summary()
             if episodic_summary:
                 context.append(
@@ -804,8 +802,7 @@ class MemoryManager:
 
             # Filter out system messages (we have our own system prompt)
             conversation_context = [
-                msg for msg in conversation_context
-                if msg.get("role") != "system"
+                msg for msg in conversation_context if msg.get("role") != "system"
             ]
             context.extend(conversation_context)
         else:
@@ -815,7 +812,7 @@ class MemoryManager:
 
         return context
 
-    def get_token_budget(self) -> Dict[str, int]:
+    def get_token_budget(self) -> dict[str, int]:
         """
         Get current token allocation across memory layers.
 
@@ -836,9 +833,7 @@ class MemoryManager:
             - episodic_tokens,
         }
 
-    def search_history(
-        self, query: str, max_results: int = 3
-    ) -> List[ConversationTurn]:
+    def search_history(self, query: str, max_results: int = 3) -> list[ConversationTurn]:
         """
         Search conversation history.
 
@@ -847,15 +842,15 @@ class MemoryManager:
             max_results: Maximum results
 
         Returns:
-            List of relevant conversation turns
+            list of relevant conversation turns
         """
         return self.episodic_memory.search_history(query=query, max_results=max_results)
 
     def save_session(
         self,
-        session_name: Optional[str] = None,
+        session_name: str | None = None,
         task_description: str = "",
-        tags: Optional[List[str]] = None,
+        tags: list[str] | None = None,
         permission_mode: str = "normal",
     ) -> str:
         """
@@ -892,8 +887,8 @@ class MemoryManager:
                 "conversation_turns": [
                     {
                         "id": turn.id,
-                        "user_message": turn.user_message.model_dump(mode='json'),
-                        "assistant_message": turn.assistant_message.model_dump(mode='json'),
+                        "user_message": turn.user_message.model_dump(mode="json"),
+                        "assistant_message": turn.assistant_message.model_dump(mode="json"),
                         "tool_calls": turn.tool_calls,
                         "timestamp": turn.timestamp.isoformat(),
                         "summary": turn.summary,
@@ -903,7 +898,7 @@ class MemoryManager:
                 ],
             },
             "task_context": (
-                self.working_memory.task_context.model_dump(mode='json')
+                self.working_memory.task_context.model_dump(mode="json")
                 if self.working_memory.task_context
                 else None
             ),
@@ -946,7 +941,7 @@ class MemoryManager:
             >>> memory_manager.load_session("feature-auth")
         """
         from ..core.session_manager import SessionManager
-        from .models import Message, ConversationTurn
+        from .models import ConversationTurn
 
         # Initialize SessionManager
         sessions_dir = self.persist_directory / "sessions"
@@ -1026,22 +1021,17 @@ class MemoryManager:
         # Load metadata
         metadata_path = session_path / "metadata.json"
         if metadata_path.exists():
-            with open(metadata_path, "r") as f:
+            with open(metadata_path) as f:
                 metadata = json.load(f)
                 self.session_id = metadata.get("session_id", self.session_id)
                 if "session_start" in metadata:
-                    self.session_start = datetime.fromisoformat(
-                        metadata["session_start"]
-                    )
+                    self.session_start = datetime.fromisoformat(metadata["session_start"])
 
-    def get_statistics(self) -> Dict[str, Any]:
+    def get_statistics(self) -> dict[str, Any]:
         """Get comprehensive memory statistics."""
         return {
             "session_id": self.session_id,
-            "session_duration_minutes": (
-                datetime.now() - self.session_start
-            ).total_seconds()
-            / 60,
+            "session_duration_minutes": (datetime.now() - self.session_start).total_seconds() / 60,
             "working_memory": {
                 "messages": len(self.working_memory.messages),
                 "code_contexts": len(self.working_memory.code_contexts),
@@ -1069,7 +1059,7 @@ class MemoryManager:
         if self._message_store:
             self._message_store.clear_tool_state()
 
-    def load_file_memories(self, starting_dir: Optional[Path] = None) -> str:
+    def load_file_memories(self, starting_dir: Path | None = None) -> str:
         """
         Load hierarchical file memories from .clarity/memory.md files.
 
@@ -1091,7 +1081,7 @@ class MemoryManager:
         self.file_memory_content = self.file_loader.load_hierarchy(starting_dir)
         return self.file_memory_content
 
-    def reload_file_memories(self, starting_dir: Optional[Path] = None) -> str:
+    def reload_file_memories(self, starting_dir: Path | None = None) -> str:
         """
         Reload file memories (useful after editing memory files).
 
@@ -1149,15 +1139,18 @@ class MemoryManager:
                 continue
 
             try:
-                content = filepath.read_text(encoding='utf-8')
+                content = filepath.read_text(encoding="utf-8")
                 if not content.strip():
                     continue
 
-                line_count = content.count('\n') + 1
+                line_count = content.count("\n") + 1
                 if line_count > self._KNOWLEDGE_WARN_LINES:
-                    logger.warning("Knowledge file exceeds recommended size",
-                                   file=filename, lines=line_count,
-                                   recommended=self._KNOWLEDGE_WARN_LINES)
+                    logger.warning(
+                        "Knowledge file exceeds recommended size",
+                        file=filename,
+                        lines=line_count,
+                        recommended=self._KNOWLEDGE_WARN_LINES,
+                    )
 
                 sections.append(content)
 
@@ -1206,7 +1199,7 @@ class MemoryManager:
         self.reload_file_memories()
         return path
 
-    def init_project_memory(self, path: Optional[Path] = None) -> Path:
+    def init_project_memory(self, path: Path | None = None) -> Path:
         """
         Initialize a new project memory file with template.
 

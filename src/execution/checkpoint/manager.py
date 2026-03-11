@@ -19,10 +19,10 @@ Phase: 1 - Self-Testing & Long-Running Execution
 import json
 import os
 import uuid
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import Any, Optional
 
 
 @dataclass
@@ -39,6 +39,7 @@ class CheckpointMetadata:
         tool_calls_count: Number of tool calls executed
         conversation_turns: Number of conversation turns
     """
+
     checkpoint_id: str
     timestamp: str  # ISO 8601 format
     task_description: str
@@ -62,22 +63,23 @@ class ExecutionCheckpoint:
         episodic_memory: Compressed summaries of older conversations
         task_context: Project type, key files, key concepts
         tool_execution_history: Complete history of tool calls
-        files_modified: List of files created/modified
+        files_modified: list of files created/modified
         current_todos: Current todo list from TodoWrite tool
         current_phase: Current development phase (e.g., "Phase 1")
         pending_tasks: Tasks remaining to complete
     """
-    metadata: CheckpointMetadata
-    working_memory: List[Dict[str, Any]]  # Recent messages
-    episodic_memory: List[str]  # Compressed summaries
-    task_context: Dict[str, Any]  # Project context
-    tool_execution_history: List[Dict[str, Any]]  # All tool calls
-    files_modified: List[str]  # File paths
-    current_todos: Optional[List[Dict[str, Any]]] = None  # TodoWrite state
-    current_phase: Optional[str] = None
-    pending_tasks: Optional[List[str]] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    metadata: CheckpointMetadata
+    working_memory: list[dict[str, Any]]  # Recent messages
+    episodic_memory: list[str]  # Compressed summaries
+    task_context: dict[str, Any]  # Project context
+    tool_execution_history: list[dict[str, Any]]  # All tool calls
+    files_modified: list[str]  # File paths
+    current_todos: list[dict[str, Any]] | None = None  # TodoWrite state
+    current_phase: str | None = None
+    pending_tasks: list[str] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
         """Convert checkpoint to dictionary for JSON serialization."""
         return {
             "metadata": asdict(self.metadata),
@@ -92,7 +94,7 @@ class ExecutionCheckpoint:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ExecutionCheckpoint":
+    def from_dict(cls, data: dict[str, Any]) -> "ExecutionCheckpoint":
         """Restore checkpoint from dictionary (JSON deserialization)."""
         metadata = CheckpointMetadata(**data["metadata"])
         return cls(
@@ -135,11 +137,7 @@ class CheckpointManager:
         max_checkpoints: Maximum number of checkpoints to keep (auto-cleanup)
     """
 
-    def __init__(
-        self,
-        checkpoint_dir: str = ".checkpoints",
-        max_checkpoints: int = 10
-    ):
+    def __init__(self, checkpoint_dir: str = ".checkpoints", max_checkpoints: int = 10):
         """
         Initialize checkpoint manager.
 
@@ -158,8 +156,8 @@ class CheckpointManager:
         agent: Any,  # CodingAgent instance
         execution_progress: str,
         task_description: str = "Ongoing work",
-        current_phase: Optional[str] = None,
-        pending_tasks: Optional[List[str]] = None
+        current_phase: str | None = None,
+        pending_tasks: list[str] | None = None,
     ) -> str:
         """
         Save complete agent execution state to checkpoint.
@@ -176,7 +174,7 @@ class CheckpointManager:
             execution_progress: Description of current progress
             task_description: What the agent is working on
             current_phase: Current development phase (e.g., "Phase 1")
-            pending_tasks: List of tasks remaining
+            pending_tasks: list of tasks remaining
 
         Returns:
             checkpoint_id: Unique ID of saved checkpoint
@@ -192,16 +190,18 @@ class CheckpointManager:
         # Extract working memory (recent conversation)
         working_memory_messages = []
         try:
-            if (hasattr(agent, 'memory') and
-                hasattr(agent.memory, 'working_memory') and
-                hasattr(agent.memory.working_memory, 'messages')):
+            if (
+                hasattr(agent, "memory")
+                and hasattr(agent.memory, "working_memory")
+                and hasattr(agent.memory.working_memory, "messages")
+            ):
                 # Truncate to last 20 messages to keep checkpoint size manageable
                 recent_messages = agent.memory.working_memory.messages[-20:]
                 working_memory_messages = [
                     {
-                        "role": msg.role.value if hasattr(msg.role, 'value') else str(msg.role),
+                        "role": msg.role.value if hasattr(msg.role, "value") else str(msg.role),
                         "content": msg.content,
-                        "timestamp": msg.timestamp.isoformat() if msg.timestamp else None
+                        "timestamp": msg.timestamp.isoformat() if msg.timestamp else None,
                     }
                     for msg in recent_messages
                 ]
@@ -212,24 +212,26 @@ class CheckpointManager:
         # Extract episodic memory (compressed summaries)
         episodic_memory_summaries = []
         try:
-            if hasattr(agent, 'memory') and hasattr(agent.memory, 'episodic_memory'):
-                if hasattr(agent.memory.episodic_memory, 'compressed_history'):
-                    episodic_memory_summaries = agent.memory.episodic_memory.compressed_history.copy()
+            if hasattr(agent, "memory") and hasattr(agent.memory, "episodic_memory"):
+                if hasattr(agent.memory.episodic_memory, "compressed_history"):
+                    episodic_memory_summaries = (
+                        agent.memory.episodic_memory.compressed_history.copy()
+                    )
         except (TypeError, AttributeError):
             pass
 
         # Extract task context
         task_context = {}
         try:
-            if hasattr(agent, 'memory') and hasattr(agent.memory, 'task_context'):
+            if hasattr(agent, "memory") and hasattr(agent.memory, "task_context"):
                 ctx = agent.memory.task_context
                 # Safely extract each field, ensuring it's a proper type (not Mock)
-                project_type = getattr(ctx, 'project_type', None)
-                key_files = getattr(ctx, 'key_files', [])
-                key_concepts = getattr(ctx, 'key_concepts', [])
+                project_type = getattr(ctx, "project_type", None)
+                key_files = getattr(ctx, "key_files", [])
+                key_concepts = getattr(ctx, "key_concepts", [])
 
                 # Only include if they're JSON-serializable types
-                if isinstance(project_type, (str, type(None))):
+                if isinstance(project_type, str | type(None)):
                     task_context["project_type"] = project_type
                 if isinstance(key_files, list):
                     task_context["key_files"] = key_files
@@ -241,7 +243,7 @@ class CheckpointManager:
         # Extract tool execution history
         tool_execution_history = []
         try:
-            if hasattr(agent, 'tool_execution_history'):
+            if hasattr(agent, "tool_execution_history"):
                 tool_execution_history = [dict(call) for call in agent.tool_execution_history]
         except (TypeError, AttributeError):
             pass
@@ -258,7 +260,7 @@ class CheckpointManager:
         # Extract current todos (from TodoWrite tool state)
         current_todos_list = None
         try:
-            if hasattr(agent, 'current_todos') and agent.current_todos is not None:
+            if hasattr(agent, "current_todos") and agent.current_todos is not None:
                 # Agent has todos stored directly
                 current_todos_list = agent.current_todos.copy()
             else:
@@ -274,7 +276,7 @@ class CheckpointManager:
             pass
 
         # Get working directory
-        working_directory = getattr(agent, 'working_directory', os.getcwd())
+        working_directory = getattr(agent, "working_directory", os.getcwd())
 
         # Create metadata
         metadata = CheckpointMetadata(
@@ -284,7 +286,7 @@ class CheckpointManager:
             working_directory=str(working_directory),
             files_modified_count=len(files_modified),
             tool_calls_count=len(tool_execution_history),
-            conversation_turns=len([m for m in working_memory_messages if m["role"] == "user"])
+            conversation_turns=len([m for m in working_memory_messages if m["role"] == "user"]),
         )
 
         # Create checkpoint
@@ -297,12 +299,12 @@ class CheckpointManager:
             files_modified=files_modified,
             current_todos=current_todos_list,
             current_phase=current_phase,
-            pending_tasks=pending_tasks
+            pending_tasks=pending_tasks,
         )
 
         # Save to file
         checkpoint_file = self.checkpoint_dir / f"checkpoint_{checkpoint_id}.json"
-        with open(checkpoint_file, 'w', encoding='utf-8') as f:
+        with open(checkpoint_file, "w", encoding="utf-8") as f:
             json.dump(checkpoint.to_dict(), f, indent=2, ensure_ascii=False)
 
         # Cleanup old checkpoints
@@ -327,11 +329,9 @@ class CheckpointManager:
         checkpoint_file = self.checkpoint_dir / f"checkpoint_{checkpoint_id}.json"
 
         if not checkpoint_file.exists():
-            raise FileNotFoundError(
-                f"Checkpoint {checkpoint_id} not found at {checkpoint_file}"
-            )
+            raise FileNotFoundError(f"Checkpoint {checkpoint_id} not found at {checkpoint_file}")
 
-        with open(checkpoint_file, 'r', encoding='utf-8') as f:
+        with open(checkpoint_file, encoding="utf-8") as f:
             data = json.load(f)
 
         return ExecutionCheckpoint.from_dict(data)
@@ -354,46 +354,45 @@ class CheckpointManager:
             AttributeError: If agent doesn't have required memory attributes
         """
         # Restore working memory
-        if hasattr(agent, 'memory') and hasattr(agent.memory, 'working_memory'):
+        if hasattr(agent, "memory") and hasattr(agent.memory, "working_memory"):
             # Clear existing messages
             agent.memory.working_memory.messages.clear()
 
             # Restore messages from checkpoint
             from src.memory.memory_manager import Message, MessageRole
+
             for msg_dict in checkpoint.working_memory:
                 role = MessageRole(msg_dict["role"])
                 timestamp_str = msg_dict.get("timestamp")
                 timestamp = datetime.fromisoformat(timestamp_str) if timestamp_str else None
 
-                message = Message(
-                    role=role,
-                    content=msg_dict["content"],
-                    timestamp=timestamp
-                )
+                message = Message(role=role, content=msg_dict["content"], timestamp=timestamp)
                 agent.memory.working_memory.messages.append(message)
 
         # Restore episodic memory
-        if hasattr(agent, 'memory') and hasattr(agent.memory, 'episodic_memory'):
-            if hasattr(agent.memory.episodic_memory, 'compressed_history'):
+        if hasattr(agent, "memory") and hasattr(agent.memory, "episodic_memory"):
+            if hasattr(agent.memory.episodic_memory, "compressed_history"):
                 agent.memory.episodic_memory.compressed_history = checkpoint.episodic_memory.copy()
 
         # Restore task context
-        if hasattr(agent, 'memory') and hasattr(agent.memory, 'task_context'):
+        if hasattr(agent, "memory") and hasattr(agent.memory, "task_context"):
             ctx = agent.memory.task_context
             ctx.project_type = checkpoint.task_context.get("project_type")
             ctx.key_files = checkpoint.task_context.get("key_files", [])
             ctx.key_concepts = checkpoint.task_context.get("key_concepts", [])
 
         # Restore tool execution history
-        if hasattr(agent, 'tool_execution_history'):
-            agent.tool_execution_history = [dict(call) for call in checkpoint.tool_execution_history]
+        if hasattr(agent, "tool_execution_history"):
+            agent.tool_execution_history = [
+                dict(call) for call in checkpoint.tool_execution_history
+            ]
 
-    def list_checkpoints(self) -> List[CheckpointMetadata]:
+    def list_checkpoints(self) -> list[CheckpointMetadata]:
         """
-        List all available checkpoints, sorted by timestamp (newest first).
+        list all available checkpoints, sorted by timestamp (newest first).
 
         Returns:
-            List of CheckpointMetadata objects
+            list of CheckpointMetadata objects
         """
         checkpoints = []
 
@@ -402,7 +401,7 @@ class CheckpointManager:
 
         for checkpoint_file in checkpoint_files:
             try:
-                with open(checkpoint_file, 'r', encoding='utf-8') as f:
+                with open(checkpoint_file, encoding="utf-8") as f:
                     data = json.load(f)
 
                 metadata = CheckpointMetadata(**data["metadata"])
@@ -427,7 +426,8 @@ class CheckpointManager:
             True if checkpoint_id is safe (8-char hex), False otherwise
         """
         import re
-        return bool(re.match(r'^[a-f0-9]{8}$', checkpoint_id))
+
+        return bool(re.match(r"^[a-f0-9]{8}$", checkpoint_id))
 
     def _cleanup_old_checkpoints(self) -> None:
         """
@@ -443,14 +443,16 @@ class CheckpointManager:
             return
 
         # Delete oldest checkpoints (beyond max_checkpoints)
-        checkpoints_to_delete = checkpoints[self.max_checkpoints:]
+        checkpoints_to_delete = checkpoints[self.max_checkpoints :]
 
         for checkpoint_meta in checkpoints_to_delete:
             # Security: Validate checkpoint ID before using it
             if not self._is_valid_checkpoint_id(checkpoint_meta.checkpoint_id):
                 continue
 
-            checkpoint_file = self.checkpoint_dir / f"checkpoint_{checkpoint_meta.checkpoint_id}.json"
+            checkpoint_file = (
+                self.checkpoint_dir / f"checkpoint_{checkpoint_meta.checkpoint_id}.json"
+            )
 
             # Security: Verify file is inside checkpoint directory
             try:

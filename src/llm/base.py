@@ -1,10 +1,12 @@
 """Base LLM interface and models."""
 
-from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional, AsyncIterator, Iterator, TYPE_CHECKING
-from pydantic import BaseModel, ConfigDict, Field
-from enum import Enum
 import os
+from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator, Iterator
+from enum import Enum
+from typing import TYPE_CHECKING, Any, Optional
+
+from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
     from src.session.models.message import TokenUsage as SessionTokenUsage
@@ -26,6 +28,7 @@ class LLMBackendType(str, Enum):
 
 class LLMConfig(BaseModel):
     """Configuration for LLM backend. All values should come from .env file."""
+
     model_config = ConfigDict(protected_namespaces=(), use_enum_values=True)
 
     backend_type: LLMBackendType
@@ -37,24 +40,30 @@ class LLMConfig(BaseModel):
     max_tokens: int
     top_p: float
     top_k: int = Field(default_factory=lambda: int(os.getenv("LLM_TOP_K", "40")))
-    repeat_penalty: float = Field(default_factory=lambda: float(os.getenv("LLM_REPEAT_PENALTY", "1.1")))
+    repeat_penalty: float = Field(
+        default_factory=lambda: float(os.getenv("LLM_REPEAT_PENALTY", "1.1"))
+    )
 
     # Extended thinking (Claude, etc.)
-    thinking_budget: Optional[int] = None  # Token budget for thinking blocks
+    thinking_budget: int | None = None  # Token budget for thinking blocks
 
     # Context settings
     context_window: int
-    num_ctx: Optional[int] = None  # Override context window
+    num_ctx: int | None = None  # Override context window
 
     # Performance
-    num_predict: Optional[int] = None
-    num_gpu: Optional[int] = None
-    num_thread: Optional[int] = None
+    num_predict: int | None = None
+    num_gpu: int | None = None
+    num_thread: int | None = None
 
     # Streaming
-    stream: bool = Field(default_factory=lambda: os.getenv("ENABLE_STREAMING", "true").lower() == "true")
+    stream: bool = Field(
+        default_factory=lambda: os.getenv("ENABLE_STREAMING", "true").lower() == "true"
+    )
     # Stream usage tracking (OpenAI-specific, may not work with all providers)
-    stream_usage: bool = Field(default_factory=lambda: os.getenv("STREAM_USAGE", "true").lower() == "true")
+    stream_usage: bool = Field(
+        default_factory=lambda: os.getenv("STREAM_USAGE", "true").lower() == "true"
+    )
 
     # Timeout
     timeout: float = Field(default_factory=lambda: float(os.getenv("REQUEST_TIMEOUT", "300")))
@@ -65,10 +74,10 @@ class ToolParameter(BaseModel):
 
     type: str  # "string", "number", "boolean", "array", "object"
     description: str
-    enum: Optional[List[str]] = None
-    items: Optional[Dict[str, Any]] = None  # For array types
-    properties: Optional[Dict[str, Any]] = None  # For object types
-    required: Optional[List[str]] = None  # For object types
+    enum: list[str] | None = None
+    items: dict[str, Any] | None = None  # For array types
+    properties: dict[str, Any] | None = None  # For object types
+    required: list[str] | None = None  # For object types
 
 
 class ToolDefinition(BaseModel):
@@ -76,7 +85,7 @@ class ToolDefinition(BaseModel):
 
     name: str
     description: str
-    parameters: Dict[str, Any]  # JSON Schema object
+    parameters: dict[str, Any]  # JSON Schema object
 
     class Config:
         # Pydantic V2: renamed from schema_extra to json_schema_extra
@@ -87,17 +96,11 @@ class ToolDefinition(BaseModel):
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "file_path": {
-                            "type": "string",
-                            "description": "Path to file"
-                        },
-                        "content": {
-                            "type": "string",
-                            "description": "File content"
-                        }
+                        "file_path": {"type": "string", "description": "Path to file"},
+                        "content": {"type": "string", "description": "File content"},
                     },
-                    "required": ["file_path", "content"]
-                }
+                    "required": ["file_path", "content"],
+                },
             }
         }
 
@@ -109,24 +112,24 @@ class ToolDefinition(BaseModel):
 class LLMResponse(BaseModel):
     """Response from LLM."""
 
-    content: Optional[str] = None  # Optional because tool-only responses may have no text
+    content: str | None = None  # Optional because tool-only responses may have no text
     model: str
-    finish_reason: Optional[str] = None
+    finish_reason: str | None = None
 
     # Token usage
-    prompt_tokens: Optional[int] = None
-    completion_tokens: Optional[int] = None
-    total_tokens: Optional[int] = None
-    cached_tokens: Optional[int] = None  # Prompt tokens served from cache
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
+    cached_tokens: int | None = None  # Prompt tokens served from cache
 
     # Timing
-    eval_duration: Optional[float] = None  # seconds
+    eval_duration: float | None = None  # seconds
 
     # Raw response
-    raw_response: Optional[Dict[str, Any]] = None
+    raw_response: dict[str, Any] | None = None
 
     # Tool calls (for tool calling mode)
-    tool_calls: Optional[List[ToolCall]] = None
+    tool_calls: list[ToolCall] | None = None
 
 
 class StreamChunk(BaseModel):
@@ -134,19 +137,20 @@ class StreamChunk(BaseModel):
 
     content: str
     done: bool = False
-    model: Optional[str] = None
-    finish_reason: Optional[str] = None
+    model: str | None = None
+    finish_reason: str | None = None
 
     # Token usage (populated on final chunk when done=True)
-    prompt_tokens: Optional[int] = None
-    completion_tokens: Optional[int] = None
-    total_tokens: Optional[int] = None
-    cached_tokens: Optional[int] = None  # Prompt tokens served from cache
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
+    cached_tokens: int | None = None  # Prompt tokens served from cache
 
 
 # =============================================================================
 # Provider Delta Contract (Unified Persistence Architecture)
 # =============================================================================
+
 
 class ToolCallDelta(BaseModel):
     """
@@ -155,10 +159,11 @@ class ToolCallDelta(BaseModel):
     Used during streaming to accumulate tool call information
     before the full tool call is complete.
     """
-    index: int                         # Tool call index in current message
-    id: Optional[str] = None           # Tool call ID (first delta only)
-    name: Optional[str] = None         # Function name (first delta only)
-    arguments_delta: str = ""          # JSON arguments chunk (accumulated)
+
+    index: int  # Tool call index in current message
+    id: str | None = None  # Tool call ID (first delta only)
+    name: str | None = None  # Function name (first delta only)
+    arguments_delta: str = ""  # JSON arguments chunk (accumulated)
 
 
 class ProviderDelta(BaseModel):
@@ -175,13 +180,14 @@ class ProviderDelta(BaseModel):
     The StreamingPipeline is the ONLY place that converts these raw deltas
     into structured segments (TextSegment, CodeBlockSegment, etc.).
     """
-    stream_id: str                              # Self-describing, stable across deltas
-    text_delta: Optional[str] = None            # Raw text chunk
-    tool_call_delta: Optional[ToolCallDelta] = None  # Incremental tool call
-    thinking_delta: Optional[str] = None        # Native thinking (if provider supports)
-    thinking_signature: Optional[str] = None    # Thinking block signature (Anthropic)
-    finish_reason: Optional[str] = None         # "stop", "tool_calls", etc.
-    usage: Optional[Dict[str, Any]] = None      # Token counts as dict (on finish)
+
+    stream_id: str  # Self-describing, stable across deltas
+    text_delta: str | None = None  # Raw text chunk
+    tool_call_delta: ToolCallDelta | None = None  # Incremental tool call
+    thinking_delta: str | None = None  # Native thinking (if provider supports)
+    thinking_signature: str | None = None  # Thinking block signature (Anthropic)
+    finish_reason: str | None = None  # "stop", "tool_calls", etc.
+    usage: dict[str, Any] | None = None  # Token counts as dict (on finish)
 
     class Config:
         arbitrary_types_allowed = True
@@ -200,16 +206,12 @@ class LLMBackend(ABC):
         self.config = config
 
     @abstractmethod
-    def generate(
-        self,
-        messages: List[Dict[str, str]],
-        **kwargs: Any
-    ) -> LLMResponse:
+    def generate(self, messages: list[dict[str, str]], **kwargs: Any) -> LLMResponse:
         """
         Generate completion from messages.
 
         Args:
-            messages: List of message dicts with 'role' and 'content'
+            messages: list of message dicts with 'role' and 'content'
             **kwargs: Additional generation parameters
 
         Returns:
@@ -219,15 +221,13 @@ class LLMBackend(ABC):
 
     @abstractmethod
     def generate_stream(
-        self,
-        messages: List[Dict[str, str]],
-        **kwargs: Any
+        self, messages: list[dict[str, str]], **kwargs: Any
     ) -> Iterator[StreamChunk]:
         """
         Generate streaming completion.
 
         Args:
-            messages: List of message dicts
+            messages: list of message dicts
             **kwargs: Additional parameters
 
         Yields:
@@ -237,10 +237,10 @@ class LLMBackend(ABC):
 
     def generate_with_tools(
         self,
-        messages: List[Dict[str, str]],
-        tools: List[ToolDefinition],
+        messages: list[dict[str, str]],
+        tools: list[ToolDefinition],
         tool_choice: str = "auto",
-        **kwargs: Any
+        **kwargs: Any,
     ) -> LLMResponse:
         """
         Generate completion with tool calling support.
@@ -249,8 +249,8 @@ class LLMBackend(ABC):
         The LLM can choose to call one or more tools, or respond with text.
 
         Args:
-            messages: List of message dicts with 'role' and 'content'
-            tools: List of available tools (function definitions)
+            messages: list of message dicts with 'role' and 'content'
+            tools: list of available tools (function definitions)
             tool_choice: "auto" (LLM decides), "required" (must call tool),
                         "none" (no tools), or specific tool name
             **kwargs: Additional generation parameters
@@ -310,16 +310,16 @@ class LLMBackend(ABC):
         pass
 
     @abstractmethod
-    def list_models(self) -> List[str]:
+    def list_models(self) -> list[str]:
         """
-        List available models.
+        list available models.
 
         Returns:
-            List of model names
+            list of model names
         """
         pass
 
-    def validate_messages(self, messages: List[Dict[str, str]]) -> None:
+    def validate_messages(self, messages: list[dict[str, str]]) -> None:
         """
         Validate message format.
 
@@ -343,13 +343,13 @@ class LLMBackend(ABC):
             if msg["role"] not in ["system", "user", "assistant", "tool"]:
                 raise ValueError(f"Invalid role: {msg['role']}")
 
-    def format_prompt(self, messages: List[Dict[str, str]]) -> str:
+    def format_prompt(self, messages: list[dict[str, str]]) -> str:
         """
         Format messages into a single prompt string.
         Useful for backends that don't support chat format.
 
         Args:
-            messages: List of messages
+            messages: list of messages
 
         Returns:
             Formatted prompt string

@@ -14,14 +14,14 @@ Engineering Principles:
 """
 
 import json
-import sqlite3
 import logging
+import sqlite3
 import threading
-from dataclasses import dataclass, asdict
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, List, Dict, Any
-from contextlib import contextmanager
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class MetricEntry:
     """Single metric entry."""
+
     timestamp: str
     metric_name: str
     value: float
@@ -91,7 +92,7 @@ class MetricsCollector:
 
             conn.commit()
 
-    def record(self, metric_name: str, value: float, tags: Optional[Dict[str, Any]] = None):
+    def record(self, metric_name: str, value: float, tags: dict[str, Any] | None = None):
         """
         Record a metric.
 
@@ -104,12 +105,7 @@ class MetricsCollector:
             with self._get_connection() as conn:
                 conn.execute(
                     "INSERT INTO metrics (timestamp, metric_name, value, tags) VALUES (?, ?, ?, ?)",
-                    (
-                        datetime.now().isoformat(),
-                        metric_name,
-                        value,
-                        json.dumps(tags or {})
-                    )
+                    (datetime.now().isoformat(), metric_name, value, json.dumps(tags or {})),
                 )
                 conn.commit()
         except Exception as e:
@@ -118,11 +114,11 @@ class MetricsCollector:
     def query(
         self,
         metric_name: str,
-        since: Optional[datetime] = None,
-        until: Optional[datetime] = None,
-        tags: Optional[Dict[str, Any]] = None,
-        limit: Optional[int] = None
-    ) -> List[MetricEntry]:
+        since: datetime | None = None,
+        until: datetime | None = None,
+        tags: dict[str, Any] | None = None,
+        limit: int | None = None,
+    ) -> list[MetricEntry]:
         """
         Query metrics.
 
@@ -134,11 +130,13 @@ class MetricsCollector:
             limit: Maximum number of results
 
         Returns:
-            List of metric entries
+            list of metric entries
         """
         try:
             with self._get_connection() as conn:
-                query = "SELECT timestamp, metric_name, value, tags FROM metrics WHERE metric_name = ?"
+                query = (
+                    "SELECT timestamp, metric_name, value, tags FROM metrics WHERE metric_name = ?"
+                )
                 params = [metric_name]
 
                 if since:
@@ -177,10 +175,10 @@ class MetricsCollector:
         self,
         metric_name: str,
         aggregation: str = "avg",
-        since: Optional[datetime] = None,
-        until: Optional[datetime] = None,
-        tags: Optional[Dict[str, Any]] = None
-    ) -> Optional[float]:
+        since: datetime | None = None,
+        until: datetime | None = None,
+        tags: dict[str, Any] | None = None,
+    ) -> float | None:
         """
         Aggregate metrics.
 
@@ -239,7 +237,7 @@ class MetricsCollector:
             logger.error(f"[FAIL] Failed to aggregate metric {metric_name}: {e}")
             return None
 
-    def get_stats(self, metric_name: str, hours: int = 24) -> Dict[str, Any]:
+    def get_stats(self, metric_name: str, hours: int = 24) -> dict[str, Any]:
         """
         Get statistics for a metric over the last N hours.
 
@@ -271,10 +269,7 @@ class MetricsCollector:
         try:
             cutoff = (datetime.now() - timedelta(days=days)).isoformat()
             with self._get_connection() as conn:
-                cursor = conn.execute(
-                    "DELETE FROM metrics WHERE timestamp < ?",
-                    (cutoff,)
-                )
+                cursor = conn.execute("DELETE FROM metrics WHERE timestamp < ?", (cutoff,))
                 deleted = cursor.rowcount
                 conn.commit()
                 logger.info(f"[OK] Deleted {deleted} metrics older than {days} days")
@@ -287,7 +282,7 @@ class MetricsCollector:
 # =============================================================================
 
 # Singleton metrics collector
-_metrics_instance: Optional[MetricsCollector] = None
+_metrics_instance: MetricsCollector | None = None
 
 
 def get_metrics_collector() -> MetricsCollector:
@@ -306,6 +301,7 @@ metrics = get_metrics_collector()
 # CONVENIENCE FUNCTIONS
 # =============================================================================
 
+
 def record_llm_latency(latency_ms: float, model: str, operation: str = "call"):
     """
     Record LLM latency.
@@ -315,11 +311,7 @@ def record_llm_latency(latency_ms: float, model: str, operation: str = "call"):
         model: Model name (e.g., "gpt-4", "deepseek-coder")
         operation: Operation type (e.g., "call", "stream")
     """
-    metrics.record(
-        "llm_latency_ms",
-        latency_ms,
-        tags={"model": model, "operation": operation}
-    )
+    metrics.record("llm_latency_ms", latency_ms, tags={"model": model, "operation": operation})
 
 
 def record_token_usage(prompt_tokens: int, completion_tokens: int, model: str):
@@ -345,11 +337,7 @@ def record_tool_execution(tool: str, duration_ms: float, success: bool):
         duration_ms: Execution time in milliseconds
         success: Whether execution succeeded
     """
-    metrics.record(
-        "tool_duration_ms",
-        duration_ms,
-        tags={"tool": tool, "success": success}
-    )
+    metrics.record("tool_duration_ms", duration_ms, tags={"tool": tool, "success": success})
 
 
 def record_cost_estimate(cost_usd: float, model: str, operation: str = "llm_call"):
@@ -361,14 +349,10 @@ def record_cost_estimate(cost_usd: float, model: str, operation: str = "llm_call
         model: Model name
         operation: Operation type
     """
-    metrics.record(
-        "cost_usd",
-        cost_usd,
-        tags={"model": model, "operation": operation}
-    )
+    metrics.record("cost_usd", cost_usd, tags={"model": model, "operation": operation})
 
 
-def get_session_stats(hours: int = 24) -> Dict[str, Any]:
+def get_session_stats(hours: int = 24) -> dict[str, Any]:
     """
     Get statistics for the current session.
 
@@ -391,6 +375,7 @@ def get_session_stats(hours: int = 24) -> Dict[str, Any]:
 # =============================================================================
 # MAINTENANCE
 # =============================================================================
+
 
 def cleanup_old_metrics(days: int = 30):
     """

@@ -1,8 +1,8 @@
 """Phase handlers for the Director Protocol."""
 
 from .base import PhaseHandler
-from .understand import UnderstandPhaseHandler
 from .plan import PlanPhaseHandler
+from .understand import UnderstandPhaseHandler
 
 __all__ = [
     "PhaseHandler",

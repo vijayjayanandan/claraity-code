@@ -7,13 +7,14 @@ to validate its behavior through natural, adaptive conversations.
 
 import os
 import re
-from typing import Dict, Any, Optional, List
 from pathlib import Path
+from typing import Any, Optional
 
-from .scenario import AutonomousScenario, ValidationCheck, ScenarioResult
-from .models import ConversationLog
+from src.llm.base import LLMBackendType, LLMConfig
 from src.llm.openai_backend import OpenAIBackend
-from src.llm.base import LLMConfig, LLMBackendType
+
+from .models import ConversationLog
+from .scenario import AutonomousScenario, ScenarioResult, ValidationCheck
 
 
 class TestingAgent:
@@ -33,10 +34,10 @@ class TestingAgent:
     def __init__(
         self,
         scenario: AutonomousScenario,
-        model_name: Optional[str] = None,
-        backend: Optional[str] = None,
-        base_url: Optional[str] = None,
-        api_key: Optional[str] = None
+        model_name: str | None = None,
+        backend: str | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
     ):
         """
         Initialize Testing Agent.
@@ -49,7 +50,7 @@ class TestingAgent:
             api_key: API key (defaults to env OPENAI_API_KEY)
         """
         self.scenario = scenario
-        self.conversation_history: List[Dict[str, str]] = []
+        self.conversation_history: list[dict[str, str]] = []
 
         # Initialize LLM backend (using OpenAI-compatible backend)
         self.model_name = model_name or os.getenv("LLM_MODEL")
@@ -69,14 +70,11 @@ class TestingAgent:
             context_window=int(os.getenv("LLM_CONTEXT_WINDOW", "32768")),
             temperature=float(os.getenv("LLM_TEMPERATURE", "0.2")),
             max_tokens=int(os.getenv("LLM_MAX_TOKENS", "16384")),
-            top_p=float(os.getenv("LLM_TOP_P", "0.95"))
+            top_p=float(os.getenv("LLM_TOP_P", "0.95")),
         )
 
         # Initialize OpenAI backend
-        self.llm = OpenAIBackend(
-            llm_config,
-            api_key=self.api_key
-        )
+        self.llm = OpenAIBackend(llm_config, api_key=self.api_key)
 
         # Build system prompt for Testing Agent
         self.system_prompt = self._build_system_prompt()
@@ -92,7 +90,7 @@ YOUR ROLE AS TESTING AGENT:
 {self.scenario.testing_agent_prompt}
 
 SUCCESS CRITERIA (you will validate these at the end):
-{chr(10).join(f"{i+1}. {criterion}" for i, criterion in enumerate(self.scenario.success_criteria))}
+{chr(10).join(f"{i + 1}. {criterion}" for i, criterion in enumerate(self.scenario.success_criteria))}
 
 INSTRUCTIONS:
 1. Generate realistic user messages that test the coding agent
@@ -118,7 +116,7 @@ IMPORTANT RULES:
 - Your goal is to VALIDATE the coding agent, not to make its job harder
 """
 
-    def generate_first_message(self) -> Dict[str, Any]:
+    def generate_first_message(self) -> dict[str, Any]:
         """
         Generate the first user message to start the conversation.
 
@@ -141,29 +139,23 @@ Provide your response in the required format."""
         response = self.llm.generate(
             messages=[
                 {"role": "system", "content": self.system_prompt},
-                {"role": "user", "content": prompt}
+                {"role": "user", "content": prompt},
             ]
         ).content
 
         # Add to conversation history
-        self.conversation_history.append({
-            "role": "user",
-            "content": prompt
-        })
-        self.conversation_history.append({
-            "role": "assistant",
-            "content": response
-        })
+        self.conversation_history.append({"role": "user", "content": prompt})
+        self.conversation_history.append({"role": "assistant", "content": response})
 
         return self._parse_response(response)
 
     def generate_next_message(
         self,
         coding_agent_response: str,
-        files_generated: List[str],
-        tools_called: List[str],
-        turn_number: int
-    ) -> Dict[str, Any]:
+        files_generated: list[str],
+        tools_called: list[str],
+        turn_number: int,
+    ) -> dict[str, Any]:
         """
         Generate next user message based on coding agent's response.
 
@@ -203,28 +195,19 @@ Provide your response in the required format."""
             messages=[
                 {"role": "system", "content": self.system_prompt},
                 *self.conversation_history,
-                {"role": "user", "content": context}
+                {"role": "user", "content": context},
             ]
         ).content
 
         # Add to conversation history
-        self.conversation_history.append({
-            "role": "user",
-            "content": context
-        })
-        self.conversation_history.append({
-            "role": "assistant",
-            "content": response
-        })
+        self.conversation_history.append({"role": "user", "content": context})
+        self.conversation_history.append({"role": "assistant", "content": response})
 
         return self._parse_response(response)
 
     def generate_final_verdict(
-        self,
-        conversation_log: ConversationLog,
-        workspace_files: List[str],
-        workspace_path: Path
-    ) -> Dict[str, Any]:
+        self, conversation_log: ConversationLog, workspace_files: list[str], workspace_path: Path
+    ) -> dict[str, Any]:
         """
         Generate final verdict after conversation ends.
 
@@ -237,14 +220,16 @@ Provide your response in the required format."""
             Dictionary with:
                 - verdict: PASS or FAIL
                 - reasoning: Explanation of verdict
-                - evidence: List of evidence points
-                - validation_checks: List of ValidationCheck objects
+                - evidence: list of evidence points
+                - validation_checks: list of ValidationCheck objects
         """
         # Build conversation summary
-        conversation_summary = "\n\n".join([
-            f"[{msg.role.upper()}] {msg.content[:500]}{'...' if len(msg.content) > 500 else ''}"
-            for msg in conversation_log.messages
-        ])
+        conversation_summary = "\n\n".join(
+            [
+                f"[{msg.role.upper()}] {msg.content[:500]}{'...' if len(msg.content) > 500 else ''}"
+                for msg in conversation_log.messages
+            ]
+        )
 
         # Read file contents for validation
         file_contents = {}
@@ -253,7 +238,7 @@ Provide your response in the required format."""
                 full_path = workspace_path / file_path
                 if full_path.exists() and full_path.is_file():
                     # Read first 1000 chars of each file
-                    content = full_path.read_text(encoding='utf-8')[:1000]
+                    content = full_path.read_text(encoding="utf-8")[:1000]
                     file_contents[file_path] = content
             except Exception:
                 file_contents[file_path] = "[Could not read file]"
@@ -270,7 +255,7 @@ FILE CONTENTS (first 1000 chars):
 Based on the success criteria, provide your FINAL VERDICT:
 
 SUCCESS CRITERIA TO VALIDATE:
-{chr(10).join(f"{i+1}. {criterion}" for i, criterion in enumerate(self.scenario.success_criteria))}
+{chr(10).join(f"{i + 1}. {criterion}" for i, criterion in enumerate(self.scenario.success_criteria))}
 
 For EACH criterion:
 1. State whether it PASSED or FAILED
@@ -296,13 +281,13 @@ REASONING: <why you made this decision>
         response = self.llm.generate(
             messages=[
                 {"role": "system", "content": self.system_prompt},
-                {"role": "user", "content": verdict_prompt}
+                {"role": "user", "content": verdict_prompt},
             ]
         ).content
 
         return self._parse_verdict(response)
 
-    def _parse_response(self, response: str) -> Dict[str, Any]:
+    def _parse_response(self, response: str) -> dict[str, Any]:
         """
         Parse Testing Agent's response into structured format.
 
@@ -312,30 +297,25 @@ REASONING: <why you made this decision>
             CONTINUE: <yes/no>
             REASONING: <reasoning>
         """
-        result = {
-            "user_message": "",
-            "assessment": "",
-            "continue": True,
-            "reasoning": ""
-        }
+        result = {"user_message": "", "assessment": "", "continue": True, "reasoning": ""}
 
         # Extract USER_MESSAGE
-        user_msg_match = re.search(r'USER_MESSAGE:\s*(.+?)(?=\nASSESSMENT:|$)', response, re.DOTALL)
+        user_msg_match = re.search(r"USER_MESSAGE:\s*(.+?)(?=\nASSESSMENT:|$)", response, re.DOTALL)
         if user_msg_match:
             result["user_message"] = user_msg_match.group(1).strip()
 
         # Extract ASSESSMENT
-        assessment_match = re.search(r'ASSESSMENT:\s*(.+?)(?=\nCONTINUE:|$)', response, re.DOTALL)
+        assessment_match = re.search(r"ASSESSMENT:\s*(.+?)(?=\nCONTINUE:|$)", response, re.DOTALL)
         if assessment_match:
             result["assessment"] = assessment_match.group(1).strip()
 
         # Extract CONTINUE
-        continue_match = re.search(r'CONTINUE:\s*(yes|no)', response, re.IGNORECASE)
+        continue_match = re.search(r"CONTINUE:\s*(yes|no)", response, re.IGNORECASE)
         if continue_match:
             result["continue"] = continue_match.group(1).lower() == "yes"
 
         # Extract REASONING
-        reasoning_match = re.search(r'REASONING:\s*(.+?)(?=\n---|$)', response, re.DOTALL)
+        reasoning_match = re.search(r"REASONING:\s*(.+?)(?=\n---|$)", response, re.DOTALL)
         if reasoning_match:
             result["reasoning"] = reasoning_match.group(1).strip()
 
@@ -347,7 +327,7 @@ REASONING: <why you made this decision>
 
         return result
 
-    def _parse_verdict(self, response: str) -> Dict[str, Any]:
+    def _parse_verdict(self, response: str) -> dict[str, Any]:
         """
         Parse final verdict response.
 
@@ -355,46 +335,50 @@ REASONING: <why you made this decision>
             Dictionary with:
                 - verdict: "PASS" or "FAIL"
                 - reasoning: Explanation
-                - evidence: List of evidence points
-                - validation_checks: List of ValidationCheck objects
+                - evidence: list of evidence points
+                - validation_checks: list of ValidationCheck objects
         """
-        validation_checks: List[ValidationCheck] = []
+        validation_checks: list[ValidationCheck] = []
 
         # Extract validation checks for each criterion
         for i, criterion in enumerate(self.scenario.success_criteria):
             criterion_num = i + 1
 
             # Look for CRITERION N: PASS/FAIL
-            pattern = rf'CRITERION {criterion_num}:\s*(PASS|FAIL)'
+            pattern = rf"CRITERION {criterion_num}:\s*(PASS|FAIL)"
             match = re.search(pattern, response, re.IGNORECASE)
 
             if match:
                 passed = match.group(1).upper() == "PASS"
 
                 # Extract evidence for this criterion
-                evidence_pattern = rf'CRITERION {criterion_num}:.*?EVIDENCE:\s*(.+?)(?=\nCRITERION|OVERALL|$)'
+                evidence_pattern = (
+                    rf"CRITERION {criterion_num}:.*?EVIDENCE:\s*(.+?)(?=\nCRITERION|OVERALL|$)"
+                )
                 evidence_match = re.search(evidence_pattern, response, re.DOTALL | re.IGNORECASE)
-                evidence = evidence_match.group(1).strip() if evidence_match else "No evidence provided"
+                evidence = (
+                    evidence_match.group(1).strip() if evidence_match else "No evidence provided"
+                )
 
-                validation_checks.append(ValidationCheck(
-                    expectation=criterion,
-                    passed=passed,
-                    evidence=evidence
-                ))
+                validation_checks.append(
+                    ValidationCheck(expectation=criterion, passed=passed, evidence=evidence)
+                )
             else:
                 # Criterion not found in response - mark as failed
-                validation_checks.append(ValidationCheck(
-                    expectation=criterion,
-                    passed=False,
-                    evidence="Testing Agent did not evaluate this criterion"
-                ))
+                validation_checks.append(
+                    ValidationCheck(
+                        expectation=criterion,
+                        passed=False,
+                        evidence="Testing Agent did not evaluate this criterion",
+                    )
+                )
 
         # Extract overall verdict
-        verdict_match = re.search(r'OVERALL VERDICT:\s*(PASS|FAIL)', response, re.IGNORECASE)
+        verdict_match = re.search(r"OVERALL VERDICT:\s*(PASS|FAIL)", response, re.IGNORECASE)
         verdict = verdict_match.group(1).upper() if verdict_match else "FAIL"
 
         # Extract reasoning
-        reasoning_match = re.search(r'REASONING:\s*(.+?)(?=\n---|$)', response, re.DOTALL)
+        reasoning_match = re.search(r"REASONING:\s*(.+?)(?=\n---|$)", response, re.DOTALL)
         reasoning = reasoning_match.group(1).strip() if reasoning_match else response
 
         # Overall pass = all criteria passed
@@ -409,5 +393,5 @@ REASONING: <why you made this decision>
             "verdict": verdict,
             "reasoning": reasoning,
             "validation_checks": validation_checks,
-            "passed": overall_passed
+            "passed": overall_passed,
         }

@@ -19,8 +19,8 @@ All logging goes to JSONL file via get_logger() framework.
 
 import json
 import os
-import sys
 import signal
+import sys
 import traceback
 from pathlib import Path
 
@@ -34,13 +34,13 @@ if _project_root not in sys.path:
 
 from src.observability import get_logger
 from src.subagents.ipc import (
+    ApprovalRequest,
     IPCEventType,
     emit_event,
+    read_approval_response_from_stdin,
     read_input_from_stdin,
     serialize_notification,
     serialize_result,
-    ApprovalRequest,
-    read_approval_response_from_stdin,
 )
 
 logger = get_logger("subagents.runner")
@@ -56,7 +56,7 @@ def _create_llm_backend(llm_config_dict, api_key):
     Returns:
         LLMBackend instance
     """
-    from src.llm import LLMConfig, OpenAIBackend, OllamaBackend
+    from src.llm import LLMConfig, OllamaBackend, OpenAIBackend
 
     config = LLMConfig.model_validate(llm_config_dict)
     backend_type = config.backend_type
@@ -84,14 +84,18 @@ def _create_tool_executor(tools_allowlist=None):
         ToolExecutor instance with registered tools
     """
     from src.tools.base import ToolExecutor
-    from src.tools.file_operations import (
-        ReadFileTool, WriteFileTool, EditFileTool,
-        AppendToFileTool, ListDirectoryTool, RunCommandTool,
-    )
-    from src.tools.search_tools import GrepTool, GlobTool
-    from src.tools.lsp_tools import GetFileOutlineTool, GetSymbolContextTool
-    from src.tools.knowledge_tools import KBDetectChangesTool, KBUpdateManifestTool
     from src.tools.clarify_tool import ClarifyTool
+    from src.tools.file_operations import (
+        AppendToFileTool,
+        EditFileTool,
+        ListDirectoryTool,
+        ReadFileTool,
+        RunCommandTool,
+        WriteFileTool,
+    )
+    from src.tools.knowledge_tools import KBDetectChangesTool, KBUpdateManifestTool
+    from src.tools.lsp_tools import GetFileOutlineTool, GetSymbolContextTool
+    from src.tools.search_tools import GlobTool, GrepTool
 
     executor = ToolExecutor(hook_manager=None)
 
@@ -168,8 +172,9 @@ def _create_ipc_approval_callback(subagent_name, auto_approve_set):
         - Tool approval: (approved, feedback_or_None)
         - Clarify: (True, result_dict)
     """
+
     def _callback(tool_name, tool_args, tool_call_id):
-        is_clarify = (tool_name == "clarify")
+        is_clarify = tool_name == "clarify"
         args_summary = ", ".join(
             f'{k}="{v}"' if isinstance(v, str) else f"{k}={v}"
             for k, v in list(tool_args.items())[:3]
@@ -215,6 +220,7 @@ def _create_ipc_pause_callback(subagent_name):
     Returns:
         Callable(reason, reason_code, stats) -> (continue_work, feedback)
     """
+
     def _callback(reason, reason_code, stats):
         request = ApprovalRequest(
             tool_call_id="pause-request",
@@ -266,6 +272,7 @@ def main():
         # Without this, _workspace_root stays None and validate_path_security
         # falls back to Path.cwd() which is fragile if any tool changes cwd.
         from src.tools.file_operations import FileOperationTool
+
         FileOperationTool._workspace_root = Path(input_data.working_directory)
 
         # 3c. Switch process cwd to the target project's working directory.
@@ -294,12 +301,15 @@ def main():
         max_wall_time = input_data.max_wall_time
 
         from src.subagents.subagent import SubAgent
+
         subagent = SubAgent(
             config=config,
             llm=llm,
             tool_executor=tool_executor,
             working_directory=input_data.working_directory,
-            transcript_dir=Path(input_data.transcript_path).parent if input_data.transcript_path else None,
+            transcript_dir=Path(input_data.transcript_path).parent
+            if input_data.transcript_path
+            else None,
             permission_mode=permission_mode,
             approval_callback=approval_cb,
             auto_approve_tools=auto_approve_set,
@@ -315,7 +325,7 @@ def main():
 
         signal.signal(signal.SIGTERM, _on_sigterm)
         # On Windows, also handle SIGBREAK if available
-        if hasattr(signal, 'SIGBREAK'):
+        if hasattr(signal, "SIGBREAK"):
             signal.signal(signal.SIGBREAK, _on_sigterm)
 
         # 7. Emit "registered" event
@@ -355,8 +365,7 @@ def main():
         )
 
         logger.info(
-            f"Runner: task completed (success={result.success}, "
-            f"time={result.execution_time:.2f}s)"
+            f"Runner: task completed (success={result.success}, time={result.execution_time:.2f}s)"
         )
         sys.exit(0)
 
@@ -366,9 +375,10 @@ def main():
         logger.error(f"Runner: fatal error: {error_msg}")
         # Redact potential API keys from traceback before sending over IPC
         import re
+
         sanitized = re.sub(
-            r'(sk-[a-zA-Z0-9]{2})[a-zA-Z0-9-]+',
-            r'\1***REDACTED***',
+            r"(sk-[a-zA-Z0-9]{2})[a-zA-Z0-9-]+",
+            r"\1***REDACTED***",
             error_msg,
         )
         emit_event(

@@ -8,6 +8,7 @@ The protocol (protocol.py) logs errors with full context.
 
 class DirectorError(Exception):
     """Base exception for all Director Protocol errors."""
+
     pass
 
 
@@ -17,9 +18,7 @@ class InvalidTransitionError(DirectorError):
     def __init__(self, current, attempted):
         self.current = current
         self.attempted = attempted
-        super().__init__(
-            f"Invalid transition: {current.name} -> {attempted.name}"
-        )
+        super().__init__(f"Invalid transition: {current.name} -> {attempted.name}")
 
 
 class PhaseError(DirectorError):

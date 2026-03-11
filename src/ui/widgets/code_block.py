@@ -9,12 +9,12 @@ Features:
 - Visual distinction between streaming and complete states
 """
 
-from textual.widgets import Static
-from textual.reactive import reactive
-from rich.syntax import Syntax
-from rich.panel import Panel
-from rich.text import Text
 from rich.console import RenderableType
+from rich.panel import Panel
+from rich.syntax import Syntax
+from rich.text import Text
+from textual.reactive import reactive
+from textual.widgets import Static
 
 
 class CodeBlock(Static):
@@ -61,13 +61,7 @@ class CodeBlock(Static):
     }
     """
 
-    def __init__(
-        self,
-        code: str = "",
-        language: str = "text",
-        is_streaming: bool = True,
-        **kwargs
-    ):
+    def __init__(self, code: str = "", language: str = "text", is_streaming: bool = True, **kwargs):
         """
         Initialize CodeBlock.
 
@@ -164,4 +158,4 @@ class CodeBlock(Static):
         """Get number of lines in the code."""
         if not self.code:
             return 0
-        return self.code.count('\n') + (1 if not self.code.endswith('\n') else 0)
+        return self.code.count("\n") + (1 if not self.code.endswith("\n") else 0)

@@ -14,13 +14,23 @@ llm:
   base_url: https://proxy.fuelix.ai/v1
   model: claude-sonnet-4-5-20250929
   context_window: 200000
-  temperature: 0.2
+  temperature: 0.3
   max_tokens: 16384
   top_p: 0.95
+  thinking_budget: 10000
   subagents:
     code-reviewer:
-      model: gpt-5.2-2025-12-11
+      model: claude-sonnet-4-5-20250929
     test-writer:
-      model: gpt-5.2-2025-12-11
+      model: claude-sonnet-4-5-20250929
     doc-writer:
-      model: gpt-5
+      model: claude-sonnet-4-5-20250929
+    code-writer:
+      model: claude-sonnet-4-5-20250929
+    explore:
+      model: claude-sonnet-4-5-20250929
+    planner:
+      model: claude-sonnet-4-5-20250929
+    general-purpose:
+      model: claude-sonnet-4-5-20250929
+  api_key: sk-test-123

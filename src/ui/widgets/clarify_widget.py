@@ -10,14 +10,14 @@ Replicates the Claude Code AskUserQuestion pattern:
 - "Chat about this" escape hatch
 """
 
-from typing import Optional, List, Dict, Any
+from typing import Any, Optional
 
-from textual.widgets import Static
+from rich.console import RenderableType
+from rich.text import Text
+from textual.binding import Binding
 from textual.containers import Container
 from textual.reactive import reactive
-from textual.binding import Binding
-from rich.text import Text
-from rich.console import RenderableType
+from textual.widgets import Static
 
 from ..messages import ClarifyResponseMessage
 
@@ -25,7 +25,7 @@ from ..messages import ClarifyResponseMessage
 class _TabBar(Static):
     """Horizontal tab navigation bar."""
 
-    def __init__(self, labels: List[str], **kwargs):
+    def __init__(self, labels: list[str], **kwargs):
         super().__init__(**kwargs)
         self.labels = labels
         self.active_index = 0
@@ -45,8 +45,8 @@ class _TabBar(Static):
             if i > 0:
                 t.append("  ", style="dim")
 
-            is_active = (i == self.active_index)
-            is_done = (i in self.completed)
+            is_active = i == self.active_index
+            is_done = i in self.completed
 
             if is_active:
                 # Active tab: highlighted background
@@ -66,7 +66,7 @@ class _QuestionPanel(Static):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._question: Dict[str, Any] = {}
+        self._question: dict[str, Any] = {}
         self._option_index: int = 0
         self._multi_select: bool = False
         self._checked: set[int] = set()  # indices of checked options
@@ -76,7 +76,7 @@ class _QuestionPanel(Static):
 
     def set_question(
         self,
-        question: Dict[str, Any],
+        question: dict[str, Any],
         option_index: int,
         checked: set[int],
         custom_text: str,
@@ -96,14 +96,14 @@ class _QuestionPanel(Static):
 
         # Check if cursor is on the "Type something" row
         type_something_idx = len(options)
-        self._in_custom_mode = (option_index == type_something_idx)
+        self._in_custom_mode = option_index == type_something_idx
 
         self.refresh()
 
     def set_review(
         self,
-        questions: List[Dict[str, Any]],
-        responses: Dict[str, Any],
+        questions: list[dict[str, Any]],
+        responses: dict[str, Any],
         option_index: int,
     ) -> None:
         """Set the review/submit tab content."""
@@ -133,7 +133,7 @@ class _QuestionPanel(Static):
 
         # Render each option
         for i, opt in enumerate(options):
-            is_selected = (i == self._option_index)
+            is_selected = i == self._option_index
             prefix = "> " if is_selected else "  "
 
             if self._multi_select:
@@ -152,7 +152,7 @@ class _QuestionPanel(Static):
 
         # "Type something" option — ghost placeholder when empty
         type_idx = len(options)
-        is_type_selected = (self._option_index == type_idx)
+        is_type_selected = self._option_index == type_idx
         type_prefix = "> " if is_type_selected else "  "
 
         if self._multi_select:
@@ -180,7 +180,7 @@ class _QuestionPanel(Static):
         # "Submit" button for multi-select
         if self._multi_select:
             submit_idx = type_idx + 1
-            is_submit_selected = (self._option_index == submit_idx)
+            is_submit_selected = self._option_index == submit_idx
             submit_prefix = "> " if is_submit_selected else "  "
             submit_style = "bold white" if is_submit_selected else "white"
             t.append(f"     {submit_prefix}Submit\n", style=submit_style)
@@ -190,14 +190,14 @@ class _QuestionPanel(Static):
 
         # "Chat about this" option
         t.append("\n")
-        is_chat_selected = (self._option_index == chat_idx)
+        is_chat_selected = self._option_index == chat_idx
         chat_prefix = "> " if is_chat_selected else "  "
         chat_style = "bold white" if is_chat_selected else "dim"
         t.append(f"{chat_prefix}{chat_idx + 1}. Chat about this\n", style=chat_style)
 
         return t
 
-    def _render_review(self, q: Dict[str, Any]) -> RenderableType:
+    def _render_review(self, q: dict[str, Any]) -> RenderableType:
         t = Text()
         t.append("Review your answers\n\n", style="bold white")
 
@@ -315,8 +315,8 @@ class ClarifyWidget(Container, can_focus=True):
     def __init__(
         self,
         call_id: str,
-        questions: List[Dict[str, Any]],
-        context: Optional[str] = None,
+        questions: list[dict[str, Any]],
+        context: str | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -325,13 +325,13 @@ class ClarifyWidget(Container, can_focus=True):
         self.context = context
 
         # State per question
-        self.responses: Dict[str, Any] = {}  # qid -> selected option id(s)
-        self.selections: Dict[str, set] = {}  # qid -> set of checked option indices (multi-select)
-        self.custom_texts: Dict[str, str] = {}  # qid -> freeform text
-        self.option_indices: Dict[int, int] = {}  # tab_index -> current option index
+        self.responses: dict[str, Any] = {}  # qid -> selected option id(s)
+        self.selections: dict[str, set] = {}  # qid -> set of checked option indices (multi-select)
+        self.custom_texts: dict[str, str] = {}  # qid -> freeform text
+        self.option_indices: dict[int, int] = {}  # tab_index -> current option index
 
         # Tab labels: one per question + "Submit"
-        self._tab_labels = [q.get("label", f"Q{i+1}") for i, q in enumerate(questions)]
+        self._tab_labels = [q.get("label", f"Q{i + 1}") for i, q in enumerate(questions)]
         self._tab_labels.append("Submit")
         self._tab_count = len(self._tab_labels)
         self._completed_tabs: set[int] = set()
@@ -339,7 +339,9 @@ class ClarifyWidget(Container, can_focus=True):
     def compose(self):
         yield _TabBar(self._tab_labels, id="clarify-tabs")
         yield _QuestionPanel(id="clarify-panel")
-        yield Static("Enter to select . Tab/Arrow keys to navigate . Esc to cancel", id="clarify-hints")
+        yield Static(
+            "Enter to select . Tab/Arrow keys to navigate . Esc to cancel", id="clarify-hints"
+        )
 
     def on_mount(self) -> None:
         self.call_after_refresh(self._ensure_focus)
@@ -508,10 +510,12 @@ class ClarifyWidget(Container, can_focus=True):
 
     def action_cancel(self) -> None:
         """Cancel the entire clarify widget."""
-        self.post_message(ClarifyResponseMessage(
-            call_id=self.call_id,
-            submitted=False,
-        ))
+        self.post_message(
+            ClarifyResponseMessage(
+                call_id=self.call_id,
+                submitted=False,
+            )
+        )
 
     def action_select(self) -> None:
         """Handle Enter key."""
@@ -519,17 +523,21 @@ class ClarifyWidget(Container, can_focus=True):
         if self.current_tab >= len(self.questions):
             if self.current_option == 0:
                 # Submit answers
-                self.post_message(ClarifyResponseMessage(
-                    call_id=self.call_id,
-                    submitted=True,
-                    responses=dict(self.responses),
-                ))
+                self.post_message(
+                    ClarifyResponseMessage(
+                        call_id=self.call_id,
+                        submitted=True,
+                        responses=dict(self.responses),
+                    )
+                )
             else:
                 # Cancel
-                self.post_message(ClarifyResponseMessage(
-                    call_id=self.call_id,
-                    submitted=False,
-                ))
+                self.post_message(
+                    ClarifyResponseMessage(
+                        call_id=self.call_id,
+                        submitted=False,
+                    )
+                )
             return
 
         q = self.questions[self.current_tab]
@@ -541,12 +549,14 @@ class ClarifyWidget(Container, can_focus=True):
         if self._is_on_chat():
             # Use custom text as chat message if typed, otherwise empty
             chat_msg = self.custom_texts.get(qid, "")
-            self.post_message(ClarifyResponseMessage(
-                call_id=self.call_id,
-                submitted=False,
-                chat_instead=True,
-                chat_message=chat_msg or None,
-            ))
+            self.post_message(
+                ClarifyResponseMessage(
+                    call_id=self.call_id,
+                    submitted=False,
+                    chat_instead=True,
+                    chat_message=chat_msg or None,
+                )
+            )
             return
 
         # Multi-select "Submit" button
@@ -594,7 +604,7 @@ class ClarifyWidget(Container, can_focus=True):
                 self._completed_tabs.add(self.current_tab)
                 self._advance_tab()
 
-    def _finalize_question(self, qid: str, question: Dict[str, Any]) -> None:
+    def _finalize_question(self, qid: str, question: dict[str, Any]) -> None:
         """Finalize multi-select question and advance."""
         options = question.get("options", [])
         checked = self.selections.get(qid, set())
@@ -626,4 +636,4 @@ class ClarifyWidget(Container, can_focus=True):
             self.current_tab += 1
 
 
-__all__ = ['ClarifyWidget']
+__all__ = ["ClarifyWidget"]

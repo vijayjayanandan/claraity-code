@@ -22,7 +22,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Optional
 from urllib.parse import urlparse
 
 import httpx
@@ -32,6 +32,7 @@ from .base import Tool, ToolResult, ToolStatus
 # Try to import structured logging
 try:
     from src.observability import get_logger
+
     logger = get_logger("tools.web")
 except ImportError:
     logger = logging.getLogger(__name__)
@@ -40,6 +41,7 @@ except ImportError:
 # =============================================================================
 # Helper Classes
 # =============================================================================
+
 
 class TTLCache:
     """Thread-safe TTL cache for web tool results."""
@@ -52,10 +54,10 @@ class TTLCache:
             ttl_seconds: Time-to-live for cached entries (default: 1 hour)
         """
         self.ttl = ttl_seconds
-        self._cache: Dict[str, Tuple[Any, float]] = {}
+        self._cache: dict[str, tuple[Any, float]] = {}
         self._lock = threading.Lock()
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         """Get cached value if not expired."""
         with self._lock:
             if key in self._cache:
@@ -94,7 +96,7 @@ class RateLimiter:
         """
         self.limit = requests_per_minute
         self.window_seconds = 60
-        self._requests: List[float] = []
+        self._requests: list[float] = []
         self._lock = threading.Lock()
 
     def check(self) -> bool:
@@ -102,10 +104,7 @@ class RateLimiter:
         with self._lock:
             now = time.time()
             # Remove old requests outside window
-            self._requests = [
-                t for t in self._requests
-                if t > now - self.window_seconds
-            ]
+            self._requests = [t for t in self._requests if t > now - self.window_seconds]
             return len(self._requests) < self.limit
 
     def record(self) -> None:
@@ -186,8 +185,10 @@ class RunBudget:
 # URL Safety (SSRF Protection)
 # =============================================================================
 
+
 class UrlSafetyError(ValueError):
     """URL validation failed due to security check."""
+
     pass
 
 
@@ -206,32 +207,32 @@ class UrlSafety:
 
     # IP ranges to block (SSRF protection)
     BLOCKED_IP_NETWORKS = [
-        ipaddress.ip_network('10.0.0.0/8'),       # RFC1918 Class A
-        ipaddress.ip_network('172.16.0.0/12'),    # RFC1918 Class B
-        ipaddress.ip_network('192.168.0.0/16'),   # RFC1918 Class C
-        ipaddress.ip_network('127.0.0.0/8'),      # Loopback
-        ipaddress.ip_network('169.254.0.0/16'),   # Link-local (includes metadata)
-        ipaddress.ip_network('100.64.0.0/10'),    # CGNAT
-        ipaddress.ip_network('0.0.0.0/8'),        # "This" network
-        ipaddress.ip_network('224.0.0.0/4'),      # Multicast
-        ipaddress.ip_network('240.0.0.0/4'),      # Reserved
+        ipaddress.ip_network("10.0.0.0/8"),  # RFC1918 Class A
+        ipaddress.ip_network("172.16.0.0/12"),  # RFC1918 Class B
+        ipaddress.ip_network("192.168.0.0/16"),  # RFC1918 Class C
+        ipaddress.ip_network("127.0.0.0/8"),  # Loopback
+        ipaddress.ip_network("169.254.0.0/16"),  # Link-local (includes metadata)
+        ipaddress.ip_network("100.64.0.0/10"),  # CGNAT
+        ipaddress.ip_network("0.0.0.0/8"),  # "This" network
+        ipaddress.ip_network("224.0.0.0/4"),  # Multicast
+        ipaddress.ip_network("240.0.0.0/4"),  # Reserved
         # IPv6
-        ipaddress.ip_network('::1/128'),          # Loopback
-        ipaddress.ip_network('fc00::/7'),         # ULA
-        ipaddress.ip_network('fe80::/10'),        # Link-local
-        ipaddress.ip_network('ff00::/8'),         # Multicast
+        ipaddress.ip_network("::1/128"),  # Loopback
+        ipaddress.ip_network("fc00::/7"),  # ULA
+        ipaddress.ip_network("fe80::/10"),  # Link-local
+        ipaddress.ip_network("ff00::/8"),  # Multicast
     ]
 
     # Cloud metadata endpoints to explicitly block
-    CLOUD_METADATA_IPS = {'169.254.169.254', 'fd00:ec2::254'}
+    CLOUD_METADATA_IPS = {"169.254.169.254", "fd00:ec2::254"}
 
     # v1: Only standard ports to minimize attack surface
     # Non-standard ports (8080, 8443) often indicate internal services
     ALLOWED_PORTS = {80, 443}
 
     # Hostnames to block (checked after normalization)
-    BLOCKED_HOSTNAMES = {'localhost', 'localhost.'}
-    BLOCKED_HOSTNAME_SUFFIXES = ('.localhost', '.local', '.internal', '.localdomain')
+    BLOCKED_HOSTNAMES = {"localhost", "localhost."}
+    BLOCKED_HOSTNAME_SUFFIXES = (".localhost", ".local", ".internal", ".localdomain")
 
     # Maximum URL length
     MAX_URL_LENGTH = 2048
@@ -239,15 +240,15 @@ class UrlSafety:
     @classmethod
     def normalize_hostname(cls, hostname: str) -> str:
         """Normalize hostname: lowercase + strip trailing dot."""
-        return hostname.lower().rstrip('.')
+        return hostname.lower().rstrip(".")
 
     @classmethod
-    def is_ip_blocked(cls, ip_str: str) -> Tuple[bool, str]:
+    def is_ip_blocked(cls, ip_str: str) -> tuple[bool, str]:
         """
         Check if IP is in any blocked range.
 
         Returns:
-            Tuple of (is_blocked, reason)
+            tuple of (is_blocked, reason)
         """
         try:
             ip = ipaddress.ip_address(ip_str)
@@ -278,12 +279,12 @@ class UrlSafety:
         return False, ""
 
     @classmethod
-    def is_hostname_blocked(cls, hostname: str) -> Tuple[bool, str]:
+    def is_hostname_blocked(cls, hostname: str) -> tuple[bool, str]:
         """
         Check if hostname matches blocklist.
 
         Returns:
-            Tuple of (is_blocked, reason)
+            tuple of (is_blocked, reason)
         """
         normalized = cls.normalize_hostname(hostname)
 
@@ -321,7 +322,7 @@ class UrlSafety:
             raise UrlSafetyError(f"Invalid URL format: {e}")
 
         # 3. Check scheme
-        if parsed.scheme not in ('http', 'https'):
+        if parsed.scheme not in ("http", "https"):
             raise UrlSafetyError(f"Invalid scheme: {parsed.scheme}. Only http/https allowed")
 
         # 4. Check hostname exists
@@ -341,7 +342,7 @@ class UrlSafety:
         port = parsed.port
         if port is None:
             # Default ports based on scheme
-            port = 443 if parsed.scheme == 'https' else 80
+            port = 443 if parsed.scheme == "https" else 80
 
         if port not in cls.ALLOWED_PORTS:
             raise UrlSafetyError(
@@ -352,9 +353,10 @@ class UrlSafety:
         try:
             # Get all IP addresses (A and AAAA records)
             addr_infos = socket.getaddrinfo(
-                normalized_hostname, port,
+                normalized_hostname,
+                port,
                 family=socket.AF_UNSPEC,  # Both IPv4 and IPv6
-                type=socket.SOCK_STREAM
+                type=socket.SOCK_STREAM,
             )
         except socket.gaierror as e:
             raise UrlSafetyError(f"DNS resolution failed for {normalized_hostname}: {e}")
@@ -375,21 +377,21 @@ class UrlSafety:
 # Content Type Safety
 # =============================================================================
 
-ALLOWED_CONTENT_TYPES: Set[str] = {
-    'text/html',
-    'text/plain',
-    'text/xml',
-    'text/markdown',
-    'text/css',
-    'text/javascript',
-    'application/json',
-    'application/xml',
-    'application/xhtml+xml',
-    'application/javascript',
+ALLOWED_CONTENT_TYPES: set[str] = {
+    "text/html",
+    "text/plain",
+    "text/xml",
+    "text/markdown",
+    "text/css",
+    "text/javascript",
+    "application/json",
+    "application/xml",
+    "application/xhtml+xml",
+    "application/javascript",
 }
 
 
-def is_content_type_allowed(content_type: str) -> Tuple[bool, str]:
+def is_content_type_allowed(content_type: str) -> tuple[bool, str]:
     """
     Check if content-type is in allowlist.
 
@@ -397,20 +399,20 @@ def is_content_type_allowed(content_type: str) -> Tuple[bool, str]:
         content_type: Content-Type header value
 
     Returns:
-        Tuple of (is_allowed, base_type)
+        tuple of (is_allowed, base_type)
     """
     if not content_type:
         return False, ""
 
     # Parse content-type (ignore charset and other parameters)
-    base_type = content_type.split(';')[0].strip().lower()
+    base_type = content_type.split(";")[0].strip().lower()
 
     # Check exact match
     if base_type in ALLOWED_CONTENT_TYPES:
         return True, base_type
 
     # Check text/* prefix
-    if base_type.startswith('text/'):
+    if base_type.startswith("text/"):
         return True, base_type
 
     return False, base_type
@@ -420,9 +422,11 @@ def is_content_type_allowed(content_type: str) -> Tuple[bool, str]:
 # Provider Interface for Web Search
 # =============================================================================
 
+
 @dataclass
 class SearchResultItem:
     """Single search result item."""
+
     title: str
     url: str
     snippet: str
@@ -432,12 +436,14 @@ class SearchResultItem:
 @dataclass
 class WebSearchResult:
     """Provider-agnostic search result."""
-    results: List[SearchResultItem] = field(default_factory=list)
-    answer: Optional[str] = None  # AI summary if provider supports
+
+    results: list[SearchResultItem] = field(default_factory=list)
+    answer: str | None = None  # AI summary if provider supports
 
 
 class RateLimitError(Exception):
     """Rate limit exceeded error."""
+
     pass
 
 
@@ -450,8 +456,8 @@ class WebSearchProvider(ABC):
         query: str,
         max_results: int = 5,
         search_depth: str = "basic",
-        include_domains: Optional[List[str]] = None,
-        exclude_domains: Optional[List[str]] = None,
+        include_domains: list[str] | None = None,
+        exclude_domains: list[str] | None = None,
     ) -> WebSearchResult:
         """
         Execute search and return normalized results.
@@ -480,7 +486,7 @@ class TavilyProvider(WebSearchProvider):
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         api_key_env: str = "TAVILY_API_KEY",
         timeout_seconds: float = 30.0,
     ):
@@ -495,7 +501,7 @@ class TavilyProvider(WebSearchProvider):
         self.api_key = api_key or os.getenv(api_key_env)
         if not self.api_key:
             raise ValueError(
-                f"Tavily API key not provided. Set {api_key_env} environment variable "
+                f"Tavily API key not provided. set {api_key_env} environment variable "
                 f"or pass api_key parameter. Get a key at https://tavily.com"
             )
         self.timeout = timeout_seconds
@@ -505,8 +511,8 @@ class TavilyProvider(WebSearchProvider):
         query: str,
         max_results: int = 5,
         search_depth: str = "basic",
-        include_domains: Optional[List[str]] = None,
-        exclude_domains: Optional[List[str]] = None,
+        include_domains: list[str] | None = None,
+        exclude_domains: list[str] | None = None,
     ) -> WebSearchResult:
         """Execute Tavily search."""
         # Build request payload
@@ -551,12 +557,14 @@ class TavilyProvider(WebSearchProvider):
         for item in data.get("results", []):
             url = item.get("url", "")
             domain = urlparse(url).netloc if url else ""
-            results.append(SearchResultItem(
-                title=item.get("title", "Untitled"),
-                url=url,
-                snippet=item.get("content", "")[:500],  # Truncate snippet
-                domain=domain,
-            ))
+            results.append(
+                SearchResultItem(
+                    title=item.get("title", "Untitled"),
+                    url=url,
+                    snippet=item.get("content", "")[:500],  # Truncate snippet
+                    domain=domain,
+                )
+            )
 
         return WebSearchResult(
             results=results,
@@ -567,6 +575,7 @@ class TavilyProvider(WebSearchProvider):
 # =============================================================================
 # WebFetchTool
 # =============================================================================
+
 
 class WebFetchTool(Tool):
     """
@@ -595,23 +604,18 @@ class WebFetchTool(Tool):
         """
         super().__init__(
             name="web_fetch",
-            description="Fetch content from a specific URL. Returns extracted text."
+            description="Fetch content from a specific URL. Returns extracted text.",
         )
         self.cache = TTLCache(ttl_seconds=cache_ttl_seconds)
         self.timeout = timeout_seconds
         self.max_bytes = max_content_bytes
-        self._run_budget: Optional[RunBudget] = None
+        self._run_budget: RunBudget | None = None
 
     def set_run_budget(self, budget: RunBudget) -> None:
-        """Set run budget for current turn. Called at turn start."""
+        """set run budget for current turn. Called at turn start."""
         self._run_budget = budget
 
-    def execute(
-        self,
-        url: str,
-        extract_text: bool = True,
-        **kwargs: Any
-    ) -> ToolResult:
+    def execute(self, url: str, extract_text: bool = True, **kwargs: Any) -> ToolResult:
         """
         Fetch URL content.
 
@@ -638,7 +642,7 @@ class WebFetchTool(Tool):
                     status=ToolStatus.ERROR,
                     output=None,
                     error=f"Fetch budget exceeded ({self._run_budget.max_fetches}/turn). "
-                          "Ask user for permission to continue."
+                    "Ask user for permission to continue.",
                 )
 
             # 2. Validate URL (SSRF protection)
@@ -650,7 +654,7 @@ class WebFetchTool(Tool):
                     tool_name=self.name,
                     status=ToolStatus.ERROR,
                     output=None,
-                    error=f"URL blocked: {e}"
+                    error=f"URL blocked: {e}",
                 )
 
             # 3. Check cache
@@ -662,7 +666,7 @@ class WebFetchTool(Tool):
                     tool_name=self.name,
                     status=ToolStatus.SUCCESS,
                     output=cached,
-                    metadata={"cache_hit": True, "url": validated_url}
+                    metadata={"cache_hit": True, "url": validated_url},
                 )
 
             # 4. Record budget usage
@@ -686,7 +690,7 @@ class WebFetchTool(Tool):
                             status=ToolStatus.ERROR,
                             output=None,
                             error=f"URL redirects to: {location}. "
-                                  "Fetch the target URL directly if needed."
+                            "Fetch the target URL directly if needed.",
                         )
 
                     # Check status code
@@ -696,7 +700,7 @@ class WebFetchTool(Tool):
                             tool_name=self.name,
                             status=ToolStatus.ERROR,
                             output=None,
-                            error=f"HTTP {status_code}: {response.reason_phrase}"
+                            error=f"HTTP {status_code}: {response.reason_phrase}",
                         )
 
                     # 6. Validate content-type before reading body
@@ -709,7 +713,7 @@ class WebFetchTool(Tool):
                             status=ToolStatus.ERROR,
                             output=None,
                             error=f"Unsupported content-type: {base_type}. "
-                                  "Only text, JSON, and XML are supported."
+                            "Only text, JSON, and XML are supported.",
                         )
 
                     # 7. Stream content with byte cap
@@ -720,19 +724,19 @@ class WebFetchTool(Tool):
                         if bytes_read >= self.max_bytes:
                             break
 
-                    content = b''.join(chunks)
+                    content = b"".join(chunks)
 
             # 8. Decode content
             try:
-                text = content.decode('utf-8')
+                text = content.decode("utf-8")
             except UnicodeDecodeError:
                 try:
-                    text = content.decode('latin-1')
+                    text = content.decode("latin-1")
                 except UnicodeDecodeError:
-                    text = content.decode('utf-8', errors='replace')
+                    text = content.decode("utf-8", errors="replace")
 
             # 9. Extract text if HTML
-            if extract_text and 'html' in content_type.lower():
+            if extract_text and "html" in content_type.lower():
                 text = self._extract_text(text)
 
             # 10. Add truncation notice if applicable
@@ -751,7 +755,7 @@ class WebFetchTool(Tool):
                     "bytes_read": bytes_read,
                     "content_type": content_type,
                     "cache_hit": False,
-                }
+                },
             )
 
         except httpx.TimeoutException:
@@ -760,7 +764,7 @@ class WebFetchTool(Tool):
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 output=None,
-                error=f"Request timed out after {self.timeout}s"
+                error=f"Request timed out after {self.timeout}s",
             )
         except httpx.RequestError as e:
             error_type = "request_error"
@@ -768,7 +772,7 @@ class WebFetchTool(Tool):
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 output=None,
-                error=f"Request failed: {e}"
+                error=f"Request failed: {e}",
             )
         except Exception as e:
             error_type = "unknown"
@@ -776,7 +780,7 @@ class WebFetchTool(Tool):
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 output=None,
-                error=f"Fetch failed: {e}"
+                error=f"Fetch failed: {e}",
             )
         finally:
             # Log observability fields
@@ -792,7 +796,7 @@ class WebFetchTool(Tool):
                     "cache_hit": cache_hit,
                     "content_type": content_type,
                     "error_type": error_type,
-                }
+                },
             )
 
     def _extract_text(self, html: str) -> str:
@@ -802,53 +806,51 @@ class WebFetchTool(Tool):
         Strips script/style tags, collapses whitespace, preserves structure.
         """
         # Remove script and style elements
-        html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
-        html = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL | re.IGNORECASE)
+        html = re.sub(r"<script[^>]*>.*?</script>", "", html, flags=re.DOTALL | re.IGNORECASE)
+        html = re.sub(r"<style[^>]*>.*?</style>", "", html, flags=re.DOTALL | re.IGNORECASE)
 
         # Remove HTML comments
-        html = re.sub(r'<!--.*?-->', '', html, flags=re.DOTALL)
+        html = re.sub(r"<!--.*?-->", "", html, flags=re.DOTALL)
 
         # Replace block elements with newlines
-        html = re.sub(r'<(br|hr|p|div|h[1-6]|li|tr)[^>]*>', '\n', html, flags=re.IGNORECASE)
+        html = re.sub(r"<(br|hr|p|div|h[1-6]|li|tr)[^>]*>", "\n", html, flags=re.IGNORECASE)
 
         # Remove remaining HTML tags
-        html = re.sub(r'<[^>]+>', '', html)
+        html = re.sub(r"<[^>]+>", "", html)
 
         # Decode common HTML entities
-        html = html.replace('&nbsp;', ' ')
-        html = html.replace('&amp;', '&')
-        html = html.replace('&lt;', '<')
-        html = html.replace('&gt;', '>')
-        html = html.replace('&quot;', '"')
-        html = html.replace('&#39;', "'")
+        html = html.replace("&nbsp;", " ")
+        html = html.replace("&amp;", "&")
+        html = html.replace("&lt;", "<")
+        html = html.replace("&gt;", ">")
+        html = html.replace("&quot;", '"')
+        html = html.replace("&#39;", "'")
 
         # Collapse multiple whitespace
-        html = re.sub(r'[ \t]+', ' ', html)
-        html = re.sub(r'\n\s*\n', '\n\n', html)
+        html = re.sub(r"[ \t]+", " ", html)
+        html = re.sub(r"\n\s*\n", "\n\n", html)
 
         return html.strip()
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         """Get parameter schema for LLM."""
         return {
             "type": "object",
             "properties": {
-                "url": {
-                    "type": "string",
-                    "description": "URL to fetch (http/https only)"
-                },
+                "url": {"type": "string", "description": "URL to fetch (http/https only)"},
                 "extract_text": {
                     "type": "boolean",
-                    "description": "Extract plain text from HTML (default: true)"
-                }
+                    "description": "Extract plain text from HTML (default: true)",
+                },
             },
-            "required": ["url"]
+            "required": ["url"],
         }
 
 
 # =============================================================================
 # WebSearchTool
 # =============================================================================
+
 
 class WebSearchTool(Tool):
     """
@@ -866,7 +868,7 @@ class WebSearchTool(Tool):
 
     def __init__(
         self,
-        provider: Optional[WebSearchProvider] = None,
+        provider: WebSearchProvider | None = None,
         cache_ttl_seconds: int = 3600,
         rate_limit_per_minute: int = 10,
     ):
@@ -880,15 +882,15 @@ class WebSearchTool(Tool):
         """
         super().__init__(
             name="web_search",
-            description="Search the web for current information. Returns results with citations."
+            description="Search the web for current information. Returns results with citations.",
         )
         self._provider = provider  # Lazy init if None
         self.cache = TTLCache(ttl_seconds=cache_ttl_seconds)
         self.rate_limiter = RateLimiter(requests_per_minute=rate_limit_per_minute)
-        self._run_budget: Optional[RunBudget] = None
+        self._run_budget: RunBudget | None = None
 
     def set_run_budget(self, budget: RunBudget) -> None:
-        """Set run budget for current turn. Called at turn start."""
+        """set run budget for current turn. Called at turn start."""
         self._run_budget = budget
 
     def _get_provider(self) -> WebSearchProvider:
@@ -902,9 +904,9 @@ class WebSearchTool(Tool):
         query: str,
         max_results: int = 5,
         search_depth: str = "basic",
-        include_domains: Optional[List[str]] = None,
-        exclude_domains: Optional[List[str]] = None,
-        **kwargs: Any
+        include_domains: list[str] | None = None,
+        exclude_domains: list[str] | None = None,
+        **kwargs: Any,
     ) -> ToolResult:
         """
         Search the web.
@@ -934,7 +936,7 @@ class WebSearchTool(Tool):
                     status=ToolStatus.ERROR,
                     output=None,
                     error=f"Search budget exceeded ({self._run_budget.max_searches}/turn). "
-                          "Ask user for permission to continue."
+                    "Ask user for permission to continue.",
                 )
 
             # 2. Sanitize query
@@ -945,7 +947,7 @@ class WebSearchTool(Tool):
                     tool_name=self.name,
                     status=ToolStatus.ERROR,
                     output=None,
-                    error="Query cannot be empty"
+                    error="Query cannot be empty",
                 )
 
             # 3. Check cache
@@ -963,7 +965,7 @@ class WebSearchTool(Tool):
                     tool_name=self.name,
                     status=ToolStatus.SUCCESS,
                     output=cached,
-                    metadata={"cache_hit": True, "query": query}
+                    metadata={"cache_hit": True, "query": query},
                 )
 
             # 4. Check rate limit
@@ -976,7 +978,7 @@ class WebSearchTool(Tool):
                         tool_name=self.name,
                         status=ToolStatus.ERROR,
                         output=None,
-                        error=f"Rate limited. Try again in {wait_time:.0f} seconds."
+                        error=f"Rate limited. Try again in {wait_time:.0f} seconds.",
                     )
                 time.sleep(wait_time)
 
@@ -1007,7 +1009,7 @@ class WebSearchTool(Tool):
                         tool_name=self.name,
                         status=ToolStatus.ERROR,
                         output=None,
-                        error="Search provider rate limit. Try again later."
+                        error="Search provider rate limit. Try again later.",
                     )
 
             if result is None:
@@ -1016,7 +1018,7 @@ class WebSearchTool(Tool):
                     tool_name=self.name,
                     status=ToolStatus.ERROR,
                     output=None,
-                    error="Search failed unexpectedly"
+                    error="Search failed unexpectedly",
                 )
 
             # 7. Format results
@@ -1034,17 +1036,14 @@ class WebSearchTool(Tool):
                     "query": query,
                     "results_count": results_count,
                     "cache_hit": False,
-                }
+                },
             )
 
         except ValueError as e:
             # Provider initialization error (missing API key)
             error_type = "config_error"
             return ToolResult(
-                tool_name=self.name,
-                status=ToolStatus.ERROR,
-                output=None,
-                error=str(e)
+                tool_name=self.name, status=ToolStatus.ERROR, output=None, error=str(e)
             )
         except Exception as e:
             error_type = "unknown"
@@ -1052,7 +1051,7 @@ class WebSearchTool(Tool):
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 output=None,
-                error=f"Search failed: {e}"
+                error=f"Search failed: {e}",
             )
         finally:
             # Log observability fields
@@ -1068,7 +1067,7 @@ class WebSearchTool(Tool):
                     "rate_limit_wait_ms": round(rate_limit_wait_ms, 2),
                     "provider": "tavily",
                     "error_type": error_type,
-                }
+                },
             )
 
     def _sanitize_query(self, query: str) -> str:
@@ -1077,13 +1076,13 @@ class WebSearchTool(Tool):
             return ""
 
         # Truncate to max length
-        query = query[:self.MAX_QUERY_LENGTH]
+        query = query[: self.MAX_QUERY_LENGTH]
 
         # Remove control characters but keep printable and whitespace
-        query = ''.join(c for c in query if c.isprintable() or c.isspace())
+        query = "".join(c for c in query if c.isprintable() or c.isspace())
 
         # Collapse multiple spaces
-        query = ' '.join(query.split())
+        query = " ".join(query.split())
 
         return query.strip()
 
@@ -1128,34 +1127,31 @@ class WebSearchTool(Tool):
 
         return "\n".join(parts)
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         """Get parameter schema for LLM."""
         return {
             "type": "object",
             "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Search query"
-                },
+                "query": {"type": "string", "description": "Search query"},
                 "max_results": {
                     "type": "number",
-                    "description": "Results to return (1-10, default: 5)"
+                    "description": "Results to return (1-10, default: 5)",
                 },
                 "search_depth": {
                     "type": "string",
                     "enum": ["basic", "advanced"],
-                    "description": "'basic' (fast) or 'advanced' (thorough)"
+                    "description": "'basic' (fast) or 'advanced' (thorough)",
                 },
                 "include_domains": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Only include results from these domains"
+                    "description": "Only include results from these domains",
                 },
                 "exclude_domains": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Exclude results from these domains"
-                }
+                    "description": "Exclude results from these domains",
+                },
             },
-            "required": ["query"]
+            "required": ["query"],
         }

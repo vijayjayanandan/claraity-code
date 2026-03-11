@@ -13,13 +13,13 @@ Design Principles:
 - Bounded excerpt injection (avoid context bloat)
 """
 
-from pathlib import Path
-from datetime import datetime
-from hashlib import sha256
-from enum import Enum
-from typing import Optional, Dict, Any
-import uuid
 import os
+import uuid
+from datetime import datetime
+from enum import Enum
+from hashlib import sha256
+from pathlib import Path
+from typing import Any, Optional
 
 from src.observability import get_logger
 
@@ -44,61 +44,60 @@ def _is_read_only(tool_name: str) -> bool:
 
 class PlanGateDecision(Enum):
     """Decision from tool gating in plan mode."""
+
     ALLOW = "allow"
     DENY = "deny"
     REQUIRE_APPROVAL = "require_approval"
 
 
 # Read-only tools that are always allowed in plan mode
-READ_ONLY_TOOLS = frozenset({
-    # File reading
-    "read_file",
-    "list_directory",
-
-    # Search tools
-    "search_code",
-    "grep",
-    "glob",
-
-    # Analysis tools (read-only)
-    "analyze_code",
-    "get_file_outline",
-    "get_symbol_context",
-
-    # Web tools (read-only)
-    "web_fetch",
-    "web_search",
-
-    # Task/todo tools (read-only queries)
-    "get_todos",
-    "get_next_task",
-
-    # Architecture query tools (read-only)
-    "query_component",
-    "query_dependencies",
-    "query_decisions",
-    "query_flows",
-    "query_architecture_summary",
-    "search_components",
-    "get_implementation_spec",
-
-    # Git read-only
-    "git_status",
-    "git_diff",
-})
+READ_ONLY_TOOLS = frozenset(
+    {
+        # File reading
+        "read_file",
+        "list_directory",
+        # Search tools
+        "search_code",
+        "grep",
+        "glob",
+        # Analysis tools (read-only)
+        "analyze_code",
+        "get_file_outline",
+        "get_symbol_context",
+        # Web tools (read-only)
+        "web_fetch",
+        "web_search",
+        # Task/todo tools (read-only queries)
+        "get_todos",
+        "get_next_task",
+        # Architecture query tools (read-only)
+        "query_component",
+        "query_dependencies",
+        "query_decisions",
+        "query_flows",
+        "query_architecture_summary",
+        "search_components",
+        "get_implementation_spec",
+        # Git read-only
+        "git_status",
+        "git_diff",
+    }
+)
 
 # Plan mode control tools
-PLAN_MODE_TOOLS = frozenset({
-    "enter_plan_mode",
-    "request_plan_approval",
-})
+PLAN_MODE_TOOLS = frozenset(
+    {
+        "enter_plan_mode",
+        "request_plan_approval",
+    }
+)
 
 # Agent workspace directory — files under this path are agent-internal
 # (plan files, session logs, metrics) and bypass approval in all modes.
 AGENT_WORKSPACE_DIR = ".clarity"
 
 
-def is_agent_internal_write(tool_name: str, tool_args: Dict[str, Any]) -> bool:
+def is_agent_internal_write(tool_name: str, tool_args: dict[str, Any]) -> bool:
     """
     Check if a tool call is an agent-internal file operation.
 
@@ -178,17 +177,17 @@ class PlanModeState:
         # Current state
         self.is_active = False
         self._awaiting_approval = False
-        self.plan_file_path: Optional[Path] = None
-        self.session_id: Optional[str] = None
+        self.plan_file_path: Path | None = None
+        self.session_id: str | None = None
 
         # Hash tracking for approval
-        self.plan_hash: Optional[str] = None
-        self.approved_hash: Optional[str] = None
+        self.plan_hash: str | None = None
+        self.approved_hash: str | None = None
 
         # Clear context flag (stubbed for Phase 2)
         self.clear_context_on_exit = False
 
-    def enter(self, session_id: str) -> Dict[str, Any]:
+    def enter(self, session_id: str) -> dict[str, Any]:
         """
         Enter plan mode and create plan file.
 
@@ -196,7 +195,7 @@ class PlanModeState:
             session_id: Current session ID (used for plan file name)
 
         Returns:
-            Dict with plan_path and status
+            dict with plan_path and status
         """
         # Create plans directory if needed
         self.plans_dir.mkdir(parents=True, exist_ok=True)
@@ -218,7 +217,7 @@ class PlanModeState:
             "plan_path": str(self.plan_file_path),
         }
 
-    def exit_for_approval(self) -> Dict[str, Any]:
+    def exit_for_approval(self) -> dict[str, Any]:
         """
         Exit plan mode and prepare for approval.
 
@@ -226,7 +225,7 @@ class PlanModeState:
         Returns truncated excerpt to avoid context bloat.
 
         Returns:
-            Dict with plan_hash, excerpt, truncated flag, or error
+            dict with plan_hash, excerpt, truncated flag, or error
         """
         if not self.is_active or not self.plan_file_path:
             return {"error": "Not in plan mode"}
@@ -285,11 +284,7 @@ class PlanModeState:
         self._awaiting_approval = False
         self.is_active = True
 
-    def gate_tool(
-        self,
-        tool_name: str,
-        target_path: Optional[str] = None
-    ) -> PlanGateDecision:
+    def gate_tool(self, tool_name: str, target_path: str | None = None) -> PlanGateDecision:
         """
         Check if tool is allowed in current plan mode state.
 
@@ -332,7 +327,7 @@ class PlanModeState:
                     except (OSError, FileNotFoundError):
                         # Files may not exist yet, fall back to normalized path comparison
                         # Normalize for case-insensitive comparison on Windows
-                        if os.name == 'nt':
+                        if os.name == "nt":
                             if str(target).lower() == str(plan_path).lower():
                                 return PlanGateDecision.ALLOW
                         elif target == plan_path:
@@ -376,7 +371,7 @@ Created: {timestamp}
 [Any additional context, alternatives considered, or trade-offs]
 """
 
-    def get_plan_content(self) -> Optional[str]:
+    def get_plan_content(self) -> str | None:
         """
         Get current plan file content.
 
@@ -408,8 +403,8 @@ Created: {timestamp}
 
 # Export all types
 __all__ = [
-    'PlanGateDecision',
-    'PlanModeState',
-    'READ_ONLY_TOOLS',
-    'PLAN_MODE_TOOLS',
+    "PlanGateDecision",
+    "PlanModeState",
+    "READ_ONLY_TOOLS",
+    "PLAN_MODE_TOOLS",
 ]

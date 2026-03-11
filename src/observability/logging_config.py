@@ -40,7 +40,11 @@ import uuid
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional
+from typing import TYPE_CHECKING, Any, Literal, Optional
+
+if TYPE_CHECKING:
+    from src.observability.sqlite_error_handler import SQLiteErrorHandler
+    from src.observability.sqlite_log_handler import SQLiteLogHandler
 
 import structlog
 from structlog.stdlib import BoundLogger
@@ -66,19 +70,19 @@ MAX_TRACEBACK_LENGTH = 32768
 # CONTEXT VARIABLES (for async propagation)
 # =============================================================================
 
-run_id: ContextVar[str] = ContextVar('run_id', default='')  # Process-level ID, set once at startup
-session_id: ContextVar[str] = ContextVar('session_id', default='')
-stream_id: ContextVar[str] = ContextVar('stream_id', default='')
-request_id: ContextVar[str] = ContextVar('request_id', default='')
-component: ContextVar[str] = ContextVar('component', default='')
-operation: ContextVar[str] = ContextVar('operation', default='')
+run_id: ContextVar[str] = ContextVar("run_id", default="")  # Process-level ID, set once at startup
+session_id: ContextVar[str] = ContextVar("session_id", default="")
+stream_id: ContextVar[str] = ContextVar("stream_id", default="")
+request_id: ContextVar[str] = ContextVar("request_id", default="")
+component: ContextVar[str] = ContextVar("component", default="")
+operation: ContextVar[str] = ContextVar("operation", default="")
 
 # =============================================================================
 # GLOBALS
 # =============================================================================
 
-_queue_listener: Optional[logging.handlers.QueueListener] = None
-_log_queue: Optional[queue.Queue] = None
+_queue_listener: logging.handlers.QueueListener | None = None
+_log_queue: queue.Queue | None = None
 _sqlite_handler: Optional["SQLiteErrorHandler"] = None  # Forward reference
 _sqlite_log_handler: Optional["SQLiteLogHandler"] = None  # Forward reference
 _configured: bool = False
@@ -93,43 +97,73 @@ _original_sigterm_handler = None
 # Patterns to redact (compiled for performance)
 _REDACT_PATTERNS = [
     # Generic key=value patterns for common sensitive fields
-    (re.compile(r'(api[_-]?key|apikey|authorization|auth[_-]?token|bearer|secret|password|passwd|pwd)\s*[=:]\s*["\']?[\w\-\.]+["\']?', re.IGNORECASE), r'\1=***REDACTED***'),
-
+    (
+        re.compile(
+            r'(api[_-]?key|apikey|authorization|auth[_-]?token|bearer|secret|password|passwd|pwd)\s*[=:]\s*["\']?[\w\-\.]+["\']?',
+            re.IGNORECASE,
+        ),
+        r"\1=***REDACTED***",
+    ),
     # OpenAI API keys (sk-...)
-    (re.compile(r'(sk-[a-zA-Z0-9]{20,})', re.IGNORECASE), '***OPENAI_API_KEY***'),
-
+    (re.compile(r"(sk-[a-zA-Z0-9]{20,})", re.IGNORECASE), "***OPENAI_API_KEY***"),
     # Anthropic API keys (sk-ant-...)
-    (re.compile(r'(sk-ant-[a-zA-Z0-9\-_]{20,})', re.IGNORECASE), '***ANTHROPIC_API_KEY***'),
-
+    (re.compile(r"(sk-ant-[a-zA-Z0-9\-_]{20,})", re.IGNORECASE), "***ANTHROPIC_API_KEY***"),
     # AWS Access Key IDs (AKIA...)
-    (re.compile(r'(AKIA[0-9A-Z]{16})', re.IGNORECASE), '***AWS_ACCESS_KEY***'),
-
+    (re.compile(r"(AKIA[0-9A-Z]{16})", re.IGNORECASE), "***AWS_ACCESS_KEY***"),
     # AWS Secret Access Keys (40 character base64-like strings after aws_secret)
-    (re.compile(r'(aws_secret_access_key\s*[=:]\s*["\']?)[A-Za-z0-9/+=]{40}["\']?', re.IGNORECASE), r'\1***AWS_SECRET_KEY***'),
-
+    (
+        re.compile(
+            r'(aws_secret_access_key\s*[=:]\s*["\']?)[A-Za-z0-9/+=]{40}["\']?', re.IGNORECASE
+        ),
+        r"\1***AWS_SECRET_KEY***",
+    ),
     # Bearer tokens
-    (re.compile(r'(Bearer\s+[\w\-\.]+)', re.IGNORECASE), 'Bearer ***REDACTED***'),
-
+    (re.compile(r"(Bearer\s+[\w\-\.]+)", re.IGNORECASE), "Bearer ***REDACTED***"),
     # Private keys (PEM format) - match the header only to avoid huge replacements
-    (re.compile(r'-----BEGIN\s+(RSA\s+|EC\s+|DSA\s+|OPENSSH\s+)?PRIVATE\s+KEY-----', re.IGNORECASE), '***PRIVATE_KEY_HEADER***'),
-
+    (
+        re.compile(
+            r"-----BEGIN\s+(RSA\s+|EC\s+|DSA\s+|OPENSSH\s+)?PRIVATE\s+KEY-----", re.IGNORECASE
+        ),
+        "***PRIVATE_KEY_HEADER***",
+    ),
     # Database connection strings with passwords
-    (re.compile(r'((?:postgres|mysql|mongodb|redis)://[^:]+:)[^@]+(@)', re.IGNORECASE), r'\1***PASSWORD***\2'),
-
+    (
+        re.compile(r"((?:postgres|mysql|mongodb|redis)://[^:]+:)[^@]+(@)", re.IGNORECASE),
+        r"\1***PASSWORD***\2",
+    ),
     # Generic token patterns (token=..., access_token=...)
-    (re.compile(r'((?:access_|refresh_|auth_)?token\s*[=:]\s*["\']?)[a-zA-Z0-9\-_.]{20,}["\']?', re.IGNORECASE), r'\1***TOKEN***'),
+    (
+        re.compile(
+            r'((?:access_|refresh_|auth_)?token\s*[=:]\s*["\']?)[a-zA-Z0-9\-_.]{20,}["\']?',
+            re.IGNORECASE,
+        ),
+        r"\1***TOKEN***",
+    ),
 ]
 
 # Keys to fully redact in dicts
 _REDACT_KEYS = {
-    'api_key', 'apikey', 'api-key',
-    'authorization', 'auth_token', 'access_token', 'refresh_token',
-    'secret', 'secret_key', 'private_key',
-    'password', 'passwd', 'pwd',
-    'bearer', 'token',
-    'aws_secret_access_key', 'aws_access_key_id',
-    'anthropic_api_key', 'openai_api_key',
-    'database_url', 'connection_string',
+    "api_key",
+    "apikey",
+    "api-key",
+    "authorization",
+    "auth_token",
+    "access_token",
+    "refresh_token",
+    "secret",
+    "secret_key",
+    "private_key",
+    "password",
+    "passwd",
+    "pwd",
+    "bearer",
+    "token",
+    "aws_secret_access_key",
+    "aws_access_key_id",
+    "anthropic_api_key",
+    "openai_api_key",
+    "database_url",
+    "connection_string",
 }
 
 
@@ -138,30 +172,30 @@ def _redact_value(value: Any, max_length: int = REDACT_MAX_LENGTH) -> Any:
     if isinstance(value, str):
         # Truncate long strings (like prompts)
         if len(value) > max_length:
-            value = value[:max_length] + f'...[truncated {len(value) - max_length} chars]'
+            value = value[:max_length] + f"...[truncated {len(value) - max_length} chars]"
         # Apply redaction patterns
         for pattern, replacement in _REDACT_PATTERNS:
             value = pattern.sub(replacement, value)
         return value
     elif isinstance(value, dict):
         return _redact_dict(value, max_length)
-    elif isinstance(value, (list, tuple)):
+    elif isinstance(value, list | tuple):
         return [_redact_value(v, max_length) for v in value[:10]]  # Limit list length
     return value
 
 
-def _redact_dict(d: Dict[str, Any], max_length: int = REDACT_MAX_LENGTH) -> Dict[str, Any]:
+def _redact_dict(d: dict[str, Any], max_length: int = REDACT_MAX_LENGTH) -> dict[str, Any]:
     """Recursively redact sensitive keys in dictionaries."""
     result = {}
     for key, value in d.items():
         if key.lower() in _REDACT_KEYS:
-            result[key] = '***REDACTED***'
+            result[key] = "***REDACTED***"
         else:
             result[key] = _redact_value(value, max_length)
     return result
 
 
-def redact_sensitive(logger: Any, method_name: str, event_dict: Dict[str, Any]) -> Dict[str, Any]:
+def redact_sensitive(logger: Any, method_name: str, event_dict: dict[str, Any]) -> dict[str, Any]:
     """Structlog processor to redact sensitive information."""
     return _redact_dict(event_dict)
 
@@ -170,7 +204,8 @@ def redact_sensitive(logger: Any, method_name: str, event_dict: Dict[str, Any]) 
 # CONTEXT INJECTION (structlog processor)
 # =============================================================================
 
-def add_context(logger: Any, method_name: str, event_dict: Dict[str, Any]) -> Dict[str, Any]:
+
+def add_context(logger: Any, method_name: str, event_dict: dict[str, Any]) -> dict[str, Any]:
     """Structlog processor to inject context variables."""
     ctx_run = run_id.get()
     ctx_session = session_id.get()
@@ -180,17 +215,17 @@ def add_context(logger: Any, method_name: str, event_dict: Dict[str, Any]) -> Di
     ctx_operation = operation.get()
 
     if ctx_run:
-        event_dict['run_id'] = ctx_run
+        event_dict["run_id"] = ctx_run
     if ctx_session:
-        event_dict['session_id'] = ctx_session
+        event_dict["session_id"] = ctx_session
     if ctx_stream:
-        event_dict['stream_id'] = ctx_stream
+        event_dict["stream_id"] = ctx_stream
     if ctx_request:
-        event_dict['request_id'] = ctx_request
+        event_dict["request_id"] = ctx_request
     if ctx_component:
-        event_dict['component'] = ctx_component
+        event_dict["component"] = ctx_component
     if ctx_operation:
-        event_dict['operation'] = ctx_operation
+        event_dict["operation"] = ctx_operation
 
     return event_dict
 
@@ -203,6 +238,7 @@ def add_context(logger: Any, method_name: str, event_dict: Dict[str, Any]) -> Di
 # output formats. ProcessorFormatter extracts the event_dict from record.msg
 # (set by wrap_for_formatter) and applies final rendering processors.
 #
+
 
 def create_json_formatter() -> structlog.stdlib.ProcessorFormatter:
     """
@@ -252,32 +288,31 @@ def create_console_formatter() -> structlog.stdlib.ProcessorFormatter:
 
 
 def _add_source_location(
-    logger: Any, method_name: str, event_dict: Dict[str, Any]
-) -> Dict[str, Any]:
+    logger: Any, method_name: str, event_dict: dict[str, Any]
+) -> dict[str, Any]:
     """Processor to add source location from LogRecord."""
-    record = event_dict.get('_record')
+    record = event_dict.get("_record")
     if record:
-        event_dict['source'] = {
-            'file': record.filename,
-            'line': record.lineno,
-            'function': record.funcName,
+        event_dict["source"] = {
+            "file": record.filename,
+            "line": record.lineno,
+            "function": record.funcName,
         }
     return event_dict
 
 
-def _console_renderer(
-    logger: Any, method_name: str, event_dict: Dict[str, Any]
-) -> str:
+def _console_renderer(logger: Any, method_name: str, event_dict: dict[str, Any]) -> str:
     """Simple console renderer: [LEVEL] logger: event"""
-    level = event_dict.get('level', 'INFO').upper()
-    logger_name = event_dict.get('logger', 'root')
-    event = event_dict.get('event', str(event_dict))
+    level = event_dict.get("level", "INFO").upper()
+    logger_name = event_dict.get("logger", "root")
+    event = event_dict.get("event", str(event_dict))
     return f"[{level}] {logger_name}: {event}"
 
 
 # =============================================================================
 # LEGACY FORMATTERS (for backwards compatibility with non-structlog records)
 # =============================================================================
+
 
 class StructlogJSONFormatter(logging.Formatter):
     """
@@ -291,36 +326,36 @@ class StructlogJSONFormatter(logging.Formatter):
         """Format log record as JSON line."""
         # Base entry with timestamp
         log_entry = {
-            'ts': datetime.now(timezone.utc).isoformat(),
-            'level': record.levelname,
-            'logger': record.name,
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
         }
 
         # Check if record.msg is a dict (from wrap_for_formatter)
         if isinstance(record.msg, dict):
             event_dict = record.msg.copy()
             # Remove internal keys
-            event_dict.pop('_record', None)
-            event_dict.pop('_from_structlog', None)
+            event_dict.pop("_record", None)
+            event_dict.pop("_from_structlog", None)
             for key, value in event_dict.items():
-                if key == 'event':
-                    log_entry['event'] = value
-                elif key not in ('level', 'logger', 'timestamp'):
+                if key == "event":
+                    log_entry["event"] = value
+                elif key not in ("level", "logger", "timestamp"):
                     log_entry[key] = value
         else:
             # Plain string message
-            log_entry['event'] = record.getMessage()
+            log_entry["event"] = record.getMessage()
 
         # Add exception info if present
         if record.exc_info and record.exc_info[0] is not None:
             exc_type, exc_value, exc_tb = record.exc_info
-            log_entry['exception'] = self.formatException(record.exc_info)[:MAX_TRACEBACK_LENGTH]
+            log_entry["exception"] = self.formatException(record.exc_info)[:MAX_TRACEBACK_LENGTH]
 
         # Add source location
-        log_entry['source'] = {
-            'file': record.filename,
-            'line': record.lineno,
-            'function': record.funcName,
+        log_entry["source"] = {
+            "file": record.filename,
+            "line": record.lineno,
+            "function": record.funcName,
         }
 
         return json.dumps(log_entry, default=str, ensure_ascii=False)
@@ -338,7 +373,7 @@ class StructlogConsoleFormatter(logging.Formatter):
         """Format for console output."""
         # Check if record.msg is a dict (from wrap_for_formatter)
         if isinstance(record.msg, dict):
-            event = record.msg.get('event', str(record.msg))
+            event = record.msg.get("event", str(record.msg))
             return f"[{record.levelname}] {record.name}: {event}"
 
         return f"[{record.levelname}] {record.name}: {record.getMessage()}"
@@ -418,6 +453,7 @@ class BoundedQueueHandler(logging.handlers.QueueHandler):
 
             # Rate-limit drop warnings to stderr
             import time
+
             now = time.time()
             with _drop_stats_lock:
                 if now - _last_drop_warning_time > DROP_WARNING_INTERVAL_SECONDS:
@@ -446,6 +482,7 @@ def get_drop_count() -> int:
 # CRASH HOOKS
 # =============================================================================
 
+
 def _uncaught_exception_handler(exc_type, exc_value, exc_tb):
     """Handle uncaught exceptions."""
     if issubclass(exc_type, KeyboardInterrupt):
@@ -453,13 +490,15 @@ def _uncaught_exception_handler(exc_type, exc_value, exc_tb):
         return
 
     # Use structlog logger
-    logger = structlog.get_logger('crash')
+    logger = structlog.get_logger("crash")
     logger.critical(
-        'uncaught_exception',
-        category='unexpected',
+        "uncaught_exception",
+        category="unexpected",
         error_type=exc_type.__name__,
         message=str(exc_value),
-        traceback=''.join(traceback.format_exception(exc_type, exc_value, exc_tb))[:MAX_TRACEBACK_LENGTH],
+        traceback="".join(traceback.format_exception(exc_type, exc_value, exc_tb))[
+            :MAX_TRACEBACK_LENGTH
+        ],
     )
 
     # Ensure logs are flushed
@@ -468,14 +507,16 @@ def _uncaught_exception_handler(exc_type, exc_value, exc_tb):
 
 def _thread_exception_handler(args):
     """Handle uncaught thread exceptions."""
-    logger = structlog.get_logger('crash')
+    logger = structlog.get_logger("crash")
     logger.critical(
-        'thread_exception',
-        category='unexpected',
+        "thread_exception",
+        category="unexpected",
         error_type=args.exc_type.__name__,
         message=str(args.exc_value),
-        thread_name=args.thread.name if args.thread else 'unknown',
-        traceback=''.join(traceback.format_exception(args.exc_type, args.exc_value, args.exc_traceback))[:MAX_TRACEBACK_LENGTH],
+        thread_name=args.thread.name if args.thread else "unknown",
+        traceback="".join(
+            traceback.format_exception(args.exc_type, args.exc_value, args.exc_traceback)
+        )[:MAX_TRACEBACK_LENGTH],
     )
 
 
@@ -486,55 +527,57 @@ def _asyncio_exception_handler(loop, context):
     This captures exceptions from background tasks that weren't awaited
     or had their exceptions ignored.
     """
-    from .error_store import get_error_store, ErrorCategory
+    from .error_store import ErrorCategory, get_error_store
 
-    exception = context.get('exception')
-    message = context.get('message', 'Unknown asyncio error')
+    exception = context.get("exception")
+    message = context.get("message", "Unknown asyncio error")
 
     # Build log data
     log_data = {
-        'category': ErrorCategory.UNEXPECTED,
-        'message': message,
+        "category": ErrorCategory.UNEXPECTED,
+        "message": message,
     }
 
-    error_type = 'AsyncioError'
+    error_type = "AsyncioError"
     tb_str = None
 
     if exception:
         error_type = type(exception).__name__
-        log_data['error_type'] = error_type
-        tb_str = ''.join(traceback.format_exception(type(exception), exception, exception.__traceback__))[:MAX_TRACEBACK_LENGTH]
-        log_data['traceback'] = tb_str
+        log_data["error_type"] = error_type
+        tb_str = "".join(
+            traceback.format_exception(type(exception), exception, exception.__traceback__)
+        )[:MAX_TRACEBACK_LENGTH]
+        log_data["traceback"] = tb_str
 
         # Classify timeout exceptions
         exc_name = error_type.lower()
-        if 'timeout' in exc_name:
-            log_data['category'] = ErrorCategory.PROVIDER_TIMEOUT
+        if "timeout" in exc_name:
+            log_data["category"] = ErrorCategory.PROVIDER_TIMEOUT
 
     # Get task info if available
-    if 'future' in context:
-        future = context['future']
-        log_data['task_name'] = getattr(future, 'get_name', lambda: str(future))()
+    if "future" in context:
+        future = context["future"]
+        log_data["task_name"] = getattr(future, "get_name", lambda: str(future))()
 
     # Record to error store directly (non-blocking)
     try:
         store = get_error_store()
         store.record_from_dict(
-            level='ERROR',
-            category=log_data['category'],
+            level="ERROR",
+            category=log_data["category"],
             error_type=error_type,
             message=message,
             traceback=tb_str,
-            component='asyncio',
-            operation='task_exception',
+            component="asyncio",
+            operation="task_exception",
         )
     except Exception:
         # Don't fail if error store is unavailable
         pass
 
     # Also emit structured log
-    logger = structlog.get_logger('asyncio')
-    logger.error('task_exception', **log_data)
+    logger = structlog.get_logger("asyncio")
+    logger.error("task_exception", **log_data)
 
 
 def _flush_logs():
@@ -591,6 +634,7 @@ def _signal_handler(signum, frame):
         # On Unix: os.kill re-raises the signal with original handler
         # On Windows: SIGTERM exists but can only be sent internally, fallback to sys.exit
         import os
+
         try:
             os.kill(os.getpid(), signal.SIGTERM)
         except (OSError, AttributeError):
@@ -606,7 +650,7 @@ def _install_crash_hooks():
     sys.excepthook = _uncaught_exception_handler
 
     # Thread exceptions (Python 3.8+)
-    if hasattr(threading, 'excepthook'):
+    if hasattr(threading, "excepthook"):
         threading.excepthook = _thread_exception_handler
 
     # Signal handlers for graceful shutdown (SIGINT = Ctrl+C, SIGTERM = kill)
@@ -616,7 +660,7 @@ def _install_crash_hooks():
         pass  # Not in main thread or signal not available
 
     # SIGTERM only exists on Unix, but signal module handles this gracefully
-    if hasattr(signal, 'SIGTERM'):
+    if hasattr(signal, "SIGTERM"):
         try:
             _original_sigterm_handler = signal.signal(signal.SIGTERM, _signal_handler)
         except (ValueError, OSError):
@@ -630,9 +674,10 @@ def _install_crash_hooks():
 # MAIN CONFIGURATION
 # =============================================================================
 
+
 def configure_logging(
     mode: Literal["cli", "tui"] = "cli",
-    log_level: Optional[str] = None,
+    log_level: str | None = None,
     log_dir: str = ".clarity/logs",
     max_bytes: int = 50 * 1024 * 1024,  # 50MB
     backup_count: int = 5,
@@ -664,10 +709,10 @@ def configure_logging(
 
     # ---- Load centralized config from .clarity/config.yaml ----
     from .log_config_loader import (
-        load_logging_config,
-        resolve_logging_config,
         apply_component_levels,
         generate_default_config,
+        load_logging_config,
+        resolve_logging_config,
     )
 
     # Generate default config on first run
@@ -675,7 +720,7 @@ def configure_logging(
 
     # Load and resolve with priority layering
     config = load_logging_config()
-    env_level = os.environ.get('LOG_LEVEL')
+    env_level = os.environ.get("LOG_LEVEL")
     config = resolve_logging_config(
         env_level=env_level,
         cli_level=log_level,
@@ -700,6 +745,7 @@ def configure_logging(
     if platform.system() != "Windows":
         try:
             import stat as _stat
+
             log_path.chmod(_stat.S_IRWXU)  # 700: owner rwx only
         except OSError:
             pass  # Best-effort, non-fatal
@@ -708,18 +754,16 @@ def configure_logging(
     handlers = []
 
     # 1. Rotating file handler for JSONL (always enabled)
-    jsonl_file = log_path / 'app.jsonl'
+    jsonl_file = log_path / "app.jsonl"
     file_handler = logging.handlers.RotatingFileHandler(
         filename=str(jsonl_file),
         maxBytes=max_bytes,
         backupCount=backup_count,
-        encoding='utf-8',
+        encoding="utf-8",
     )
     file_handler.setFormatter(create_json_formatter())
     # Handler level from config (default: INFO)
-    file_handler.setLevel(
-        getattr(logging, config.handlers.jsonl_level, logging.INFO)
-    )
+    file_handler.setLevel(getattr(logging, config.handlers.jsonl_level, logging.INFO))
     handlers.append(file_handler)
 
     # 2. Console handler - DISABLED for both modes
@@ -733,11 +777,10 @@ def configure_logging(
     # 3. SQLite error handler (always enabled)
     try:
         from .sqlite_error_handler import SQLiteErrorHandler
+
         sqlite_handler = SQLiteErrorHandler()
         # Handler level from config (default: ERROR)
-        sqlite_handler.setLevel(
-            getattr(logging, config.handlers.errors_db_level, logging.ERROR)
-        )
+        sqlite_handler.setLevel(getattr(logging, config.handlers.errors_db_level, logging.ERROR))
         handlers.append(sqlite_handler)
         _sqlite_handler = sqlite_handler  # Save reference for shutdown
     except ImportError:
@@ -746,11 +789,10 @@ def configure_logging(
     # 4. SQLite log handler - ALL log levels to logs.db for queryable access
     try:
         from .sqlite_log_handler import SQLiteLogHandler
+
         log_handler = SQLiteLogHandler()
         # Handler level from config (default: DEBUG)
-        log_handler.setLevel(
-            getattr(logging, config.handlers.logs_db_level, logging.DEBUG)
-        )
+        log_handler.setLevel(getattr(logging, config.handlers.logs_db_level, logging.DEBUG))
         handlers.append(log_handler)
         _sqlite_log_handler = log_handler  # Save reference for shutdown
     except ImportError:
@@ -846,14 +888,24 @@ def configure_logging(
     # These libraries generate excessive DEBUG/INFO logs during streaming/HTTP operations
     # which can flood the log queue (10,000 items) and cause message drops
     noisy_loggers = [
-        'httpx', 'httpcore', 'openai', 'multilspy', 'chromadb',
-        'urllib3', 'asyncio', 'hpack', 'h2',
+        "httpx",
+        "httpcore",
+        "openai",
+        "multilspy",
+        "urllib3",
+        "asyncio",
+        "hpack",
+        "h2",
         # LiteLLM generates DEBUG logs per streaming chunk - extremely noisy
-        'litellm', 'LiteLLM', 'litellm.proxy', 'litellm.llms',
-        'litellm.router', 'litellm.caching',
+        "litellm",
+        "LiteLLM",
+        "litellm.proxy",
+        "litellm.llms",
+        "litellm.router",
+        "litellm.caching",
         # markdown-it-py emits DEBUG logs per parser state transition
         # Incremental streaming triggers repeated re-parses, flooding the queue
-        'markdown_it',
+        "markdown_it",
     ]
     for logger_name in noisy_loggers:
         logging.getLogger(logger_name).setLevel(logging.WARNING)
@@ -870,14 +922,15 @@ def configure_logging(
     # Startup cleanup using retention config
     try:
         from .log_store import get_log_store
+
         get_log_store().clear_old(days=config.retention.logs_db_days)
     except Exception:
         pass  # Non-critical, logs.db may not exist yet
 
     # Log startup (this now goes through the full pipeline)
-    logger = structlog.get_logger('logging')
+    logger = structlog.get_logger("logging")
     logger.info(
-        'logging_configured',
+        "logging_configured",
         run_id=process_run_id,
         mode=mode,
         level=config.level,
@@ -892,13 +945,14 @@ def configure_logging(
 # CONTEXT BINDING UTILITIES
 # =============================================================================
 
+
 def bind_context(
-    run: Optional[str] = None,
-    session: Optional[str] = None,
-    stream: Optional[str] = None,
-    request: Optional[str] = None,
-    comp: Optional[str] = None,
-    op: Optional[str] = None,
+    run: str | None = None,
+    session: str | None = None,
+    stream: str | None = None,
+    request: str | None = None,
+    comp: str | None = None,
+    op: str | None = None,
 ) -> None:
     """
     Bind context variables for logging correlation.
@@ -927,11 +981,11 @@ def bind_context(
 
 def clear_context() -> None:
     """Clear all context variables (except run_id which is process-level)."""
-    session_id.set('')
-    stream_id.set('')
-    request_id.set('')
-    component.set('')
-    operation.set('')
+    session_id.set("")
+    stream_id.set("")
+    request_id.set("")
+    component.set("")
+    operation.set("")
     # Note: run_id is intentionally NOT cleared as it's process-level
 
 
@@ -945,6 +999,7 @@ def new_request_id() -> str:
 # =============================================================================
 # LOGGER FACTORY
 # =============================================================================
+
 
 def get_logger(name: str = None) -> BoundLogger:
     """
@@ -971,6 +1026,7 @@ def get_logger(name: str = None) -> BoundLogger:
 # =============================================================================
 # ASYNCIO EXCEPTION HANDLER INSTALLER
 # =============================================================================
+
 
 def install_asyncio_handler(loop=None) -> None:
     """

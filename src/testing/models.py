@@ -1,12 +1,13 @@
 """Data models for test execution results."""
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Any
 from enum import Enum
+from typing import Any, Optional
 
 
 class TestStatus(Enum):
     """Test execution status."""
+
     PASSED = "passed"
     FAILED = "failed"
     ERROR = "error"
@@ -20,10 +21,10 @@ class TestCase:
     name: str
     status: TestStatus
     duration_seconds: float = 0.0
-    error_message: Optional[str] = None
-    stack_trace: Optional[str] = None
-    file_path: Optional[str] = None
-    line_number: Optional[int] = None
+    error_message: str | None = None
+    stack_trace: str | None = None
+    file_path: str | None = None
+    line_number: int | None = None
 
     @property
     def passed(self) -> bool:
@@ -47,7 +48,7 @@ class TestSuiteResult:
     errors: int
     skipped: int
     duration_seconds: float
-    test_cases: List[TestCase] = field(default_factory=list)
+    test_cases: list[TestCase] = field(default_factory=list)
     raw_output: str = ""
     exit_code: int = 0
 
@@ -88,7 +89,7 @@ class TestSuiteResult:
 
         return "\n".join(summary_lines)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
             "framework": self.framework,
@@ -111,5 +112,5 @@ class TestSuiteResult:
                     "line_number": tc.line_number,
                 }
                 for tc in self.test_cases
-            ]
+            ],
         }

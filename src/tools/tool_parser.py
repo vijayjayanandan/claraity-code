@@ -5,15 +5,16 @@ Supports JSON format optimized for Qwen3-Coder 30B.
 
 import json
 import re
-from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
+from typing import Any, Optional
 
 
 @dataclass
 class ToolCall:
     """Represents a single tool call."""
+
     tool: str
-    arguments: Dict[str, Any]
+    arguments: dict[str, Any]
 
     def __repr__(self) -> str:
         return f"ToolCall(tool='{self.tool}', arguments={self.arguments})"
@@ -22,16 +23,21 @@ class ToolCall:
 @dataclass
 class ParsedResponse:
     """Result of parsing an LLM response for tool calls."""
+
     has_tool_calls: bool
-    tool_calls: List[ToolCall]
-    thoughts: Optional[str] = None
-    raw_text: Optional[str] = None
-    error: Optional[str] = None
+    tool_calls: list[ToolCall]
+    thoughts: str | None = None
+    raw_text: str | None = None
+    error: str | None = None
 
     def __repr__(self) -> str:
         if self.has_tool_calls:
-            return f"ParsedResponse(tools={len(self.tool_calls)}, thoughts='{self.thoughts[:50]}...')"
-        return f"ParsedResponse(no_tools, text='{self.raw_text[:50] if self.raw_text else 'None'}...')"
+            return (
+                f"ParsedResponse(tools={len(self.tool_calls)}, thoughts='{self.thoughts[:50]}...')"
+            )
+        return (
+            f"ParsedResponse(no_tools, text='{self.raw_text[:50] if self.raw_text else 'None'}...')"
+        )
 
 
 class ToolCallParser:
@@ -50,10 +56,10 @@ class ToolCallParser:
     def __init__(self):
         """Initialize the tool call parser."""
         # Pattern to extract JSON from markdown code blocks
-        self.json_pattern = re.compile(r'```json\s*\n(.*?)\n```', re.DOTALL)
+        self.json_pattern = re.compile(r"```json\s*\n(.*?)\n```", re.DOTALL)
 
         # Pattern to find standalone JSON objects
-        self.json_object_pattern = re.compile(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', re.DOTALL)
+        self.json_object_pattern = re.compile(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", re.DOTALL)
 
     def parse(self, llm_response: str) -> ParsedResponse:
         """
@@ -66,22 +72,14 @@ class ToolCallParser:
             ParsedResponse object containing tool calls or error information
         """
         if not llm_response or not llm_response.strip():
-            return ParsedResponse(
-                has_tool_calls=False,
-                tool_calls=[],
-                error="Empty response"
-            )
+            return ParsedResponse(has_tool_calls=False, tool_calls=[], error="Empty response")
 
         # Try to extract JSON from the response
         json_text = self._extract_json(llm_response)
 
         if not json_text:
             # No JSON found - this is a regular text response
-            return ParsedResponse(
-                has_tool_calls=False,
-                tool_calls=[],
-                raw_text=llm_response
-            )
+            return ParsedResponse(has_tool_calls=False, tool_calls=[], raw_text=llm_response)
 
         # Try to parse the JSON
         try:
@@ -92,10 +90,10 @@ class ToolCallParser:
                 has_tool_calls=False,
                 tool_calls=[],
                 error=f"Invalid JSON: {str(e)}",
-                raw_text=llm_response
+                raw_text=llm_response,
             )
 
-    def _extract_json(self, text: str) -> Optional[str]:
+    def _extract_json(self, text: str) -> str | None:
         """
         Extract JSON from text, trying multiple strategies.
 
@@ -119,24 +117,24 @@ class ToolCallParser:
                     data = json.loads(match)
                     if isinstance(data, dict) and ("tool_calls" in data or "thoughts" in data):
                         return match
-                except:
+                except Exception:
                     continue
 
         # Strategy 3: Try to find JSON between { and } manually
         try:
-            start = text.find('{')
-            end = text.rfind('}') + 1
+            start = text.find("{")
+            end = text.rfind("}") + 1
             if start != -1 and end > start:
                 potential_json = text[start:end]
                 # Validate it's parseable
                 json.loads(potential_json)
                 return potential_json
-        except:
+        except Exception:
             pass
 
         return None
 
-    def _parse_json_response(self, data: Dict[str, Any], original_text: str) -> ParsedResponse:
+    def _parse_json_response(self, data: dict[str, Any], original_text: str) -> ParsedResponse:
         """
         Parse a JSON response object into a ParsedResponse.
 
@@ -156,10 +154,7 @@ class ToolCallParser:
         if not tool_calls_data or not isinstance(tool_calls_data, list):
             # No tool calls in response
             return ParsedResponse(
-                has_tool_calls=False,
-                tool_calls=[],
-                thoughts=thoughts,
-                raw_text=original_text
+                has_tool_calls=False, tool_calls=[], thoughts=thoughts, raw_text=original_text
             )
 
         # Parse each tool call
@@ -179,16 +174,12 @@ class ToolCallParser:
                 has_tool_calls=False,
                 tool_calls=[],
                 error=f"Tool call parsing errors: {error_msg}",
-                raw_text=original_text
+                raw_text=original_text,
             )
 
-        return ParsedResponse(
-            has_tool_calls=True,
-            tool_calls=tool_calls,
-            thoughts=thoughts
-        )
+        return ParsedResponse(has_tool_calls=True, tool_calls=tool_calls, thoughts=thoughts)
 
-    def _parse_tool_call(self, call_data: Dict[str, Any], index: int) -> ToolCall:
+    def _parse_tool_call(self, call_data: dict[str, Any], index: int) -> ToolCall:
         """
         Parse a single tool call from JSON data.
 
@@ -218,19 +209,24 @@ class ToolCallParser:
 
         return ToolCall(tool=tool_name, arguments=arguments)
 
-    def validate_tool_call(self, tool_call: ToolCall, available_tools: List[str]) -> Tuple[bool, Optional[str]]:
+    def validate_tool_call(
+        self, tool_call: ToolCall, available_tools: list[str]
+    ) -> tuple[bool, str | None]:
         """
         Validate that a tool call is valid and the tool exists.
 
         Args:
             tool_call: The ToolCall to validate
-            available_tools: List of available tool names
+            available_tools: list of available tool names
 
         Returns:
-            Tuple of (is_valid, error_message)
+            tuple of (is_valid, error_message)
         """
         if tool_call.tool not in available_tools:
-            return False, f"Unknown tool: '{tool_call.tool}'. Available tools: {', '.join(available_tools)}"
+            return (
+                False,
+                f"Unknown tool: '{tool_call.tool}'. Available tools: {', '.join(available_tools)}",
+            )
 
         return True, None
 
@@ -254,7 +250,7 @@ if __name__ == "__main__":
     # Test cases
     test_responses = [
         # Test 1: Valid tool call
-        '''```json
+        """```json
 {
   "thoughts": "I need to read the file first",
   "tool_calls": [
@@ -264,10 +260,9 @@ if __name__ == "__main__":
     }
   ]
 }
-```''',
-
+```""",
         # Test 2: Multiple tool calls
-        '''```json
+        """```json
 {
   "thoughts": "I'll search first, then read the results",
   "tool_calls": [
@@ -275,11 +270,9 @@ if __name__ == "__main__":
     {"tool": "read_file", "arguments": {"file_path": "src/core/agent.py"}}
   ]
 }
-```''',
-
+```""",
         # Test 3: No tool calls (regular response)
         "Here's what the code does: It implements a coding agent that...",
-
         # Test 4: Invalid JSON
         "```json\n{invalid json}\n```",
     ]
@@ -287,9 +280,9 @@ if __name__ == "__main__":
     parser = ToolCallParser()
 
     for i, response in enumerate(test_responses, 1):
-        print(f"\n{'='*80}")
+        print(f"\n{'=' * 80}")
         print(f"Test {i}:")
-        print(f"{'='*80}")
+        print(f"{'=' * 80}")
         print(f"Input: {response[:100]}...")
 
         result = parser.parse(response)

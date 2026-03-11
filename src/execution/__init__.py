@@ -9,7 +9,7 @@ Phase 1 Components:
 - Long-Running Controller: Manage multi-session workflows
 """
 
-from .checkpoint import CheckpointManager, ExecutionCheckpoint, CheckpointMetadata
+from .checkpoint import CheckpointManager, CheckpointMetadata, ExecutionCheckpoint
 from .controller import LongRunningController
 
 __all__ = [

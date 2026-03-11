@@ -7,11 +7,12 @@ Pure data structures with no codebase dependencies.
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, auto
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 
 class DirectorPhase(Enum):
     """States in the Director Protocol state machine."""
+
     IDLE = auto()
     UNDERSTAND = auto()
     PLAN = auto()
@@ -24,6 +25,7 @@ class DirectorPhase(Enum):
 
 class SliceStatus(Enum):
     """Status of an individual vertical slice."""
+
     PENDING = auto()
     IN_PROGRESS = auto()
     COMPLETED = auto()
@@ -33,24 +35,26 @@ class SliceStatus(Enum):
 @dataclass
 class FileMapping:
     """A file identified during the UNDERSTAND phase."""
+
     path: str
     role: str
     description: str
-    patterns: List[str] = field(default_factory=list)
+    patterns: list[str] = field(default_factory=list)
 
 
 @dataclass
 class ContextDocument:
     """Output of the UNDERSTAND phase."""
-    task_description: str
-    affected_files: List[FileMapping] = field(default_factory=list)
-    existing_patterns: List[str] = field(default_factory=list)
-    dependencies: List[str] = field(default_factory=list)
-    constraints: List[str] = field(default_factory=list)
-    risks: List[str] = field(default_factory=list)
-    created_at: Optional[datetime] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    task_description: str
+    affected_files: list[FileMapping] = field(default_factory=list)
+    existing_patterns: list[str] = field(default_factory=list)
+    dependencies: list[str] = field(default_factory=list)
+    constraints: list[str] = field(default_factory=list)
+    risks: list[str] = field(default_factory=list)
+    created_at: datetime | None = None
+
+    def to_dict(self) -> dict[str, Any]:
         """Serialize for persistence/display."""
         return {
             "task_description": self.task_description,
@@ -74,16 +78,17 @@ class ContextDocument:
 @dataclass
 class VerticalSlice:
     """A thin, independently testable increment of functionality."""
+
     id: int
     title: str
     description: str = ""
-    files_to_create: List[str] = field(default_factory=list)
-    files_to_modify: List[str] = field(default_factory=list)
-    test_criteria: List[str] = field(default_factory=list)
-    depends_on: List[int] = field(default_factory=list)
+    files_to_create: list[str] = field(default_factory=list)
+    files_to_modify: list[str] = field(default_factory=list)
+    test_criteria: list[str] = field(default_factory=list)
+    depends_on: list[int] = field(default_factory=list)
     status: SliceStatus = SliceStatus.PENDING
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize for persistence/display."""
         return {
             "id": self.id,
@@ -100,11 +105,12 @@ class VerticalSlice:
 @dataclass
 class DirectorPlan:
     """Output of the PLAN phase."""
-    slices: List[VerticalSlice] = field(default_factory=list)
-    context: Optional[ContextDocument] = None
+
+    slices: list[VerticalSlice] = field(default_factory=list)
+    context: ContextDocument | None = None
     summary: str = ""
     plan_document: str = ""  # Path to rich markdown plan file
-    created_at: Optional[datetime] = None
+    created_at: datetime | None = None
 
     @property
     def total_slices(self) -> int:
@@ -114,7 +120,7 @@ class DirectorPlan:
     def completed_slices(self) -> int:
         return sum(1 for s in self.slices if s.status == SliceStatus.COMPLETED)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize for persistence/display."""
         return {
             "summary": self.summary,
@@ -127,8 +133,9 @@ class DirectorPlan:
 @dataclass
 class PhaseResult:
     """Result from executing a phase."""
+
     phase: DirectorPhase
     success: bool
     output: Any = None
-    error: Optional[str] = None
+    error: str | None = None
     duration_seconds: float = 0.0

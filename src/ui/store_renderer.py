@@ -6,20 +6,21 @@ messages, assistant messages (with segment-based rendering), tool results,
 and system messages (clarify requests, plan approvals, compaction boundaries).
 """
 
-from typing import TYPE_CHECKING, Any, Callable, Awaitable, Optional
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Optional
 
-from src.observability import get_logger
 from src.core.tool_status import ToolStatus as CoreToolStatus
+from src.observability import get_logger
 
 logger = get_logger(__name__)
 
 if TYPE_CHECKING:
-    from ..session.store.memory_store import MessageStore
     from ..session.models.message import Message
-    from .widgets.message import MessageWidget, UserMessage, AssistantMessage
-    from .widgets.tool_card import ToolCard
-    from .segment_renderer import SegmentRenderer
+    from ..session.store.memory_store import MessageStore
     from .events import ToolStatus
+    from .segment_renderer import SegmentRenderer
+    from .widgets.message import AssistantMessage, MessageWidget, UserMessage
+    from .widgets.tool_card import ToolCard
 
 
 class StoreRenderer:
@@ -96,8 +97,8 @@ class StoreRenderer:
         Returns:
             The pre_mounted_user_widget (may be consumed/cleared) or None
         """
-        from .widgets.message import UserMessage, AssistantMessage
         from .events import ToolStatus
+        from .widgets.message import AssistantMessage, UserMessage
 
         if not message:
             return pre_mounted_user_widget
@@ -107,6 +108,11 @@ class StoreRenderer:
 
         # Create appropriate widget based on role
         if message.is_user:
+            # Skip rendering for auto-generated task notifications (no visible bubble)
+            content = message.content or ""
+            if content.strip().startswith("<task-notification>"):
+                return pre_mounted_user_widget
+
             # Adopt pre-mounted widget (mounted immediately on submit)
             if not bulk_load and pre_mounted_user_widget is not None:
                 widget = pre_mounted_user_widget
@@ -116,7 +122,7 @@ class StoreRenderer:
                 return pre_mounted_user_widget  # Return None (consumed)
             # Pass raw content and UUID for clickable image support
             message_uuid = message.meta.uuid if message.meta else ""
-            widget = UserMessage(content=message.content or "", message_uuid=message_uuid)
+            widget = UserMessage(content=content, message_uuid=message_uuid)
         elif message.is_assistant:
             if not bulk_load:
                 # Check if widget already exists for this stream_id
@@ -127,7 +133,9 @@ class StoreRenderer:
                 if current_message is not None:
                     if stream_id:
                         self._store_message_widgets[stream_id] = current_message
-                    segments = message.meta.segments if message.meta and message.meta.segments else []
+                    segments = (
+                        message.meta.segments if message.meta and message.meta.segments else []
+                    )
                     if segments:
                         await self._segment_renderer.render_tool_segments_only(
                             current_message, message, segments
@@ -146,9 +154,7 @@ class StoreRenderer:
             await self.apply_tool_result_to_card(message)
             return pre_mounted_user_widget
         elif message.is_system:
-            await self._handle_system_message(
-                message, conversation, status_bar
-            )
+            await self._handle_system_message(message, conversation, status_bar)
             return pre_mounted_user_widget
         else:
             return pre_mounted_user_widget
@@ -165,16 +171,15 @@ class StoreRenderer:
             if segments:
                 try:
                     rendered = await self._segment_renderer.render_segments(
-                        widget, message, segments,
+                        widget,
+                        message,
+                        segments,
                         defer_tool_mount=bulk_load,
                         use_store_hydration=bulk_load,
                         hydrate_fn=self.hydrate_tool_card_from_store if bulk_load else None,
                     )
                 except Exception as e:
-                    logger.error(
-                        f"_render_segments failed: {type(e).__name__}: {e}",
-                        exc_info=True
-                    )
+                    logger.error(f"_render_segments failed: {type(e).__name__}: {e}", exc_info=True)
                     rendered = 0
                 # Track segment index for future updates (live path only)
                 if not bulk_load and stream_id:
@@ -186,11 +191,14 @@ class StoreRenderer:
                 # Bulk load: also render tool calls in fallback path
                 if bulk_load and message.tool_calls:
                     import json
+
                     for tc in message.tool_calls:
                         if tc.function.name in self._silent_tools:
                             continue
                         args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-                        card = widget.add_tool_card(tc.id, tc.function.name, args, requires_approval=False)
+                        card = widget.add_tool_card(
+                            tc.id, tc.function.name, args, requires_approval=False
+                        )
                         card.set_defer_diff_mount(True)
                         self._tool_cards[tc.id] = card
                         self._on_tool_card_created(tc.id, card)
@@ -270,7 +278,9 @@ class StoreRenderer:
         if call_id and self._message_store:
             tool_result = self._message_store.get_tool_result(call_id)
             if tool_result:
-                logger.info(f"[{label}] Skipping approval mount - tool result exists for call_id={call_id}")
+                logger.info(
+                    f"[{label}] Skipping approval mount - tool result exists for call_id={call_id}"
+                )
                 return
 
         await self._on_plan_approval(
@@ -294,7 +304,9 @@ class StoreRenderer:
         tool_call_id = message.tool_call_id
         card = self._tool_cards.get(tool_call_id)
         if not card:
-            logger.debug(f"No ToolCard found for tool_call_id={tool_call_id}, skipping result update")
+            logger.debug(
+                f"No ToolCard found for tool_call_id={tool_call_id}, skipping result update"
+            )
             return
 
         status = message.meta.status if message.meta else None
@@ -344,7 +356,11 @@ class StoreRenderer:
         result_msg = self._message_store.get_tool_result(tool_call_id)
 
         if result_msg:
-            result_content = result_msg.get_text_content() if hasattr(result_msg, 'get_text_content') else (result_msg.content or "")
+            result_content = (
+                result_msg.get_text_content()
+                if hasattr(result_msg, "get_text_content")
+                else (result_msg.content or "")
+            )
             status = result_msg.meta.status if result_msg.meta else None
             duration = result_msg.meta.duration_ms if result_msg.meta else None
 
@@ -360,7 +376,9 @@ class StoreRenderer:
                 card.result_preview = "(Approved but not executed)"
             else:
                 card.status = ToolStatus.REJECTED
-                feedback = approval_msg.meta.extra.get("feedback") if approval_msg.meta.extra else None
+                feedback = (
+                    approval_msg.meta.extra.get("feedback") if approval_msg.meta.extra else None
+                )
                 if feedback:
                     card.result_preview = f"(Rejected: {feedback[:50]})"
                 else:

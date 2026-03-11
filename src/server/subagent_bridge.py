@@ -14,10 +14,10 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Any, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 
-from src.server.serializers import serialize_store_notification
 from src.observability import get_logger
+from src.server.serializers import serialize_store_notification
 
 if TYPE_CHECKING:
     from src.server.ws_protocol import WebSocketProtocol
@@ -35,7 +35,7 @@ class ServerSubagentBridge:
     messages the VS Code client already understands.
     """
 
-    def __init__(self, protocol: "WebSocketProtocol") -> None:
+    def __init__(self, protocol: WebSocketProtocol) -> None:
         self._protocol = protocol
         self._active: dict[str, dict[str, Any]] = {}
 
@@ -55,26 +55,29 @@ class ServerSubagentBridge:
             "model_name": model_name,
             "subagent_name": subagent_name,
         }
-        asyncio.ensure_future(self._protocol._send_json({
-            "type": "subagent",
-            "event": "registered",
-            "data": {
-                "subagent_id": subagent_id,
-                "parent_tool_call_id": parent_tool_call_id,
-                "model_name": model_name,
-                "subagent_name": subagent_name,
-                "transcript_path": str(transcript_path),
-            },
-        }))
+        asyncio.ensure_future(
+            self._protocol._send_json(
+                {
+                    "type": "subagent",
+                    "event": "registered",
+                    "data": {
+                        "subagent_id": subagent_id,
+                        "parent_tool_call_id": parent_tool_call_id,
+                        "model_name": model_name,
+                        "subagent_name": subagent_name,
+                        "transcript_path": str(transcript_path),
+                    },
+                }
+            )
+        )
         logger.info(
-            f"[BRIDGE] Registered subagent {subagent_id} "
-            f"(name={subagent_name}, model={model_name})"
+            f"[BRIDGE] Registered subagent {subagent_id} (name={subagent_name}, model={model_name})"
         )
 
     def push_notification(
         self,
         subagent_id: str,
-        notification: "StoreNotification",
+        notification: StoreNotification,
     ) -> None:
         """Serialize a store notification and forward to the client."""
         data = serialize_store_notification(notification)
@@ -85,9 +88,13 @@ class ServerSubagentBridge:
     def unregister(self, subagent_id: str) -> None:
         """Remove tracking and notify the client."""
         self._active.pop(subagent_id, None)
-        asyncio.ensure_future(self._protocol._send_json({
-            "type": "subagent",
-            "event": "unregistered",
-            "data": {"subagent_id": subagent_id},
-        }))
+        asyncio.ensure_future(
+            self._protocol._send_json(
+                {
+                    "type": "subagent",
+                    "event": "unregistered",
+                    "data": {"subagent_id": subagent_id},
+                }
+            )
+        )
         logger.info(f"[BRIDGE] Unregistered subagent {subagent_id}")

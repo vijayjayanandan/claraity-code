@@ -1,6 +1,7 @@
 """Model configurations and recommendations."""
 
-from typing import Dict, Optional
+from typing import Optional
+
 from pydantic import BaseModel
 
 
@@ -24,42 +25,42 @@ CODING_MODELS = {
         context_window=4096,
         recommended_temperature=0.2,
         use_case="coding",
-        description="Code Llama 7B optimized for instruction following. Good general coding model."
+        description="Code Llama 7B optimized for instruction following. Good general coding model.",
     ),
     "codellama:13b-instruct": ModelConfig(
         name="codellama:13b-instruct",
         context_window=4096,
         recommended_temperature=0.2,
         use_case="coding",
-        description="Code Llama 13B. Better quality than 7B but slower."
+        description="Code Llama 13B. Better quality than 7B but slower.",
     ),
     "deepseek-coder:6.7b-instruct": ModelConfig(
         name="deepseek-coder:6.7b-instruct",
         context_window=16384,
         recommended_temperature=0.2,
         use_case="coding",
-        description="DeepSeek Coder 6.7B. Excellent coding capabilities with large context."
+        description="DeepSeek Coder 6.7B. Excellent coding capabilities with large context.",
     ),
     "qwen2.5-coder:7b": ModelConfig(
         name="qwen2.5-coder:7b",
         context_window=32768,
         recommended_temperature=0.2,
         use_case="coding",
-        description="Qwen 2.5 Coder 7B. Very large context window, great for complex tasks."
+        description="Qwen 2.5 Coder 7B. Very large context window, great for complex tasks.",
     ),
     "codestral:7b": ModelConfig(
         name="codestral:7b",
         context_window=8192,
         recommended_temperature=0.3,
         use_case="coding",
-        description="Mistral's code model. Good reasoning and code generation."
+        description="Mistral's code model. Good reasoning and code generation.",
     ),
     "qwen3-coder:30b": ModelConfig(
         name="qwen3-coder:30b",
         context_window=262144,
         recommended_temperature=0.2,
         use_case="coding",
-        description="Qwen3 Coder 30B. Massive 262K context window with enhanced agentic capabilities. Best for complex multi-file tasks."
+        description="Qwen3 Coder 30B. Massive 262K context window with enhanced agentic capabilities. Best for complex multi-file tasks.",
     ),
 }
 
@@ -70,21 +71,21 @@ GENERAL_MODELS = {
         context_window=8192,
         recommended_temperature=0.3,
         use_case="general",
-        description="Llama 3.2 8B. Balanced performance for various tasks."
+        description="Llama 3.2 8B. Balanced performance for various tasks.",
     ),
     "mistral:7b-instruct": ModelConfig(
         name="mistral:7b-instruct",
         context_window=8192,
         recommended_temperature=0.3,
         use_case="general",
-        description="Mistral 7B. Fast and capable general purpose model."
+        description="Mistral 7B. Fast and capable general purpose model.",
     ),
     "phi3:medium": ModelConfig(
         name="phi3:medium",
         context_window=4096,
         recommended_temperature=0.3,
         use_case="general",
-        description="Phi-3 Medium. Efficient for limited resources."
+        description="Phi-3 Medium. Efficient for limited resources.",
     ),
 }
 
@@ -92,7 +93,7 @@ GENERAL_MODELS = {
 ALL_MODELS = {**CODING_MODELS, **GENERAL_MODELS}
 
 
-def get_model_config(model_name: str) -> Optional[ModelConfig]:
+def get_model_config(model_name: str) -> ModelConfig | None:
     """
     Get configuration for a model.
 
@@ -105,7 +106,7 @@ def get_model_config(model_name: str) -> Optional[ModelConfig]:
     return ALL_MODELS.get(model_name)
 
 
-def list_recommended_models(use_case: str = "coding") -> Dict[str, ModelConfig]:
+def list_recommended_models(use_case: str = "coding") -> dict[str, ModelConfig]:
     """
     List recommended models for a use case.
 
@@ -123,7 +124,7 @@ def list_recommended_models(use_case: str = "coding") -> Dict[str, ModelConfig]:
         return ALL_MODELS
 
 
-def get_best_model_for_context(required_context: int) -> Optional[str]:
+def get_best_model_for_context(required_context: int) -> str | None:
     """
     Get best model name for required context window.
 

@@ -1,13 +1,14 @@
 """CRUD task tracking tools backed by TaskState with file persistence."""
 
-from typing import Dict, Any, Optional
+from typing import Any, Optional
+
 from .base import Tool, ToolResult, ToolStatus
 from .task_state import TaskState
-
 
 # ---------------------------------------------------------------------------
 # CRUD Task Tools (backed by TaskState)
 # ---------------------------------------------------------------------------
+
 
 class TaskCreateTool(Tool):
     """Create a new task in the task list."""
@@ -15,12 +16,13 @@ class TaskCreateTool(Tool):
     def __init__(self, task_state: TaskState):
         super().__init__(
             name="task_create",
-            description="Create a new task to track work. Returns the created task with its ID."
+            description="Create a new task to track work. Returns the created task with its ID.",
         )
         self.task_state = task_state
 
-    def execute(self, subject: str, description: str = "",
-                activeForm: str = "", **kwargs: Any) -> ToolResult:
+    def execute(
+        self, subject: str, description: str = "", activeForm: str = "", **kwargs: Any
+    ) -> ToolResult:
         try:
             task = self.task_state.create(
                 subject=subject,
@@ -42,13 +44,16 @@ class TaskCreateTool(Tool):
                 error=str(e),
             )
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
                 "subject": {"type": "string", "description": "Brief task title (imperative form)"},
                 "description": {"type": "string", "description": "Detailed description"},
-                "activeForm": {"type": "string", "description": "Present continuous form for spinner"},
+                "activeForm": {
+                    "type": "string",
+                    "description": "Present continuous form for spinner",
+                },
             },
             "required": ["subject"],
         }
@@ -60,7 +65,7 @@ class TaskUpdateTool(Tool):
     def __init__(self, task_state: TaskState):
         super().__init__(
             name="task_update",
-            description="Update a task's status, subject, description, or dependencies."
+            description="Update a task's status, subject, description, or dependencies.",
         )
         self.task_state = task_state
 
@@ -89,7 +94,7 @@ class TaskUpdateTool(Tool):
                 error=str(e),
             )
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
@@ -128,8 +133,7 @@ class TaskListTool(Tool):
 
     def __init__(self, task_state: TaskState):
         super().__init__(
-            name="task_list",
-            description="List all tasks with their status and dependencies."
+            name="task_list", description="List all tasks with their status and dependencies."
         )
         self.task_state = task_state
 
@@ -155,7 +159,7 @@ class TaskListTool(Tool):
             metadata={"tasks": tasks},
         )
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         return {"type": "object", "properties": {}}
 
 
@@ -163,10 +167,7 @@ class TaskGetTool(Tool):
     """Get a single task by ID."""
 
     def __init__(self, task_state: TaskState):
-        super().__init__(
-            name="task_get",
-            description="Get full details of a task by its ID."
-        )
+        super().__init__(name="task_get", description="Get full details of a task by its ID.")
         self.task_state = task_state
 
     def execute(self, taskId: str, **kwargs: Any) -> ToolResult:
@@ -195,7 +196,7 @@ class TaskGetTool(Tool):
             metadata={"task": task},
         )
 
-    def _get_parameters(self) -> Dict[str, Any]:
+    def _get_parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {

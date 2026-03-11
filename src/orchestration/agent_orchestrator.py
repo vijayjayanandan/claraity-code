@@ -7,14 +7,15 @@ and AI Coding Agent (subject under test).
 
 import os
 import uuid
-from pathlib import Path
 from datetime import datetime
-from typing import Dict, Optional
+from pathlib import Path
+from typing import Optional
+
+from src.core.agent import CodingAgent
+from src.execution.controller import LongRunningController
 
 from .conversation import ConversationSession
 from .models import AgentResponse, ConversationLog
-from src.core.agent import CodingAgent
-from src.execution.controller import LongRunningController
 
 
 class AgentOrchestrator:
@@ -33,12 +34,12 @@ class AgentOrchestrator:
 
     def __init__(
         self,
-        model_name: Optional[str] = None,
-        backend: Optional[str] = None,
-        base_url: Optional[str] = None,
-        api_key: Optional[str] = None,
+        model_name: str | None = None,
+        backend: str | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
         output_dir: str = "./orchestration-logs",
-        working_directory: str = "./orchestration-workspace"
+        working_directory: str = "./orchestration-workspace",
     ):
         """
         Initialize orchestrator.
@@ -61,11 +62,14 @@ class AgentOrchestrator:
 
         # Validate configuration
         if not self.model_name:
-            raise ValueError("No model name found. Set LLM_MODEL in .env or pass model_name parameter.")
+            raise ValueError(
+                "No model name found. Set LLM_MODEL in .env or pass model_name parameter."
+            )
         if not self.base_url:
             raise ValueError("No base URL found. Set LLM_HOST in .env or pass base_url parameter.")
         if not self.api_key:
-            raise ValueError("No API key found. Set OPENAI_API_KEY in .env or pass api_key parameter."
+            raise ValueError(
+                "No API key found. Set OPENAI_API_KEY in .env or pass api_key parameter."
             )
 
         # Create directories
@@ -73,12 +77,10 @@ class AgentOrchestrator:
         self.working_directory.mkdir(exist_ok=True, parents=True)
 
         # Track active sessions
-        self.active_sessions: Dict[str, ConversationSession] = {}
+        self.active_sessions: dict[str, ConversationSession] = {}
 
     def start_conversation(
-        self,
-        task_description: Optional[str] = None,
-        isolated_workspace: bool = True
+        self, task_description: str | None = None, isolated_workspace: bool = True
     ) -> ConversationSession:
         """
         Start new conversation with agent.
@@ -121,9 +123,7 @@ class AgentOrchestrator:
 
         # Initialize Long Running Controller for checkpoints
         controller = LongRunningController(
-            agent=agent,
-            project_dir=str(workspace_abs),
-            max_checkpoints=10
+            agent=agent, project_dir=str(workspace_abs), max_checkpoints=10
         )
 
         # Wire controller to checkpoint tool
@@ -141,7 +141,7 @@ class AgentOrchestrator:
             working_directory=workspace_abs,  # Use absolute path
             agent=agent,
             log_file=log_file,
-            controller=controller  # Pass controller for checkpoint API
+            controller=controller,  # Pass controller for checkpoint API
         )
 
         # Track session
@@ -153,11 +153,7 @@ class AgentOrchestrator:
 
         return session
 
-    def send_message(
-        self,
-        message: str,
-        isolated_workspace: bool = True
-    ) -> AgentResponse:
+    def send_message(self, message: str, isolated_workspace: bool = True) -> AgentResponse:
         """
         Simple API: send single message, get response (no session tracking).
 
@@ -182,7 +178,7 @@ class AgentOrchestrator:
 
         return response
 
-    def get_session(self, conversation_id: str) -> Optional[ConversationSession]:
+    def get_session(self, conversation_id: str) -> ConversationSession | None:
         """
         Get active session by ID.
 
@@ -230,7 +226,7 @@ class AgentOrchestrator:
 
         return log
 
-    def list_active_conversations(self) -> Dict[str, dict]:
+    def list_active_conversations(self) -> dict[str, dict]:
         """
         List all active conversations.
 
@@ -243,7 +239,7 @@ class AgentOrchestrator:
                 "started_at": session.started_at.isoformat(),
                 "working_directory": str(session.working_directory),
                 "message_count": len(session.messages),
-                "turns": len([m for m in session.messages if m.role == "user"])
+                "turns": len([m for m in session.messages if m.role == "user"]),
             }
             for conv_id, session in self.active_sessions.items()
         }

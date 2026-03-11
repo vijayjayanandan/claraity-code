@@ -1,17 +1,19 @@
 """Working Memory - Immediate context for current task."""
 
-import tiktoken
-from typing import List, Optional, Dict, Any, TYPE_CHECKING
 from datetime import datetime
+from typing import TYPE_CHECKING, Any, Optional
 
-from .models import Message, CodeContext, TaskContext, MessageRole
+import tiktoken
+
+from .models import CodeContext, Message, MessageRole, TaskContext
 
 if TYPE_CHECKING:
-    from src.observability.transcript_logger import TranscriptLogger
     from src.memory.compaction.summarizer import PrioritizedSummarizer
+    from src.observability.transcript_logger import TranscriptLogger
 
 # Use structlog-based logger from observability module
 from src.observability import get_logger
+
 logger = get_logger(__name__)
 
 
@@ -45,14 +47,14 @@ class WorkingMemory:
         self.transcript_logger = transcript_logger
 
         # Current context
-        self.messages: List[Message] = []
-        self.task_context: Optional[TaskContext] = None
-        self.code_contexts: List[CodeContext] = []
-        self.metadata: Dict[str, Any] = {}
+        self.messages: list[Message] = []
+        self.task_context: TaskContext | None = None
+        self.code_contexts: list[CodeContext] = []
+        self.metadata: dict[str, Any] = {}
 
         # Compaction state
-        self.pending_continuation_summary: Optional[str] = None
-        self._summarizer: Optional["PrioritizedSummarizer"] = None
+        self.pending_continuation_summary: str | None = None
+        self._summarizer: PrioritizedSummarizer | None = None
 
     def count_tokens(self, text: str) -> int:
         """Count tokens in text."""
@@ -81,7 +83,7 @@ class WorkingMemory:
 
         return total
 
-    def add_message(self, role: MessageRole, content: str, metadata: Optional[Dict] = None) -> None:
+    def add_message(self, role: MessageRole, content: str, metadata: dict | None = None) -> None:
         """
         Add a message to working memory.
 
@@ -141,25 +143,21 @@ class WorkingMemory:
         recent_messages = self.messages[-2:]
 
         # Get messages eligible for eviction (excluding system and recent)
-        eviction_candidates = [
-            m for m in self.messages[:-2] if m.role != MessageRole.SYSTEM
-        ]
+        eviction_candidates = [m for m in self.messages[:-2] if m.role != MessageRole.SYSTEM]
 
         # Group tool messages with their assistant messages
         # This ensures we don't orphan tool results from their calls
         eviction_groups = self._group_tool_messages(eviction_candidates)
 
         # Evict oldest groups until under budget (keep more recent)
-        retained_groups: List[List[Message]] = []
-        evicted_messages: List[Message] = []
+        retained_groups: list[list[Message]] = []
+        evicted_messages: list[Message] = []
 
         for group in reversed(eviction_groups):  # Newest first
             # Calculate tokens if we kept this group
             flat_retained = [m for g in retained_groups for m in g]
             test_messages = system_messages + flat_retained + group + recent_messages
-            test_tokens = sum(
-                m.token_count or self.count_tokens(m.content) for m in test_messages
-            )
+            test_tokens = sum(m.token_count or self.count_tokens(m.content) for m in test_messages)
 
             if test_tokens <= self.max_tokens * 0.9:  # Keep 10% buffer
                 retained_groups.append(group)
@@ -173,6 +171,7 @@ class WorkingMemory:
             # Get or create summarizer
             if self._summarizer is None:
                 from src.memory.compaction.summarizer import PrioritizedSummarizer
+
                 self._summarizer = PrioritizedSummarizer(token_budget=6000)
 
             summary = self._summarizer.generate_summary(evicted_dicts, use_llm=use_llm)
@@ -182,14 +181,14 @@ class WorkingMemory:
             if self.pending_continuation_summary:
                 # Append new summary to existing
                 self.pending_continuation_summary = (
-                    self.pending_continuation_summary +
-                    "\n\n---\n\n[Additional context from further compaction:]\n\n" +
-                    summary
+                    self.pending_continuation_summary
+                    + "\n\n---\n\n[Additional context from further compaction:]\n\n"
+                    + summary
                 )
                 logger.info(
                     "compaction_merged",
                     evicted_count=len(evicted_messages),
-                    summary_tokens=summary_tokens
+                    summary_tokens=summary_tokens,
                 )
             else:
                 self.pending_continuation_summary = summary
@@ -202,7 +201,7 @@ class WorkingMemory:
                         tokens_after=self.get_current_token_count(),
                         evicted_count=len(evicted_messages),
                         summary_tokens=summary_tokens,
-                        summary_preview=summary[:500]
+                        summary_preview=summary[:500],
                     )
                 except Exception as e:
                     logger.warning("compaction_log_failed", error=str(e))
@@ -211,19 +210,18 @@ class WorkingMemory:
                 "compaction_complete",
                 evicted_count=len(evicted_messages),
                 tokens_before=original_tokens,
-                summary_tokens=summary_tokens
+                summary_tokens=summary_tokens,
             )
 
         # Rebuild messages list
         flat_retained = [m for g in retained_groups for m in g]
         self.messages = sorted(
-            system_messages + flat_retained + recent_messages,
-            key=lambda m: m.timestamp
+            system_messages + flat_retained + recent_messages, key=lambda m: m.timestamp
         )
 
         return original_count - len(self.messages)
 
-    def _group_tool_messages(self, messages: List[Message]) -> List[List[Message]]:
+    def _group_tool_messages(self, messages: list[Message]) -> list[list[Message]]:
         """
         Group messages so tool calls and results stay together.
 
@@ -232,12 +230,12 @@ class WorkingMemory:
         OpenAI API message format).
 
         Returns:
-            List of groups, where each group is either:
+            list of groups, where each group is either:
             - [assistant_with_tool_calls, tool_result_1, tool_result_2, ...]
             - [standalone_message]
         """
-        groups: List[List[Message]] = []
-        current_group: List[Message] = []
+        groups: list[list[Message]] = []
+        current_group: list[Message] = []
 
         for msg in messages:
             if msg.role == MessageRole.ASSISTANT and msg.metadata.get("tool_calls"):
@@ -264,7 +262,7 @@ class WorkingMemory:
 
         return groups
 
-    def _message_to_dict(self, msg: Message) -> Dict[str, Any]:
+    def _message_to_dict(self, msg: Message) -> dict[str, Any]:
         """Convert Message to dict format for summarizer."""
         result = {
             "role": msg.role.value,
@@ -283,7 +281,7 @@ class WorkingMemory:
         """Check if there's a pending continuation summary."""
         return self.pending_continuation_summary is not None
 
-    def consume_pending_summary(self) -> Optional[str]:
+    def consume_pending_summary(self) -> str | None:
         """
         Get and clear the pending continuation summary (one-shot).
 
@@ -294,7 +292,7 @@ class WorkingMemory:
         self.pending_continuation_summary = None
         return summary
 
-    def get_context_for_llm(self) -> List[Dict[str, Any]]:
+    def get_context_for_llm(self) -> list[dict[str, Any]]:
         """
         Get formatted context for LLM consumption.
 
@@ -302,7 +300,7 @@ class WorkingMemory:
         to maintain OpenAI-compatible message format for context retention.
 
         Returns:
-            List of message dictionaries in OpenAI format
+            list of message dictionaries in OpenAI format
         """
         context = []
 
@@ -342,11 +340,13 @@ class WorkingMemory:
                 context.append(tool_msg)
             elif msg.role == MessageRole.ASSISTANT and msg.metadata.get("tool_calls"):
                 # Assistant messages with tool_calls need to include them
-                context.append({
-                    "role": "assistant",
-                    "content": msg.content,
-                    "tool_calls": msg.metadata.get("tool_calls")
-                })
+                context.append(
+                    {
+                        "role": "assistant",
+                        "content": msg.content,
+                        "tool_calls": msg.metadata.get("tool_calls"),
+                    }
+                )
             else:
                 # Standard messages (user, system, assistant without tools)
                 context.append({"role": msg.role.value, "content": msg.content})
@@ -369,13 +369,11 @@ class WorkingMemory:
 
         summary_parts.append(f"Messages: {len(self.messages)}")
         summary_parts.append(f"Code Contexts: {len(self.code_contexts)}")
-        summary_parts.append(
-            f"Tokens: {self.get_current_token_count()}/{self.max_tokens}"
-        )
+        summary_parts.append(f"Tokens: {self.get_current_token_count()}/{self.max_tokens}")
 
         return " | ".join(summary_parts)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """
         Serialize working memory to dictionary.
 
@@ -383,21 +381,23 @@ class WorkingMemory:
             Dictionary with all working memory state
         """
         return {
-            "messages": [msg.model_dump(mode='json') for msg in self.messages],
-            "task_context": self.task_context.model_dump(mode='json') if self.task_context else None,
-            "code_contexts": [ctx.model_dump(mode='json') for ctx in self.code_contexts],
+            "messages": [msg.model_dump(mode="json") for msg in self.messages],
+            "task_context": self.task_context.model_dump(mode="json")
+            if self.task_context
+            else None,
+            "code_contexts": [ctx.model_dump(mode="json") for ctx in self.code_contexts],
             "metadata": self.metadata,
             "max_tokens": self.max_tokens,
         }
 
-    def from_dict(self, data: Dict[str, Any]) -> None:
+    def from_dict(self, data: dict[str, Any]) -> None:
         """
         Restore working memory from dictionary.
 
         Args:
             data: Dictionary with working memory state
         """
-        from .models import Message, MessageRole, CodeContext, TaskContext
+        from .models import CodeContext, Message, MessageRole, TaskContext
 
         # Restore messages
         self.messages = [Message.model_validate(msg) for msg in data.get("messages", [])]

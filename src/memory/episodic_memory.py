@@ -1,9 +1,10 @@
 """Episodic Memory - Session-scoped conversation history with compression."""
 
 import json
-from typing import List, Optional, Dict, Any
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Optional
+
 import tiktoken
 
 from .models import ConversationTurn, MemoryEntry, MemoryType, Message
@@ -33,8 +34,8 @@ class EpisodicMemory:
         self.compression_threshold = compression_threshold
         self.encoding = tiktoken.get_encoding(encoding_name)
 
-        self.conversation_turns: List[ConversationTurn] = []
-        self.compressed_history: List[str] = []  # Summaries of old conversations
+        self.conversation_turns: list[ConversationTurn] = []
+        self.compressed_history: list[str] = []  # Summaries of old conversations
         self.current_token_count = 0
 
     def count_tokens(self, text: str) -> int:
@@ -80,20 +81,18 @@ class EpisodicMemory:
 
         # Update state
         self.conversation_turns = recent_turns
-        self.current_token_count = sum(
-            t.token_count or 0 for t in self.conversation_turns
-        )
+        self.current_token_count = sum(t.token_count or 0 for t in self.conversation_turns)
 
         # Add token count for compressed summaries
         for summary in self.compressed_history:
             self.current_token_count += self.count_tokens(summary)
 
-    def _create_summary(self, turns: List[ConversationTurn]) -> str:
+    def _create_summary(self, turns: list[ConversationTurn]) -> str:
         """
         Create a compressed summary of conversation turns.
 
         Args:
-            turns: List of turns to summarize
+            turns: list of turns to summarize
 
         Returns:
             Compressed summary string
@@ -114,10 +113,12 @@ class EpisodicMemory:
 
                 summaries.append(summary)
 
-        timestamp_range = f"{turns[0].timestamp.strftime('%H:%M')} - {turns[-1].timestamp.strftime('%H:%M')}"
+        timestamp_range = (
+            f"{turns[0].timestamp.strftime('%H:%M')} - {turns[-1].timestamp.strftime('%H:%M')}"
+        )
         return f"[{timestamp_range}] " + " | ".join(summaries)
 
-    def get_recent_turns(self, n: int = 5) -> List[ConversationTurn]:
+    def get_recent_turns(self, n: int = 5) -> list[ConversationTurn]:
         """
         Get the N most recent conversation turns.
 
@@ -125,7 +126,7 @@ class EpisodicMemory:
             n: Number of recent turns to retrieve
 
         Returns:
-            List of recent turns
+            list of recent turns
         """
         return self.conversation_turns[-n:]
 
@@ -152,7 +153,7 @@ class EpisodicMemory:
 
         return "\n".join(parts)
 
-    def search_history(self, query: str, max_results: int = 3) -> List[ConversationTurn]:
+    def search_history(self, query: str, max_results: int = 3) -> list[ConversationTurn]:
         """
         Search conversation history for relevant turns.
 
@@ -161,7 +162,7 @@ class EpisodicMemory:
             max_results: Maximum number of results
 
         Returns:
-            List of relevant conversation turns
+            list of relevant conversation turns
         """
         query_lower = query.lower()
         scored_turns = []
@@ -233,7 +234,7 @@ class EpisodicMemory:
         Args:
             filepath: Path to load session from
         """
-        with open(filepath, "r") as f:
+        with open(filepath) as f:
             session_data = json.load(f)
 
         self.compressed_history = session_data["compressed_history"]
@@ -251,9 +252,7 @@ class EpisodicMemory:
             assistant_msg = Message(
                 role=turn_data["assistant_message"]["role"],
                 content=turn_data["assistant_message"]["content"],
-                timestamp=datetime.fromisoformat(
-                    turn_data["assistant_message"]["timestamp"]
-                ),
+                timestamp=datetime.fromisoformat(turn_data["assistant_message"]["timestamp"]),
                 metadata=turn_data["assistant_message"]["metadata"],
             )
 
@@ -286,7 +285,7 @@ class EpisodicMemory:
         for summary in self.compressed_history:
             self.current_token_count += self.count_tokens(summary)
 
-    def get_statistics(self) -> Dict[str, Any]:
+    def get_statistics(self) -> dict[str, Any]:
         """Get memory statistics."""
         return {
             "total_turns": len(self.conversation_turns),

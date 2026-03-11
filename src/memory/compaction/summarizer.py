@@ -19,8 +19,10 @@ Features:
 """
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional, Callable
+from typing import Any, Optional
+
 import tiktoken
 
 from src.observability import get_logger
@@ -32,13 +34,13 @@ logger = get_logger(__name__)
 SUMMARY_TOKEN_BUDGET = 6000  # Soft cap - quality prioritized
 
 SUMMARY_PRIORITIES = [
-    ("goal_and_decisions", 800),       # Priority 1: What we're doing
-    ("user_messages", 2000),           # Priority 2: ALL user messages (they're short!)
-    ("code_snippets", 1500),           # Priority 3: Actual code
-    ("errors_and_fixes", 600),         # Priority 4: Mistakes to avoid
-    ("files_modified", 400),           # Priority 5: File context
-    ("current_state", 400),            # Priority 6: Where we are now
-    ("tool_summary", 300),             # Priority 7: Tools used
+    ("goal_and_decisions", 800),  # Priority 1: What we're doing
+    ("user_messages", 2000),  # Priority 2: ALL user messages (they're short!)
+    ("code_snippets", 1500),  # Priority 3: Actual code
+    ("errors_and_fixes", 600),  # Priority 4: Mistakes to avoid
+    ("files_modified", 400),  # Priority 5: File context
+    ("current_state", 400),  # Priority 6: Where we are now
+    ("tool_summary", 300),  # Priority 7: Tools used
 ]
 
 
@@ -54,6 +56,7 @@ class SummarySection:
         priority: Priority rank (lower = more important)
         token_count: Tokens used by this section
     """
+
     name: str
     title: str
     content: str
@@ -77,7 +80,7 @@ class PrioritizedSummarizer:
         self,
         token_budget: int = SUMMARY_TOKEN_BUDGET,
         encoding_name: str = "cl100k_base",
-        llm_caller: Optional[Callable[[str], str]] = None
+        llm_caller: Callable[[str], str] | None = None,
     ):
         """
         Initialize summarizer.
@@ -98,11 +101,7 @@ class PrioritizedSummarizer:
             return 0
         return len(self.encoding.encode(text))
 
-    def generate_summary(
-        self,
-        messages: List[Dict[str, Any]],
-        use_llm: bool = True
-    ) -> str:
+    def generate_summary(self, messages: list[dict[str, Any]], use_llm: bool = True) -> str:
         """
         Generate prioritized summary from messages.
 
@@ -129,7 +128,7 @@ class PrioritizedSummarizer:
         # Fallback to deterministic summarization
         return self._generate_deterministic_summary(messages)
 
-    def _generate_llm_summary(self, messages: List[Dict[str, Any]]) -> str:
+    def _generate_llm_summary(self, messages: list[dict[str, Any]]) -> str:
         """
         Use LLM to generate high-quality summary.
 
@@ -184,7 +183,7 @@ Output the summary in clean markdown format."""
 
         return self.llm_caller(prompt)
 
-    def _generate_deterministic_summary(self, messages: List[Dict[str, Any]]) -> str:
+    def _generate_deterministic_summary(self, messages: list[dict[str, Any]]) -> str:
         """
         Fallback deterministic summarizer - always works, never fails.
 
@@ -194,7 +193,7 @@ Output the summary in clean markdown format."""
         Returns:
             Deterministic summary
         """
-        sections: List[SummarySection] = []
+        sections: list[SummarySection] = []
         remaining_budget = self.token_budget
 
         # Priority 1: Goal and decisions
@@ -244,7 +243,7 @@ Output the summary in clean markdown format."""
 
     # ==================== Section Extractors ====================
 
-    def _extract_goal_section(self, messages: List[Dict[str, Any]]) -> Optional[SummarySection]:
+    def _extract_goal_section(self, messages: list[dict[str, Any]]) -> SummarySection | None:
         """Extract goal and key decisions.
 
         Captures the first user message as the goal, and extracts FULL
@@ -269,12 +268,12 @@ Output the summary in clean markdown format."""
         decisions = []
         # Match a full sentence that contains a decision trigger
         decision_pattern = re.compile(
-            r"([^.!?\n]*?"                       # sentence start
+            r"([^.!?\n]*?"  # sentence start
             r"(?:I'll|I will|Let's|We should|I'm going to|"
             r"decided to|choosing|using|we chose|I chose|"
             r"the plan is to|going with|opting for)"
-            r"[^.!?\n]{10,})"                    # at least 10 more chars (skip "I'll do" noise)
-            r"[.!?]",                            # sentence-ending punctuation
+            r"[^.!?\n]{10,})"  # at least 10 more chars (skip "I'll do" noise)
+            r"[.!?]",  # sentence-ending punctuation
             re.IGNORECASE,
         )
 
@@ -300,14 +299,12 @@ Output the summary in clean markdown format."""
             title="## Goal and Key Decisions",
             content=content,
             priority=1,
-            token_count=self.count_tokens(content)
+            token_count=self.count_tokens(content),
         )
 
     def _extract_user_messages_section(
-        self,
-        messages: List[Dict[str, Any]],
-        budget: int
-    ) -> Optional[SummarySection]:
+        self, messages: list[dict[str, Any]], budget: int
+    ) -> SummarySection | None:
         """Extract ALL user messages."""
         user_messages = []
         for msg in messages:
@@ -322,7 +319,7 @@ Output the summary in clean markdown format."""
         # Build section with all messages
         content = "## All User Messages\n\n"
         for i, msg in enumerate(user_messages, 1):
-            content += f"{i}. \"{msg}\"\n\n"
+            content += f'{i}. "{msg}"\n\n'
 
         token_count = self.count_tokens(content)
 
@@ -331,7 +328,7 @@ Output the summary in clean markdown format."""
             content = "## All User Messages\n\n"
             for i, msg in enumerate(user_messages, 1):
                 truncated = msg[:200] + "..." if len(msg) > 200 else msg
-                content += f"{i}. \"{truncated}\"\n\n"
+                content += f'{i}. "{truncated}"\n\n'
             token_count = self.count_tokens(content)
 
         return SummarySection(
@@ -339,32 +336,74 @@ Output the summary in clean markdown format."""
             title="## All User Messages",
             content=content.strip(),
             priority=2,
-            token_count=token_count
+            token_count=token_count,
         )
 
     # Languages that contain actual executable/functional code worth preserving.
     # Diagram formats (mermaid, plantuml) and data formats (json, yaml, csv, xml)
     # are noise for continuation purposes.
     _CODE_LANGUAGES = {
-        "python", "py", "javascript", "js", "typescript", "ts", "tsx", "jsx",
-        "bash", "sh", "shell", "zsh", "powershell", "ps1",
-        "rust", "go", "java", "kotlin", "c", "cpp", "csharp", "cs",
-        "ruby", "rb", "php", "swift", "scala", "lua", "perl",
-        "sql", "html", "css", "scss", "sass",
-        "dockerfile", "makefile", "toml", "ini", "cfg",
+        "python",
+        "py",
+        "javascript",
+        "js",
+        "typescript",
+        "ts",
+        "tsx",
+        "jsx",
+        "bash",
+        "sh",
+        "shell",
+        "zsh",
+        "powershell",
+        "ps1",
+        "rust",
+        "go",
+        "java",
+        "kotlin",
+        "c",
+        "cpp",
+        "csharp",
+        "cs",
+        "ruby",
+        "rb",
+        "php",
+        "swift",
+        "scala",
+        "lua",
+        "perl",
+        "sql",
+        "html",
+        "css",
+        "scss",
+        "sass",
+        "dockerfile",
+        "makefile",
+        "toml",
+        "ini",
+        "cfg",
     }
 
     _SKIP_LANGUAGES = {
-        "mermaid", "plantuml", "dot", "graphviz",
-        "text", "txt", "output", "log", "console",
-        "json", "yaml", "yml", "xml", "csv",
+        "mermaid",
+        "plantuml",
+        "dot",
+        "graphviz",
+        "text",
+        "txt",
+        "output",
+        "log",
+        "console",
+        "json",
+        "yaml",
+        "yml",
+        "xml",
+        "csv",
     }
 
     def _extract_code_section(
-        self,
-        messages: List[Dict[str, Any]],
-        budget: int
-    ) -> Optional[SummarySection]:
+        self, messages: list[dict[str, Any]], budget: int
+    ) -> SummarySection | None:
         """Extract code snippets from messages.
 
         Filters out diagram formats (mermaid, plantuml) and plain text/data
@@ -372,7 +411,7 @@ Output the summary in clean markdown format."""
         """
         code_blocks = []
 
-        code_pattern = re.compile(r'```(\w*)\n(.*?)```', re.DOTALL)
+        code_pattern = re.compile(r"```(\w*)\n(.*?)```", re.DOTALL)
 
         for msg in messages:
             content = self._normalize_content(msg.get("content", ""))
@@ -396,10 +435,23 @@ Output the summary in clean markdown format."""
 
                 # For bare code blocks, do a quick heuristic check
                 if not lang_lower:
-                    code_indicators = ["def ", "class ", "import ", "from ",
-                                       "function ", "const ", "let ", "var ",
-                                       "return ", "if ", "for ", "while ",
-                                       "= ", "=> ", "->"]
+                    code_indicators = [
+                        "def ",
+                        "class ",
+                        "import ",
+                        "from ",
+                        "function ",
+                        "const ",
+                        "let ",
+                        "var ",
+                        "return ",
+                        "if ",
+                        "for ",
+                        "while ",
+                        "= ",
+                        "=> ",
+                        "->",
+                    ]
                     if not any(ind in stripped for ind in code_indicators):
                         continue
                     lang_lower = "python"  # default label
@@ -434,14 +486,15 @@ Output the summary in clean markdown format."""
             title="## Code Snippets",
             content=content.strip(),
             priority=3,
-            token_count=current_tokens
+            token_count=current_tokens,
         )
 
     # Patterns that indicate actual errors/failures being discussed, not
     # generic prose that happens to contain the word "error" or "fix".
     # Each pattern must match within a single sentence.
     _ERROR_PATTERNS = [
-        re.compile(p, re.IGNORECASE) for p in [
+        re.compile(p, re.IGNORECASE)
+        for p in [
             # Explicit error reports — require specific verb + error noun
             r"(?:got|getting|seeing|encountered|hit|threw|raised|throws|raises)\s+(?:an?\s+)?(?:error|exception|traceback)",
             # "error:" or "exception:" (error message format)
@@ -461,10 +514,8 @@ Output the summary in clean markdown format."""
     ]
 
     def _extract_error_section(
-        self,
-        messages: List[Dict[str, Any]],
-        budget: int
-    ) -> Optional[SummarySection]:
+        self, messages: list[dict[str, Any]], budget: int
+    ) -> SummarySection | None:
         """Extract error mentions and fixes.
 
         Uses specific patterns to avoid false positives from generic prose
@@ -477,7 +528,7 @@ Output the summary in clean markdown format."""
             if not content:
                 continue
 
-            sentences = re.split(r'(?<=[.!?\n])\s+', content)
+            sentences = re.split(r"(?<=[.!?\n])\s+", content)
             for sentence in sentences:
                 if any(p.search(sentence) for p in self._ERROR_PATTERNS):
                     cleaned = sentence.strip()
@@ -510,23 +561,21 @@ Output the summary in clean markdown format."""
             title="## Errors and Fixes",
             content=content.strip(),
             priority=4,
-            token_count=self.count_tokens(content)
+            token_count=self.count_tokens(content),
         )
 
     def _extract_files_section(
-        self,
-        messages: List[Dict[str, Any]],
-        budget: int
-    ) -> Optional[SummarySection]:
+        self, messages: list[dict[str, Any]], budget: int
+    ) -> SummarySection | None:
         """Extract file paths mentioned."""
         files = set()
 
         # Patterns for file paths
         file_patterns = [
-            r'`([a-zA-Z0-9_/\\.-]+\.[a-zA-Z]{1,4})`',  # `file.py`
+            r"`([a-zA-Z0-9_/\\.-]+\.[a-zA-Z]{1,4})`",  # `file.py`
             r'"([a-zA-Z0-9_/\\.-]+\.[a-zA-Z]{1,4})"',  # "file.py"
             r"'([a-zA-Z0-9_/\\.-]+\.[a-zA-Z]{1,4})'",  # 'file.py'
-            r'(?:src|tests|lib|app)/[a-zA-Z0-9_/\\.-]+\.[a-zA-Z]{1,4}',  # src/file.py
+            r"(?:src|tests|lib|app)/[a-zA-Z0-9_/\\.-]+\.[a-zA-Z]{1,4}",  # src/file.py
         ]
 
         for msg in messages:
@@ -547,6 +596,7 @@ Output the summary in clean markdown format."""
                 try:
                     if isinstance(args_str, str):
                         import json
+
                         args = json.loads(args_str)
                     else:
                         args = args_str
@@ -562,7 +612,7 @@ Output the summary in clean markdown format."""
             return None
 
         # Filter out non-file strings
-        valid_files = [f for f in files if '.' in f and len(f) > 3][:15]
+        valid_files = [f for f in files if "." in f and len(f) > 3][:15]
 
         if not valid_files:
             return None
@@ -576,14 +626,12 @@ Output the summary in clean markdown format."""
             title="## Files Modified",
             content=content.strip(),
             priority=5,
-            token_count=self.count_tokens(content)
+            token_count=self.count_tokens(content),
         )
 
     def _extract_current_state_section(
-        self,
-        messages: List[Dict[str, Any]],
-        budget: int
-    ) -> Optional[SummarySection]:
+        self, messages: list[dict[str, Any]], budget: int
+    ) -> SummarySection | None:
         """Extract current state from recent messages.
 
         Takes the last few complete sentences from the last assistant message
@@ -610,7 +658,7 @@ Output the summary in clean markdown format."""
         # Extract last complete sentences from assistant message
         if last_assistant:
             # Split into sentences and take the last few that fit in budget
-            sentences = re.split(r'(?<=[.!?])\s+', last_assistant.strip())
+            sentences = re.split(r"(?<=[.!?])\s+", last_assistant.strip())
             # Filter out empty/trivial sentences
             sentences = [s for s in sentences if len(s.strip()) > 10]
             if sentences:
@@ -635,16 +683,14 @@ Output the summary in clean markdown format."""
             title="## Current State",
             content=content,
             priority=6,
-            token_count=self.count_tokens(content)
+            token_count=self.count_tokens(content),
         )
 
     def _extract_tool_summary_section(
-        self,
-        messages: List[Dict[str, Any]],
-        budget: int
-    ) -> Optional[SummarySection]:
+        self, messages: list[dict[str, Any]], budget: int
+    ) -> SummarySection | None:
         """Extract summary of tools used."""
-        tool_counts: Dict[str, int] = {}
+        tool_counts: dict[str, int] = {}
 
         for msg in messages:
             tool_calls = msg.get("tool_calls", [])
@@ -668,7 +714,7 @@ Output the summary in clean markdown format."""
             title="## Tools Used",
             content=content.strip(),
             priority=7,
-            token_count=self.count_tokens(content)
+            token_count=self.count_tokens(content),
         )
 
     # ==================== Helpers ====================
@@ -697,7 +743,7 @@ Output the summary in clean markdown format."""
             return "\n".join(parts)
         return str(content) if content else ""
 
-    def _format_messages_for_llm(self, messages: List[Dict[str, Any]]) -> str:
+    def _format_messages_for_llm(self, messages: list[dict[str, Any]]) -> str:
         """Format messages for LLM prompt."""
         formatted = []
         for i, msg in enumerate(messages):
@@ -708,7 +754,7 @@ Output the summary in clean markdown format."""
             if len(content) > 1000:
                 content = content[:500] + "\n...[truncated]...\n" + content[-300:]
 
-            formatted.append(f"[{i+1}] {role}: {content}")
+            formatted.append(f"[{i + 1}] {role}: {content}")
 
             # Include tool calls info
             tool_calls = msg.get("tool_calls", [])
@@ -718,7 +764,7 @@ Output the summary in clean markdown format."""
 
         return "\n\n".join(formatted)
 
-    def get_section_stats(self, summary: str) -> Dict[str, Any]:
+    def get_section_stats(self, summary: str) -> dict[str, Any]:
         """
         Get statistics about a generated summary.
 
@@ -726,7 +772,7 @@ Output the summary in clean markdown format."""
             summary: Generated summary
 
         Returns:
-            Dict with token count, section counts, etc.
+            dict with token count, section counts, etc.
         """
         sections_found = []
         section_headers = [
@@ -736,7 +782,7 @@ Output the summary in clean markdown format."""
             "Errors and Fixes",
             "Files Modified",
             "Current State",
-            "Tools Used"
+            "Tools Used",
         ]
 
         for header in section_headers:
@@ -747,5 +793,5 @@ Output the summary in clean markdown format."""
             "total_tokens": self.count_tokens(summary),
             "sections_included": sections_found,
             "section_count": len(sections_found),
-            "char_count": len(summary)
+            "char_count": len(summary),
         }

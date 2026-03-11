@@ -32,21 +32,22 @@ import atexit
 import concurrent.futures
 import logging
 import threading
-from typing import Any, Coroutine, Optional, TypeVar
+from collections.abc import Coroutine
+from typing import Any, Optional, TypeVar
 
 from src.code_intelligence.lsp_client_manager import LSPClientManager
 
 logger = logging.getLogger("code_intelligence.lsp_runtime")
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 # Module-level state
-_loop: Optional[asyncio.AbstractEventLoop] = None
-_thread: Optional[threading.Thread] = None
-_manager: Optional[LSPClientManager] = None
+_loop: asyncio.AbstractEventLoop | None = None
+_thread: threading.Thread | None = None
+_manager: LSPClientManager | None = None
 _lock = threading.Lock()
 _loop_ready = threading.Event()  # Signaled when loop is ready
-_request_lock: Optional[asyncio.Lock] = None  # Serializes LSP requests
+_request_lock: asyncio.Lock | None = None  # Serializes LSP requests
 
 
 def _run_loop():
@@ -63,7 +64,9 @@ def _run_loop():
     # Signal that loop is ready
     _loop_ready.set()
 
-    logger.info(f"LSP runtime started (loop_id={id(_loop)}, thread={threading.current_thread().name})")
+    logger.info(
+        f"LSP runtime started (loop_id={id(_loop)}, thread={threading.current_thread().name})"
+    )
 
     try:
         _loop.run_forever()
@@ -80,10 +83,7 @@ def _run_loop():
 def _is_runtime_healthy() -> bool:
     """Check if the runtime is in a healthy state."""
     return (
-        _thread is not None and
-        _thread.is_alive() and
-        _loop is not None and
-        not _loop.is_closed()
+        _thread is not None and _thread.is_alive() and _loop is not None and not _loop.is_closed()
     )
 
 
@@ -134,7 +134,7 @@ def _ensure_runtime():
             _thread = threading.Thread(
                 target=_run_loop,
                 name="lsp-runtime",
-                daemon=True  # Dies with main process
+                daemon=True,  # Dies with main process
             )
             _thread.start()
             logger.info("LSP runtime (re)started")
@@ -164,10 +164,7 @@ def get_manager_sync() -> LSPClientManager:
     with _lock:
         if _manager is None:
             # Create manager on the LSP loop thread
-            future = asyncio.run_coroutine_threadsafe(
-                _create_manager_async(),
-                _loop
-            )
+            future = asyncio.run_coroutine_threadsafe(_create_manager_async(), _loop)
             try:
                 _manager = future.result(timeout=30.0)
                 logger.info(f"LSP manager created (id={id(_manager)})")
@@ -329,9 +326,7 @@ def lsp_run(coro: Coroutine[Any, Any, T], timeout: float = 30.0) -> T:
 
     except asyncio.CancelledError:
         # Request was cancelled (e.g., by user interrupt)
-        raise TimeoutError(
-            f"LSP request was cancelled."
-        )
+        raise TimeoutError("LSP request was cancelled.")
 
     except Exception:
         # Re-raise other exceptions as-is
@@ -359,10 +354,7 @@ def shutdown():
         # Close servers first
         if _manager is not None:
             try:
-                future = asyncio.run_coroutine_threadsafe(
-                    _manager.close_all_servers(),
-                    _loop
-                )
+                future = asyncio.run_coroutine_threadsafe(_manager.close_all_servers(), _loop)
                 future.result(timeout=10.0)
             except Exception as e:
                 logger.warning(f"Error closing LSP servers: {e}")
@@ -371,10 +363,7 @@ def shutdown():
         # Cancel all pending tasks on the loop
         if not _loop.is_closed():
             try:
-                future = asyncio.run_coroutine_threadsafe(
-                    _cancel_all_tasks(),
-                    _loop
-                )
+                future = asyncio.run_coroutine_threadsafe(_cancel_all_tasks(), _loop)
                 future.result(timeout=5.0)
             except Exception as e:
                 logger.warning(f"Error cancelling pending tasks: {e}")

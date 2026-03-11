@@ -6,12 +6,13 @@ and aggregates tool definitions across all connections.
 
 Replaces ad-hoc _mcp_client / _mcp_registry attributes on the agent.
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 
 from .client import McpClient
 from .config import McpServerConfig
@@ -22,6 +23,7 @@ if TYPE_CHECKING:
 
 try:
     from src.observability import get_logger
+
     logger = get_logger("integrations.mcp.manager")
 except ImportError:
     logger = logging.getLogger(__name__)
@@ -39,11 +41,12 @@ class McpConnection:
         tool_names: Snapshot of prefixed tool names registered in ToolExecutor
                     by this connection. Used for cleanup on disconnect.
     """
+
     name: str
     config: McpServerConfig
     client: McpClient
     registry: McpToolRegistry
-    tool_names: Set[str] = field(default_factory=set)
+    tool_names: set[str] = field(default_factory=set)
 
 
 class McpConnectionManager:
@@ -57,7 +60,7 @@ class McpConnectionManager:
     """
 
     def __init__(self) -> None:
-        self._connections: Dict[str, McpConnection] = {}
+        self._connections: dict[str, McpConnection] = {}
 
     # ------------------------------------------------------------------
     # Connection lifecycle
@@ -70,7 +73,7 @@ class McpConnectionManager:
         client: McpClient,
         registry: McpToolRegistry,
         tool_executor: ToolExecutor,
-        secret_store: Optional[Any] = None,
+        secret_store: Any | None = None,
     ) -> int:
         """Connect to a named MCP server, discover tools, register them.
 
@@ -90,8 +93,7 @@ class McpConnectionManager:
         """
         if name in self._connections:
             raise ValueError(
-                f"MCP connection '{name}' already exists. "
-                "Disconnect first before reconnecting."
+                f"MCP connection '{name}' already exists. Disconnect first before reconnecting."
             )
 
         await client.connect(secret_store=secret_store)
@@ -119,7 +121,7 @@ class McpConnectionManager:
     async def disconnect(
         self,
         name: str,
-        tool_executor: Optional[ToolExecutor] = None,
+        tool_executor: ToolExecutor | None = None,
     ) -> None:
         """Gracefully disconnect a single named connection.
 
@@ -144,7 +146,7 @@ class McpConnectionManager:
 
     async def shutdown(
         self,
-        tool_executor: Optional[ToolExecutor] = None,
+        tool_executor: ToolExecutor | None = None,
     ) -> None:
         """Gracefully disconnect ALL connections (async).
 
@@ -184,11 +186,11 @@ class McpConnectionManager:
     # Query methods
     # ------------------------------------------------------------------
 
-    def get_connection(self, name: str) -> Optional[McpConnection]:
+    def get_connection(self, name: str) -> McpConnection | None:
         """Get a connection by name, or None."""
         return self._connections.get(name)
 
-    def get_all_tool_definitions(self) -> List:
+    def get_all_tool_definitions(self) -> list:
         """Aggregate tool definitions from all active connections."""
         defs = []
         for conn in self._connections.values():
@@ -197,10 +199,7 @@ class McpConnectionManager:
 
     def is_mcp_tool(self, tool_name: str) -> bool:
         """Check if a tool belongs to any MCP connection."""
-        return any(
-            conn.registry.is_mcp_tool(tool_name)
-            for conn in self._connections.values()
-        )
+        return any(conn.registry.is_mcp_tool(tool_name) for conn in self._connections.values())
 
     def requires_approval(self, tool_name: str) -> bool:
         """Check if an MCP tool requires user approval.
@@ -219,6 +218,6 @@ class McpConnectionManager:
         return bool(self._connections)
 
     @property
-    def connection_names(self) -> List[str]:
+    def connection_names(self) -> list[str]:
         """Names of all active connections."""
         return list(self._connections.keys())

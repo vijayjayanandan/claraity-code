@@ -9,24 +9,24 @@ UI code can continue to use `from src.ui.protocol import ...`.
 # Re-export everything from core.protocol
 from src.core.protocol import (  # noqa: F401
     ApprovalResult,
-    InterruptSignal,
-    RetrySignal,
-    PauseResult,
     ClarifyResult,
-    PlanApprovalResult,
-    UserAction,
+    InterruptSignal,
+    PauseResult,
     PendingApproval,
+    PlanApprovalResult,
+    RetrySignal,
     UIProtocol,
+    UserAction,
 )
 
 __all__ = [
-    'ApprovalResult',
-    'InterruptSignal',
-    'RetrySignal',
-    'PauseResult',
-    'ClarifyResult',
-    'PlanApprovalResult',
-    'UserAction',
-    'PendingApproval',
-    'UIProtocol',
+    "ApprovalResult",
+    "InterruptSignal",
+    "RetrySignal",
+    "PauseResult",
+    "ClarifyResult",
+    "PlanApprovalResult",
+    "UserAction",
+    "PendingApproval",
+    "UIProtocol",
 ]

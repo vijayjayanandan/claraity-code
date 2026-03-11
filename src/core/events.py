@@ -14,28 +14,29 @@ Design Principles:
 
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Any, Union
+from typing import Any
 
 
 class ToolStatus(Enum):
     """Tool execution lifecycle states."""
 
-    PENDING = auto()            # Queued, not yet started
+    PENDING = auto()  # Queued, not yet started
     AWAITING_APPROVAL = auto()  # Waiting for user confirmation
-    APPROVED = auto()           # User approved, about to execute
-    REJECTED = auto()           # User rejected
-    RUNNING = auto()            # Currently executing
-    SUCCESS = auto()            # Completed successfully
-    FAILED = auto()             # Completed with error
-    ERROR = auto()              # Tool execution error (alias for FAILED)
-    TIMEOUT = auto()            # Tool execution timed out
-    CANCELLED = auto()          # User cancelled mid-execution
-    SKIPPED = auto()            # Blocked (e.g., repeated failed call)
+    APPROVED = auto()  # User approved, about to execute
+    REJECTED = auto()  # User rejected
+    RUNNING = auto()  # Currently executing
+    SUCCESS = auto()  # Completed successfully
+    FAILED = auto()  # Completed with error
+    ERROR = auto()  # Tool execution error (alias for FAILED)
+    TIMEOUT = auto()  # Tool execution timed out
+    CANCELLED = auto()  # User cancelled mid-execution
+    SKIPPED = auto()  # Blocked (e.g., repeated failed call)
 
 
 # =============================================================================
 # Stream Lifecycle Events
 # =============================================================================
+
 
 @dataclass(frozen=True)
 class StreamStart:
@@ -43,6 +44,7 @@ class StreamStart:
 
     UI should create a new MessageWidget for the assistant.
     """
+
     pass
 
 
@@ -52,6 +54,7 @@ class StreamEnd:
 
     UI should finalize the current message and re-focus input.
     """
+
     total_tokens: int | None = None
     duration_ms: int | None = None
 
@@ -60,6 +63,7 @@ class StreamEnd:
 # Text Content Events
 # =============================================================================
 
+
 @dataclass(frozen=True)
 class TextDelta:
     """Incremental text content to append to the current markdown block.
@@ -67,12 +71,14 @@ class TextDelta:
     These arrive debounced (not per-token) for smooth rendering.
     The UI should accumulate and render as Markdown.
     """
+
     content: str
 
 
 # =============================================================================
 # Code Block Events
 # =============================================================================
+
 
 @dataclass(frozen=True)
 class CodeBlockStart:
@@ -81,17 +87,19 @@ class CodeBlockStart:
     The UI should create a new CodeBlock widget.
     Subsequent CodeBlockDelta events append to this block.
     """
+
     language: str
 
     def __post_init__(self):
         # Normalize empty/None language to "text"
         if not self.language:
-            object.__setattr__(self, 'language', 'text')
+            object.__setattr__(self, "language", "text")
 
 
 @dataclass(frozen=True)
 class CodeBlockDelta:
     """Incremental code content to append to the current code block."""
+
     content: str
 
 
@@ -101,12 +109,14 @@ class CodeBlockEnd:
 
     UI should finalize the block (update border, stop streaming indicator).
     """
+
     pass
 
 
 # =============================================================================
 # Tool Call Events (legacy - kept for backward compatibility)
 # =============================================================================
+
 
 @dataclass(frozen=True)
 class ToolCallStart:
@@ -115,6 +125,7 @@ class ToolCallStart:
     Note: No longer yielded by the agent. Kept for backward compatibility.
     Tool cards are now created from store notifications.
     """
+
     call_id: str
     name: str
     arguments: dict[str, Any]
@@ -128,6 +139,7 @@ class ToolCallStatus:
     Note: No longer yielded by the agent. Kept for backward compatibility.
     Tool status is now driven by store notifications.
     """
+
     call_id: str
     status: ToolStatus
     message: str | None = None
@@ -140,6 +152,7 @@ class ToolCallResult:
     Note: No longer yielded by the agent. Kept for backward compatibility.
     Tool results are now persisted to the store directly.
     """
+
     call_id: str
     status: ToolStatus
     result: Any = None
@@ -151,18 +164,21 @@ class ToolCallResult:
 # Thinking/Reasoning Events (for models with extended thinking)
 # =============================================================================
 
+
 @dataclass(frozen=True)
 class ThinkingStart:
     """Model started extended thinking/reasoning.
 
     UI should create a collapsible ThinkingBlock.
     """
+
     pass
 
 
 @dataclass(frozen=True)
 class ThinkingDelta:
     """Incremental thinking content."""
+
     content: str
 
 
@@ -172,12 +188,14 @@ class ThinkingEnd:
 
     UI should finalize the thinking block and show token count.
     """
+
     token_count: int | None = None
 
 
 # =============================================================================
 # Pause/Continue Events
 # =============================================================================
+
 
 @dataclass(frozen=True)
 class PausePromptStart:
@@ -186,6 +204,7 @@ class PausePromptStart:
     Emitted when agent hits a budget limit (tool calls, wall time, iterations).
     UI should display a pause widget with Continue/Stop options.
     """
+
     reason: str
     reason_code: str
     pending_todos: list[str]
@@ -195,6 +214,7 @@ class PausePromptStart:
 @dataclass(frozen=True)
 class PausePromptEnd:
     """User responded to pause prompt."""
+
     continue_work: bool
     feedback: str | None = None
 
@@ -203,12 +223,14 @@ class PausePromptEnd:
 # Context Window Events
 # =============================================================================
 
+
 @dataclass(frozen=True)
 class ContextUpdated:
     """Context window usage updated.
 
     Emitted after each context build so UI can display usage progress bar.
     """
+
     used: int
     limit: int
     pressure_level: str = "green"
@@ -221,6 +243,7 @@ class ContextCompacting:
     Emitted just before the LLM summarization call so the UI can show
     a 'Compacting Conversation' indicator in the status bar.
     """
+
     tokens_before: int
 
 
@@ -230,6 +253,7 @@ class ContextCompacted:
 
     Emitted when orchestrator triggers compaction due to threshold breach.
     """
+
     messages_removed: int
     tokens_before: int
     tokens_after: int
@@ -238,6 +262,7 @@ class ContextCompacted:
 # =============================================================================
 # Error Events
 # =============================================================================
+
 
 @dataclass(frozen=True)
 class ErrorEvent:
@@ -255,6 +280,7 @@ class ErrorEvent:
         recoverable: Whether automatic retry is possible
         retry_after: Seconds to wait before retry (for rate limits)
     """
+
     error_type: str
     user_message: str
     error_id: str = ""
@@ -266,6 +292,7 @@ class ErrorEvent:
 # File Operations Events
 # =============================================================================
 
+
 @dataclass(frozen=True)
 class FileReadEvent:
     """Emitted when the agent reads a file (for TUI annotations).
@@ -275,6 +302,7 @@ class FileReadEvent:
         lines_read: Number of lines read
         truncated: Whether the content was truncated
     """
+
     path: str
     lines_read: int = 0
     truncated: bool = False
@@ -284,29 +312,49 @@ class FileReadEvent:
 # Type Union for Pattern Matching
 # =============================================================================
 
-UIEvent = Union[
-    StreamStart, StreamEnd,
-    TextDelta,
-    CodeBlockStart, CodeBlockDelta, CodeBlockEnd,
-    ToolCallStart, ToolCallStatus, ToolCallResult,
-    ThinkingStart, ThinkingDelta, ThinkingEnd,
-    PausePromptStart, PausePromptEnd,
-    ContextUpdated, ContextCompacting, ContextCompacted,
-    FileReadEvent,
-    ErrorEvent
-]
+UIEvent = (
+    StreamStart
+    | StreamEnd
+    | TextDelta
+    | CodeBlockStart
+    | CodeBlockDelta
+    | CodeBlockEnd
+    | ToolCallStart
+    | ToolCallStatus
+    | ToolCallResult
+    | ThinkingStart
+    | ThinkingDelta
+    | ThinkingEnd
+    | PausePromptStart
+    | PausePromptEnd
+    | ContextUpdated
+    | ContextCompacting
+    | ContextCompacted
+    | FileReadEvent
+    | ErrorEvent
+)
 
 # Export all event types
 __all__ = [
-    'ToolStatus',
-    'StreamStart', 'StreamEnd',
-    'TextDelta',
-    'CodeBlockStart', 'CodeBlockDelta', 'CodeBlockEnd',
-    'ToolCallStart', 'ToolCallStatus', 'ToolCallResult',
-    'ThinkingStart', 'ThinkingDelta', 'ThinkingEnd',
-    'PausePromptStart', 'PausePromptEnd',
-    'ContextUpdated', 'ContextCompacting', 'ContextCompacted',
-    'FileReadEvent',
-    'ErrorEvent',
-    'UIEvent',
+    "ToolStatus",
+    "StreamStart",
+    "StreamEnd",
+    "TextDelta",
+    "CodeBlockStart",
+    "CodeBlockDelta",
+    "CodeBlockEnd",
+    "ToolCallStart",
+    "ToolCallStatus",
+    "ToolCallResult",
+    "ThinkingStart",
+    "ThinkingDelta",
+    "ThinkingEnd",
+    "PausePromptStart",
+    "PausePromptEnd",
+    "ContextUpdated",
+    "ContextCompacting",
+    "ContextCompacted",
+    "FileReadEvent",
+    "ErrorEvent",
+    "UIEvent",
 ]
