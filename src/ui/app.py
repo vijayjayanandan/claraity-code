@@ -86,6 +86,7 @@ from .widgets.plan_approval_widget import PlanApprovalWidget
 from .widgets.status_bar import StatusBar
 from .widgets.subagent_card import SubAgentCard
 from .widgets.thinking import ThinkingBlock
+from .widgets.background_task_bar import BackgroundTaskBar
 from .widgets.todo_bar import TodoBar
 from .widgets.tool_card import ToolCard
 
@@ -629,6 +630,7 @@ class CodingAgentApp(App):
         Binding("ctrl+l", "clear_screen", "Clear", show=False),
         Binding("f2", "toggle_mode", "Mode", show=True),
         Binding("ctrl+t", "toggle_todos", "Todos", show=False),
+        Binding("ctrl+b", "show_background_tasks", "BG Tasks", show=False),
         Binding("ctrl+w", "debug_widgets", "Debug", show=False),  # Debug: count widgets
         # Scroll bindings for conversation area
         Binding("pageup", "page_up", "Page Up", show=False),
@@ -728,6 +730,9 @@ class CodingAgentApp(App):
         # Track plan approval widget
         self._plan_approval_widget: PlanApprovalWidget | None = None
 
+        # Track promoted subagent approval widgets (call_id -> widget)
+        self._promoted_approvals: dict[str, Any] = {}
+
         # Cache conversation reference (avoid repeated query_one per flush)
         self._conversation: ConversationContainer | None = None
 
@@ -765,6 +770,12 @@ class CodingAgentApp(App):
         self._pending_file_read_events: list = []
         self._store_update_timer: asyncio.TimerHandle | None = None
         self._store_update_interval_sec: float = 0.15  # Coalesce updates within 150ms
+
+        # Background task completion debounce timer.
+        # When tasks complete, we wait briefly then drain the registry's
+        # _completed_queue once — single source of truth, no duplicate queue.
+        self._bg_debounce_timer: asyncio.TimerHandle | None = None
+        self._bg_debounce_sec: float = 2.0
 
         # Render metadata registry (ephemeral approval policy hints)
         # Injected via set_render_meta_registry(), queried when creating tool cards
@@ -845,6 +856,7 @@ class CodingAgentApp(App):
         yield AutocompleteDropdown(id="autocomplete")
         yield AttachmentBar(id="attachment-bar")
         yield TodoBar(id="todo-bar")  # Above status bar, hidden until todos exist
+        yield BackgroundTaskBar(id="bg-task-bar")  # Above status bar, hidden until bg tasks running
         yield StatusBar(model_name=self.model_name, id="status")
         yield ChatInput(id="input")
         yield Footer()
@@ -1097,6 +1109,7 @@ class CodingAgentApp(App):
                 agent=self.agent,
                 ui_protocol=self.ui_protocol,
                 pause_callback=self._on_subagent_pause_requested,
+                approval_callback=self._on_subagent_approval_requested,
             )
 
     async def _on_subagent_pause_requested(
@@ -1128,6 +1141,59 @@ class CodingAgentApp(App):
         self._pause_widget = widget
         await conversation.mount(widget)
         widget.scroll_visible()
+
+    async def _on_subagent_approval_requested(
+        self,
+        call_id: str,
+        tool_name: str,
+        args: dict,
+        subagent_name: str = "",
+        subagent_id: str = "",
+    ) -> None:
+        """Mount a full ToolCard at conversation level for a subagent tool approval.
+
+        Shows the complete tool card (tool name, args, file path, diff, etc.)
+        with its built-in approval widget so the user can see what they're approving.
+        A label above the card indicates which subagent is requesting approval.
+        """
+        try:
+            conversation = self._conversation or self.query_one(
+                "#conversation", ConversationContainer
+            )
+        except NoMatches:
+            logger.warning("No conversation container found for subagent approval widget")
+            return
+
+        # Remove stale promoted widget for this call_id if any
+        existing = self._promoted_approvals.pop(call_id, None)
+        if existing and existing.is_attached:
+            existing.remove()
+
+        # Wrapper container: subagent label + full ToolCard
+        label_text = subagent_name or subagent_id[:8] or "subagent"
+        container = Vertical(
+            Static(
+                f"[bold #cca700]{label_text}[/] requests approval:",
+                classes="promoted-approval-label",
+            ),
+            ToolCard(
+                call_id=call_id,
+                tool_name=tool_name,
+                args=args,
+                requires_approval=True,
+            ),
+            classes="promoted-approval-container",
+        )
+        self._promoted_approvals[call_id] = container
+        await conversation.mount(container)
+
+        # Trigger AWAITING_APPROVAL on the ToolCard to show approval options
+        try:
+            tool_card = container.query_one(ToolCard)
+            tool_card.status = ToolStatus.AWAITING_APPROVAL
+        except NoMatches:
+            pass
+        container.scroll_visible()
 
     def _focus_input(self) -> None:
         """Set focus to input widget."""
@@ -1219,19 +1285,23 @@ class CodingAgentApp(App):
         # Re-enable auto-scroll on new message (user expects to follow the response)
         self._auto_scroll = True
 
+        # Skip user bubble for auto-generated task notifications
+        is_task_notification = user_input.startswith("<task-notification>")
+
         # Mount user message immediately (no store round-trip)
-        attachment_summary = ""
-        if attachments:
-            parts = [f"[{a.kind.upper()}: {a.filename}]" for a in attachments]
-            attachment_summary = " " + " ".join(parts)
-        try:
-            conversation = self.query_one("#conversation", ConversationContainer)
-            user_widget = UserMessage(content=user_input + attachment_summary)
-            await conversation.mount(user_widget)
-            self._pre_mounted_user_widget = user_widget
-            self._scroll_to_bottom(conversation)
-        except NoMatches:
-            pass
+        if not is_task_notification:
+            attachment_summary = ""
+            if attachments:
+                parts = [f"[{a.kind.upper()}: {a.filename}]" for a in attachments]
+                attachment_summary = " " + " ".join(parts)
+            try:
+                conversation = self.query_one("#conversation", ConversationContainer)
+                user_widget = UserMessage(content=user_input + attachment_summary)
+                await conversation.mount(user_widget)
+                self._pre_mounted_user_widget = user_widget
+                self._scroll_to_bottom(conversation)
+            except NoMatches:
+                pass
 
         # Start streaming response in a worker - DO NOT await here!
         # This allows Textual to keep processing key events and messages
@@ -1282,6 +1352,34 @@ class CodingAgentApp(App):
 
     def on_attachment_bar_exit_to_input(self, message: AttachmentBar.ExitToInput) -> None:
         """Handle request to return focus to input."""
+        self._focus_input()
+
+    # -------------------------------------------------------------------------
+    # Background Task Bar Handlers
+    # -------------------------------------------------------------------------
+
+    async def on_background_task_bar_kill_task(
+        self, message: BackgroundTaskBar.KillTask
+    ) -> None:
+        """Handle kill request from BackgroundTaskBar."""
+        if not self.agent:
+            return
+        success, msg = await self.agent._bg_registry.cancel(message.task_id)
+        if success:
+            self.notify(f"Killed {message.task_id}", timeout=2)
+        else:
+            self.notify(msg, severity="warning", timeout=2)
+        # Refresh the bar
+        try:
+            bg_bar = self.query_one("#bg-task-bar", BackgroundTaskBar)
+            bg_bar.update_from_registry(self.agent._bg_registry)
+        except NoMatches:
+            pass
+
+    def on_background_task_bar_collapse_bar(
+        self, message: BackgroundTaskBar.CollapseBar
+    ) -> None:
+        """Handle collapse — return focus to input."""
         self._focus_input()
 
     # -------------------------------------------------------------------------
@@ -2185,6 +2283,11 @@ class CodingAgentApp(App):
 
     def on_approval_response_message(self, message: ApprovalResponseMessage) -> None:
         """Handle approval response from ToolApprovalOptions."""
+        # Remove promoted approval widget if it exists for this call_id
+        promoted = self._promoted_approvals.pop(message.call_id, None)
+        if promoted and promoted.is_attached:
+            promoted.remove()
+
         approved = message.action in ("yes", "yes_all")
 
         self.ui_protocol.submit_action(
@@ -2624,6 +2727,17 @@ class CodingAgentApp(App):
         except NoMatches:
             pass
 
+    def action_show_background_tasks(self) -> None:
+        """Toggle the background tasks bar."""
+        try:
+            bg_bar = self.query_one("#bg-task-bar", BackgroundTaskBar)
+            # Refresh before toggling so data is fresh
+            if self.agent:
+                bg_bar.update_from_registry(self.agent._bg_registry)
+            bg_bar.toggle()
+        except NoMatches:
+            pass
+
     def action_debug_widgets(self) -> None:
         """Debug action: count and log all widgets in the DOM."""
         from .widgets.code_block import CodeBlock
@@ -2678,17 +2792,107 @@ class CodingAgentApp(App):
         except NoMatches:
             pass
 
-    def _on_bg_task_update(self, active_count: int) -> None:
-        """Handle background task completion callback.
+    def _on_bg_task_update(self, active_count: int, completed_task=None) -> None:
+        """Handle background task start/completion callback.
 
-        Updates the StatusBar BG badge count. Called from the asyncio
-        event loop by BackgroundTaskRegistry on task completion.
+        Updates the StatusBar BG badge count, refreshes the BackgroundTaskBar,
+        and shows inline chat notification when a task completes.
+        Called from the asyncio event loop by BackgroundTaskRegistry.
         """
         try:
             status = self.query_one("#status", StatusBar)
             status.set_bg_task_count(active_count)
         except NoMatches:
             pass
+
+        # Refresh the background task bar
+        try:
+            bg_bar = self.query_one("#bg-task-bar", BackgroundTaskBar)
+            if self.agent:
+                bg_bar.update_from_registry(self.agent._bg_registry)
+        except NoMatches:
+            pass
+
+        # Show toast + queue for batched agent notification
+        if completed_task is not None:
+            status_label = completed_task.status.value
+            desc = completed_task.description or completed_task.command[:80]
+            exit_info = ""
+            if completed_task.exit_code is not None:
+                exit_info = f" (exit code {completed_task.exit_code})"
+
+            msg = f'Background command "{desc}" {status_label}{exit_info}'
+            # Toast notification — non-intrusive, auto-dismisses
+            severity = "information" if status_label == "completed" else "warning"
+            self.notify(msg, title="Background Task", severity=severity, timeout=5)
+
+            # Reset debounce timer. After the window, we drain the registry's
+            # _completed_queue (single source of truth) and send one notification.
+            if self._bg_debounce_timer is not None:
+                self._bg_debounce_timer.cancel()
+            try:
+                loop = asyncio.get_running_loop()
+                self._bg_debounce_timer = loop.call_later(
+                    self._bg_debounce_sec,
+                    lambda: asyncio.ensure_future(self._flush_bg_notifications()),
+                )
+            except RuntimeError:
+                pass
+
+    async def _flush_bg_notifications(self) -> None:
+        """Drain the registry's completed queue into ONE agent notification.
+
+        Single source of truth: the registry's _completed_queue.
+        - Idle: we drain it here and send a batched InputSubmittedMessage.
+        - Streaming: the tool loop's drain_completed() handles it — skip.
+        """
+        self._bg_debounce_timer = None
+
+        if not self.agent or self._is_streaming or self.stream_handler is None:
+            return
+
+        # Drain the single source of truth
+        completed = self.agent._bg_registry.drain_completed()
+        if not completed:
+            return
+
+        # Build one batched notification with all completed tasks
+        MAX_INLINE_OUTPUT = 4096
+        task_blocks = []
+        for task in completed:
+            desc = task.description or task.command[:80]
+            exit_info = f" (exit code {task.exit_code})" if task.exit_code is not None else ""
+            summary = f'Background command "{desc}" {task.status.value}{exit_info}'
+
+            stdout = (task.stdout or "").strip()
+            stderr = (task.stderr or "").strip()
+            if len(stdout) > MAX_INLINE_OUTPUT:
+                stdout = stdout[:MAX_INLINE_OUTPUT] + "\n... (truncated)"
+            if len(stderr) > MAX_INLINE_OUTPUT:
+                stderr = stderr[:MAX_INLINE_OUTPUT] + "\n... (truncated)"
+
+            output_section = ""
+            if stdout:
+                output_section += f"<stdout>\n{stdout}\n</stdout>\n"
+            if stderr:
+                output_section += f"<stderr>\n{stderr}\n</stderr>\n"
+
+            task_blocks.append(
+                f"<task>\n"
+                f"<task-id>{task.task_id}</task-id>\n"
+                f"<status>{task.status.value}</status>\n"
+                f"<exit-code>{task.exit_code}</exit-code>\n"
+                f"<summary>{summary}</summary>\n"
+                f"{output_section}"
+                f"</task>"
+            )
+
+        notification = (
+            "<task-notification>\n"
+            + "\n".join(task_blocks)
+            + "\n</task-notification>"
+        )
+        self.post_message(InputSubmittedMessage(content=notification))
 
     # -------------------------------------------------------------------------
     # Phase 6: Store-Driven Rendering

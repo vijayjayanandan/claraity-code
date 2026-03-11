@@ -95,8 +95,8 @@ class StatusBar(Static):
     context_limit = reactive(0)  # Max context window (0 = not set, hide bar)
     context_pressure = reactive("green")  # Pressure level from agent (green/yellow/orange/red)
 
-    # Spinner animation frames (ASCII-safe for Windows compatibility)
-    SPINNER_FRAMES = ["|", "/", "-", "\\"]
+    # Braille orbit spinner — 10-frame cycle (Claude Code style)
+    SPINNER_FRAMES = list("\u280b\u2819\u2839\u2838\u283c\u2834\u2826\u2827\u2807\u280f")
 
     DEFAULT_CSS = """
     StatusBar {
@@ -155,7 +155,7 @@ class StatusBar(Static):
                 if result.plain:
                     result.append(" ", style="")
                 result.append(
-                    f" BG:{self.bg_task_count} ",
+                    f" Background Tasks Running: {self.bg_task_count} (Ctrl+B) ",
                     style="bold #1e1e1e on #3794ff",
                 )
             return result if result.plain else Text("")
@@ -172,7 +172,7 @@ class StatusBar(Static):
         # Compute spinner frame from time (self-correcting, no counter needed)
         spinner = ""
         if self.is_streaming or self.current_tool:
-            frame = int(time.monotonic() * 10) % len(self.SPINNER_FRAMES)
+            frame = int(time.monotonic() * 6) % len(self.SPINNER_FRAMES)
             spinner = self.SPINNER_FRAMES[frame]
 
         # State indicator
@@ -229,7 +229,7 @@ class StatusBar(Static):
         if self.bg_task_count > 0:
             result.append(" ", style="")
             result.append(
-                f" BG:{self.bg_task_count} ",
+                f" Background Tasks Running: {self.bg_task_count} (Ctrl+B) ",
                 style="bold #1e1e1e on #3794ff",
             )
 

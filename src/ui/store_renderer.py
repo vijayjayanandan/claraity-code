@@ -108,6 +108,11 @@ class StoreRenderer:
 
         # Create appropriate widget based on role
         if message.is_user:
+            # Skip rendering for auto-generated task notifications (no visible bubble)
+            content = message.content or ""
+            if content.strip().startswith("<task-notification>"):
+                return pre_mounted_user_widget
+
             # Adopt pre-mounted widget (mounted immediately on submit)
             if not bulk_load and pre_mounted_user_widget is not None:
                 widget = pre_mounted_user_widget
@@ -117,7 +122,7 @@ class StoreRenderer:
                 return pre_mounted_user_widget  # Return None (consumed)
             # Pass raw content and UUID for clickable image support
             message_uuid = message.meta.uuid if message.meta else ""
-            widget = UserMessage(content=message.content or "", message_uuid=message_uuid)
+            widget = UserMessage(content=content, message_uuid=message_uuid)
         elif message.is_assistant:
             if not bulk_load:
                 # Check if widget already exists for this stream_id

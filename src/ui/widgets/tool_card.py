@@ -191,6 +191,7 @@ class ToolCard(Static):
         tool_name: str,
         args: dict[str, Any],
         requires_approval: bool = False,
+        suppress_approval_ui: bool = False,
         **kwargs,
     ):
         """
@@ -201,6 +202,8 @@ class ToolCard(Static):
             tool_name: Tool function name
             args: Tool arguments dictionary
             requires_approval: Whether user must approve
+            suppress_approval_ui: If True, don't mount ToolApprovalOptions/ClarifyWidget
+                on AWAITING_APPROVAL (used for subagent cards where approval is promoted)
             **kwargs: Additional arguments for Static
         """
         # Initialize instance attributes BEFORE super().__init__
@@ -209,6 +212,7 @@ class ToolCard(Static):
         self._defer_diff_mount: bool = False  # Set True during bulk load for performance
         self._diff_mounted: bool = False  # Track if diff already mounted
         self._header_widget: Static | None = None  # Mounted header for tools with children
+        self._suppress_approval_ui = suppress_approval_ui
 
         super().__init__(**kwargs)
         self.call_id = call_id
@@ -256,7 +260,8 @@ class ToolCard(Static):
 
         if new_status == ToolStatus.AWAITING_APPROVAL:
             # Show interaction widget - clarify or approval depending on tool
-            if not self._approval_widget and self.is_attached:
+            # (skip for subagent cards where approval is promoted to conversation level)
+            if not self._suppress_approval_ui and not self._approval_widget and self.is_attached:
                 if self.tool_name == "clarify":
                     logger.info(f"[WATCH_STATUS] {self.call_id}: Creating clarify widget")
                     from .clarify_widget import ClarifyWidget

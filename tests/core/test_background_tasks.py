@@ -227,9 +227,13 @@ class TestCompletionCallback:
         registry.set_completion_callback(callback)
         task_id, _ = await registry.launch("echo callback-test")
         await _wait_until_not_running(registry, task_id)
-        assert callback.called
-        # Should be called with active_count (0 after completion)
-        callback.assert_called_with(0)
+        # Callback fires on launch (count=1, task=None) and completion (count=0, task=info)
+        assert callback.call_count >= 2
+        # Last call should be completion with active_count=0 and the task info
+        last_call_args = callback.call_args_list[-1][0]
+        assert last_call_args[0] == 0  # active_count
+        assert last_call_args[1] is not None  # completed task info
+        assert last_call_args[1].task_id == task_id
 
     @pytest.mark.asyncio
     async def test_callback_fires_on_cancel(self, registry):
@@ -239,6 +243,10 @@ class TestCompletionCallback:
         task_id, _ = await registry.launch(cmd)
         await registry.cancel(task_id)
         assert callback.called
+        # Cancel should pass the task info
+        last_call_args = callback.call_args_list[-1][0]
+        assert last_call_args[1] is not None
+        assert last_call_args[1].task_id == task_id
 
 
 # ---------------------------------------------------------------------------

@@ -24,6 +24,7 @@ from typing import Any, Optional
 
 from src.observability import get_logger
 from src.tools.command_safety import check_command_safety
+from src.tools.powershell_sanitize import sanitize_for_powershell
 
 logger = get_logger(__name__)
 
@@ -80,7 +81,7 @@ class BackgroundTaskRegistry:
         self._async_tasks: dict[str, asyncio.Task] = {}
         self._completed_queue: list[BackgroundTaskInfo] = []
         self._counter: int = 0
-        self._completion_callback: Callable[[int], Any] | None = None
+        self._completion_callback: Callable[[int, Optional["BackgroundTaskInfo"]], Any] | None = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -147,6 +148,9 @@ class BackgroundTaskRegistry:
             timeout=clamped_timeout,
         )
 
+        # Notify callback that a new task started (count changed)
+        self._fire_completion_callback(None)
+
         return task_id, None
 
     def get_status(self, task_id: str) -> BackgroundTaskInfo | None:
@@ -194,7 +198,7 @@ class BackgroundTaskRegistry:
         info.status = BackgroundTaskStatus.CANCELLED
         info.end_time = time.monotonic()
         self._completed_queue.append(info)
-        self._fire_completion_callback()
+        self._fire_completion_callback(info)
 
         logger.info("background_task_cancelled", task_id=task_id)
         return True, f"Task '{task_id}' cancelled"
@@ -220,8 +224,13 @@ class BackgroundTaskRegistry:
             logger.info("background_tasks_cancel_all", count=count)
         return count
 
-    def set_completion_callback(self, fn: Callable[[int], Any]) -> None:
-        """Register callback fired on task completion. fn(active_count)."""
+    def set_completion_callback(self, fn: Callable[[int, Optional["BackgroundTaskInfo"]], Any]) -> None:
+        """Register callback fired on task start/completion.
+
+        Args:
+            fn: Callback taking (active_count, completed_task_info_or_none).
+                completed_task is None on launch, populated on completion.
+        """
         self._completion_callback = fn
 
     def cleanup(self) -> None:
@@ -251,10 +260,10 @@ class BackgroundTaskRegistry:
             1 for info in self._tasks.values() if info.status == BackgroundTaskStatus.RUNNING
         )
 
-    def _fire_completion_callback(self) -> None:
+    def _fire_completion_callback(self, completed_task: Optional[BackgroundTaskInfo] = None) -> None:
         if self._completion_callback:
             try:
-                self._completion_callback(self._active_count())
+                self._completion_callback(self._active_count(), completed_task)
             except Exception as e:
                 logger.warning(f"Completion callback error: {e}")
 
@@ -268,6 +277,8 @@ class BackgroundTaskRegistry:
         """Execute command as async subprocess and capture output."""
         info = self._tasks[task_id]
         communicate_task = None
+        # Sanitize cmd.exe/bash syntax for PowerShell
+        command = sanitize_for_powershell(command)
         try:
             # Platform-specific subprocess creation
             if platform.system() == "Windows":
@@ -341,7 +352,7 @@ class BackgroundTaskRegistry:
             # Only queue and notify if not already cancelled (cancel() handles its own queueing)
             if info.status != BackgroundTaskStatus.CANCELLED:
                 self._completed_queue.append(info)
-            self._fire_completion_callback()
+            self._fire_completion_callback(info)
 
             logger.info(
                 "background_task_finished",

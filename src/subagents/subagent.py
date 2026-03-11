@@ -1024,6 +1024,20 @@ class SubAgent:
                             f"Tool '{tool_name}' is not allowed for subagent '{self.config.name}'"
                         )
 
+                    # Force background=False for subagent tool calls.
+                    # Background mode relies on a shared BackgroundTaskRegistry
+                    # whose drain_completed() is global — completions would be
+                    # stolen by whichever caller (main agent or another subagent)
+                    # drains first.  Subagents don't benefit from background mode
+                    # anyway: they loop on tool calls with no user interaction,
+                    # so foreground execution (waiting for the result) is correct.
+                    if tool_name == "run_command" and tool_args.get("background"):
+                        tool_args["background"] = False
+                        logger.debug(
+                            f"SubAgent [{self.config.name}]: Forced background=False "
+                            f"for run_command (subagents use foreground execution)"
+                        )
+
                     result = self._tool_executor.execute_tool(tool_name, **tool_args)
 
                     if result.is_success():

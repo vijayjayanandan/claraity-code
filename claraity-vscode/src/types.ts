@@ -148,7 +148,8 @@ export type MiscEvent =
     | { type: 'jira_profiles'; profiles: JiraProfile[]; connected_profile: string | null; error?: string }
     | { type: 'jira_config_saved'; success: boolean; message: string; profile?: string }
     | { type: 'jira_connect_result'; success: boolean; message: string; profile?: string; tool_count?: number }
-    | { type: 'jira_disconnect_result'; success: boolean; message: string };
+    | { type: 'jira_disconnect_result'; success: boolean; message: string }
+    | { type: 'execute_in_terminal'; task_id: string; command: string; working_dir?: string; timeout?: number };
 
 // ── Union of all server messages ──
 
@@ -284,6 +285,14 @@ export interface DisconnectJiraPayload {
     type: 'disconnect_jira';
 }
 
+export interface TerminalResultPayload {
+    type: 'terminal_result';
+    task_id: string;
+    exit_code: number;
+    output: string;
+    error?: string;
+}
+
 export type ClientMessage =
     | ChatMessagePayload
     | ApprovalResultPayload
@@ -303,7 +312,8 @@ export type ClientMessage =
     | GetJiraProfilesPayload
     | SaveJiraConfigPayload
     | ConnectJiraPayload
-    | DisconnectJiraPayload;
+    | DisconnectJiraPayload
+    | TerminalResultPayload;
 
 // ============================================================================
 // Extension <-> WebView postMessage types

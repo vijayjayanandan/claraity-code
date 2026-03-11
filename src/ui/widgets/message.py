@@ -500,6 +500,7 @@ class MessageWidget(Vertical):
         tool_name: str,
         args: dict[str, Any],
         requires_approval: bool,
+        suppress_approval_ui: bool = False,
     ) -> ToolCard:
         """
         Add a tool card.
@@ -509,6 +510,7 @@ class MessageWidget(Vertical):
             tool_name: Tool function name
             args: Tool arguments dictionary
             requires_approval: Whether user must approve
+            suppress_approval_ui: If True, don't mount approval widget inline
 
         Returns:
             The ToolCard widget for status updates
@@ -528,6 +530,7 @@ class MessageWidget(Vertical):
             tool_name=tool_name,
             args=args,
             requires_approval=requires_approval,
+            suppress_approval_ui=suppress_approval_ui,
         )
 
         self._blocks.append(card)

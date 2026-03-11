@@ -892,11 +892,23 @@ def _get_environment_info() -> str:
     plat = platform.system()
     os_version = platform.version()
 
+    shell_info = ""
+    if plat == "Windows":
+        shell_info = (
+            "\nShell: PowerShell 5.1 (NOT cmd.exe, NOT bash)"
+            "\n- Do NOT use '&&' to chain commands. Use '; ' (semicolon-space) instead."
+            "\n- Do NOT use cmd.exe builtins like 'dir /s', '2>nul', 'find /c'. Use PowerShell equivalents (Get-ChildItem, $null, Select-String)."
+            "\n- Do NOT use bash syntax like '2>&1' redirection. PowerShell uses '*>&1' or try/catch."
+            "\n- Common equivalents: dir->Get-ChildItem, find->Select-String, type->Get-Content, del->Remove-Item"
+        )
+    else:
+        shell_info = "\nShell: Default system shell (bash/zsh)"
+
     return f"""# Environment
 Working directory: {cwd}
 Is directory a git repo: {is_git}
 Platform: {plat}
-OS Version: {os_version}
+OS Version: {os_version}{shell_info}
 Today's date: {today}
 """
 
