@@ -132,7 +132,9 @@ def save_config_from_request(data: dict, config_path: str) -> dict:
             return {
                 "type": "config_saved",
                 "success": True,
-                "message": "Configuration saved. Restart server to apply changes.",
+                "message": "Configuration saved.",
+                "_config": cfg,
+                "_api_key": str(api_key) if api_key else "",
             }
         else:
             return {

@@ -138,8 +138,10 @@ class StatusBar(Static):
             and not self.error_message
             and not self.info_message
         ):
-            # Minimal idle state - show mode and director badges
+            # Minimal idle state - show model name, mode and director badges
             result = Text()
+            if self.model_name:
+                result.append(f" {self.model_name} ", style="#9cdcfe")
             if self.current_mode == "plan":
                 result.append(" PLAN ", style="bold #1e1e1e on #cca700")
             elif self.current_mode == "auto":
@@ -158,6 +160,21 @@ class StatusBar(Static):
                     f" Background Tasks Running: {self.bg_task_count} (Ctrl+B) ",
                     style="bold #1e1e1e on #3794ff",
                 )
+            # Context window progress bar (right-aligned)
+            if self.context_limit > 0:
+                context_bar = self._render_context_bar()
+                try:
+                    width = self.app.size.width if self.app else 80
+                except (AttributeError, RuntimeError):
+                    width = 80
+                current_len = len(result.plain)
+                context_len = len(context_bar.plain)
+                min_width_needed = current_len + context_len + 6
+                if width >= min_width_needed:
+                    padding = width - current_len - context_len - 4
+                    result.append(" " * padding)
+                    result.append_text(context_bar)
+
             return result if result.plain else Text("")
 
         result = Text()

@@ -88,7 +88,7 @@ class TestSaveConfigFromRequest:
 
         assert result["type"] == "config_saved"
         assert result["success"] is True
-        assert "Restart server" in result["message"]
+        assert "Configuration saved" in result["message"]
 
         mock_save.assert_called_once()
         saved_cfg = mock_save.call_args[0][0]

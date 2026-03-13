@@ -504,6 +504,99 @@ class CodingAgent(AgentInterface):
 
         return agent
 
+    def reconfigure_llm(
+        self, config: "LLMConfigData", api_key: str | None = None
+    ) -> str:
+        """Swap the LLM backend at runtime without losing conversation state.
+
+        Creates a new backend from *config*, then replaces ``self.llm``.
+        Session, memory contents, tools, and permissions are preserved.
+        The new backend is fully constructed **before** the old one is
+        closed so that a construction failure leaves the agent intact.
+
+        Args:
+            config: New LLMConfigData from the config wizard.
+            api_key: Resolved API key (from keyring / env).
+
+        Returns:
+            Human-readable summary of what changed.
+        """
+        old_model = self.model_name
+        old_backend = self.backend_name
+        old_context = self.context_window
+
+        # Build new LLMConfig
+        new_llm_config = LLMConfig(
+            backend_type=LLMBackendType(config.backend_type),
+            model_name=config.model,
+            base_url=config.base_url,
+            context_window=config.context_window,
+            num_ctx=config.context_window,
+            temperature=config.temperature
+            if config.temperature is not None
+            else 0.2,
+            max_tokens=config.max_tokens
+            if config.max_tokens is not None
+            else 16384,
+            top_p=config.top_p if config.top_p is not None else 0.95,
+            thinking_budget=config.thinking_budget,
+        )
+
+        # Construct new backend (before closing old one)
+        resolved_key = api_key or config.api_key or None
+        api_key_env = config.api_key_env
+
+        if config.backend_type == "ollama":
+            new_backend: LLMBackend = OllamaBackend(new_llm_config)
+        elif config.backend_type == "openai":
+            new_backend = OpenAIBackend(
+                new_llm_config, api_key=resolved_key, api_key_env=api_key_env
+            )
+        elif config.backend_type == "anthropic":
+            from src.llm.anthropic_backend import AnthropicBackend
+
+            new_backend = AnthropicBackend(
+                new_llm_config,
+                api_key=resolved_key,
+                api_key_env=api_key_env
+                if api_key_env != "OPENAI_API_KEY"
+                else "ANTHROPIC_API_KEY",
+            )
+        else:
+            raise ValueError(f"Unsupported backend: {config.backend_type}")
+
+        # Close old backend, swap in new one
+        self._close_llm_backend()
+        self.llm = new_backend
+
+        # Update scalar fields
+        self.model_name = config.model
+        self.backend_name = config.backend_type
+        self.context_window = config.context_window
+
+        # Re-tune memory allocations if context window changed
+        if config.context_window != old_context:
+            self.memory.total_context_tokens = config.context_window
+            self.memory.working_memory.max_tokens = int(config.context_window * 0.4)
+            self.memory.episodic_memory.max_tokens = int(config.context_window * 0.2)
+            self.context_builder.max_context_tokens = config.context_window
+
+        # Apply subagent overrides
+        if config.subagents and hasattr(self, "subagent_manager"):
+            self.subagent_manager.config_loader.apply_llm_overrides(config)
+
+        # Build change summary
+        changes = []
+        if config.model != old_model:
+            changes.append(f"Model: {old_model} -> {config.model}")
+        if config.backend_type != old_backend:
+            changes.append(f"Backend: {old_backend} -> {config.backend_type}")
+        if config.context_window != old_context:
+            changes.append(f"Context: {old_context} -> {config.context_window}")
+        summary = "; ".join(changes) if changes else "Generation parameters updated"
+        logger.info(f"LLM reconfigured: {summary}")
+        return summary
+
     def get_available_subagents(self) -> list[str]:
         """Get list of all available subagent names.
 
@@ -1194,9 +1287,13 @@ class CodingAgent(AgentInterface):
             # Sequence: add_user_message → FileReadEvent(s) → StreamStart → LLM call
             yield StreamStart()
 
+            _t0 = time.monotonic()
+            logger.debug("stream_response_phase", phase="start", input_len=len(user_input))
+
             # CRITICAL: Sync plan mode state from MessageStore before building context
             # This ensures agent's in-memory state matches persisted state (single source of truth)
             self._sync_plan_mode_from_store()
+            logger.debug("stream_response_phase", phase="plan_mode_synced", elapsed_ms=round((time.monotonic() - _t0) * 1000))
 
             # Build initial context (with agent state for task continuation)
             # MemoryManager uses MessageStore when configured (Option A: Single Source of Truth)
@@ -1209,6 +1306,7 @@ class CodingAgent(AgentInterface):
                 plan_mode_state=self.plan_mode_state,
                 director_adapter=self.director_adapter,
             )
+            logger.debug("stream_response_phase", phase="context_built", elapsed_ms=round((time.monotonic() - _t0) * 1000), context_messages=len(context))
 
             # NOTE: Context usage is emitted after each LLM response with real token count
             # (see chunk.done handling below). We don't emit here to avoid overwriting
@@ -1333,12 +1431,14 @@ class CodingAgent(AgentInterface):
                     # This handles Ctrl+C interrupts, crashes, and any edge cases
                     # where tool_use exists without tool_result
                     current_context = self._fix_orphaned_tool_calls(current_context)
+                    logger.debug("stream_response_phase", phase="orphans_fixed", elapsed_ms=round((time.monotonic() - _t0) * 1000))
 
                     # === UNIFIED ARCHITECTURE: Use ProviderDelta + StreamingPipeline ===
                     # 1. Start assistant stream through MemoryManager
                     self.memory.start_assistant_stream(
                         provider=self.backend_name, model=self.model_name
                     )
+                    logger.debug("stream_response_phase", phase="assistant_stream_started", elapsed_ms=round((time.monotonic() - _t0) * 1000))
 
                     # 2. Get LLM stream - yields ProviderDelta objects
                     _llm_kwargs = {}
@@ -1356,6 +1456,7 @@ class CodingAgent(AgentInterface):
                     last_usage = None
                     _thinking_started = False
 
+                    logger.debug("stream_response_phase", phase="llm_stream_entering", elapsed_ms=round((time.monotonic() - _t0) * 1000))
                     async for delta in llm_stream:
                         # Feed delta to MemoryManager (uses StreamingPipeline internally)
                         finalized_message = self.memory.process_provider_delta(delta)
@@ -2944,8 +3045,21 @@ class CodingAgent(AgentInterface):
         self._bg_registry.cleanup()
 
         # Clean up LLM backend HTTP clients
+        self._close_llm_backend()
+
+    def _close_llm_backend(self) -> None:
+        """Close HTTP clients on the current LLM backend (best-effort)."""
+        if not hasattr(self, "llm"):
+            return
+        # Close sync client
         try:
             if hasattr(self.llm, "client") and hasattr(self.llm.client, "close"):
                 self.llm.client.close()
+        except Exception:
+            pass
+        # Close async client
+        try:
+            if hasattr(self.llm, "async_client") and hasattr(self.llm.async_client, "close"):
+                self.llm.async_client.close()
         except Exception:
             pass

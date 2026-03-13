@@ -110,6 +110,11 @@ class StoreRenderer:
         if message.is_user:
             # Skip rendering for auto-generated task notifications (no visible bubble)
             content = message.content or ""
+            # Multimodal messages store content as list of dicts
+            if isinstance(content, list):
+                content = " ".join(
+                    part.get("text", "") for part in content if isinstance(part, dict)
+                )
             if content.strip().startswith("<task-notification>"):
                 return pre_mounted_user_widget
 

@@ -315,6 +315,28 @@ class WebSocketProtocol(UIProtocol):
                         from src.server.config_handler import save_config_from_request
 
                         response = save_config_from_request(data, self._config_path)
+
+                        # Hot-swap the LLM backend if agent is available
+                        cfg = response.pop("_config", None)
+                        api_key = response.pop("_api_key", None)
+                        if response.get("success") and cfg and self._agent:
+                            try:
+                                import os
+
+                                resolved_key = api_key or os.environ.get(
+                                    cfg.api_key_env, ""
+                                )
+                                summary = self._agent.reconfigure_llm(
+                                    cfg, api_key=resolved_key
+                                )
+                                response["message"] = f"LLM config applied: {summary}"
+                            except Exception as exc:
+                                logger.warning(f"LLM reconfigure failed: {exc}")
+                                response["message"] = (
+                                    f"Config saved but apply failed: {exc}. "
+                                    "Restart server to apply changes."
+                                )
+
                         await self._send_json(response)
 
                     elif msg_type == "list_models":
