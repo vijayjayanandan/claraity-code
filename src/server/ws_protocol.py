@@ -323,12 +323,8 @@ class WebSocketProtocol(UIProtocol):
                             try:
                                 import os
 
-                                resolved_key = api_key or os.environ.get(
-                                    cfg.api_key_env, ""
-                                )
-                                summary = self._agent.reconfigure_llm(
-                                    cfg, api_key=resolved_key
-                                )
+                                resolved_key = api_key or os.environ.get(cfg.api_key_env, "")
+                                summary = self._agent.reconfigure_llm(cfg, api_key=resolved_key)
                                 response["message"] = f"LLM config applied: {summary}"
                             except Exception as exc:
                                 logger.warning(f"LLM reconfigure failed: {exc}")

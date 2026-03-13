@@ -1066,9 +1066,7 @@ class CodingAgentApp(App):
 
         # Cache conversation reference (persistent — container lives for entire app)
         try:
-            self._conversation = self.query_one(
-                "#conversation", ConversationContainer
-            )
+            self._conversation = self.query_one("#conversation", ConversationContainer)
         except NoMatches:
             self._conversation = None
 

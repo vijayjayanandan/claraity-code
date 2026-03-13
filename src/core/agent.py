@@ -504,9 +504,7 @@ class CodingAgent(AgentInterface):
 
         return agent
 
-    def reconfigure_llm(
-        self, config: "LLMConfigData", api_key: str | None = None
-    ) -> str:
+    def reconfigure_llm(self, config: "LLMConfigData", api_key: str | None = None) -> str:
         """Swap the LLM backend at runtime without losing conversation state.
 
         Creates a new backend from *config*, then replaces ``self.llm``.
@@ -532,12 +530,8 @@ class CodingAgent(AgentInterface):
             base_url=config.base_url,
             context_window=config.context_window,
             num_ctx=config.context_window,
-            temperature=config.temperature
-            if config.temperature is not None
-            else 0.2,
-            max_tokens=config.max_tokens
-            if config.max_tokens is not None
-            else 16384,
+            temperature=config.temperature if config.temperature is not None else 0.2,
+            max_tokens=config.max_tokens if config.max_tokens is not None else 16384,
             top_p=config.top_p if config.top_p is not None else 0.95,
             thinking_budget=config.thinking_budget,
         )
@@ -558,9 +552,7 @@ class CodingAgent(AgentInterface):
             new_backend = AnthropicBackend(
                 new_llm_config,
                 api_key=resolved_key,
-                api_key_env=api_key_env
-                if api_key_env != "OPENAI_API_KEY"
-                else "ANTHROPIC_API_KEY",
+                api_key_env=api_key_env if api_key_env != "OPENAI_API_KEY" else "ANTHROPIC_API_KEY",
             )
         else:
             raise ValueError(f"Unsupported backend: {config.backend_type}")
@@ -1293,7 +1285,11 @@ class CodingAgent(AgentInterface):
             # CRITICAL: Sync plan mode state from MessageStore before building context
             # This ensures agent's in-memory state matches persisted state (single source of truth)
             self._sync_plan_mode_from_store()
-            logger.debug("stream_response_phase", phase="plan_mode_synced", elapsed_ms=round((time.monotonic() - _t0) * 1000))
+            logger.debug(
+                "stream_response_phase",
+                phase="plan_mode_synced",
+                elapsed_ms=round((time.monotonic() - _t0) * 1000),
+            )
 
             # Build initial context (with agent state for task continuation)
             # MemoryManager uses MessageStore when configured (Option A: Single Source of Truth)
@@ -1306,7 +1302,12 @@ class CodingAgent(AgentInterface):
                 plan_mode_state=self.plan_mode_state,
                 director_adapter=self.director_adapter,
             )
-            logger.debug("stream_response_phase", phase="context_built", elapsed_ms=round((time.monotonic() - _t0) * 1000), context_messages=len(context))
+            logger.debug(
+                "stream_response_phase",
+                phase="context_built",
+                elapsed_ms=round((time.monotonic() - _t0) * 1000),
+                context_messages=len(context),
+            )
 
             # NOTE: Context usage is emitted after each LLM response with real token count
             # (see chunk.done handling below). We don't emit here to avoid overwriting
@@ -1431,14 +1432,22 @@ class CodingAgent(AgentInterface):
                     # This handles Ctrl+C interrupts, crashes, and any edge cases
                     # where tool_use exists without tool_result
                     current_context = self._fix_orphaned_tool_calls(current_context)
-                    logger.debug("stream_response_phase", phase="orphans_fixed", elapsed_ms=round((time.monotonic() - _t0) * 1000))
+                    logger.debug(
+                        "stream_response_phase",
+                        phase="orphans_fixed",
+                        elapsed_ms=round((time.monotonic() - _t0) * 1000),
+                    )
 
                     # === UNIFIED ARCHITECTURE: Use ProviderDelta + StreamingPipeline ===
                     # 1. Start assistant stream through MemoryManager
                     self.memory.start_assistant_stream(
                         provider=self.backend_name, model=self.model_name
                     )
-                    logger.debug("stream_response_phase", phase="assistant_stream_started", elapsed_ms=round((time.monotonic() - _t0) * 1000))
+                    logger.debug(
+                        "stream_response_phase",
+                        phase="assistant_stream_started",
+                        elapsed_ms=round((time.monotonic() - _t0) * 1000),
+                    )
 
                     # 2. Get LLM stream - yields ProviderDelta objects
                     _llm_kwargs = {}
@@ -1456,7 +1465,11 @@ class CodingAgent(AgentInterface):
                     last_usage = None
                     _thinking_started = False
 
-                    logger.debug("stream_response_phase", phase="llm_stream_entering", elapsed_ms=round((time.monotonic() - _t0) * 1000))
+                    logger.debug(
+                        "stream_response_phase",
+                        phase="llm_stream_entering",
+                        elapsed_ms=round((time.monotonic() - _t0) * 1000),
+                    )
                     async for delta in llm_stream:
                         # Feed delta to MemoryManager (uses StreamingPipeline internally)
                         finalized_message = self.memory.process_provider_delta(delta)
