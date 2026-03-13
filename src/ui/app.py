@@ -116,15 +116,15 @@ SILENT_TOOLS = {
 
 
 class ConversationContainer(ScrollableContainer):
-    """ScrollableContainer that can receive focus for keyboard scrolling.
+    """ScrollableContainer for conversation messages.
 
-    By setting can_focus=True, users can:
-    - Click on the conversation area to focus it
-    - Use mouse wheel to scroll (works even without focus in Textual)
-    - Use keyboard bindings (PageUp/PageDown, Ctrl+Up/Down) when app has focus
+    Keyboard scrolling is handled by app-level bindings (PageUp, Ctrl+Up, etc.)
+    which call scroll action methods directly. Mouse wheel scrolling works without
+    focus. Non-focusable so clicking the conversation area doesn't steal focus
+    from the input box.
     """
 
-    can_focus = True
+    can_focus = False
 
 
 # =============================================================================
@@ -214,10 +214,6 @@ class ChatInput(TextArea):
                 self.selection = Selection(start=(0, 0), end=(0, 0))
             except Exception:
                 pass
-
-    def on_focus(self) -> None:
-        """Handle focus event."""
-        self.refresh()
 
     def on_mount(self) -> None:
         """Start autocomplete indexing in background (non-blocking)."""
@@ -954,13 +950,41 @@ class CodingAgentApp(App):
 
         self.notify("LLM configuration saved to .clarity/config.yaml")
 
-        # If agent already exists, config was just updated (not setup mode)
+        # If agent already exists, hot-swap the LLM backend
         if self.agent is not None:
-            self.notify(
-                "Config updated. Please restart the app for changes to take effect.",
-                severity="information",
-                timeout=8.0,
-            )
+            if self._is_streaming:
+                self.notify(
+                    "Cannot change LLM config while streaming. "
+                    "Try again after the response completes.",
+                    severity="warning",
+                    timeout=6.0,
+                )
+                return
+
+            try:
+                api_key = result.api_key or os.environ.get(result.api_key_env, "")
+                summary = self.agent.reconfigure_llm(result, api_key=api_key)
+
+                # Update app-level references
+                self.model_name = self.agent.model_name
+                self.stream_handler = self._create_agent_stream_handler(self.agent)
+
+                # Update status bar
+                if self._status_bar:
+                    self._status_bar.set_model(self.model_name)
+
+                self.notify(
+                    f"LLM config applied: {summary}",
+                    severity="information",
+                    timeout=6.0,
+                )
+            except Exception as e:
+                logger.error(f"Failed to reconfigure LLM: {e}")
+                self.notify(
+                    f"Config change failed: {e}. Previous config still active.",
+                    severity="error",
+                    timeout=8.0,
+                )
             return
 
         # Setup mode: create agent from saved config
@@ -1039,6 +1063,14 @@ class CodingAgentApp(App):
             self._status_bar = self.query_one("#status", StatusBar)
         except NoMatches:
             self._status_bar = None
+
+        # Cache conversation reference (persistent — container lives for entire app)
+        try:
+            self._conversation = self.query_one(
+                "#conversation", ConversationContainer
+            )
+        except NoMatches:
+            self._conversation = None
 
         # Use call_after_refresh to ensure focus happens after layout is complete
         self.call_after_refresh(self._focus_input)
@@ -1819,7 +1851,6 @@ class CodingAgentApp(App):
             # This prevents clearing a new message if a new stream started during cleanup
             self._finalize_current_message(msg_to_finalize)
 
-            self._conversation = None  # Clear cached reference
             # Clear segment buffers
             self._segment_chunks = []
             self._segment_chars = 0
@@ -3404,61 +3435,55 @@ class CodingAgentApp(App):
 
     def action_scroll_up(self) -> None:
         """Scroll conversation up."""
-        try:
-            conversation = self.query_one("#conversation", ScrollableContainer)
-            conversation.scroll_up(animate=False)
-            self._auto_scroll = False
-        except NoMatches:
-            pass
+        conversation = self._conversation
+        if conversation is None:
+            return
+        conversation.scroll_up(animate=False)
+        self._auto_scroll = False
 
     def action_scroll_down(self) -> None:
         """Scroll conversation down."""
-        try:
-            conversation = self.query_one("#conversation", ScrollableContainer)
-            conversation.scroll_down(animate=False)
-            # Re-enable auto-scroll if at bottom
-            if conversation.scroll_offset.y >= conversation.max_scroll_y - 10:
-                self._auto_scroll = True
-        except NoMatches:
-            pass
+        conversation = self._conversation
+        if conversation is None:
+            return
+        conversation.scroll_down(animate=False)
+        # Re-enable auto-scroll if at bottom
+        if conversation.scroll_offset.y >= conversation.max_scroll_y - 10:
+            self._auto_scroll = True
 
     def action_page_up(self) -> None:
         """Page up in conversation."""
-        try:
-            conversation = self.query_one("#conversation", ScrollableContainer)
-            conversation.scroll_page_up(animate=False)
-            self._auto_scroll = False
-        except NoMatches:
-            pass
+        conversation = self._conversation
+        if conversation is None:
+            return
+        conversation.scroll_page_up(animate=False)
+        self._auto_scroll = False
 
     def action_page_down(self) -> None:
         """Page down in conversation."""
-        try:
-            conversation = self.query_one("#conversation", ScrollableContainer)
-            conversation.scroll_page_down(animate=False)
-            # Re-enable auto-scroll if at bottom
-            if conversation.scroll_offset.y >= conversation.max_scroll_y - 10:
-                self._auto_scroll = True
-        except NoMatches:
-            pass
+        conversation = self._conversation
+        if conversation is None:
+            return
+        conversation.scroll_page_down(animate=False)
+        # Re-enable auto-scroll if at bottom
+        if conversation.scroll_offset.y >= conversation.max_scroll_y - 10:
+            self._auto_scroll = True
 
     def action_scroll_home(self) -> None:
         """Scroll to top of conversation."""
-        try:
-            conversation = self.query_one("#conversation", ScrollableContainer)
-            conversation.scroll_home(animate=False)
-            self._auto_scroll = False
-        except NoMatches:
-            pass
+        conversation = self._conversation
+        if conversation is None:
+            return
+        conversation.scroll_home(animate=False)
+        self._auto_scroll = False
 
     def action_scroll_end(self) -> None:
         """Scroll to bottom of conversation."""
-        try:
-            conversation = self.query_one("#conversation", ScrollableContainer)
-            conversation.scroll_end(animate=False)
-            self._auto_scroll = True
-        except NoMatches:
-            pass
+        conversation = self._conversation
+        if conversation is None:
+            return
+        conversation.scroll_end(animate=False)
+        self._auto_scroll = True
 
 
 def run_app(
