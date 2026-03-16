@@ -14,8 +14,15 @@ webview-ui/GAP_ANALYSIS.md
 
 # Development files
 .vscode/**
-node_modules/**
+.clarity/**
 .gitignore
+esbuild.mjs
+
+# E2E / Playwright
+webview-ui/e2e/**
+webview-ui/playwright.config.ts
+webview-ui/playwright-report/**
+webview-ui/test-results/**
 
 # Test files
 __mocks__/**

@@ -178,13 +178,10 @@ class OpenAIBackend(LLMBackend):
         """
         super().__init__(config)
 
-        # Get API key from parameter or environment variable
-        self.api_key = api_key or os.getenv(api_key_env)
-        if not self.api_key:
-            raise ValueError(
-                "API key not provided. Set an API key in the LLM config wizard "
-                "(Ctrl+P > Configure LLM) or pass it via --api-key flag."
-            )
+        # Get API key from parameter or environment variable.
+        # Allow missing key at init so the server can start and let the user
+        # configure via the Settings panel. Calls will fail gracefully.
+        self.api_key = api_key or os.getenv(api_key_env) or "not-configured"
 
         import httpx
 

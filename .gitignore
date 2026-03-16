@@ -122,6 +122,8 @@ test-*-workspace/
 
 # VS Code extension build output
 claraity-vscode/out/
+claraity-vscode/bin/
+claraity-vscode/*.vsix
 claraity-vscode/webview-ui/dist/
 claraity-vscode/webview-ui/node_modules/
 claraity-vscode/webview-ui/playwright-report/
