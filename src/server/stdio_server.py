@@ -171,9 +171,7 @@ class StdioProtocol(UIProtocol):
         def on_notification(notification: StoreNotification) -> None:
             self._loop.call_soon_threadsafe(
                 asyncio.ensure_future,
-                self._safe_background_send(
-                    self._send_store_notification(notification)
-                ),
+                self._safe_background_send(self._send_store_notification(notification)),
             )
 
         self._unsubscribe = self._store.subscribe(on_notification)
@@ -193,9 +191,7 @@ class StdioProtocol(UIProtocol):
 
     def notify_todos_updated(self, todos: list) -> None:
         asyncio.ensure_future(
-            self._safe_background_send(
-                self._send_json({"type": "todos_updated", "todos": todos})
-            )
+            self._safe_background_send(self._send_json({"type": "todos_updated", "todos": todos}))
         )
 
     # -- Interactive overrides (pause, clarify) -----------------------------
@@ -287,9 +283,7 @@ class StdioProtocol(UIProtocol):
                         )
                         continue
                     if content.strip() or images:
-                        await self._chat_queue.put(
-                            {"content": content, "images": images}
-                        )
+                        await self._chat_queue.put({"content": content, "images": images})
 
                 # -- Config handlers ---------------------------------------
                 elif msg_type == "get_config":
@@ -399,8 +393,7 @@ class StdioProtocol(UIProtocol):
             except Exception as exc:
                 logger.warning("stdio_llm_reconfigure_failed", error=str(exc))
                 response["message"] = (
-                    f"Config saved but apply failed: {exc}. "
-                    "Restart server to apply changes."
+                    f"Config saved but apply failed: {exc}. Restart server to apply changes."
                 )
 
         await self._send_json(response)
@@ -707,7 +700,7 @@ class StdioProtocol(UIProtocol):
                 if mcp_conn:
                     config_name = mcp_conn.config.name
                     if config_name.startswith("mcp-atlassian-"):
-                        connected_profile = config_name[len("mcp-atlassian-"):]
+                        connected_profile = config_name[len("mcp-atlassian-") :]
 
             await self._send_json(
                 {
@@ -1001,9 +994,7 @@ async def run_stdio_server(
     try:
         while True:
             try:
-                chat_msg = await asyncio.wait_for(
-                    protocol.wait_for_chat_message(), timeout=1.0
-                )
+                chat_msg = await asyncio.wait_for(protocol.wait_for_chat_message(), timeout=1.0)
             except asyncio.TimeoutError:
                 if receive_task.done():
                     break

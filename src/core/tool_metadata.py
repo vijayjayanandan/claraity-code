@@ -16,12 +16,14 @@ from typing import Any, Optional
 
 # Tools whose file_path argument should be resolved to absolute for the
 # VS Code extension (openDiffEditor needs an absolute path to read the file).
-_FILE_PATH_TOOLS = frozenset({
-    "read_file",
-    "write_file",
-    "edit_file",
-    "append_to_file",
-})
+_FILE_PATH_TOOLS = frozenset(
+    {
+        "read_file",
+        "write_file",
+        "edit_file",
+        "append_to_file",
+    }
+)
 
 
 def _resolve_file_path(tool_name: str, tool_args: dict[str, Any]) -> dict[str, Any]:

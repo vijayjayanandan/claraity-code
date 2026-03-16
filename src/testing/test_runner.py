@@ -317,7 +317,12 @@ class TestRunner:
 
         try:
             result = subprocess.run(
-                cmd, cwd=self.working_directory, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=300
+                cmd,
+                cwd=self.working_directory,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=300,
             )
 
             # Parse jest JSON output

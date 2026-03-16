@@ -232,7 +232,11 @@ class ContextBuilder:
             if director_injection:
                 system_prompt = system_prompt + "\n\n" + director_injection
 
-        logger.debug("build_context_phase", phase="system_prompt_built", elapsed_ms=round((time.monotonic() - _t0) * 1000))
+        logger.debug(
+            "build_context_phase",
+            phase="system_prompt_built",
+            elapsed_ms=round((time.monotonic() - _t0) * 1000),
+        )
 
         # Inject project knowledge base (same pattern as CLAUDE.md in Claude Code)
         knowledge_content = self.memory.get_knowledge_base()
@@ -243,7 +247,11 @@ class ContextBuilder:
                 + "Contents of .clarity/knowledge/ (project knowledge base - auto-loaded each session):\n\n"
                 + knowledge_content
             )
-        logger.debug("build_context_phase", phase="knowledge_loaded", elapsed_ms=round((time.monotonic() - _t0) * 1000))
+        logger.debug(
+            "build_context_phase",
+            phase="knowledge_loaded",
+            elapsed_ms=round((time.monotonic() - _t0) * 1000),
+        )
 
         # Compress if needed
         if self.optimizer.count_tokens(system_prompt) > system_prompt_budget:
@@ -253,7 +261,11 @@ class ContextBuilder:
             )
 
         tokens["system_prompt"] = self.optimizer.count_tokens(system_prompt)
-        logger.debug("build_context_phase", phase="tokens_counted", elapsed_ms=round((time.monotonic() - _t0) * 1000))
+        logger.debug(
+            "build_context_phase",
+            phase="tokens_counted",
+            elapsed_ms=round((time.monotonic() - _t0) * 1000),
+        )
 
         # 2. Get memory context from MemoryManager
         # MemoryManager uses MessageStore when configured (Option A: Single Source of Truth)
@@ -262,7 +274,12 @@ class ContextBuilder:
             system_prompt="",  # We'll add system prompt separately
             include_episodic=True,
         )
-        logger.debug("build_context_phase", phase="memory_context_loaded", elapsed_ms=round((time.monotonic() - _t0) * 1000), memory_messages=len(memory_context))
+        logger.debug(
+            "build_context_phase",
+            phase="memory_context_loaded",
+            elapsed_ms=round((time.monotonic() - _t0) * 1000),
+            memory_messages=len(memory_context),
+        )
 
         # Count memory tokens by type
         for msg in memory_context:
@@ -340,7 +357,12 @@ class ContextBuilder:
         if log_report:
             self._log_context_report(self.last_report)
 
-        logger.debug("build_context_phase", phase="complete", elapsed_ms=round((time.monotonic() - _t0) * 1000), total_messages=len(context))
+        logger.debug(
+            "build_context_phase",
+            phase="complete",
+            elapsed_ms=round((time.monotonic() - _t0) * 1000),
+            total_messages=len(context),
+        )
         return context
 
     def _log_context_report(self, report: ContextAssemblyReport) -> None:
