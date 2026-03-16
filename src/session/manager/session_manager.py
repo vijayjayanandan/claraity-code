@@ -357,6 +357,7 @@ class SessionManager:
         try:
             result = subprocess.run(
                 ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
                 cwd=os.getcwd(),

@@ -323,7 +323,13 @@ class WebSocketProtocol(UIProtocol):
                             try:
                                 import os
 
-                                resolved_key = api_key or os.environ.get(cfg.api_key_env, "")
+                                resolved_key = api_key or ""
+                                if not resolved_key:
+                                    resolved_key = os.environ.get("CLARAITY_API_KEY", "")
+                                if not resolved_key:
+                                    from src.llm.credential_store import load_api_key
+
+                                    resolved_key = load_api_key()
                                 summary = self._agent.reconfigure_llm(cfg, api_key=resolved_key)
                                 response["message"] = f"LLM config applied: {summary}"
                             except Exception as exc:

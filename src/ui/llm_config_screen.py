@@ -375,50 +375,10 @@ class ConfigLLMScreen(ModalScreen[LLMConfigData | None]):
 
     @staticmethod
     def _list_models(backend: str, base_url: str, api_key: str) -> list[str]:
-        """
-        list models from the backend.
+        """Delegates to the shared implementation in config_handler."""
+        from src.server.config_handler import _list_models
 
-        Reuses existing backend classes for the actual API call.
-
-        Args:
-            backend: Backend type ("openai", "anthropic", or "ollama")
-            base_url: API endpoint URL
-            api_key: Actual API key (not an env var name)
-        """
-        from src.llm.base import LLMBackendType, LLMConfig
-
-        if backend == "ollama":
-            from src.llm.ollama_backend import OllamaBackend
-
-            config = LLMConfig(
-                backend_type=LLMBackendType.OLLAMA,
-                model_name="temp",
-                base_url=base_url,
-                temperature=0.2,
-                max_tokens=1024,
-                top_p=0.95,
-                context_window=4096,
-            )
-            ollama = OllamaBackend(config)
-            return ollama.list_models()
-        elif backend == "anthropic":
-            from src.llm.anthropic_backend import KNOWN_CLAUDE_MODELS
-
-            return list(KNOWN_CLAUDE_MODELS)
-        else:
-            from src.llm.openai_backend import OpenAIBackend
-
-            config = LLMConfig(
-                backend_type=LLMBackendType.OPENAI,
-                model_name="temp",
-                base_url=base_url,
-                temperature=0.2,
-                max_tokens=1024,
-                top_p=0.95,
-                context_window=4096,
-            )
-            openai_backend = OpenAIBackend(config, api_key=api_key)
-            return openai_backend.list_models()
+        return _list_models(backend, base_url, api_key)
 
     # -----------------------------------------------------------------
     # Save

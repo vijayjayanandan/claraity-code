@@ -117,6 +117,7 @@ def _git_ls_files(root: Path) -> list[str] | None:
         result = subprocess.run(
             ["git", "ls-files"],
             cwd=str(root),
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=30,

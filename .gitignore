@@ -29,6 +29,7 @@ ENV/
 env.bak/
 venv.bak/
 .venv/
+.venv-build/
 
 # IDE
 .vscode/
@@ -121,6 +122,10 @@ test-*-workspace/
 
 # VS Code extension build output
 claraity-vscode/out/
+claraity-vscode/webview-ui/dist/
+claraity-vscode/webview-ui/node_modules/
+claraity-vscode/webview-ui/playwright-report/
+claraity-vscode/webview-ui/test-results/
 
 # Stray pip artifacts
 /=*

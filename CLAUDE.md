@@ -199,6 +199,8 @@ Never add write methods to StoreAdapter. MemoryManager is the single writer.
 
 7. **Protocol interrupt lifecycle:** `_interrupted` must be cleared after "Continue" on a pause prompt (via `clear_interrupt()`). See STATE LIFECYCLE comment in `protocol.py`. Forgetting this causes the pause prompt to re-appear on every subsequent iteration.
 
+8. **subprocess.run stdin inheritance (stdio mode):** Every `subprocess.run()` call MUST include `stdin=subprocess.DEVNULL`. In stdio mode, a background thread reads stdin for JSON commands. Without DEVNULL, child processes inherit the stdin handle, causing a deadlock on Windows — the subprocess hangs, freezing the event loop until data arrives on stdin. This doesn't affect TUI or WebSocket modes (no stdin reader thread).
+
 ---
 
 ## AGENT/SUBAGENT/VSCODE PARITY CHECKLIST

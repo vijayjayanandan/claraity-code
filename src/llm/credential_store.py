@@ -136,7 +136,11 @@ def load_api_key(
     api_key_env: str = "OPENAI_API_KEY",
 ) -> str:
     """
-    Load an API key with fallback chain: keyring > config.yaml > env var > empty.
+    Load an API key with fallback chain:
+    CLARAITY_API_KEY env > keyring > config.yaml > api_key_env env > empty.
+
+    CLARAITY_API_KEY is checked first because the VS Code extension injects
+    the API key via this env var when spawning the agent binary.
 
     Args:
         username: Credential identifier (default: "api_key")
@@ -145,7 +149,12 @@ def load_api_key(
     Returns:
         The API key string, or empty string if not found
     """
-    # Try keyring first
+    # Highest priority: CLARAITY_API_KEY env var (set by VS Code extension)
+    from_ext = os.environ.get("CLARAITY_API_KEY", "")
+    if from_ext:
+        return from_ext
+
+    # Try keyring
     kr = _get_keyring()
     if kr is not None:
         try:

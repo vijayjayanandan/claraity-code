@@ -81,6 +81,7 @@ all = [
 
 [project.scripts]
 claraity = "src.cli:main"
+claraitydev = "src.cli:main"
 claraity-server = "src.server.__main__:main"
 
 [tool.setuptools.packages.find]

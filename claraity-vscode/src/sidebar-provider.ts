@@ -9,7 +9,11 @@
 
 import * as vscode from 'vscode';
 import { AgentConnection } from './agent-connection';
+import { StdioConnection } from './stdio-connection';
 import { ServerMessage, WebViewMessage, FileAttachment, ImageAttachment } from './types';
+
+/** Connection type accepted by the sidebar (WebSocket or stdio). */
+type AnyConnection = AgentConnection | StdioConnection;
 
 
 /**
@@ -238,10 +242,11 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
     private projectContext: string | null = null;
     private contextSentThisSession = false;
     private terminalQueue: TerminalQueue;
+    private secrets: vscode.SecretStorage | null = null;
 
     constructor(
         private extensionUri: vscode.Uri,
-        private connection: AgentConnection,
+        private connection: AnyConnection | null,
         private log?: vscode.OutputChannel,
     ) {
         // Register diff content provider for claraity-diff: URI scheme
@@ -254,26 +259,50 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
         // Initialize terminal queue for run_command execution
         this.terminalQueue = new TerminalQueue((taskId, exitCode, output, error) => {
             // Send result back to agent
-            this.connection.send({
+            this.connection?.send({
                 type: 'terminal_result',
                 task_id: taskId,
                 exit_code: exitCode,
                 output: output,
                 error: error,
-            });
+            } as any);
         });
 
+        // Wire connection events if available (deferred in stdio mode)
+        if (this.connection) {
+            this.wireConnectionEvents(this.connection);
+        }
+    }
+
+    /**
+     * Set or replace the connection (used for stdio mode where connection
+     * is created asynchronously after the sidebar provider).
+     */
+    setConnection(conn: AnyConnection): void {
+        this.connection = conn;
+        this.wireConnectionEvents(conn);
+    }
+
+    /**
+     * Set the SecretStorage instance for persisting API keys.
+     * Called from extension.ts with context.secrets.
+     */
+    setSecrets(secrets: vscode.SecretStorage): void {
+        this.secrets = secrets;
+    }
+
+    private wireConnectionEvents(conn: AnyConnection): void {
         // Forward server messages to webview
-        this.connection.onMessage((msg) => {
+        conn.onMessage((msg: ServerMessage) => {
             this.handleServerMessage(msg);
         });
 
         // Forward connection status to webview
-        this.connection.onConnected(() => {
+        conn.onConnected(() => {
             this.postToWebview({ type: 'connectionStatus', status: 'connected' });
         });
 
-        this.connection.onDisconnected(() => {
+        conn.onDisconnected(() => {
             this.postToWebview({ type: 'connectionStatus', status: 'disconnected' });
         });
     }
@@ -302,8 +331,26 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
      * Server -> Extension -> WebView message routing.
      */
     private handleServerMessage(msg: ServerMessage): void {
-        // Forward to webview for rendering
-        this.postToWebview({ type: 'serverMessage', payload: msg });
+        // Augment config_loaded: mark has_api_key / has_search_key if SecretStorage has keys
+        if (msg.type === 'config_loaded' && this.secrets) {
+            Promise.all([
+                this.secrets.get('claraity.apiKey'),
+                this.secrets.get('claraity.tavilyKey'),
+            ]).then(([apiKey, tavilyKey]) => {
+                const augmented = { ...msg } as any;
+                if (!augmented.config) { augmented.config = {}; }
+                if (apiKey) { augmented.config.has_api_key = true; }
+                if (tavilyKey) {
+                    augmented.config.has_search_key = true;
+                    augmented.config.search_key = tavilyKey;
+                }
+                this.postToWebview({ type: 'serverMessage', payload: augmented });
+            });
+            // Don't forward yet — the async handler above will do it
+        } else {
+            // Forward to webview for rendering
+            this.postToWebview({ type: 'serverMessage', payload: msg });
+        }
 
         // Extract session info for status bar etc.
         if (msg.type === 'session_info') {
@@ -336,7 +383,7 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
 
         // Stop reconnecting on non-recoverable errors
         if (msg.type === 'error' && msg.recoverable === false) {
-            this.connection.disconnect();
+            this.connection?.disconnect();
         }
     }
 
@@ -354,7 +401,7 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                 break;
 
             case 'approvalResult':
-                this.connection.send({
+                this.connection?.send({
                     type: 'approval_result',
                     call_id: msg.callId,
                     approved: msg.approved,
@@ -366,12 +413,12 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                 break;
 
             case 'interrupt':
-                this.connection.send({ type: 'interrupt' });
+                this.connection?.send({ type: 'interrupt' });
                 break;
 
             case 'ready':
                 // WebView finished loading — send current connection state
-                if (this.connection.isConnected) {
+                if (this.connection?.isConnected) {
                     this.postToWebview({ type: 'connectionStatus', status: 'connected' });
                 }
                 break;
@@ -381,7 +428,7 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                 break;
 
             case 'pauseResult':
-                this.connection.send({
+                this.connection?.send({
                     type: 'pause_result',
                     continue_work: msg.continueWork,
                     feedback: msg.feedback ?? null,
@@ -393,7 +440,7 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                 break;
 
             case 'clarifyResult':
-                this.connection.send({
+                this.connection?.send({
                     type: 'clarify_result',
                     call_id: msg.callId,
                     submitted: msg.submitted,
@@ -404,7 +451,7 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                 break;
 
             case 'planApprovalResult':
-                this.connection.send({
+                this.connection?.send({
                     type: 'plan_approval_result',
                     plan_hash: msg.planHash,
                     approved: msg.approved,
@@ -414,19 +461,48 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                 break;
 
             case 'setMode':
-                this.connection.send({ type: 'set_mode', mode: msg.mode });
+                this.connection?.send({ type: 'set_mode', mode: msg.mode });
                 break;
 
             case 'getConfig':
-                this.connection.send({ type: 'get_config' });
+                this.connection?.send({ type: 'get_config' });
                 break;
 
-            case 'saveConfig':
-                this.connection.send({ type: 'save_config', config: msg.config } as any);
+            case 'saveConfig': {
+                const config = msg.config ?? {};
+
+                // Intercept API key: store in VS Code SecretStorage
+                // (industry standard — never forwarded to agent config file)
+                const apiKey = config.api_key;
+                if (apiKey && this.secrets) {
+                    this.secrets.store('claraity.apiKey', apiKey).then(() => {
+                        this.log?.appendLine('[ClarAIty] API key saved to SecretStorage');
+                        // Update StdioConnection so next spawn uses the new key
+                        if (this.connection && 'setApiKey' in this.connection) {
+                            (this.connection as StdioConnection).setApiKey(apiKey);
+                        }
+                    });
+                }
+
+                // Intercept search API key: store in SecretStorage, inject at next spawn
+                const searchKey = config.search_key;
+                if (searchKey && this.secrets) {
+                    this.secrets.store('claraity.tavilyKey', searchKey).then(() => {
+                        this.log?.appendLine('[ClarAIty] Tavily key saved to SecretStorage');
+                        if (this.connection && 'setTavilyKey' in this.connection) {
+                            (this.connection as StdioConnection).setTavilyKey(searchKey);
+                        }
+                    });
+                }
+
+                // Strip secrets before forwarding to agent (agent reads from env vars)
+                const { api_key: _stripped, search_key: _sStripped, ...configWithoutKey } = config;
+                this.connection?.send({ type: 'save_config', config: configWithoutKey } as any);
                 break;
+            }
 
             case 'listModels':
-                this.connection.send({
+                this.connection?.send({
                     type: 'list_models',
                     backend: msg.backend,
                     base_url: msg.base_url,
@@ -435,35 +511,39 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                 break;
 
             case 'setAutoApprove':
-                this.connection.send({ type: 'set_auto_approve', categories: msg.categories } as any);
+                this.connection?.send({ type: 'set_auto_approve', categories: msg.categories } as any);
                 break;
 
             case 'getAutoApprove':
-                this.connection.send({ type: 'get_auto_approve' } as any);
+                this.connection?.send({ type: 'get_auto_approve' } as any);
                 break;
 
             case 'newSession':
-                this.connection.send({ type: 'new_session' });
+                this.connection?.send({ type: 'new_session' });
                 break;
 
             case 'listSessions':
-                this.connection.send({ type: 'list_sessions' } as any);
+                this.connection?.send({ type: 'list_sessions' } as any);
                 break;
 
             case 'resumeSession':
-                this.connection.send({ type: 'resume_session', session_id: msg.sessionId } as any);
+                this.connection?.send({ type: 'resume_session', session_id: msg.sessionId } as any);
                 break;
 
             case 'undoTurn':
                 vscode.commands.executeCommand('claraity.undoTurn', msg.turnId);
                 break;
 
+            case 'pickFile':
+                this.pickFileFromDisk();
+                break;
+
             case 'getJiraProfiles':
-                this.connection.send({ type: 'get_jira_profiles' } as any);
+                this.connection?.send({ type: 'get_jira_profiles' } as any);
                 break;
 
             case 'saveJiraConfig':
-                this.connection.send({
+                this.connection?.send({
                     type: 'save_jira_config',
                     profile: msg.profile,
                     jira_url: msg.jira_url,
@@ -473,13 +553,34 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                 break;
 
             case 'connectJira':
-                this.connection.send({ type: 'connect_jira', profile: msg.profile } as any);
+                this.connection?.send({ type: 'connect_jira', profile: msg.profile } as any);
                 break;
 
             case 'disconnectJira':
-                this.connection.send({ type: 'disconnect_jira' } as any);
+                this.connection?.send({ type: 'disconnect_jira' } as any);
                 break;
         }
+    }
+
+    /**
+     * Open native file picker and send the selected file back to the webview
+     * as a FileAttachment (path + name).
+     */
+    private async pickFileFromDisk(): Promise<void> {
+        const result = await vscode.window.showOpenDialog({
+            canSelectMany: false,
+            canSelectFolders: false,
+            openLabel: 'Attach file',
+        });
+        if (!result || result.length === 0) return;
+
+        const uri = result[0];
+        const name = uri.path.split('/').pop() ?? uri.fsPath.split(/[\\/]/).pop() ?? 'file';
+        this.postToWebview({
+            type: 'fileSelected',
+            path: uri.fsPath,
+            name,
+        } as any);
     }
 
     /**
@@ -564,6 +665,25 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                     // Fallback: show original vs original-with-new-text-appended
                     // so the user still sees the new_text being proposed
                     modifiedContent = originalContent + '\n// [edit_file: old_text not found in current file]\n' + newText;
+                }
+            } else if (toolName === 'append_to_file') {
+                filePath = args.file_path || args.path || '';
+                const appendContent = args.content || '';
+                // Read existing file to show current content
+                if (filePath) {
+                    try {
+                        const uri = vscode.Uri.file(filePath);
+                        const bytes = await vscode.workspace.fs.readFile(uri);
+                        originalContent = Buffer.from(bytes).toString('utf-8');
+                    } catch {
+                        originalContent = '';
+                    }
+                }
+                // Modified = original + appended content
+                if (originalContent && !originalContent.endsWith('\n')) {
+                    modifiedContent = originalContent + '\n' + appendContent;
+                } else {
+                    modifiedContent = originalContent + appendContent;
                 }
             } else {
                 return; // Unsupported tool
@@ -662,7 +782,7 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             }))
             : undefined;
 
-        this.connection.send({
+        this.connection?.send({
             type: 'chat_message',
             content: finalContent,
             ...(imagePayload ? { images: imagePayload } : {}),
@@ -693,6 +813,15 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
     }
 
     private getHtmlForWebview(webview: vscode.Webview): string {
+        // Check claraity.webviewMode setting: "auto" | "react" | "inline"
+        const webviewMode = vscode.workspace
+            .getConfiguration('claraity')
+            .get<string>('webviewMode', 'auto');
+
+        if (webviewMode === 'inline') {
+            return this.getInlineHtml(webview);
+        }
+
         // Try to load built React app, fall back to inline HTML
         const webviewDistPath = vscode.Uri.joinPath(this.extensionUri, 'webview-ui', 'dist');
         const scriptFsPath = vscode.Uri.joinPath(webviewDistPath, 'webview.js').fsPath;
@@ -775,6 +904,7 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             height: 100vh;
             display: flex;
             flex-direction: column;
+            position: relative;
         }
 
         /* ── Status bar ── */
@@ -1610,14 +1740,54 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
         }
         .aa-row input[type="checkbox"] { margin: 0; cursor: pointer; }
 
+        /* ── Streaming status line ── */
+        @keyframes status-spin {
+            from { transform: rotate(0deg); }
+            to   { transform: rotate(360deg); }
+        }
+        #streaming-status {
+            display: none;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-top: 1px solid var(--vscode-panel-border);
+            font-size: 11px;
+            color: var(--vscode-descriptionForeground);
+        }
+        #streaming-status.visible { display: flex; }
+        .status-spinner {
+            display: inline-block;
+            animation: status-spin 1s linear infinite;
+            color: var(--vscode-progressBar-background);
+            font-size: 14px;
+            line-height: 1;
+        }
+        .status-text {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .status-elapsed {
+            white-space: nowrap;
+            font-variant-numeric: tabular-nums;
+            opacity: 0.7;
+        }
+
         /* ── Config panel ── */
         #config-panel {
             display: none;
-            border-bottom: 1px solid var(--vscode-panel-border);
-            max-height: 70vh;
-            overflow-y: auto;
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 100;
+            background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+            flex-direction: column;
+            overflow: hidden;
         }
-        #config-panel.visible { display: block; }
+        #config-panel.visible { display: flex; }
         #config-header {
             display: flex;
             justify-content: space-between;
@@ -1693,15 +1863,33 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             font-size: 11px;
         }
         .cfg-subagent-row input { flex: 1; }
-        #cfg-subagents-section { display: none; margin-top: 6px; }
+        #cfg-subagents-section { display: none; margin-top: 6px; position: relative; }
         #cfg-subagents-section.visible { display: block; }
-        #config-actions {
+        #cfg-subagent-dropdown {
+            position: absolute;
+            max-height: 120px;
+            overflow-y: auto;
+            border: 1px solid var(--vscode-panel-border);
+            background: var(--vscode-input-background);
+            z-index: 200;
+            display: none;
+            border-radius: 2px;
+        }
+        #cfg-subagent-dropdown.visible { display: block; }
+        .config-panel-body {
+            flex: 1;
+            overflow-y: auto;
+            min-height: 0;
+        }
+        .config-panel-footer {
             display: flex;
             gap: 6px;
-            padding: 6px 8px;
+            padding: 8px;
             border-top: 1px solid var(--vscode-panel-border);
+            background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+            flex-shrink: 0;
         }
-        #config-actions button {
+        .config-panel-footer button {
             padding: 4px 12px;
             border: none;
             border-radius: 2px;
@@ -1738,7 +1926,7 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             color: var(--vscode-descriptionForeground);
             margin-left: 6px;
         }
-        #cfg-key-indicator {
+        #cfg-key-indicator, #cfg-search-key-indicator {
             font-size: 10px;
             color: var(--vscode-descriptionForeground);
             margin-left: 4px;
@@ -2052,6 +2240,7 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             <button id="config-close">\u2715</button>
         </div>
         <div id="cfg-notification"></div>
+        <div class="config-panel-body">
         <div class="config-section">
             <label>Backend</label>
             <select id="cfg-backend">
@@ -2066,12 +2255,12 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             <label>API Key <span id="cfg-key-indicator"></span></label>
             <input type="password" id="cfg-api-key" placeholder="Enter new API key..." />
 
-            <label>Model</label>
-            <input type="text" id="cfg-model" placeholder="Model name" />
-            <div>
-                <button id="cfg-fetch-btn">Fetch Models</button>
+            <div style="display:flex;align-items:center;gap:6px;margin:6px 0 2px;">
+                <label style="margin:0">Model</label>
+                <button id="cfg-fetch-btn">Fetch</button>
                 <span id="cfg-fetch-status"></span>
             </div>
+            <input type="text" id="cfg-model" placeholder="Type to filter or enter model name" />
             <div id="cfg-model-list"></div>
 
             <div class="config-row">
@@ -2095,6 +2284,16 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                 </div>
             </div>
 
+            <div style="border-top:1px solid var(--vscode-panel-border);margin-top:8px;padding-top:6px;">
+                <label style="font-weight:600;font-size:11px;">Web Search</label>
+                <label>Search Provider</label>
+                <select id="cfg-search-provider">
+                    <option value="tavily">Tavily</option>
+                </select>
+                <label>Search API Key <span id="cfg-search-key-indicator"></span></label>
+                <input type="password" id="cfg-search-key" placeholder="tvly-..." />
+            </div>
+
             <button id="cfg-subagents-toggle">+ Subagent Models</button>
             <div id="cfg-subagents-section">
                 <div id="cfg-same-model-row">
@@ -2102,9 +2301,11 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                     <label for="cfg-same-model" style="margin:0;display:inline;">Use same model for all</label>
                 </div>
                 <div id="cfg-subagent-inputs"></div>
+                <div id="cfg-subagent-dropdown"></div>
             </div>
         </div>
-        <div id="config-actions">
+        </div><!-- .config-panel-body -->
+        <div class="config-panel-footer">
             <button id="cfg-save-btn" class="cfg-btn-primary">Save</button>
             <button id="cfg-cancel-btn" class="cfg-btn-secondary">Cancel</button>
         </div>
@@ -2178,6 +2379,11 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             <label class="aa-row"><input type="checkbox" id="aa-browser" /> Browser tools</label>
         </div>
     </div>
+    <div id="streaming-status">
+        <span class="status-spinner">&#x27F3;</span>
+        <span class="status-text">Streaming...</span>
+        <span class="status-elapsed"></span>
+    </div>
     <div id="input-container">
         <div id="mention-dropdown"></div>
         <div id="attachment-bar"></div>
@@ -2215,6 +2421,12 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
         let renderScheduled = false;      // Throttle flag for markdown re-render
         let userScrolledUp = false;       // Auto-scroll lock
         const toolCards = {};             // call_id -> DOM element
+
+        // ── Streaming status line state ──
+        let statusElapsedTimerId = null;
+        let statusStreamStartTime = 0;
+        let currentTodos = [];
+        let isThinking = false;
 
         // ── Cost tracking ──
         let sessionTotalTokens = 0;
@@ -2406,6 +2618,9 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             currentCodeElement = null;
             currentThinkingBlock = null;
             markdownBuffer = '';
+            hideStatusLine();
+            currentTodos = [];
+            isThinking = false;
             // Clear tool state caches
             for (const key of Object.keys(toolCards)) delete toolCards[key];
             for (const key of Object.keys(toolMeta)) delete toolMeta[key];
@@ -3065,8 +3280,10 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
         document.getElementById('todo-header').addEventListener('click', toggleTodoPanel);
 
         function updateTodos(todos) {
+            currentTodos = todos || [];
             if (!todos || todos.length === 0) {
                 todoPanel.style.display = 'none';
+                updateStatusForStreaming();
                 return;
             }
             todoPanel.style.display = 'block';
@@ -3099,6 +3316,60 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
 
                 todoList.appendChild(item);
             }
+            updateStatusForStreaming();
+        }
+
+        // ── Streaming status line helpers ──
+        const statusEl = document.getElementById('streaming-status');
+        const statusTextEl = statusEl.querySelector('.status-text');
+        const statusElapsedEl = statusEl.querySelector('.status-elapsed');
+
+        function showStatusLine(text) {
+            statusTextEl.textContent = text;
+            statusEl.classList.add('visible');
+        }
+
+        function hideStatusLine() {
+            statusEl.classList.remove('visible');
+            stopElapsedTimer();
+        }
+
+        function startElapsedTimer() {
+            statusStreamStartTime = Date.now();
+            statusElapsedEl.textContent = '0:00';
+            stopElapsedTimer();
+            statusElapsedTimerId = setInterval(() => {
+                const secs = Math.floor((Date.now() - statusStreamStartTime) / 1000);
+                const m = Math.floor(secs / 60);
+                const s = secs % 60;
+                statusElapsedEl.textContent = m + ':' + (s < 10 ? '0' : '') + s;
+            }, 1000);
+        }
+
+        function stopElapsedTimer() {
+            if (statusElapsedTimerId !== null) {
+                clearInterval(statusElapsedTimerId);
+                statusElapsedTimerId = null;
+            }
+        }
+
+        function getActiveFormText() {
+            for (const todo of currentTodos) {
+                if (todo.status === 'in_progress' && todo.activeForm) {
+                    return todo.activeForm;
+                }
+            }
+            return null;
+        }
+
+        function updateStatusForStreaming() {
+            if (!isStreaming) return;
+            if (isThinking) {
+                showStatusLine('Thinking...');
+            } else {
+                const activeForm = getActiveFormText();
+                showStatusLine(activeForm || 'Streaming...');
+            }
         }
 
         // ── Tool cards ──
@@ -3110,6 +3381,16 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             const meta = toolMeta[data.call_id];
             if (data.tool_name) meta.name = data.tool_name;
             if (data.arguments) meta.arguments = data.arguments;
+
+            // Update streaming status line for parent agent tools
+            if (!subagentId && isStreaming) {
+                const toolName = meta.name || data.tool_name || 'tool';
+                if (data.status === 'running') {
+                    showStatusLine(toolName);
+                } else if (data.status === 'success' || data.status === 'error') {
+                    updateStatusForStreaming();
+                }
+            }
 
             // Update subagent parent card status line
             if (subagentId) {
@@ -3206,8 +3487,8 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                 if (saInfo && saInfo.details) saInfo.details.open = true;
             } else if (data.status === 'awaiting_approval') {
                 // Main agent tool approval — render inline as before
-                // Auto-open diff for write_file/edit_file
-                if ((toolName === 'write_file' || toolName === 'edit_file')
+                // Auto-open diff for write_file/edit_file/append_to_file
+                if ((toolName === 'write_file' || toolName === 'edit_file' || toolName === 'append_to_file')
                     && meta.arguments) {
                     vscode.postMessage({
                         type: 'showDiff',
@@ -3782,8 +4063,8 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             widget.appendChild(actions);
             widget.appendChild(feedbackWrap);
 
-            // Trigger diff viewer for write_file/edit_file
-            if ((toolName === 'write_file' || toolName === 'edit_file') && meta.arguments) {
+            // Trigger diff viewer for write_file/edit_file/append_to_file
+            if ((toolName === 'write_file' || toolName === 'edit_file' || toolName === 'append_to_file') && meta.arguments) {
                 vscode.postMessage({
                     type: 'showDiff',
                     callId: data.call_id,
@@ -3804,6 +4085,10 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             if (msg.type === 'connectionStatus') {
                 connectionStatus.textContent = msg.status === 'connected' ? 'Connected' : 'Disconnected';
                 connectionStatus.className = msg.status === 'connected' ? 'connected' : 'disconnected';
+                if (msg.status !== 'connected') {
+                    hideStatusLine();
+                    isThinking = false;
+                }
             }
 
             else if (msg.type === 'sessionInfo') {
@@ -3827,8 +4112,10 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                     for (const key of Object.keys(subagentContainers)) { if (subagentContainers[key].timerId) clearInterval(subagentContainers[key].timerId); delete subagentContainers[key]; }
                     for (const key of Object.keys(subagentParents)) delete subagentParents[key];
                     for (const key of Object.keys(promotedApprovals)) delete promotedApprovals[key];
-                    // Clear todo panel
+                    // Clear todo panel and status line
                     updateTodos([]);
+                    hideStatusLine();
+                    isThinking = false;
                     // Reset context bar and session stats
                     contextBar.style.display = 'none';
                     sessionTotalTokens = 0;
@@ -3882,12 +4169,15 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                 switch (payload.type) {
                     case 'stream_start':
                         isStreaming = true;
+                        isThinking = false;
                         userScrolledUp = false;
                         sendBtn.disabled = false;
                         sendBtn.textContent = 'Stop';
                         sendBtn.style.background = 'var(--vscode-testing-iconFailed)';
                         sendBtn.onclick = () => vscode.postMessage({ type: 'interrupt' });
                         startAssistantMessage();
+                        showStatusLine('Streaming...');
+                        startElapsedTimer();
                         break;
 
                     case 'text_delta':
@@ -3907,6 +4197,8 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                         break;
 
                     case 'thinking_start':
+                        isThinking = true;
+                        showStatusLine('Thinking...');
                         startThinking();
                         break;
 
@@ -3915,6 +4207,8 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                         break;
 
                     case 'thinking_end':
+                        isThinking = false;
+                        updateStatusForStreaming();
                         endThinking(payload.token_count);
                         break;
 
@@ -3925,6 +4219,8 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                             showTurnStats(payload.total_tokens, payload.duration_ms);
                         }
                         isStreaming = false;
+                        isThinking = false;
+                        hideStatusLine();
                         sendBtn.disabled = false;
                         sendBtn.textContent = 'Send';
                         sendBtn.style.background = '';
@@ -4158,6 +4454,10 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
         const cfgSubagentsSection = document.getElementById('cfg-subagents-section');
         const cfgSameModel = document.getElementById('cfg-same-model');
         const cfgSubagentInputs = document.getElementById('cfg-subagent-inputs');
+        const cfgSubagentDropdown = document.getElementById('cfg-subagent-dropdown');
+        const cfgSearchProvider = document.getElementById('cfg-search-provider');
+        const cfgSearchKey = document.getElementById('cfg-search-key');
+        const cfgSearchKeyIndicator = document.getElementById('cfg-search-key-indicator');
         const cfgSaveBtn = document.getElementById('cfg-save-btn');
         const cfgCancelBtn = document.getElementById('cfg-cancel-btn');
 
@@ -4181,16 +4481,9 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
         configGear.addEventListener('click', toggleConfigPanel);
         configClose.addEventListener('click', () => configPanel.classList.remove('visible'));
 
-        // Backend change -> auto-suggest URL
-        cfgBackend.addEventListener('change', () => {
-            const val = cfgBackend.value;
-            if (val === 'ollama') cfgBaseUrl.value = 'http://localhost:11434';
-            else if (val === 'anthropic') cfgBaseUrl.value = '';
-            else cfgBaseUrl.value = cfgBaseUrl.value || 'http://localhost:8000/v1';
-        });
-
-        // Fetch models
-        cfgFetchBtn.addEventListener('click', () => {
+        // Auto-fetch models helper with debounce
+        let fetchDebounceTimer = null;
+        function fetchModels() {
             cfgFetchStatus.textContent = 'Fetching...';
             cfgModelList.innerHTML = '';
             cfgModelList.classList.remove('visible');
@@ -4200,7 +4493,32 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                 base_url: cfgBaseUrl.value,
                 api_key: cfgApiKey.value,
             });
+        }
+        function debouncedFetchModels() {
+            clearTimeout(fetchDebounceTimer);
+            fetchDebounceTimer = setTimeout(() => {
+                const backend = cfgBackend.value;
+                const baseUrl = cfgBaseUrl.value;
+                if (backend && (baseUrl || backend === 'anthropic')) {
+                    fetchModels();
+                }
+            }, 800);
+        }
+
+        // Backend change -> auto-suggest URL + auto-fetch models
+        cfgBackend.addEventListener('change', () => {
+            const val = cfgBackend.value;
+            if (val === 'ollama') cfgBaseUrl.value = 'http://localhost:11434';
+            else if (val === 'anthropic') cfgBaseUrl.value = '';
+            else cfgBaseUrl.value = cfgBaseUrl.value || 'http://localhost:8000/v1';
+            debouncedFetchModels();
         });
+
+        // Auto-fetch when base URL changes
+        cfgBaseUrl.addEventListener('input', debouncedFetchModels);
+
+        // Manual fetch button
+        cfgFetchBtn.addEventListener('click', fetchModels);
 
         // Subagent toggle
         cfgSubagentsToggle.addEventListener('click', () => {
@@ -4238,6 +4556,7 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                 context_window: cfgContextWindow.value,
                 thinking_budget: cfgThinkingBudget.value || null,
                 subagent_models: subagentModels,
+                search_key: cfgSearchKey.value,
             };
 
             vscode.postMessage({ type: 'saveConfig', config: configData });
@@ -4254,6 +4573,8 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             cfgBaseUrl.value = cfg.base_url || '';
             cfgApiKey.value = cfg.api_key || '';
             cfgKeyIndicator.textContent = cfg.has_api_key ? '(key stored)' : '(not set)';
+            cfgSearchKey.value = cfg.search_key || '';
+            cfgSearchKeyIndicator.textContent = cfg.has_search_key ? '(key stored)' : '(not set)';
             cfgModel.value = cfg.model || '';
             cfgTemperature.value = cfg.temperature != null ? cfg.temperature : 0.2;
             cfgMaxTokens.value = cfg.max_tokens != null ? cfg.max_tokens : 16384;
@@ -4275,6 +4596,16 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                 inp.id = 'cfg-sa-' + name;
                 inp.placeholder = '(inherit from main)';
                 inp.value = saModels[name] || '';
+                // Typeahead for subagent model inputs
+                inp.addEventListener('focus', () => {
+                    if (fetchedModels.length > 0) showSubagentDropdown(inp);
+                });
+                inp.addEventListener('input', () => {
+                    if (fetchedModels.length > 0) showSubagentDropdown(inp);
+                });
+                inp.addEventListener('blur', () => {
+                    setTimeout(() => cfgSubagentDropdown.classList.remove('visible'), 200);
+                });
                 row.appendChild(inp);
                 cfgSubagentInputs.appendChild(row);
             }
@@ -4285,37 +4616,114 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             cfgFetchStatus.textContent = '';
         }
 
+        let fetchedModels = [];
+
+        function renderModelOptions(models, targetList, targetInput) {
+            targetList.innerHTML = '';
+            if (models.length === 0) {
+                targetList.classList.remove('visible');
+                return;
+            }
+            targetList.classList.add('visible');
+            for (const m of models) {
+                const opt = document.createElement('div');
+                opt.className = 'model-option';
+                opt.textContent = m;
+                opt.addEventListener('mousedown', (e) => {
+                    e.preventDefault(); // Prevent blur before click
+                    targetInput.value = m;
+                    targetList.classList.remove('visible');
+                });
+                targetList.appendChild(opt);
+            }
+        }
+
         function populateModelList(data) {
             cfgModelList.innerHTML = '';
             if (data.error) {
                 cfgFetchStatus.textContent = 'Error: ' + data.error;
+                fetchedModels = [];
                 return;
             }
             const models = data.models || [];
+            fetchedModels = models;
             if (models.length === 0) {
                 cfgFetchStatus.textContent = 'No models found';
                 return;
             }
             cfgFetchStatus.textContent = models.length + ' model(s)';
-            cfgModelList.classList.add('visible');
-            for (const m of models) {
+            renderModelOptions(models, cfgModelList, cfgModel);
+        }
+
+        // Typeahead: filter on typing
+        cfgModel.addEventListener('input', () => {
+            if (fetchedModels.length === 0) return;
+            const query = cfgModel.value.toLowerCase().trim();
+            const filtered = query
+                ? fetchedModels.filter(m => m.toLowerCase().includes(query))
+                : fetchedModels;
+            renderModelOptions(filtered, cfgModelList, cfgModel);
+        });
+
+        // Show list on focus
+        cfgModel.addEventListener('focus', () => {
+            if (fetchedModels.length > 0) {
+                const query = cfgModel.value.toLowerCase().trim();
+                const filtered = query
+                    ? fetchedModels.filter(m => m.toLowerCase().includes(query))
+                    : fetchedModels;
+                renderModelOptions(filtered, cfgModelList, cfgModel);
+            }
+        });
+
+        // Hide list on blur (delay to allow mousedown click)
+        cfgModel.addEventListener('blur', () => {
+            setTimeout(() => cfgModelList.classList.remove('visible'), 200);
+        });
+
+        // Shared dropdown for subagent model typeahead
+        function showSubagentDropdown(inputEl) {
+            const query = inputEl.value.toLowerCase().trim();
+            const filtered = query
+                ? fetchedModels.filter(m => m.toLowerCase().includes(query))
+                : fetchedModels;
+
+            cfgSubagentDropdown.innerHTML = '';
+            if (filtered.length === 0) {
+                cfgSubagentDropdown.classList.remove('visible');
+                return;
+            }
+
+            // Position below the input within the subagents section
+            const sectionRect = cfgSubagentInputs.getBoundingClientRect();
+            const inputRect = inputEl.getBoundingClientRect();
+            cfgSubagentDropdown.style.top = (inputRect.bottom - sectionRect.top) + 'px';
+            cfgSubagentDropdown.style.left = (inputRect.left - sectionRect.left) + 'px';
+            cfgSubagentDropdown.style.width = inputRect.width + 'px';
+
+            const limit = filtered.slice(0, 20);
+            for (const m of limit) {
                 const opt = document.createElement('div');
                 opt.className = 'model-option';
                 opt.textContent = m;
-                opt.addEventListener('click', () => {
-                    cfgModel.value = m;
-                    // Highlight selected
-                    cfgModelList.querySelectorAll('.model-option').forEach(o => o.classList.remove('selected'));
-                    opt.classList.add('selected');
+                opt.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    inputEl.value = m;
+                    cfgSubagentDropdown.classList.remove('visible');
                 });
-                cfgModelList.appendChild(opt);
+                cfgSubagentDropdown.appendChild(opt);
             }
+            cfgSubagentDropdown.classList.add('visible');
         }
 
         function handleConfigSaved(data) {
             cfgNotification.textContent = data.message || '';
             cfgNotification.className = data.success ? 'success' : 'error';
             if (data.success) {
+                if (data.model) {
+                    modelName.textContent = data.model;
+                    currentModelName = data.model;
+                }
                 setTimeout(() => {
                     configPanel.classList.remove('visible');
                     cfgNotification.className = '';

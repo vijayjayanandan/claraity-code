@@ -62,6 +62,102 @@ from .cache_tracker import CacheTracker
 from .failure_handler import LLMFailureHandler
 
 
+class ThinkTagParser:
+    """Streaming parser that separates <think>...</think> tags from content.
+
+    Models like MiniMax and DeepSeek R1 embed reasoning inside <think> tags
+    within delta.content instead of using a dedicated reasoning_content field.
+    This parser handles tag boundaries that span multiple streaming chunks.
+
+    Usage:
+        parser = ThinkTagParser()
+        for chunk_text in stream:
+            for kind, text in parser.feed(chunk_text):
+                if kind == "thinking":
+                    emit_thinking(text)
+                else:
+                    emit_text(text)
+        # Flush remaining buffer at stream end
+        for kind, text in parser.flush():
+            ...
+    """
+
+    OPEN_TAG = "<think>"
+    CLOSE_TAG = "</think>"
+
+    def __init__(self) -> None:
+        self._in_thinking = False
+        self._buffer = ""
+
+    def feed(self, text: str) -> list[tuple[str, str]]:
+        """Feed a chunk and return list of (kind, text) pairs.
+
+        kind is "text" or "thinking".
+        """
+        results: list[tuple[str, str]] = []
+        self._buffer += text
+
+        while self._buffer:
+            if self._in_thinking:
+                close_idx = self._buffer.find(self.CLOSE_TAG)
+                if close_idx == -1:
+                    # Check for partial </think> at end of buffer
+                    partial = self._partial_suffix(self.CLOSE_TAG)
+                    if partial > 0:
+                        emit = self._buffer[: len(self._buffer) - partial]
+                        if emit:
+                            results.append(("thinking", emit))
+                        self._buffer = self._buffer[len(self._buffer) - partial :]
+                        break
+                    else:
+                        if self._buffer:
+                            results.append(("thinking", self._buffer))
+                        self._buffer = ""
+                else:
+                    if close_idx > 0:
+                        results.append(("thinking", self._buffer[:close_idx]))
+                    self._buffer = self._buffer[close_idx + len(self.CLOSE_TAG) :]
+                    self._in_thinking = False
+            else:
+                open_idx = self._buffer.find(self.OPEN_TAG)
+                if open_idx == -1:
+                    partial = self._partial_suffix(self.OPEN_TAG)
+                    if partial > 0:
+                        emit = self._buffer[: len(self._buffer) - partial]
+                        if emit:
+                            results.append(("text", emit))
+                        self._buffer = self._buffer[len(self._buffer) - partial :]
+                        break
+                    else:
+                        if self._buffer:
+                            results.append(("text", self._buffer))
+                        self._buffer = ""
+                else:
+                    if open_idx > 0:
+                        results.append(("text", self._buffer[:open_idx]))
+                    self._buffer = self._buffer[open_idx + len(self.OPEN_TAG) :]
+                    self._in_thinking = True
+
+        return results
+
+    def flush(self) -> list[tuple[str, str]]:
+        """Flush remaining buffer (call at stream end)."""
+        results: list[tuple[str, str]] = []
+        if self._buffer:
+            kind = "thinking" if self._in_thinking else "text"
+            results.append((kind, self._buffer))
+            self._buffer = ""
+        return results
+
+    def _partial_suffix(self, tag: str) -> int:
+        """Return length of a suffix of self._buffer that is a prefix of tag."""
+        max_check = min(len(tag) - 1, len(self._buffer))
+        for length in range(max_check, 0, -1):
+            if self._buffer.endswith(tag[:length]):
+                return length
+        return 0
+
+
 class OpenAIBackend(LLMBackend):
     """
     Generic OpenAI-compatible API backend.
@@ -655,6 +751,9 @@ class OpenAIBackend(LLMBackend):
             total_tokens = None
             cached_tokens = None
 
+            # Parser for <think>...</think> tags in delta.content
+            think_parser = ThinkTagParser()
+
             try:
                 for chunk in stream:
                     # Capture usage from any chunk that has it (comes after finish_reason)
@@ -674,36 +773,23 @@ class OpenAIBackend(LLMBackend):
                     finish_reason = chunk.choices[0].finish_reason
                     model_name = chunk.model
 
-                    # Yield text content chunks as they arrive
+                    # Yield text content chunks - strip <think> tags
+                    # (thinking suppressed in v1; StreamChunk has no thinking field)
                     if delta.content:
-                        yield (
-                            StreamChunk(
-                                content=delta.content,
-                                done=False,
-                                model=model_name,
-                                finish_reason=None,
-                            ),
-                            None,  # No tool calls yet during streaming
-                        )
+                        for kind, text in think_parser.feed(delta.content):
+                            if kind == "text":
+                                yield (
+                                    StreamChunk(
+                                        content=text,
+                                        done=False,
+                                        model=model_name,
+                                        finish_reason=None,
+                                    ),
+                                    None,  # No tool calls yet during streaming
+                                )
 
-                    # Yield reasoning content chunks (for Kimi K2.5 and other reasoning models)
-                    # Handle both direct Moonshot API (reasoning_content) and LiteLLM proxy (reasoning)
-                    reasoning_text = None
-                    if hasattr(delta, "reasoning_content") and delta.reasoning_content:
-                        reasoning_text = delta.reasoning_content
-                    elif hasattr(delta, "reasoning") and delta.reasoning:
-                        reasoning_text = delta.reasoning
-
-                    if reasoning_text:
-                        yield (
-                            StreamChunk(
-                                content=reasoning_text,
-                                done=False,
-                                model=model_name,
-                                finish_reason=None,
-                            ),
-                            None,
-                        )
+                    # Reasoning from dedicated fields suppressed in v1
+                    # (Kimi, MiniMax reasoning_split - no thinking field on StreamChunk)
 
                     # Accumulate tool call deltas
                     if delta.tool_calls:
@@ -905,6 +991,9 @@ class OpenAIBackend(LLMBackend):
             total_tokens = None
             cached_tokens = None
 
+            # Parser for <think>...</think> tags in delta.content
+            think_parser = ThinkTagParser()
+
             try:
                 async for chunk in stream:
                     # Capture usage from any chunk that has it (comes after finish_reason)
@@ -924,36 +1013,23 @@ class OpenAIBackend(LLMBackend):
                     finish_reason = chunk.choices[0].finish_reason
                     model_name = chunk.model
 
-                    # Yield text content chunks as they arrive
+                    # Yield text content chunks - strip <think> tags
+                    # (thinking suppressed in v1; StreamChunk has no thinking field)
                     if delta.content:
-                        yield (
-                            StreamChunk(
-                                content=delta.content,
-                                done=False,
-                                model=model_name,
-                                finish_reason=None,
-                            ),
-                            None,  # No tool calls yet during streaming
-                        )
+                        for kind, text in think_parser.feed(delta.content):
+                            if kind == "text":
+                                yield (
+                                    StreamChunk(
+                                        content=text,
+                                        done=False,
+                                        model=model_name,
+                                        finish_reason=None,
+                                    ),
+                                    None,  # No tool calls yet during streaming
+                                )
 
-                    # Yield reasoning content chunks (for Kimi K2.5 and other reasoning models)
-                    # Handle both direct Moonshot API (reasoning_content) and LiteLLM proxy (reasoning)
-                    reasoning_text = None
-                    if hasattr(delta, "reasoning_content") and delta.reasoning_content:
-                        reasoning_text = delta.reasoning_content
-                    elif hasattr(delta, "reasoning") and delta.reasoning:
-                        reasoning_text = delta.reasoning
-
-                    if reasoning_text:
-                        yield (
-                            StreamChunk(
-                                content=reasoning_text,
-                                done=False,
-                                model=model_name,
-                                finish_reason=None,
-                            ),
-                            None,
-                        )
+                    # Reasoning from dedicated fields suppressed in v1
+                    # (Kimi, MiniMax reasoning_split - no thinking field on StreamChunk)
 
                     # Accumulate tool call deltas
                     if delta.tool_calls:
@@ -1167,8 +1243,17 @@ class OpenAIBackend(LLMBackend):
             params.pop("top_p", None)
 
         stream = None
+        _t0 = time.monotonic()
+        _chunk_count = 0
         try:
+            logger.debug("llm_stream_phase", phase="http_request_start", model=params.get("model"))
             stream = self.client.chat.completions.create(**params)
+            logger.debug(
+                "llm_stream_phase",
+                phase="http_request_done",
+                model=params.get("model"),
+                elapsed_ms=round((time.monotonic() - _t0) * 1000),
+            )
 
             # Track tool call accumulation by index
             tool_call_ids: dict[int, str] = {}
@@ -1176,8 +1261,21 @@ class OpenAIBackend(LLMBackend):
             finish_reason = None
             usage_dict = None
 
+            # Parser for <think>...</think> tags in delta.content
+            # (MiniMax, DeepSeek R1, and similar models embed reasoning this way)
+            think_parser = ThinkTagParser()
+
             try:
                 for chunk in stream:
+                    _chunk_count += 1
+                    if _chunk_count == 1 or _chunk_count % 10 == 0:
+                        logger.debug(
+                            "llm_stream_chunk",
+                            chunk_num=_chunk_count,
+                            has_choices=bool(chunk.choices),
+                            elapsed_ms=round((time.monotonic() - _t0) * 1000),
+                        )
+
                     # Capture usage
                     if hasattr(chunk, "usage") and chunk.usage:
                         usage_dict = {
@@ -1186,9 +1284,6 @@ class OpenAIBackend(LLMBackend):
                             "cached_tokens": self._extract_cached_tokens(chunk.usage),
                         }
                         self.cache_tracker.record(chunk.usage)
-                        logger.debug(
-                            f"[CACHE] prompt={chunk.usage.prompt_tokens} cached={usage_dict['cached_tokens'] or 0}"
-                        )
 
                     # Skip chunks with no choices
                     if not chunk.choices or len(chunk.choices) == 0:
@@ -1197,17 +1292,32 @@ class OpenAIBackend(LLMBackend):
                     delta = chunk.choices[0].delta
                     finish_reason = chunk.choices[0].finish_reason
 
-                    # Emit text delta
+                    # Emit text delta - parse <think> tags to separate reasoning
                     if delta.content:
-                        yield ProviderDelta(
-                            stream_id=sid,
-                            text_delta=delta.content,
-                        )
+                        for kind, text in think_parser.feed(delta.content):
+                            if kind == "thinking":
+                                yield ProviderDelta(
+                                    stream_id=sid,
+                                    thinking_delta=text,
+                                )
+                            else:
+                                yield ProviderDelta(
+                                    stream_id=sid,
+                                    text_delta=text,
+                                )
 
-                    # Emit reasoning content as thinking_delta (for Kimi K2.5 and other reasoning models)
+                    # Emit reasoning from dedicated fields (Kimi K2.5, MiniMax with reasoning_split, etc.)
                     # Pydantic v2 stores unknown fields in model_extra, NOT accessible via hasattr/getattr
                     _extra = getattr(delta, "model_extra", None) or {}
                     reasoning_text = _extra.get("reasoning") or _extra.get("reasoning_content")
+
+                    # MiniMax reasoning_details: list of {"text": "..."} dicts
+                    if not reasoning_text:
+                        details = _extra.get("reasoning_details")
+                        if details and isinstance(details, list):
+                            reasoning_text = "".join(
+                                d.get("text", "") for d in details if isinstance(d, dict)
+                            )
 
                     if reasoning_text:
                         yield ProviderDelta(
@@ -1246,7 +1356,21 @@ class OpenAIBackend(LLMBackend):
                 if stream is not None and hasattr(stream, "close"):
                     stream.close()
 
+            # Flush any remaining buffered content from think tag parser
+            for kind, text in think_parser.flush():
+                if kind == "thinking":
+                    yield ProviderDelta(stream_id=sid, thinking_delta=text)
+                else:
+                    yield ProviderDelta(stream_id=sid, text_delta=text)
+
             # Emit final delta with finish_reason and usage
+            logger.debug(
+                "llm_stream_phase",
+                phase="stream_complete",
+                total_chunks=_chunk_count,
+                finish_reason=finish_reason,
+                elapsed_ms=round((time.monotonic() - _t0) * 1000),
+            )
             yield ProviderDelta(
                 stream_id=sid,
                 finish_reason=finish_reason or "stop",
@@ -1362,14 +1486,18 @@ class OpenAIBackend(LLMBackend):
             params["temperature"] = 1
             params.pop("top_p", None)
 
-        logger.debug(
-            f"LLM call: model={params.get('model')} messages={len(params.get('messages', []))} "
-            f"tools={len(params.get('tools', []))} stream_id={sid}"
-        )
-
         stream = None
+        _t0 = time.monotonic()
+        _chunk_count = 0
         try:
+            logger.debug("llm_stream_phase", phase="http_request_start", model=params.get("model"))
             stream = await self.async_client.chat.completions.create(**params)
+            logger.debug(
+                "llm_stream_phase",
+                phase="http_request_done",
+                model=params.get("model"),
+                elapsed_ms=round((time.monotonic() - _t0) * 1000),
+            )
 
             # Track tool call accumulation by index
             tool_call_ids: dict[int, str] = {}
@@ -1377,8 +1505,21 @@ class OpenAIBackend(LLMBackend):
             finish_reason = None
             usage_dict = None
 
+            # Parser for <think>...</think> tags in delta.content
+            # (MiniMax, DeepSeek R1, and similar models embed reasoning this way)
+            think_parser = ThinkTagParser()
+
             try:
                 async for chunk in stream:
+                    _chunk_count += 1
+                    if _chunk_count == 1 or _chunk_count % 10 == 0:
+                        logger.debug(
+                            "llm_stream_chunk",
+                            chunk_num=_chunk_count,
+                            has_choices=bool(chunk.choices),
+                            elapsed_ms=round((time.monotonic() - _t0) * 1000),
+                        )
+
                     # Capture usage
                     if hasattr(chunk, "usage") and chunk.usage:
                         usage_dict = {
@@ -1387,9 +1528,6 @@ class OpenAIBackend(LLMBackend):
                             "cached_tokens": self._extract_cached_tokens(chunk.usage),
                         }
                         self.cache_tracker.record(chunk.usage)
-                        logger.debug(
-                            f"[CACHE] prompt={chunk.usage.prompt_tokens} cached={usage_dict['cached_tokens'] or 0}"
-                        )
 
                     # Skip chunks with no choices
                     if not chunk.choices or len(chunk.choices) == 0:
@@ -1398,17 +1536,32 @@ class OpenAIBackend(LLMBackend):
                     delta = chunk.choices[0].delta
                     finish_reason = chunk.choices[0].finish_reason
 
-                    # Emit text delta
+                    # Emit text delta - parse <think> tags to separate reasoning
                     if delta.content:
-                        yield ProviderDelta(
-                            stream_id=sid,
-                            text_delta=delta.content,
-                        )
+                        for kind, text in think_parser.feed(delta.content):
+                            if kind == "thinking":
+                                yield ProviderDelta(
+                                    stream_id=sid,
+                                    thinking_delta=text,
+                                )
+                            else:
+                                yield ProviderDelta(
+                                    stream_id=sid,
+                                    text_delta=text,
+                                )
 
-                    # Emit reasoning content as thinking_delta (for Kimi K2.5 and other reasoning models)
+                    # Emit reasoning from dedicated fields (Kimi K2.5, MiniMax with reasoning_split, etc.)
                     # Pydantic v2 stores unknown fields in model_extra, NOT accessible via hasattr/getattr
                     _extra = getattr(delta, "model_extra", None) or {}
                     reasoning_text = _extra.get("reasoning") or _extra.get("reasoning_content")
+
+                    # MiniMax reasoning_details: list of {"text": "..."} dicts
+                    if not reasoning_text:
+                        details = _extra.get("reasoning_details")
+                        if details and isinstance(details, list):
+                            reasoning_text = "".join(
+                                d.get("text", "") for d in details if isinstance(d, dict)
+                            )
 
                     if reasoning_text:
                         yield ProviderDelta(
@@ -1447,8 +1600,21 @@ class OpenAIBackend(LLMBackend):
                 if stream is not None and hasattr(stream, "close"):
                     await stream.close()
 
+            # Flush any remaining buffered content from think tag parser
+            for kind, text in think_parser.flush():
+                if kind == "thinking":
+                    yield ProviderDelta(stream_id=sid, thinking_delta=text)
+                else:
+                    yield ProviderDelta(stream_id=sid, text_delta=text)
+
             # Emit final delta with finish_reason and usage
-            logger.debug(f"Stream end: finish={finish_reason!r} usage={usage_dict} stream_id={sid}")
+            logger.debug(
+                "llm_stream_phase",
+                phase="stream_complete",
+                total_chunks=_chunk_count,
+                finish_reason=finish_reason,
+                elapsed_ms=round((time.monotonic() - _t0) * 1000),
+            )
             yield ProviderDelta(
                 stream_id=sid,
                 finish_reason=finish_reason or "stop",
@@ -1458,7 +1624,6 @@ class OpenAIBackend(LLMBackend):
         except Exception as e:
             error_type = type(e).__name__
             error_msg = str(e).strip() or repr(e)
-            logger.error(f"Stream error: {error_type}: {error_msg[:500]} stream_id={sid}")
             logger.exception(
                 "openai_async_provider_delta_error",
                 error_type=error_type,

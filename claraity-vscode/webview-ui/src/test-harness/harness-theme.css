@@ -1,0 +1,88 @@
+/**
+ * VS Code dark theme fallbacks for the test harness.
+ *
+ * Defines all --vscode-* CSS custom properties referenced in index.css
+ * with values matching VS Code's default "Dark+" theme, so components
+ * render correctly outside VS Code.
+ */
+:root {
+  /* ── Backgrounds ── */
+  --vscode-sideBar-background: #252526;
+  --vscode-editor-background: #1e1e1e;
+  --vscode-textCodeBlock-background: #2d2d2d;
+  --vscode-editor-inactiveSelectionBackground: #3a3d41;
+
+  /* ── Foregrounds ── */
+  --vscode-foreground: #cccccc;
+  --vscode-descriptionForeground: #9e9e9e;
+
+  /* ── Borders ── */
+  --vscode-focusBorder: #007fd4;
+  --vscode-panel-border: #3c3c3c;
+
+  /* ── Inputs ── */
+  --vscode-input-background: #3c3c3c;
+  --vscode-input-foreground: #cccccc;
+  --vscode-input-border: #3c3c3c;
+  --vscode-input-placeholderForeground: #6e6e6e;
+
+  /* ── Buttons ── */
+  --vscode-button-background: #0e639c;
+  --vscode-button-foreground: #ffffff;
+  --vscode-button-secondaryBackground: #3a3d41;
+  --vscode-button-secondaryForeground: #cccccc;
+
+  /* ── Links ── */
+  --vscode-textLink-foreground: #3794ff;
+
+  /* ── Badges ── */
+  --vscode-badge-background: #4d4d4d;
+  --vscode-badge-foreground: #cccccc;
+
+  /* ── Lists ── */
+  --vscode-list-hoverBackground: #2a2d2e;
+
+  /* ── Dropdowns ── */
+  --vscode-dropdown-background: #3c3c3c;
+  --vscode-dropdown-foreground: #cccccc;
+
+  /* ── Suggest widget ── */
+  --vscode-editorSuggestWidget-background: #252526;
+  --vscode-editorSuggestWidget-selectedBackground: #04395e;
+  --vscode-editorSuggestWidget-border: #454545;
+
+  /* ── Progress ── */
+  --vscode-progressBar-background: #0e70c0;
+
+  /* ── Scrollbar ── */
+  --vscode-scrollbarSlider-background: rgba(121, 121, 121, 0.4);
+  --vscode-scrollbarSlider-hoverBackground: rgba(100, 100, 100, 0.7);
+
+  /* ── Toolbar ── */
+  --vscode-toolbar-hoverBackground: #5a5d5e50;
+
+  /* ── Testing ── */
+  --vscode-testing-iconPassed: #73c991;
+  --vscode-testing-iconFailed: #f14c4c;
+
+  /* ── Warning ── */
+  --vscode-editorWarning-foreground: #cca700;
+
+  /* ── Typography ── */
+  --vscode-font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC",
+    "Segoe UI", system-ui, Ubuntu, "Droid Sans", sans-serif;
+  --vscode-editor-font-family: "Cascadia Code", "Fira Code", Menlo, Monaco,
+    "Courier New", monospace;
+  --vscode-font-size: 13px;
+  --vscode-editor-font-size: 13px;
+}
+
+/* Harness body defaults */
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--vscode-sideBar-background);
+  color: var(--vscode-foreground);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+}

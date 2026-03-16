@@ -1,0 +1,32 @@
+/**
+ * Top header bar with ClarAIty title and toolbar icons.
+ */
+
+interface StatusBarProps {
+  onNewChat: () => void;
+  onShowHistory: () => void;
+  onShowConfig: () => void;
+  onShowJira: () => void;
+}
+
+export function StatusBar({ onNewChat, onShowHistory, onShowConfig, onShowJira }: StatusBarProps) {
+  return (
+    <div className="status-bar">
+      <span className="title">ClarAIty</span>
+      <div className="toolbar-icons">
+        <button className="toolbar-icon" onClick={onNewChat} title="New Chat">
+          <i className="codicon codicon-add" />
+        </button>
+        <button className="toolbar-icon" onClick={onShowHistory} title="Session History">
+          <i className="codicon codicon-history" />
+        </button>
+        <button className="toolbar-icon" onClick={onShowJira} title="Jira Integration">
+          <i className="codicon codicon-plug" />
+        </button>
+        <button className="toolbar-icon" onClick={onShowConfig} title="LLM Configuration">
+          <i className="codicon codicon-gear" />
+        </button>
+      </div>
+    </div>
+  );
+}

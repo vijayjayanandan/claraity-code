@@ -1,4 +1,4 @@
-"""Lightweight subagent bridge for WebSocket server.
+"""Lightweight subagent bridge for server transports (WebSocket + stdio).
 
 Duck-typed to match what delegation.py expects from ``self._registry``
 (register / push_notification / unregister). Instead of mounting TUI
@@ -20,22 +20,24 @@ from src.observability import get_logger
 from src.server.serializers import serialize_store_notification
 
 if TYPE_CHECKING:
-    from src.server.ws_protocol import WebSocketProtocol
     from src.session.store.memory_store import StoreNotification
 
 logger = get_logger("server.subagent_bridge")
 
 
 class ServerSubagentBridge:
-    """Forwards subagent lifecycle events over WebSocket.
+    """Forwards subagent lifecycle events over a server protocol.
 
     The delegation tool calls ``register``, ``push_notification``, and
     ``unregister`` -- exactly the same methods it calls on the TUI's
     ``SubagentRegistry``. This class translates those calls into JSON
     messages the VS Code client already understands.
+
+    Works with any protocol that exposes an async ``_send_json(dict)``
+    method (WebSocketProtocol, StdioProtocol, etc.).
     """
 
-    def __init__(self, protocol: WebSocketProtocol) -> None:
+    def __init__(self, protocol: Any) -> None:
         self._protocol = protocol
         self._active: dict[str, dict[str, Any]] = {}
 

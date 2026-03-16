@@ -27,14 +27,66 @@ def main():
     parser.add_argument(
         "--config", default=None, help="Config file path (default: .clarity/config.yaml)"
     )
+    parser.add_argument(
+        "--stdio", action="store_true", help="Use stdio transport (stdin/stdout JSON lines)"
+    )
+    parser.add_argument(
+        "--data-port",
+        type=int,
+        default=0,
+        help="TCP port for data channel (used with --stdio to bypass pipe issues on Windows)",
+    )
+    parser.add_argument(
+        "--subagent",
+        action="store_true",
+        help="Run as subagent subprocess (reads task JSON from stdin, emits events on stdout)",
+    )
     args = parser.parse_args()
+
+    # Subagent mode: delegate to src.subagents.runner.main() immediately.
+    # This is used when the bundled binary spawns subagent subprocesses —
+    # sys.executable is the .exe so we can't use `python -m src.subagents.runner`.
+    if args.subagent:
+        from src.subagents.runner import main as runner_main
+
+        runner_main()
+        return
 
     working_directory = args.workdir or os.getcwd()
 
-    # Load LLM config from config.yaml (same as CLI)
-    from src.llm.config_loader import SYSTEM_CONFIG_PATH, load_llm_config
+    # Resolve config path: explicit flag > project config > system config
+    from src.llm.config_loader import SYSTEM_CONFIG_PATH
 
-    config_path = args.config or SYSTEM_CONFIG_PATH
+    if args.config:
+        config_path = args.config
+    else:
+        project_config = os.path.join(working_directory, ".clarity", "config.yaml")
+        config_path = project_config if os.path.isfile(project_config) else SYSTEM_CONFIG_PATH
+
+    # stdio mode: stdin for commands, TCP for events (for VS Code extension)
+    if args.stdio:
+        from src.server.stdio_server import run_stdio_server
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(
+                run_stdio_server(
+                    working_directory=working_directory,
+                    config_path=config_path,
+                    permission_mode="auto",
+                    data_port=args.data_port,
+                )
+            )
+        except KeyboardInterrupt:
+            pass
+        finally:
+            loop.close()
+        return
+
+    # WebSocket mode: HTTP+WS server (default)
+    from src.llm.config_loader import load_llm_config
+
     print(f"Loading config from: {config_path}")
     llm_config = load_llm_config(config_path)
 
@@ -91,4 +143,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        import traceback
+
+        sys.stderr.write(f"\n[FATAL] {e}\n")
+        traceback.print_exc(file=sys.stderr)
+        sys.stderr.flush()
+        sys.exit(1)

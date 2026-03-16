@@ -402,7 +402,7 @@ class AgentServer:
                         )
 
                 # Stream the response
-                logger.info(f"[SERVER] Processing chat: {chat_content[:80]}...")
+                logger.info("ws_chat_received", content_preview=chat_content[:80])
                 try:
                     async for event in self._agent.stream_response(
                         user_input=chat_content,
@@ -411,9 +411,9 @@ class AgentServer:
                     ):
                         await protocol.send_event(event)
                 except asyncio.CancelledError:
-                    logger.info("[SERVER] Stream cancelled")
+                    logger.info("ws_stream_cancelled")
                 except Exception as e:
-                    logger.error(f"[SERVER] Stream error: {e}")
+                    logger.error("ws_stream_error", error=str(e))
                     await protocol._send_json(
                         {
                             "type": "error",
@@ -480,7 +480,7 @@ class AgentServer:
         """
         from pathlib import Path
 
-        from src.ui.session_picker import scan_sessions
+        from src.session.scanner import scan_sessions
 
         sessions_dir = Path(self._working_directory) / ".clarity" / "sessions"
         try:

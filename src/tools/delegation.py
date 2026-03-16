@@ -218,10 +218,18 @@ Use this tool proactively when appropriate!"""
         # Launch subprocess
         input_json = subprocess_input.to_json()
 
+        # Build subprocess command. In a PyInstaller bundle sys.executable
+        # is the .exe itself, so we use `--subagent` flag handled by __main__.py.
+        # In normal Python we use the standard `-m src.subagents.runner`.
+        if getattr(sys, "_MEIPASS", None):
+            # Bundled binary
+            cmd = [sys.executable, "--subagent"]
+        else:
+            # Normal Python
+            cmd = [sys.executable, "-m", "src.subagents.runner"]
+
         process = await asyncio.create_subprocess_exec(
-            sys.executable,
-            "-m",
-            "src.subagents.runner",
+            *cmd,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

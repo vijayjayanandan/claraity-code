@@ -2,7 +2,7 @@
   "name": "claraity-vscode",
   "displayName": "ClarAIty",
   "description": "AI Coding Agent - VS Code Integration",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "publisher": "VijayJayanandan",
   "license": "MIT",
   "author": {
@@ -101,6 +101,10 @@
       {
         "command": "claraity.addToChat",
         "title": "ClarAIty: Add to Chat"
+      },
+      {
+        "command": "claraity.setApiKey",
+        "title": "ClarAIty: Set API Key"
       }
     ],
     "submenus": [
@@ -199,6 +203,25 @@
           ],
           "default": "auto",
           "description": "Server launch mode. 'auto' detects source vs installed, 'always' forces source mode, 'never' skips source detection"
+        },
+        "claraity.connectionMode": {
+          "type": "string",
+          "enum": [
+            "websocket",
+            "stdio"
+          ],
+          "default": "websocket",
+          "description": "Connection transport: 'websocket' uses HTTP+WS server (default), 'stdio' uses stdin/stdout pipes (experimental)"
+        },
+        "claraity.webviewMode": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "react",
+            "inline"
+          ],
+          "default": "auto",
+          "description": "Webview UI mode: 'auto' uses React if built, falls back to inline HTML; 'react' forces React (fails if not built); 'inline' forces inline HTML"
         }
       }
     }

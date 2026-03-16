@@ -156,7 +156,7 @@ class TestSaveConfigFromRequest:
 
 class TestListModelsFromRequest:
 
-    @patch("src.ui.llm_config_screen.ConfigLLMScreen._list_models")
+    @patch("src.server.config_handler._list_models")
     def test_success(self, mock_list):
         mock_list.return_value = ["model-a", "model-b"]
         data = {"backend": "openai", "base_url": "http://localhost:8000/v1", "api_key": "sk-key"}
@@ -166,7 +166,7 @@ class TestListModelsFromRequest:
         assert result["models"] == ["model-a", "model-b"]
         assert result["error"] is None
 
-    @patch("src.ui.llm_config_screen.ConfigLLMScreen._list_models")
+    @patch("src.server.config_handler._list_models")
     def test_error(self, mock_list):
         mock_list.side_effect = ConnectionError("timeout")
         data = {"backend": "openai", "base_url": "", "api_key": ""}

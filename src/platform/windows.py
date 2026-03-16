@@ -42,7 +42,7 @@ def get_shell_type() -> str:
     if is_windows():
         # Check if PowerShell is available
         try:
-            subprocess.run(["powershell", "-Command", "echo test"], capture_output=True, timeout=1)
+            subprocess.run(["powershell", "-Command", "echo test"], stdin=subprocess.DEVNULL, capture_output=True, timeout=1)
             return "powershell"
         except (FileNotFoundError, subprocess.TimeoutExpired):
             return "cmd"
@@ -349,6 +349,7 @@ def run_command(
             command,
             cwd=cwd,
             env=env,
+            stdin=subprocess.DEVNULL,
             capture_output=capture_output,
             timeout=timeout,
             shell=shell,

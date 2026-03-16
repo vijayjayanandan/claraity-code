@@ -352,6 +352,7 @@ export type WebViewMessage =
     | { type: 'listSessions' }
     | { type: 'resumeSession'; sessionId: string }
     | { type: 'undoTurn'; turnId: string }
+    | { type: 'pickFile' }
     | { type: 'getJiraProfiles' }
     | { type: 'saveJiraConfig'; profile: string; jira_url: string; username: string; api_token: string }
     | { type: 'connectJira'; profile: string }

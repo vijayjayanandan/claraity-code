@@ -880,6 +880,7 @@ def _get_environment_info() -> str:
         subprocess.run(
             ["git", "rev-parse", "--is-inside-work-tree"],
             cwd=cwd,
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             timeout=5,
             check=True,

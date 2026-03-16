@@ -14,9 +14,11 @@ import { ClarAItyFileDecorationProvider } from './file-decoration-provider';
 import { ClarAItyCodeLensProvider } from './code-lens-provider';
 import { UndoManager } from './undo-manager';
 import { detectProjectContext, formatProjectContext } from './workspace-detector';
+import { StdioConnection } from './stdio-connection';
 import { ServerMessage } from './types';
 
-let connection: AgentConnection | undefined;
+// Connection can be either WebSocket or stdio-based
+let connection: AgentConnection | StdioConnection | undefined;
 let serverManager: ServerManager | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
@@ -31,12 +33,16 @@ export function activate(context: vscode.ExtensionContext) {
     const autoConnect = config.get<boolean>('autoConnect', true);
     const serverAutoStart = config.get<boolean>('serverAutoStart', true);
     const pythonPath = config.get<string>('pythonPath', 'python');
+    const connectionMode = config.get<string>('connectionMode', 'websocket');
 
     // Extract port from serverUrl for the server manager
     const port = extractPort(serverUrl);
 
-    // Create WebSocket connection
-    connection = new AgentConnection(serverUrl, log);
+    // In WebSocket mode, create connection eagerly.
+    // In stdio mode, connection is created later after resolving the launch config.
+    if (connectionMode !== 'stdio') {
+        connection = new AgentConnection(serverUrl, log);
+    }
 
     // Create file decoration provider for marking agent-modified files
     const fileDecorations = new ClarAItyFileDecorationProvider();
@@ -72,84 +78,13 @@ export function activate(context: vscode.ExtensionContext) {
         return agentTerminal;
     }
 
-    // Track agent-modified files, pending changes, terminal commands, and undo checkpoints
-    connection.onMessage((msg: ServerMessage) => {
-        // Begin undo checkpoint on each agent turn
-        if (msg.type === 'stream_start') {
-            undoManager.beginCheckpoint();
-        }
-
-        if (msg.type === 'store' && msg.event === 'tool_state_updated') {
-            const { call_id, tool_name, status, arguments: args } = msg.data;
-
-            // File decorations and CodeLens
-            if (tool_name === 'write_file' || tool_name === 'edit_file') {
-                if (status === 'awaiting_approval' && args) {
-                    const filePath = args.file_path || args.path;
-                    if (filePath) {
-                        codeLens.addPendingChange(call_id, tool_name, filePath, args);
-                        // Snapshot BEFORE any modification
-                        undoManager.snapshotFile(filePath);
-                    }
-                } else if (status === 'running' && args) {
-                    // Auto-approve path — snapshot on running if not already done
-                    const filePath = args.file_path || args.path;
-                    if (filePath) {
-                        undoManager.snapshotFile(filePath);
-                    }
-                } else if (status === 'success' && args) {
-                    const filePath = args.file_path || args.path;
-                    if (filePath) {
-                        fileDecorations.markModified(filePath);
-                    }
-                    codeLens.removePendingChange(call_id);
-                } else if (status === 'rejected' || status === 'error' || status === 'cancelled') {
-                    codeLens.removePendingChange(call_id);
-                }
-            }
-
-            // Terminal: echo run_command commands
-            if (tool_name === 'run_command' && status === 'running' && args) {
-                const command = args.command;
-                if (command && !shownCommands.has(call_id)) {
-                    shownCommands.add(call_id);
-                    const terminal = getAgentTerminal();
-                    // Echo the command as a comment (don't execute — runs server-side).
-                    // Sanitize newlines to prevent shell injection.
-                    const sanitized = String(command).replace(/[\r\n]+/g, ' ');
-                    terminal.sendText(`# [ClarAIty] ${sanitized}`, true);
-                }
-            }
-        }
-
-        // Commit undo checkpoint when turn ends
-        if (msg.type === 'stream_end') {
-            const checkpoint = undoManager.commitCheckpoint();
-            if (checkpoint) {
-                const filePaths = Array.from(checkpoint.files.values()).map(f => f.path);
-                sidebarProvider.postToWebview({
-                    type: 'undoAvailable',
-                    turnId: checkpoint.turnId,
-                    files: filePaths,
-                });
-            }
-        }
-
-        // Clear state on new session
-        if (msg.type === 'session_info') {
-            fileDecorations.clear();
-            codeLens.clear();
-            shownCommands.clear();
-            undoManager.clear();
-        }
-    });
-
-    // Create sidebar provider
+    // Create sidebar provider (connection may be null in stdio mode, set later)
     const sidebarProvider = new ClarAItySidebarProvider(
         context.extensionUri,
-        connection,
+        connection ?? null,
         log,
     );
+    sidebarProvider.setSecrets(context.secrets);
 
     // Register the sidebar webview provider
     context.subscriptions.push(
@@ -158,6 +93,98 @@ export function activate(context: vscode.ExtensionContext) {
             sidebarProvider,
         ),
     );
+
+    /**
+     * Wire a connection's events to the extension handlers (file decorations,
+     * undo, terminal echo, sidebar, status bar). Called once when connection
+     * is available — immediately for WebSocket, deferred for stdio.
+     */
+    function wireConnection(
+        conn: AgentConnection | StdioConnection,
+        statusBar: vscode.StatusBarItem,
+    ): void {
+        // Track agent-modified files, pending changes, terminal commands, and undo checkpoints
+        conn.onMessage((msg: ServerMessage) => {
+            // Begin undo checkpoint on each agent turn
+            if (msg.type === 'stream_start') {
+                undoManager.beginCheckpoint();
+            }
+
+            if (msg.type === 'store' && msg.event === 'tool_state_updated') {
+                const { call_id, tool_name, status, arguments: args } = msg.data;
+
+                // File decorations and CodeLens
+                if (tool_name === 'write_file' || tool_name === 'edit_file') {
+                    if (status === 'awaiting_approval' && args) {
+                        const filePath = args.file_path || args.path;
+                        if (filePath) {
+                            codeLens.addPendingChange(call_id, tool_name, filePath, args);
+                            // Snapshot BEFORE any modification
+                            undoManager.snapshotFile(filePath);
+                        }
+                    } else if (status === 'running' && args) {
+                        // Auto-approve path — snapshot on running if not already done
+                        const filePath = args.file_path || args.path;
+                        if (filePath) {
+                            undoManager.snapshotFile(filePath);
+                        }
+                    } else if (status === 'success' && args) {
+                        const filePath = args.file_path || args.path;
+                        if (filePath) {
+                            fileDecorations.markModified(filePath);
+                        }
+                        codeLens.removePendingChange(call_id);
+                    } else if (status === 'rejected' || status === 'error' || status === 'cancelled') {
+                        codeLens.removePendingChange(call_id);
+                    }
+                }
+
+                // Terminal: echo run_command commands
+                if (tool_name === 'run_command' && status === 'running' && args) {
+                    const command = args.command;
+                    if (command && !shownCommands.has(call_id)) {
+                        shownCommands.add(call_id);
+                        const terminal = getAgentTerminal();
+                        // Echo the command as a comment (don't execute — runs server-side).
+                        // Sanitize newlines to prevent shell injection.
+                        const sanitized = String(command).replace(/[\r\n]+/g, ' ');
+                        terminal.sendText(`# [ClarAIty] ${sanitized}`, true);
+                    }
+                }
+            }
+
+            // Commit undo checkpoint when turn ends
+            if (msg.type === 'stream_end') {
+                const checkpoint = undoManager.commitCheckpoint();
+                if (checkpoint) {
+                    const filePaths = Array.from(checkpoint.files.values()).map(f => f.path);
+                    sidebarProvider.postToWebview({
+                        type: 'undoAvailable',
+                        turnId: checkpoint.turnId,
+                        files: filePaths,
+                    });
+                }
+            }
+
+            // Clear state on new session
+            if (msg.type === 'session_info') {
+                fileDecorations.clear();
+                codeLens.clear();
+                shownCommands.clear();
+                undoManager.clear();
+            }
+        });
+
+        // Update status bar on connection changes
+        conn.onConnected(() => {
+            statusBar.text = '$(sparkle) ClarAIty';
+            statusBar.tooltip = 'ClarAIty - Connected';
+        });
+        conn.onDisconnected(() => {
+            statusBar.text = '$(sparkle) ClarAIty (offline)';
+            statusBar.tooltip = 'ClarAIty - Disconnected';
+        });
+    }
 
     // Detect workspace context for first-message enrichment
     detectProjectContext().then((ctx) => {
@@ -226,6 +253,21 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('claraity.addToChat', () => {
             sendSelectionToChat(sidebarProvider, '');
         }),
+        vscode.commands.registerCommand('claraity.setApiKey', async () => {
+            const key = await vscode.window.showInputBox({
+                prompt: 'Enter your LLM API key',
+                password: true,
+                placeHolder: 'sk-...',
+                ignoreFocusOut: true,
+            });
+            if (key !== undefined) {
+                await context.secrets.store('claraity.apiKey', key);
+                vscode.window.showInformationMessage(
+                    key ? 'ClarAIty: API key saved. Restart the agent to apply.'
+                         : 'ClarAIty: API key cleared.',
+                );
+            }
+        }),
     );
 
     // Status bar item
@@ -237,15 +279,10 @@ export function activate(context: vscode.ExtensionContext) {
     statusBar.show();
     context.subscriptions.push(statusBar);
 
-    // Update status bar on connection changes
-    connection.onConnected(() => {
-        statusBar.text = '$(sparkle) ClarAIty';
-        statusBar.tooltip = 'ClarAIty - Connected';
-    });
-    connection.onDisconnected(() => {
-        statusBar.text = '$(sparkle) ClarAIty (offline)';
-        statusBar.tooltip = 'ClarAIty - Disconnected';
-    });
+    // Wire connection events for WebSocket mode (connection already exists)
+    if (connection) {
+        wireConnection(connection, statusBar);
+    }
 
     // Watch for config changes
     context.subscriptions.push(
@@ -264,7 +301,74 @@ export function activate(context: vscode.ExtensionContext) {
     const autoInstallAgent = config.get<boolean>('autoInstallAgent', true);
 
     // Start server or connect directly
-    if (serverAutoStart) {
+    if (connectionMode === 'stdio') {
+        // --- STDIO MODE (experimental) ---
+        const workDir = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (!workDir) {
+            vscode.window.showWarningMessage(
+                'ClarAIty: No workspace folder open. Cannot start in stdio mode.',
+            );
+            statusBar.text = '$(sparkle) ClarAIty (offline)';
+            statusBar.tooltip = 'ClarAIty - No workspace folder';
+        } else {
+            statusBar.text = '$(loading~spin) ClarAIty (checking...)';
+            statusBar.tooltip = 'ClarAIty - Detecting environment...';
+
+            resolveLaunchConfig(pythonPath, port, workDir, devMode, autoInstallAgent)
+                .then(async (launchConfig) => {
+                    if (!launchConfig) {
+                        statusBar.text = '$(error) ClarAIty (not installed)';
+                        statusBar.tooltip = 'ClarAIty - Agent not found';
+                        return;
+                    }
+
+                    log.appendLine('[ClarAIty] Starting in stdio mode...');
+                    statusBar.text = '$(loading~spin) ClarAIty (starting...)';
+                    statusBar.tooltip = `ClarAIty - Starting (stdio, ${launchConfig.mode} mode)...`;
+
+                    // Create stdio connection with the resolved launch config
+                    const stdioConn = new StdioConnection(
+                        {
+                            command: launchConfig.command,
+                            args: launchConfig.args,
+                            cwd: launchConfig.cwd,
+                        },
+                        log,
+                        context.extensionPath,
+                    );
+
+                    // Inject API key from VS Code SecretStorage
+                    const apiKey = await context.secrets.get('claraity.apiKey');
+                    if (apiKey) {
+                        stdioConn.setApiKey(apiKey);
+                        log.appendLine('[ClarAIty] API key loaded from SecretStorage');
+                    }
+
+                    // Inject Tavily key from VS Code SecretStorage
+                    const tavilyKey = await context.secrets.get('claraity.tavilyKey');
+                    if (tavilyKey) {
+                        stdioConn.setTavilyKey(tavilyKey);
+                        log.appendLine('[ClarAIty] Tavily key loaded from SecretStorage');
+                    }
+
+                    connection = stdioConn;
+
+                    // Wire events (message handler, status bar, sidebar)
+                    wireConnection(stdioConn, statusBar);
+                    sidebarProvider.setConnection(stdioConn);
+
+                    context.subscriptions.push(stdioConn);
+                    stdioConn.connect();
+                })
+                .catch((err) => {
+                    const msg = err instanceof Error ? err.message : String(err);
+                    log.appendLine('[ERROR] Stdio launch failed: ' + msg);
+                    statusBar.text = '$(error) ClarAIty (error)';
+                    statusBar.tooltip = `ClarAIty - ${msg}`;
+                });
+        }
+    } else if (serverAutoStart) {
+        // --- WEBSOCKET MODE (default) ---
         const workDir = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
         if (!workDir) {
             vscode.window.showWarningMessage(
@@ -274,7 +378,7 @@ export function activate(context: vscode.ExtensionContext) {
             statusBar.text = '$(sparkle) ClarAIty (offline)';
             statusBar.tooltip = 'ClarAIty - No workspace folder';
             if (autoConnect) {
-                connection.connect();
+                connection?.connect();
             }
         } else {
             statusBar.text = '$(loading~spin) ClarAIty (checking...)';
@@ -323,7 +427,7 @@ export function activate(context: vscode.ExtensionContext) {
         statusBar.text = '$(sparkle) ClarAIty';
         statusBar.tooltip = 'Open ClarAIty Chat';
         if (autoConnect) {
-            connection.connect();
+            connection?.connect();
         }
     }
 

@@ -133,6 +133,7 @@ def save_config_from_request(data: dict, config_path: str) -> dict:
                 "type": "config_saved",
                 "success": True,
                 "message": "Configuration saved.",
+                "model": cfg.model,
                 "_config": cfg,
                 "_api_key": str(api_key) if api_key else "",
             }
@@ -151,12 +152,13 @@ def save_config_from_request(data: dict, config_path: str) -> dict:
 def list_models_from_request(data: dict) -> dict:
     """Fetch available models from the configured backend (blocking HTTP).
 
+    Inlines the model-listing logic so it works without Textual
+    (which is excluded from the bundled binary).
+
     Returns:
         ``{"type": "models_list", "models": [...], "error": str|None}``
     """
     try:
-        from src.ui.llm_config_screen import ConfigLLMScreen
-
         backend = str(data.get("backend", "openai"))
         base_url = str(data.get("base_url", ""))
         api_key = str(data.get("api_key", ""))
@@ -174,11 +176,50 @@ def list_models_from_request(data: dict) -> dict:
             if not is_valid:
                 return {"type": "models_list", "models": [], "error": reason}
 
-        models = ConfigLLMScreen._list_models(backend, base_url, api_key)
+        models = _list_models(backend, base_url, api_key)
         return {"type": "models_list", "models": sorted(models, key=str.lower), "error": None}
     except Exception as exc:
         logger.warning(f"[CONFIG] list_models error: {exc}")
         return {"type": "models_list", "models": [], "error": str(exc)}
+
+
+def _list_models(backend: str, base_url: str, api_key: str) -> list[str]:
+    """Fetch model list from an LLM backend (no Textual dependency).
+
+    Mirrors ``ConfigLLMScreen._list_models`` but importable without Textual.
+    """
+    from src.llm.base import LLMBackendType, LLMConfig
+
+    if backend == "ollama":
+        from src.llm.ollama_backend import OllamaBackend
+
+        config = LLMConfig(
+            backend_type=LLMBackendType.OLLAMA,
+            model_name="temp",
+            base_url=base_url,
+            temperature=0.2,
+            max_tokens=1024,
+            top_p=0.95,
+            context_window=4096,
+        )
+        return OllamaBackend(config).list_models()
+    elif backend == "anthropic":
+        from src.llm.anthropic_backend import KNOWN_CLAUDE_MODELS
+
+        return list(KNOWN_CLAUDE_MODELS)
+    else:
+        from src.llm.openai_backend import OpenAIBackend
+
+        config = LLMConfig(
+            backend_type=LLMBackendType.OPENAI,
+            model_name="temp",
+            base_url=base_url,
+            temperature=0.2,
+            max_tokens=1024,
+            top_p=0.95,
+            context_window=4096,
+        )
+        return OpenAIBackend(config, api_key=api_key).list_models()
 
 
 # -- numeric coercion helpers --
