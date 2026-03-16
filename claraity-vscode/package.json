@@ -2,7 +2,7 @@
   "name": "claraity-vscode",
   "displayName": "ClarAIty",
   "description": "AI Coding Agent - VS Code Integration",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "publisher": "VijayJayanandan",
   "license": "MIT",
   "author": {
