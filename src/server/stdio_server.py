@@ -92,7 +92,7 @@ _VALID_MODES = frozenset({"plan", "normal", "auto"})
 _SESSION_ID_RE = re.compile(
     r"^(?:"
     r"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}"  # UUID
-    r"|session-\d{8}-\d{6}-[a-f0-9]{8}"                                # TUI date-based
+    r"|session-\d{8}-\d{6}-[a-f0-9]{8}"  # TUI date-based
     r")$",
     re.IGNORECASE,
 )
@@ -181,9 +181,7 @@ def _stdin_reader_thread(
             if not stripped:
                 continue
             if len(stripped) > max_line_bytes:
-                sys.stderr.write(
-                    f"[STDIO] Dropped oversized stdin line ({len(stripped)} bytes)\n"
-                )
+                sys.stderr.write(f"[STDIO] Dropped oversized stdin line ({len(stripped)} bytes)\n")
                 sys.stderr.flush()
                 continue
             try:
@@ -243,12 +241,8 @@ class StdioProtocol(UIProtocol):
         self._send_lock = asyncio.Lock()
         self._loop = asyncio.get_running_loop()
         self._unsubscribe = None
-        self._chat_queue: asyncio.Queue[dict | None] = asyncio.Queue(
-            maxsize=_MAX_CHAT_QUEUE
-        )
-        self._stdin_queue: asyncio.Queue[bytes | None] = asyncio.Queue(
-            maxsize=_MAX_STDIN_QUEUE
-        )
+        self._chat_queue: asyncio.Queue[dict | None] = asyncio.Queue(maxsize=_MAX_CHAT_QUEUE)
+        self._stdin_queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=_MAX_STDIN_QUEUE)
         self._closed = False
         self._tcp_writer: asyncio.StreamWriter | None = None
         # Tracked by run_stdio_server for session management
@@ -349,16 +343,12 @@ class StdioProtocol(UIProtocol):
             async with self._send_lock:
                 line = json.dumps(wire_data, separators=(",", ":")) + "\n"
                 self._tcp_writer.write(line.encode("utf-8"))
-                await asyncio.wait_for(
-                    self._tcp_writer.drain(), timeout=_TCP_DRAIN_TIMEOUT
-                )
+                await asyncio.wait_for(self._tcp_writer.drain(), timeout=_TCP_DRAIN_TIMEOUT)
         except (OSError, ValueError, ConnectionError, asyncio.TimeoutError) as e:
             logger.warning("stdio_send_error", msg_type=tag, error=str(e))
             self._closed = True
 
-    async def _send_error(
-        self, error_type: str, message: str, recoverable: bool = True
-    ) -> None:
+    async def _send_error(self, error_type: str, message: str, recoverable: bool = True) -> None:
         """Send a standardized error response to the client."""
         await self._send_json(_error_response(error_type, message, recoverable))
 
@@ -582,8 +572,7 @@ class StdioProtocol(UIProtocol):
             except Exception as exc:
                 logger.warning("stdio_llm_reconfigure_failed", error=str(exc))
                 response["message"] = (
-                    "Config saved but LLM reconfiguration failed. "
-                    "Restart server to apply changes."
+                    "Config saved but LLM reconfiguration failed. Restart server to apply changes."
                 )
 
         await self._send_json(response)
@@ -646,9 +635,7 @@ class StdioProtocol(UIProtocol):
     # Session management handlers
     # -----------------------------------------------------------------
 
-    async def _switch_session(
-        self, session_id: str, store, jsonl_path: Path
-    ) -> None:
+    async def _switch_session(self, session_id: str, store, jsonl_path: Path) -> None:
         """Wire a new or resumed session: store, writer, delegation, subscriptions."""
         await self._close_session_writer()
 
@@ -680,7 +667,9 @@ class StdioProtocol(UIProtocol):
 
         from src.session.store.memory_store import MessageStore
 
-        new_session_id = f"session-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
+        new_session_id = (
+            f"session-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
+        )
 
         self._agent.reset_session(new_session_id)
         new_store = MessageStore()
@@ -816,7 +805,7 @@ class StdioProtocol(UIProtocol):
                 if mcp_conn:
                     config_name = mcp_conn.config.name
                     if config_name.startswith("mcp-atlassian-"):
-                        connected_profile = config_name[len("mcp-atlassian-"):]
+                        connected_profile = config_name[len("mcp-atlassian-") :]
 
             await self._send_json(
                 {
@@ -1197,7 +1186,9 @@ async def run_stdio_server(
                                 raw_bytes = b64.b64decode(payload)
                             except Exception as e:
                                 logger.warning("image_decode_failed", error=str(e))
-                                sys.stderr.write(f"[STDIO] Skipping image with invalid base64: {e}\n")
+                                sys.stderr.write(
+                                    f"[STDIO] Skipping image with invalid base64: {e}\n"
+                                )
                                 sys.stderr.flush()
                                 continue
                         attachments.append(
@@ -1232,11 +1223,15 @@ async def run_stdio_server(
             except Exception as turn_err:
                 # Catch-all for unexpected errors in turn processing (e.g. bad
                 # base64, malformed message). Log and continue — don't kill server.
-                logger.error("stdio_turn_error", error=str(turn_err), error_type=type(turn_err).__name__)
+                logger.error(
+                    "stdio_turn_error", error=str(turn_err), error_type=type(turn_err).__name__
+                )
                 sys.stderr.write(f"[FATAL] {turn_err}\n")
                 sys.stderr.flush()
                 try:
-                    await protocol._send_error("internal_error", f"Turn processing error: {turn_err}")
+                    await protocol._send_error(
+                        "internal_error", f"Turn processing error: {turn_err}"
+                    )
                 except Exception:
                     pass
 
