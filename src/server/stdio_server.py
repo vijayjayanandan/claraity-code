@@ -676,9 +676,10 @@ class StdioProtocol(UIProtocol):
 
     async def _handle_new_session(self, data: dict) -> None:
         """Reset agent to a fresh session (New Chat)."""
+        from datetime import datetime
+
         from src.session.store.memory_store import MessageStore
 
-        from datetime import datetime
         new_session_id = f"session-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
 
         self._agent.reset_session(new_session_id)
