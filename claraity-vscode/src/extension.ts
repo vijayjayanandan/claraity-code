@@ -2,13 +2,11 @@
  * ClarAIty VS Code Extension - Entry Point
  *
  * Activates when the ClarAIty sidebar view is opened.
- * Manages server lifecycle, WebSocket connection, and WebView lifecycle.
+ * Manages stdio connection and WebView lifecycle.
  */
 
 import * as vscode from 'vscode';
 import { ClarAItySidebarProvider } from './sidebar-provider';
-import { AgentConnection } from './agent-connection';
-import { ServerManager } from './server-manager';
 import { resolveLaunchConfig } from './python-env';
 import { ClarAItyFileDecorationProvider } from './file-decoration-provider';
 import { ClarAItyCodeLensProvider } from './code-lens-provider';
@@ -17,9 +15,7 @@ import { detectProjectContext, formatProjectContext } from './workspace-detector
 import { StdioConnection } from './stdio-connection';
 import { ServerMessage } from './types';
 
-// Connection can be either WebSocket or stdio-based
-let connection: AgentConnection | StdioConnection | undefined;
-let serverManager: ServerManager | undefined;
+let connection: StdioConnection | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
     // Create output channel for extension-side logging
@@ -29,20 +25,9 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Read configuration
     const config = vscode.workspace.getConfiguration('claraity');
-    const serverUrl = config.get<string>('serverUrl', 'ws://localhost:9120/ws');
-    const autoConnect = config.get<boolean>('autoConnect', true);
-    const serverAutoStart = config.get<boolean>('serverAutoStart', true);
     const pythonPath = config.get<string>('pythonPath', 'python');
-    const connectionMode = config.get<string>('connectionMode', 'websocket');
-
-    // Extract port from serverUrl for the server manager
-    const port = extractPort(serverUrl);
-
-    // In WebSocket mode, create connection eagerly.
-    // In stdio mode, connection is created later after resolving the launch config.
-    if (connectionMode !== 'stdio') {
-        connection = new AgentConnection(serverUrl, log);
-    }
+    const devMode = config.get<string>('devMode', 'auto');
+    const autoInstallAgent = config.get<boolean>('autoInstallAgent', true);
 
     // Create file decoration provider for marking agent-modified files
     const fileDecorations = new ClarAItyFileDecorationProvider();
@@ -78,10 +63,10 @@ export function activate(context: vscode.ExtensionContext) {
         return agentTerminal;
     }
 
-    // Create sidebar provider (connection may be null in stdio mode, set later)
+    // Create sidebar provider (connection is null until stdio connects)
     const sidebarProvider = new ClarAItySidebarProvider(
         context.extensionUri,
-        connection ?? null,
+        null,
         log,
     );
     sidebarProvider.setSecrets(context.secrets);
@@ -96,11 +81,11 @@ export function activate(context: vscode.ExtensionContext) {
 
     /**
      * Wire a connection's events to the extension handlers (file decorations,
-     * undo, terminal echo, sidebar, status bar). Called once when connection
-     * is available — immediately for WebSocket, deferred for stdio.
+     * undo, terminal echo, sidebar, status bar). Called once when the stdio
+     * connection is available.
      */
     function wireConnection(
-        conn: AgentConnection | StdioConnection,
+        conn: StdioConnection,
         statusBar: vscode.StatusBarItem,
     ): void {
         // Track agent-modified files, pending changes, terminal commands, and undo checkpoints
@@ -116,20 +101,20 @@ export function activate(context: vscode.ExtensionContext) {
                 // File decorations and CodeLens
                 if (tool_name === 'write_file' || tool_name === 'edit_file') {
                     if (status === 'awaiting_approval' && args) {
-                        const filePath = args.file_path || args.path;
+                        const filePath = (args.file_path || args.path) as string | undefined;
                         if (filePath) {
-                            codeLens.addPendingChange(call_id, tool_name, filePath, args);
+                            codeLens.addPendingChange(call_id, tool_name, filePath, args as Record<string, any>);
                             // Snapshot BEFORE any modification
                             undoManager.snapshotFile(filePath);
                         }
                     } else if (status === 'running' && args) {
                         // Auto-approve path — snapshot on running if not already done
-                        const filePath = args.file_path || args.path;
+                        const filePath = (args.file_path || args.path) as string | undefined;
                         if (filePath) {
                             undoManager.snapshotFile(filePath);
                         }
                     } else if (status === 'success' && args) {
-                        const filePath = args.file_path || args.path;
+                        const filePath = (args.file_path || args.path) as string | undefined;
                         if (filePath) {
                             fileDecorations.markModified(filePath);
                         }
@@ -143,6 +128,7 @@ export function activate(context: vscode.ExtensionContext) {
                 if (tool_name === 'run_command' && status === 'running' && args) {
                     const command = args.command;
                     if (command && !shownCommands.has(call_id)) {
+                        if (shownCommands.size > 1000) { shownCommands.clear(); }
                         shownCommands.add(call_id);
                         const terminal = getAgentTerminal();
                         // Echo the command as a comment (don't execute — runs server-side).
@@ -181,8 +167,17 @@ export function activate(context: vscode.ExtensionContext) {
             statusBar.tooltip = 'ClarAIty - Connected';
         });
         conn.onDisconnected(() => {
-            statusBar.text = '$(sparkle) ClarAIty (offline)';
-            statusBar.tooltip = 'ClarAIty - Disconnected';
+            statusBar.text = '$(loading~spin) ClarAIty (reconnecting...)';
+            statusBar.tooltip = 'ClarAIty - Reconnecting...';
+            // If auto-restart fails, the connection will show an error dialog
+            // and update status bar via the next onConnected or manual restart
+            setTimeout(() => {
+                // If still not connected after 15s, show offline
+                if (!conn.isConnected) {
+                    statusBar.text = '$(error) ClarAIty (offline)';
+                    statusBar.tooltip = 'ClarAIty - Disconnected. Use "New Chat" to reconnect.';
+                }
+            }, 15_000);
         });
     }
 
@@ -202,6 +197,11 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('claraity.newChat', () => {
             // Focus the chat view
             vscode.commands.executeCommand('claraity.chatView.focus');
+            // Verify agent is alive — if dead, attempt restart
+            if (connection && !connection.isConnected) {
+                log.appendLine('[ClarAIty] Agent is dead on newChat — restarting');
+                connection.restart();
+            }
         }),
         vscode.commands.registerCommand('claraity.interrupt', () => {
             connection?.send({ type: 'interrupt' });
@@ -279,156 +279,73 @@ export function activate(context: vscode.ExtensionContext) {
     statusBar.show();
     context.subscriptions.push(statusBar);
 
-    // Wire connection events for WebSocket mode (connection already exists)
-    if (connection) {
-        wireConnection(connection, statusBar);
-    }
-
-    // Watch for config changes
-    context.subscriptions.push(
-        vscode.workspace.onDidChangeConfiguration((e) => {
-            if (e.affectsConfiguration('claraity.serverUrl')) {
-                const newUrl = vscode.workspace
-                    .getConfiguration('claraity')
-                    .get<string>('serverUrl', 'ws://localhost:9120/ws');
-                connection?.updateUrl(newUrl);
-            }
-        }),
-    );
-
-    // Read environment detection settings
-    const devMode = config.get<string>('devMode', 'auto');
-    const autoInstallAgent = config.get<boolean>('autoInstallAgent', true);
-
-    // Start server or connect directly
-    if (connectionMode === 'stdio') {
-        // --- STDIO MODE (experimental) ---
-        const workDir = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        if (!workDir) {
-            vscode.window.showWarningMessage(
-                'ClarAIty: No workspace folder open. Cannot start in stdio mode.',
-            );
-            statusBar.text = '$(sparkle) ClarAIty (offline)';
-            statusBar.tooltip = 'ClarAIty - No workspace folder';
-        } else {
-            statusBar.text = '$(loading~spin) ClarAIty (checking...)';
-            statusBar.tooltip = 'ClarAIty - Detecting environment...';
-
-            resolveLaunchConfig(pythonPath, port, workDir, devMode, autoInstallAgent)
-                .then(async (launchConfig) => {
-                    if (!launchConfig) {
-                        statusBar.text = '$(error) ClarAIty (not installed)';
-                        statusBar.tooltip = 'ClarAIty - Agent not found';
-                        return;
-                    }
-
-                    log.appendLine('[ClarAIty] Starting in stdio mode...');
-                    statusBar.text = '$(loading~spin) ClarAIty (starting...)';
-                    statusBar.tooltip = `ClarAIty - Starting (stdio, ${launchConfig.mode} mode)...`;
-
-                    // Create stdio connection with the resolved launch config
-                    const stdioConn = new StdioConnection(
-                        {
-                            command: launchConfig.command,
-                            args: launchConfig.args,
-                            cwd: launchConfig.cwd,
-                        },
-                        log,
-                        context.extensionPath,
-                    );
-
-                    // Inject API key from VS Code SecretStorage
-                    const apiKey = await context.secrets.get('claraity.apiKey');
-                    if (apiKey) {
-                        stdioConn.setApiKey(apiKey);
-                        log.appendLine('[ClarAIty] API key loaded from SecretStorage');
-                    }
-
-                    // Inject Tavily key from VS Code SecretStorage
-                    const tavilyKey = await context.secrets.get('claraity.tavilyKey');
-                    if (tavilyKey) {
-                        stdioConn.setTavilyKey(tavilyKey);
-                        log.appendLine('[ClarAIty] Tavily key loaded from SecretStorage');
-                    }
-
-                    connection = stdioConn;
-
-                    // Wire events (message handler, status bar, sidebar)
-                    wireConnection(stdioConn, statusBar);
-                    sidebarProvider.setConnection(stdioConn);
-
-                    context.subscriptions.push(stdioConn);
-                    stdioConn.connect();
-                })
-                .catch((err) => {
-                    const msg = err instanceof Error ? err.message : String(err);
-                    log.appendLine('[ERROR] Stdio launch failed: ' + msg);
-                    statusBar.text = '$(error) ClarAIty (error)';
-                    statusBar.tooltip = `ClarAIty - ${msg}`;
-                });
-        }
-    } else if (serverAutoStart) {
-        // --- WEBSOCKET MODE (default) ---
-        const workDir = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        if (!workDir) {
-            vscode.window.showWarningMessage(
-                'ClarAIty: No workspace folder open. Cannot auto-start server.',
-            );
-            // Fall back to manual connection
-            statusBar.text = '$(sparkle) ClarAIty (offline)';
-            statusBar.tooltip = 'ClarAIty - No workspace folder';
-            if (autoConnect) {
-                connection?.connect();
-            }
-        } else {
-            statusBar.text = '$(loading~spin) ClarAIty (checking...)';
-            statusBar.tooltip = 'ClarAIty - Detecting environment...';
-
-            resolveLaunchConfig(pythonPath, port, workDir, devMode, autoInstallAgent)
-                .then((launchConfig) => {
-                    if (!launchConfig) {
-                        statusBar.text = '$(error) ClarAIty (not installed)';
-                        statusBar.tooltip = 'ClarAIty - Agent not found';
-                        return;
-                    }
-
-                    statusBar.text = '$(loading~spin) ClarAIty (starting...)';
-                    statusBar.tooltip = `ClarAIty - Starting server (${launchConfig.mode} mode)...`;
-
-                    serverManager = new ServerManager(launchConfig, port);
-
-                    serverManager.onReady(() => {
-                        log.appendLine('[ClarAIty] Server ready, connecting WebSocket...');
-                        // Pass auth token for first-message handshake
-                        const token = serverManager?.authToken;
-                        if (token && connection) {
-                            connection.setAuthToken(token);
-                        }
-                        connection?.connect();
-                    });
-
-                    serverManager.onStopped((reason) => {
-                        statusBar.text = '$(error) ClarAIty (server error)';
-                        statusBar.tooltip = `ClarAIty - Server stopped: ${reason}`;
-                    });
-
-                    context.subscriptions.push(serverManager);
-                    serverManager.start();
-                })
-                .catch((err) => {
-                    const msg = err instanceof Error ? err.message : String(err);
-                    log.appendLine('[ERROR] Environment resolution failed: ' + msg);
-                    statusBar.text = '$(error) ClarAIty (error)';
-                    statusBar.tooltip = `ClarAIty - ${msg}`;
-                });
-        }
+    // --- STDIO MODE ---
+    const workDir = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!workDir) {
+        vscode.window.showWarningMessage(
+            'ClarAIty: No workspace folder open. Cannot start in stdio mode.',
+        );
+        statusBar.text = '$(sparkle) ClarAIty (offline)';
+        statusBar.tooltip = 'ClarAIty - No workspace folder';
     } else {
-        // Manual server mode -- existing behavior
-        statusBar.text = '$(sparkle) ClarAIty';
-        statusBar.tooltip = 'Open ClarAIty Chat';
-        if (autoConnect) {
-            connection?.connect();
-        }
+        statusBar.text = '$(loading~spin) ClarAIty (checking...)';
+        statusBar.tooltip = 'ClarAIty - Detecting environment...';
+
+        // Port is passed for resolveLaunchConfig compatibility (not used in stdio)
+        const port = 9120;
+
+        resolveLaunchConfig(pythonPath, port, workDir, devMode, autoInstallAgent)
+            .then(async (launchConfig) => {
+                if (!launchConfig) {
+                    statusBar.text = '$(error) ClarAIty (not installed)';
+                    statusBar.tooltip = 'ClarAIty - Agent not found';
+                    return;
+                }
+
+                log.appendLine('[ClarAIty] Starting in stdio mode...');
+                statusBar.text = '$(loading~spin) ClarAIty (starting...)';
+                statusBar.tooltip = `ClarAIty - Starting (stdio, ${launchConfig.mode} mode)...`;
+
+                // Create stdio connection with the resolved launch config
+                const stdioConn = new StdioConnection(
+                    {
+                        command: launchConfig.command,
+                        args: launchConfig.args,
+                        cwd: launchConfig.cwd,
+                    },
+                    log,
+                    context.extensionPath,
+                );
+
+                // Inject API key from VS Code SecretStorage
+                const apiKey = await context.secrets.get('claraity.apiKey');
+                if (apiKey) {
+                    stdioConn.setApiKey(apiKey);
+                    log.appendLine('[ClarAIty] API key loaded from SecretStorage');
+                }
+
+                // Inject Tavily key from VS Code SecretStorage
+                const tavilyKey = await context.secrets.get('claraity.tavilyKey');
+                if (tavilyKey) {
+                    stdioConn.setTavilyKey(tavilyKey);
+                    log.appendLine('[ClarAIty] Tavily key loaded from SecretStorage');
+                }
+
+                connection = stdioConn;
+
+                // Wire events (message handler, status bar, sidebar)
+                wireConnection(stdioConn, statusBar);
+                sidebarProvider.setConnection(stdioConn);
+
+                context.subscriptions.push(stdioConn);
+                stdioConn.connect();
+            })
+            .catch((err) => {
+                const msg = err instanceof Error ? err.message : String(err);
+                log.appendLine('[ERROR] Stdio launch failed: ' + msg);
+                statusBar.text = '$(error) ClarAIty (error)';
+                statusBar.tooltip = `ClarAIty - ${msg}`;
+            });
     }
 
     // Register cleanup
@@ -441,11 +358,14 @@ export function activate(context: vscode.ExtensionContext) {
     log.appendLine('[ClarAIty] Extension activated');
 }
 
-export function deactivate() {
-    connection?.dispose();
-    connection = undefined;
-    serverManager?.dispose();
-    serverManager = undefined;
+export async function deactivate() {
+    if (connection) {
+        connection.disconnect();
+        // Wait briefly for the graceful shutdown before VS Code tears down
+        await new Promise<void>((resolve) => setTimeout(resolve, 1000));
+        connection.dispose();
+        connection = undefined;
+    }
 }
 
 /**
@@ -481,20 +401,4 @@ function sendSelectionToChat(
         type: 'insertAndSend',
         content,
     });
-}
-
-/**
- * Extract port number from a WebSocket URL like "ws://localhost:9120/ws".
- * Falls back to 9120 if parsing fails.
- */
-function extractPort(wsUrl: string): number {
-    try {
-        // Replace ws:// with http:// so URL constructor can parse it
-        const httpUrl = wsUrl.replace(/^ws(s?):\/\//, 'http$1://');
-        const parsed = new URL(httpUrl);
-        const port = parseInt(parsed.port, 10);
-        return isNaN(port) ? 9120 : port;
-    } catch {
-        return 9120;
-    }
 }

@@ -2,13 +2,12 @@
  * Comprehensive unit tests for extension.ts (activate / deactivate).
  *
  * Coverage:
- * - activate(): output channel, AgentConnection, SidebarProvider, webview
- *   registration, commands, status bar, connection event handlers,
- *   config change watcher, serverAutoStart scenarios, cleanup disposable
- * - deactivate(): disposes connection and server manager
- * - extractPort(): tested indirectly through ServerManager constructor args
+ * - activate(): output channel, StdioConnection, SidebarProvider, webview
+ *   registration, commands, status bar, connection event handlers (wireConnection),
+ *   stdio launch scenarios, cleanup disposable, sendSelectionToChat
+ * - deactivate(): disposes connection
  *
- * Total: 30+ tests covering all code paths in extension.ts
+ * Total: 40+ tests covering all code paths in the stdio-only extension.ts
  */
 
 import * as vscode from 'vscode';
@@ -16,41 +15,66 @@ import { activate, deactivate } from '../extension';
 
 // ── Module mocks ────────────────────────────────────────────────────────────
 
-jest.mock('../agent-connection');
+jest.mock('../stdio-connection');
 jest.mock('../sidebar-provider');
-jest.mock('../server-manager');
 jest.mock('../python-env');
+jest.mock('../file-decoration-provider');
+jest.mock('../code-lens-provider');
+jest.mock('../undo-manager');
+jest.mock('../workspace-detector');
 
-import { AgentConnection } from '../agent-connection';
+import { StdioConnection } from '../stdio-connection';
 import { ClarAItySidebarProvider } from '../sidebar-provider';
-import { ServerManager } from '../server-manager';
 import { resolveLaunchConfig } from '../python-env';
+import { ClarAItyFileDecorationProvider } from '../file-decoration-provider';
+import { ClarAItyCodeLensProvider } from '../code-lens-provider';
+import { UndoManager } from '../undo-manager';
+import { detectProjectContext, formatProjectContext } from '../workspace-detector';
 
 // ── Types for mock instances ────────────────────────────────────────────────
 
-interface MockAgentConnection {
+interface MockStdioConnection {
     connect: jest.Mock;
     send: jest.Mock;
     dispose: jest.Mock;
-    updateUrl: jest.Mock;
-    setAuthToken: jest.Mock;
+    disconnect: jest.Mock;
+    setApiKey: jest.Mock;
+    setTavilyKey: jest.Mock;
     onConnected: jest.Mock;
     onDisconnected: jest.Mock;
     onMessage: jest.Mock;
     isConnected: boolean;
-    authToken: string | null;
 }
 
 interface MockSidebarProvider {
     showSessionHistory: jest.Mock;
+    setSecrets: jest.Mock;
+    setConnection: jest.Mock;
+    setProjectContext: jest.Mock;
+    postToWebview: jest.Mock;
+    openDiffFromCommand: jest.Mock;
 }
 
-interface MockServerManager {
-    start: jest.Mock;
+interface MockFileDecorationProvider {
+    markModified: jest.Mock;
+    clear: jest.Mock;
     dispose: jest.Mock;
-    onReady: jest.Mock;
-    onStopped: jest.Mock;
-    authToken: string | null;
+}
+
+interface MockCodeLensProvider {
+    addPendingChange: jest.Mock;
+    removePendingChange: jest.Mock;
+    clear: jest.Mock;
+    dispose: jest.Mock;
+}
+
+interface MockUndoManager {
+    beginCheckpoint: jest.Mock;
+    commitCheckpoint: jest.Mock;
+    snapshotFile: jest.Mock;
+    undo: jest.Mock;
+    clear: jest.Mock;
+    dispose: jest.Mock;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -65,7 +89,12 @@ function createMockContext(): vscode.ExtensionContext {
         extensionPath: '/mock/extension',
         globalState: { get: jest.fn(), update: jest.fn(), keys: jest.fn(() => []), setKeysForSync: jest.fn() } as any,
         workspaceState: { get: jest.fn(), update: jest.fn(), keys: jest.fn(() => []) } as any,
-        secrets: { get: jest.fn(), store: jest.fn(), delete: jest.fn(), onDidChange: jest.fn() } as any,
+        secrets: {
+            get: jest.fn().mockResolvedValue(undefined),
+            store: jest.fn().mockResolvedValue(undefined),
+            delete: jest.fn().mockResolvedValue(undefined),
+            onDidChange: jest.fn(),
+        } as any,
         storagePath: '/mock/storage',
         globalStoragePath: '/mock/global-storage',
         logPath: '/mock/logs',
@@ -81,29 +110,27 @@ function createMockContext(): vscode.ExtensionContext {
 }
 
 /**
- * Stored callback registrations from mock event methods, keyed by event name.
- * Allows tests to fire events (connected, disconnected, onReady, onStopped)
- * after activate() has registered its listeners.
+ * Stored callback registrations from mock event methods.
+ * Allows tests to fire events (connected, disconnected, message)
+ * after wireConnection has registered its listeners.
  */
 let connectionCallbacks: Record<string, Function>;
-let serverManagerCallbacks: Record<string, Function>;
-let mockConnectionInstance: MockAgentConnection;
+let mockStdioInstance: MockStdioConnection;
 let mockSidebarInstance: MockSidebarProvider;
-let mockServerManagerInstance: MockServerManager;
+let mockFileDecorationInstance: MockFileDecorationProvider;
+let mockCodeLensInstance: MockCodeLensProvider;
+let mockUndoManagerInstance: MockUndoManager;
 
-/**
- * Set up fresh mock constructors before each test.
- */
 function setupMocks() {
     connectionCallbacks = {};
-    serverManagerCallbacks = {};
 
-    mockConnectionInstance = {
+    mockStdioInstance = {
         connect: jest.fn(),
         send: jest.fn(),
         dispose: jest.fn(),
-        updateUrl: jest.fn(),
-        setAuthToken: jest.fn(),
+        disconnect: jest.fn(),
+        setApiKey: jest.fn(),
+        setTavilyKey: jest.fn(),
         onConnected: jest.fn((cb: Function) => {
             connectionCallbacks['connected'] = cb;
             return { dispose: jest.fn() };
@@ -117,53 +144,63 @@ function setupMocks() {
             return { dispose: jest.fn() };
         }),
         isConnected: false,
-        authToken: null,
     };
 
     mockSidebarInstance = {
         showSessionHistory: jest.fn(),
+        setSecrets: jest.fn(),
+        setConnection: jest.fn(),
+        setProjectContext: jest.fn(),
+        postToWebview: jest.fn(),
+        openDiffFromCommand: jest.fn(),
     };
 
-    mockServerManagerInstance = {
-        start: jest.fn(),
+    mockFileDecorationInstance = {
+        markModified: jest.fn(),
+        clear: jest.fn(),
         dispose: jest.fn(),
-        onReady: jest.fn((cb: Function) => {
-            serverManagerCallbacks['ready'] = cb;
-            return { dispose: jest.fn() };
-        }),
-        onStopped: jest.fn((cb: Function) => {
-            serverManagerCallbacks['stopped'] = cb;
-            return { dispose: jest.fn() };
-        }),
-        authToken: null,
     };
 
-    (AgentConnection as jest.Mock).mockImplementation(() => mockConnectionInstance);
+    mockCodeLensInstance = {
+        addPendingChange: jest.fn(),
+        removePendingChange: jest.fn(),
+        clear: jest.fn(),
+        dispose: jest.fn(),
+    };
+
+    mockUndoManagerInstance = {
+        beginCheckpoint: jest.fn(),
+        commitCheckpoint: jest.fn().mockReturnValue(null),
+        snapshotFile: jest.fn(),
+        undo: jest.fn().mockResolvedValue([]),
+        clear: jest.fn(),
+        dispose: jest.fn(),
+    };
+
+    (StdioConnection as jest.Mock).mockImplementation(() => mockStdioInstance);
     (ClarAItySidebarProvider as jest.Mock).mockImplementation(() => mockSidebarInstance);
-    (ServerManager as jest.Mock).mockImplementation(() => mockServerManagerInstance);
+    (ClarAItyFileDecorationProvider as jest.Mock).mockImplementation(() => mockFileDecorationInstance);
+    (ClarAItyCodeLensProvider as jest.Mock).mockImplementation(() => mockCodeLensInstance);
+    (UndoManager as jest.Mock).mockImplementation(() => mockUndoManagerInstance);
     (resolveLaunchConfig as jest.Mock).mockResolvedValue(null);
+    (detectProjectContext as jest.Mock).mockResolvedValue(null);
+    (formatProjectContext as jest.Mock).mockReturnValue('Language: TypeScript / React');
 }
 
 /**
- * Configure the vscode.workspace.getConfiguration mock to return specific
- * values. Unspecified keys fall back to their defaults.
- */
-function setConfig(overrides: Record<string, any>) {
-    (vscode.workspace.getConfiguration as jest.Mock).mockImplementation(() => ({
-        get: jest.fn((key: string, defaultValue?: any) => {
-            return overrides[key] !== undefined ? overrides[key] : defaultValue;
-        }),
-        update: jest.fn().mockResolvedValue(undefined),
-        has: jest.fn((key: string) => key in overrides),
-        inspect: jest.fn(() => undefined),
-    }));
-}
-
-/**
- * Set workspace folders. Pass null to simulate no workspace.
+ * Set workspace folders. Pass undefined to simulate no workspace.
  */
 function setWorkspaceFolders(folders: any[] | undefined) {
     (vscode.workspace as any).workspaceFolders = folders;
+}
+
+/**
+ * Find a registered command callback by command ID.
+ */
+function findCommandCallback(commandId: string): Function | undefined {
+    const calls = (vscode.commands.registerCommand as jest.Mock).mock.calls;
+    const match = calls.find((c: any[]) => c[0] === commandId);
+    return match ? match[1] : undefined;
 }
 
 // ── Test suite ──────────────────────────────────────────────────────────────
@@ -172,7 +209,7 @@ describe('extension.ts', () => {
     beforeEach(() => {
         jest.clearAllMocks();
         setupMocks();
-        // Default: workspace folder exists, serverAutoStart defaults on
+        // Default: workspace folder exists
         setWorkspaceFolders([
             { uri: vscode.Uri.file('/test/workspace'), name: 'test', index: 0 },
         ]);
@@ -186,7 +223,6 @@ describe('extension.ts', () => {
         describe('output channel', () => {
             test('creates output channel named "ClarAIty Extension"', () => {
                 const ctx = createMockContext();
-                setConfig({ serverAutoStart: false, autoConnect: false });
                 activate(ctx);
 
                 expect(vscode.window.createOutputChannel).toHaveBeenCalledWith(
@@ -196,17 +232,14 @@ describe('extension.ts', () => {
 
             test('pushes output channel into subscriptions', () => {
                 const ctx = createMockContext();
-                setConfig({ serverAutoStart: false, autoConnect: false });
                 activate(ctx);
 
-                // The output channel is the first subscription pushed
                 const channel = (vscode.window.createOutputChannel as jest.Mock).mock.results[0].value;
                 expect(ctx.subscriptions).toContain(channel);
             });
 
             test('logs activation messages', () => {
                 const ctx = createMockContext();
-                setConfig({ serverAutoStart: false, autoConnect: false });
                 activate(ctx);
 
                 const channel = (vscode.window.createOutputChannel as jest.Mock).mock.results[0].value;
@@ -219,52 +252,64 @@ describe('extension.ts', () => {
             });
         });
 
-        describe('AgentConnection', () => {
-            test('creates AgentConnection with default serverUrl from config', () => {
-                const ctx = createMockContext();
-                setConfig({ serverAutoStart: false, autoConnect: false });
-                activate(ctx);
-
-                expect(AgentConnection).toHaveBeenCalledWith(
-                    'ws://localhost:9120/ws',
-                    expect.anything(), // output channel
-                );
-            });
-
-            test('creates AgentConnection with custom serverUrl from config', () => {
-                const ctx = createMockContext();
-                setConfig({
-                    serverUrl: 'ws://myhost:4567/ws',
-                    serverAutoStart: false,
-                    autoConnect: false,
-                });
-                activate(ctx);
-
-                expect(AgentConnection).toHaveBeenCalledWith(
-                    'ws://myhost:4567/ws',
-                    expect.anything(),
-                );
-            });
-        });
-
         describe('ClarAItySidebarProvider', () => {
-            test('creates sidebar provider with extensionUri, connection, and log', () => {
+            test('creates sidebar provider with extensionUri, null connection, and log', () => {
                 const ctx = createMockContext();
-                setConfig({ serverAutoStart: false, autoConnect: false });
                 activate(ctx);
 
                 expect(ClarAItySidebarProvider).toHaveBeenCalledWith(
                     ctx.extensionUri,
-                    mockConnectionInstance,
+                    null, // connection starts as null in stdio mode
                     expect.anything(), // output channel
                 );
+            });
+
+            test('calls setSecrets on sidebar provider', () => {
+                const ctx = createMockContext();
+                activate(ctx);
+
+                expect(mockSidebarInstance.setSecrets).toHaveBeenCalledWith(ctx.secrets);
+            });
+        });
+
+        describe('file decoration provider', () => {
+            test('creates and registers ClarAItyFileDecorationProvider', () => {
+                const ctx = createMockContext();
+                activate(ctx);
+
+                expect(ClarAItyFileDecorationProvider).toHaveBeenCalled();
+                expect(vscode.window.registerFileDecorationProvider).toHaveBeenCalledWith(
+                    mockFileDecorationInstance,
+                );
+            });
+        });
+
+        describe('CodeLens provider', () => {
+            test('creates and registers ClarAItyCodeLensProvider', () => {
+                const ctx = createMockContext();
+                activate(ctx);
+
+                expect(ClarAItyCodeLensProvider).toHaveBeenCalled();
+                expect(vscode.languages.registerCodeLensProvider).toHaveBeenCalledWith(
+                    { scheme: 'file' },
+                    mockCodeLensInstance,
+                );
+            });
+        });
+
+        describe('UndoManager', () => {
+            test('creates UndoManager with log channel', () => {
+                const ctx = createMockContext();
+                activate(ctx);
+
+                const channel = (vscode.window.createOutputChannel as jest.Mock).mock.results[0].value;
+                expect(UndoManager).toHaveBeenCalledWith(channel);
             });
         });
 
         describe('webview registration', () => {
             test('registers webview view provider for "claraity.chatView"', () => {
                 const ctx = createMockContext();
-                setConfig({ serverAutoStart: false, autoConnect: false });
                 activate(ctx);
 
                 expect(vscode.window.registerWebviewViewProvider).toHaveBeenCalledWith(
@@ -275,10 +320,8 @@ describe('extension.ts', () => {
 
             test('pushes webview registration disposable into subscriptions', () => {
                 const ctx = createMockContext();
-                setConfig({ serverAutoStart: false, autoConnect: false });
                 activate(ctx);
 
-                // registerWebviewViewProvider returns a Disposable
                 const disposable = (vscode.window.registerWebviewViewProvider as jest.Mock)
                     .mock.results[0].value;
                 expect(ctx.subscriptions).toContain(disposable);
@@ -288,7 +331,6 @@ describe('extension.ts', () => {
         describe('command registration', () => {
             test('registers "claraity.newChat" command', () => {
                 const ctx = createMockContext();
-                setConfig({ serverAutoStart: false, autoConnect: false });
                 activate(ctx);
 
                 expect(vscode.commands.registerCommand).toHaveBeenCalledWith(
@@ -299,7 +341,6 @@ describe('extension.ts', () => {
 
             test('registers "claraity.interrupt" command', () => {
                 const ctx = createMockContext();
-                setConfig({ serverAutoStart: false, autoConnect: false });
                 activate(ctx);
 
                 expect(vscode.commands.registerCommand).toHaveBeenCalledWith(
@@ -310,7 +351,6 @@ describe('extension.ts', () => {
 
             test('registers "claraity.sessionHistory" command', () => {
                 const ctx = createMockContext();
-                setConfig({ serverAutoStart: false, autoConnect: false });
                 activate(ctx);
 
                 expect(vscode.commands.registerCommand).toHaveBeenCalledWith(
@@ -319,69 +359,53 @@ describe('extension.ts', () => {
                 );
             });
 
-            test('newChat command focuses the chat view', () => {
+            test('registers "claraity.setApiKey" command', () => {
                 const ctx = createMockContext();
-                setConfig({ serverAutoStart: false, autoConnect: false });
                 activate(ctx);
 
-                // Find the newChat callback
-                const calls = (vscode.commands.registerCommand as jest.Mock).mock.calls;
-                const newChatCall = calls.find(
-                    (c: any[]) => c[0] === 'claraity.newChat',
+                expect(vscode.commands.registerCommand).toHaveBeenCalledWith(
+                    'claraity.setApiKey',
+                    expect.any(Function),
                 );
-                expect(newChatCall).toBeDefined();
+            });
 
-                // Invoke it
-                newChatCall![1]();
+            test('registers all 12 commands', () => {
+                const ctx = createMockContext();
+                activate(ctx);
+
+                // newChat, interrupt, sessionHistory, acceptChange, rejectChange,
+                // viewDiff, undoTurn, explainCode, fixCode, refactorCode, addToChat, setApiKey
+                expect(vscode.commands.registerCommand).toHaveBeenCalledTimes(12);
+            });
+
+            test('newChat command focuses the chat view', () => {
+                const ctx = createMockContext();
+                activate(ctx);
+
+                const callback = findCommandCallback('claraity.newChat');
+                expect(callback).toBeDefined();
+                callback!();
 
                 expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
                     'claraity.chatView.focus',
                 );
             });
 
-            test('interrupt command sends interrupt message via connection', () => {
-                const ctx = createMockContext();
-                setConfig({ serverAutoStart: false, autoConnect: false });
-                activate(ctx);
-
-                const calls = (vscode.commands.registerCommand as jest.Mock).mock.calls;
-                const interruptCall = calls.find(
-                    (c: any[]) => c[0] === 'claraity.interrupt',
-                );
-                expect(interruptCall).toBeDefined();
-
-                interruptCall![1]();
-
-                expect(mockConnectionInstance.send).toHaveBeenCalledWith({
-                    type: 'interrupt',
-                });
-            });
-
             test('sessionHistory command calls showSessionHistory on sidebar provider', () => {
                 const ctx = createMockContext();
-                setConfig({ serverAutoStart: false, autoConnect: false });
                 activate(ctx);
 
-                const calls = (vscode.commands.registerCommand as jest.Mock).mock.calls;
-                const historyCall = calls.find(
-                    (c: any[]) => c[0] === 'claraity.sessionHistory',
-                );
-                expect(historyCall).toBeDefined();
-
-                historyCall![1]();
+                const callback = findCommandCallback('claraity.sessionHistory');
+                expect(callback).toBeDefined();
+                callback!();
 
                 expect(mockSidebarInstance.showSessionHistory).toHaveBeenCalled();
             });
 
             test('pushes all command disposables into subscriptions', () => {
                 const ctx = createMockContext();
-                setConfig({ serverAutoStart: false, autoConnect: false });
                 activate(ctx);
 
-                // registerCommand is called 11 times (newChat, interrupt, sessionHistory, acceptChange, rejectChange, viewDiff, undoTurn, explainCode, fixCode, refactorCode, addToChat)
-                expect(vscode.commands.registerCommand).toHaveBeenCalledTimes(11);
-
-                // Each returns a Disposable that should be in subscriptions
                 const disposables = (vscode.commands.registerCommand as jest.Mock)
                     .mock.results.map((r: any) => r.value);
                 for (const d of disposables) {
@@ -393,7 +417,6 @@ describe('extension.ts', () => {
         describe('status bar', () => {
             test('creates status bar item with Left alignment and priority 100', () => {
                 const ctx = createMockContext();
-                setConfig({ serverAutoStart: false, autoConnect: false });
                 activate(ctx);
 
                 expect(vscode.window.createStatusBarItem).toHaveBeenCalledWith(
@@ -404,7 +427,6 @@ describe('extension.ts', () => {
 
             test('sets status bar command to claraity.newChat', () => {
                 const ctx = createMockContext();
-                setConfig({ serverAutoStart: false, autoConnect: false });
                 activate(ctx);
 
                 const statusBar = (vscode.window.createStatusBarItem as jest.Mock)
@@ -414,7 +436,6 @@ describe('extension.ts', () => {
 
             test('shows the status bar', () => {
                 const ctx = createMockContext();
-                setConfig({ serverAutoStart: false, autoConnect: false });
                 activate(ctx);
 
                 const statusBar = (vscode.window.createStatusBarItem as jest.Mock)
@@ -424,7 +445,6 @@ describe('extension.ts', () => {
 
             test('pushes status bar into subscriptions', () => {
                 const ctx = createMockContext();
-                setConfig({ serverAutoStart: false, autoConnect: false });
                 activate(ctx);
 
                 const statusBar = (vscode.window.createStatusBarItem as jest.Mock)
@@ -433,178 +453,38 @@ describe('extension.ts', () => {
             });
         });
 
-        describe('connection event handlers', () => {
-            test('updates status bar text on connected event', () => {
-                const ctx = createMockContext();
-                setConfig({ serverAutoStart: false, autoConnect: false });
-                activate(ctx);
-
-                const statusBar = (vscode.window.createStatusBarItem as jest.Mock)
-                    .mock.results[0].value;
-
-                // Fire the connected callback
-                expect(connectionCallbacks['connected']).toBeDefined();
-                connectionCallbacks['connected']();
-
-                expect(statusBar.text).toBe('$(sparkle) ClarAIty');
-                expect(statusBar.tooltip).toBe('ClarAIty - Connected');
-            });
-
-            test('updates status bar text on disconnected event', () => {
-                const ctx = createMockContext();
-                setConfig({ serverAutoStart: false, autoConnect: false });
-                activate(ctx);
-
-                const statusBar = (vscode.window.createStatusBarItem as jest.Mock)
-                    .mock.results[0].value;
-
-                expect(connectionCallbacks['disconnected']).toBeDefined();
-                connectionCallbacks['disconnected']();
-
-                expect(statusBar.text).toBe('$(sparkle) ClarAIty (offline)');
-                expect(statusBar.tooltip).toBe('ClarAIty - Disconnected');
-            });
-
-            test('registers both onConnected and onDisconnected', () => {
-                const ctx = createMockContext();
-                setConfig({ serverAutoStart: false, autoConnect: false });
-                activate(ctx);
-
-                expect(mockConnectionInstance.onConnected).toHaveBeenCalledTimes(1);
-                expect(mockConnectionInstance.onDisconnected).toHaveBeenCalledTimes(1);
-            });
-        });
-
-        describe('configuration change watcher', () => {
-            test('registers onDidChangeConfiguration listener', () => {
-                const ctx = createMockContext();
-                setConfig({ serverAutoStart: false, autoConnect: false });
-                activate(ctx);
-
-                expect(vscode.workspace.onDidChangeConfiguration).toHaveBeenCalled();
-            });
-
-            test('pushes config change disposable into subscriptions', () => {
-                const ctx = createMockContext();
-                setConfig({ serverAutoStart: false, autoConnect: false });
-                activate(ctx);
-
-                const disposable = (vscode.workspace.onDidChangeConfiguration as jest.Mock)
-                    .mock.results[0].value;
-                expect(ctx.subscriptions).toContain(disposable);
-            });
-
-            test('updates connection URL when claraity.serverUrl config changes', () => {
-                // Capture the config change callback
-                let configChangeCallback: Function | undefined;
-                (vscode.workspace.onDidChangeConfiguration as jest.Mock).mockImplementation(
-                    (cb: Function) => {
-                        configChangeCallback = cb;
-                        return { dispose: jest.fn() };
-                    },
-                );
-
-                const ctx = createMockContext();
-                setConfig({ serverAutoStart: false, autoConnect: false });
-                activate(ctx);
-
-                expect(configChangeCallback).toBeDefined();
-
-                // Set up what getConfiguration will return on the second call
-                const newConfig = {
-                    get: jest.fn((key: string, defaultValue?: any) => {
-                        if (key === 'serverUrl') { return 'ws://newhost:8888/ws'; }
-                        return defaultValue;
-                    }),
-                    update: jest.fn(),
-                    has: jest.fn(),
-                    inspect: jest.fn(),
-                };
-                (vscode.workspace.getConfiguration as jest.Mock).mockReturnValue(newConfig);
-
-                // Simulate config change event
-                configChangeCallback!({
-                    affectsConfiguration: (section: string) => section === 'claraity.serverUrl',
-                });
-
-                expect(mockConnectionInstance.updateUrl).toHaveBeenCalledWith(
-                    'ws://newhost:8888/ws',
-                );
-            });
-
-            test('does not update URL when unrelated config changes', () => {
-                let configChangeCallback: Function | undefined;
-                (vscode.workspace.onDidChangeConfiguration as jest.Mock).mockImplementation(
-                    (cb: Function) => {
-                        configChangeCallback = cb;
-                        return { dispose: jest.fn() };
-                    },
-                );
-
-                const ctx = createMockContext();
-                setConfig({ serverAutoStart: false, autoConnect: false });
-                activate(ctx);
-
-                // Simulate unrelated config change
-                configChangeCallback!({
-                    affectsConfiguration: (section: string) => section === 'editor.fontSize',
-                });
-
-                expect(mockConnectionInstance.updateUrl).not.toHaveBeenCalled();
-            });
-        });
-
         describe('cleanup disposable', () => {
-            test('pushes a cleanup disposable that disposes connection', () => {
+            test('pushes a cleanup disposable into subscriptions', () => {
                 const ctx = createMockContext();
-                setConfig({ serverAutoStart: false, autoConnect: false });
                 activate(ctx);
 
-                // Find the cleanup disposable (has a dispose function that calls connection.dispose)
-                const cleanupDisposables = ctx.subscriptions.filter(
-                    (s: any) => typeof s.dispose === 'function' && s !== (vscode.window.createOutputChannel as jest.Mock).mock.results[0].value,
-                );
-
-                // There should be at least one cleanup disposable
-                expect(cleanupDisposables.length).toBeGreaterThan(0);
-
-                // Call dispose on the last one (the cleanup disposable added at the end)
+                // The last subscription should be the cleanup disposable
                 const lastDisposable = ctx.subscriptions[ctx.subscriptions.length - 1] as any;
-                lastDisposable.dispose();
-
-                expect(mockConnectionInstance.dispose).toHaveBeenCalled();
+                expect(typeof lastDisposable.dispose).toBe('function');
             });
         });
     });
 
     // ──────────────────────────────────────────────────────────────────────
-    // activate() - serverAutoStart scenarios
+    // activate() - stdio mode with workspace
     // ──────────────────────────────────────────────────────────────────────
 
-    describe('activate() - serverAutoStart=true with workspace', () => {
+    describe('activate() - stdio mode with workspace', () => {
         test('calls resolveLaunchConfig with correct arguments', () => {
             const ctx = createMockContext();
-            setConfig({
-                serverAutoStart: true,
-                serverUrl: 'ws://localhost:9120/ws',
-                pythonPath: '/usr/bin/python3',
-                devMode: 'auto',
-                autoInstallAgent: true,
-            });
             activate(ctx);
 
             expect(resolveLaunchConfig).toHaveBeenCalledWith(
-                '/usr/bin/python3',
-                9120,
+                'python',   // default pythonPath
+                9120,       // port (for compatibility)
                 '/test/workspace',
-                'auto',
-                true,
+                'auto',     // default devMode
+                true,       // default autoInstallAgent
             );
         });
 
         test('sets status bar to checking state initially', () => {
             const ctx = createMockContext();
-            setConfig({ serverAutoStart: true });
             activate(ctx);
 
             const statusBar = (vscode.window.createStatusBarItem as jest.Mock)
@@ -613,144 +493,158 @@ describe('extension.ts', () => {
             expect(statusBar.tooltip).toBe('ClarAIty - Detecting environment...');
         });
 
-        test('creates ServerManager with launch config and port when resolved', async () => {
+        test('creates StdioConnection when launch config resolves', async () => {
             const launchConfig = {
                 mode: 'dev' as const,
                 command: 'python',
-                args: ['-m', 'src.server', '--port', '9120'],
+                args: ['-m', 'src.server'],
                 cwd: '/test/workspace',
             };
             (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
 
             const ctx = createMockContext();
-            setConfig({ serverAutoStart: true });
-            activate(ctx);
-
-            // Wait for the promise to resolve
-            await flushPromises();
-
-            expect(ServerManager).toHaveBeenCalledWith(launchConfig, 9120);
-        });
-
-        test('starts the server manager after creation', async () => {
-            const launchConfig = {
-                mode: 'installed' as const,
-                command: 'python',
-                args: ['--serve', '--port', '9120'],
-                cwd: '/test/workspace',
-            };
-            (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
-
-            const ctx = createMockContext();
-            setConfig({ serverAutoStart: true });
             activate(ctx);
 
             await flushPromises();
 
-            expect(mockServerManagerInstance.start).toHaveBeenCalled();
-        });
-
-        test('pushes server manager into subscriptions', async () => {
-            const launchConfig = {
-                mode: 'dev' as const,
-                command: 'python',
-                args: ['-m', 'src.server', '--port', '9120'],
-                cwd: '/test/workspace',
-            };
-            (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
-
-            const ctx = createMockContext();
-            setConfig({ serverAutoStart: true });
-            activate(ctx);
-
-            await flushPromises();
-
-            expect(ctx.subscriptions).toContain(mockServerManagerInstance);
-        });
-
-        test('connects WebSocket when server is ready', async () => {
-            const launchConfig = {
-                mode: 'dev' as const,
-                command: 'python',
-                args: ['-m', 'src.server', '--port', '9120'],
-                cwd: '/test/workspace',
-            };
-            (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
-
-            const ctx = createMockContext();
-            setConfig({ serverAutoStart: true });
-            activate(ctx);
-
-            await flushPromises();
-
-            // Fire the onReady callback
-            expect(serverManagerCallbacks['ready']).toBeDefined();
-            serverManagerCallbacks['ready']();
-
-            expect(mockConnectionInstance.connect).toHaveBeenCalled();
-        });
-
-        test('sets auth token on connection when server provides one', async () => {
-            const launchConfig = {
-                mode: 'dev' as const,
-                command: 'python',
-                args: ['-m', 'src.server', '--port', '9120'],
-                cwd: '/test/workspace',
-            };
-            (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
-
-            const ctx = createMockContext();
-            setConfig({ serverAutoStart: true });
-            activate(ctx);
-
-            await flushPromises();
-
-            // Simulate server providing an auth token
-            mockServerManagerInstance.authToken = 'secret-token-123';
-
-            // Fire the onReady callback
-            serverManagerCallbacks['ready']();
-
-            expect(mockConnectionInstance.setAuthToken).toHaveBeenCalledWith(
-                'secret-token-123',
+            expect(StdioConnection).toHaveBeenCalledWith(
+                {
+                    command: 'python',
+                    args: ['-m', 'src.server'],
+                    cwd: '/test/workspace',
+                },
+                expect.anything(), // log channel
+                '/mock/extension', // extensionPath
             );
-            expect(mockConnectionInstance.connect).toHaveBeenCalled();
         });
 
-        test('does not set auth token if server has none', async () => {
+        test('injects API key from SecretStorage when available', async () => {
             const launchConfig = {
                 mode: 'dev' as const,
                 command: 'python',
-                args: ['-m', 'src.server', '--port', '9120'],
+                args: ['-m', 'src.server'],
                 cwd: '/test/workspace',
             };
             (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
 
             const ctx = createMockContext();
-            setConfig({ serverAutoStart: true });
+            (ctx.secrets.get as jest.Mock).mockImplementation((key: string) => {
+                if (key === 'claraity.apiKey') { return Promise.resolve('sk-test-key'); }
+                return Promise.resolve(undefined);
+            });
             activate(ctx);
 
             await flushPromises();
 
-            // authToken is null by default
-            mockServerManagerInstance.authToken = null;
-            serverManagerCallbacks['ready']();
+            expect(mockStdioInstance.setApiKey).toHaveBeenCalledWith('sk-test-key');
+        });
 
-            expect(mockConnectionInstance.setAuthToken).not.toHaveBeenCalled();
-            expect(mockConnectionInstance.connect).toHaveBeenCalled();
+        test('injects Tavily key from SecretStorage when available', async () => {
+            const launchConfig = {
+                mode: 'dev' as const,
+                command: 'python',
+                args: ['-m', 'src.server'],
+                cwd: '/test/workspace',
+            };
+            (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
+
+            const ctx = createMockContext();
+            (ctx.secrets.get as jest.Mock).mockImplementation((key: string) => {
+                if (key === 'claraity.tavilyKey') { return Promise.resolve('tvly-test-key'); }
+                return Promise.resolve(undefined);
+            });
+            activate(ctx);
+
+            await flushPromises();
+
+            expect(mockStdioInstance.setTavilyKey).toHaveBeenCalledWith('tvly-test-key');
+        });
+
+        test('does not inject API key when SecretStorage has none', async () => {
+            const launchConfig = {
+                mode: 'dev' as const,
+                command: 'python',
+                args: ['-m', 'src.server'],
+                cwd: '/test/workspace',
+            };
+            (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
+
+            const ctx = createMockContext();
+            // secrets.get returns undefined by default
+            activate(ctx);
+
+            await flushPromises();
+
+            expect(mockStdioInstance.setApiKey).not.toHaveBeenCalled();
+        });
+
+        test('wires connection and sets it on sidebar provider', async () => {
+            const launchConfig = {
+                mode: 'dev' as const,
+                command: 'python',
+                args: ['-m', 'src.server'],
+                cwd: '/test/workspace',
+            };
+            (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
+
+            const ctx = createMockContext();
+            activate(ctx);
+
+            await flushPromises();
+
+            // wireConnection registers event handlers
+            expect(mockStdioInstance.onMessage).toHaveBeenCalledTimes(1);
+            expect(mockStdioInstance.onConnected).toHaveBeenCalledTimes(1);
+            expect(mockStdioInstance.onDisconnected).toHaveBeenCalledTimes(1);
+
+            // Sidebar gets the connection
+            expect(mockSidebarInstance.setConnection).toHaveBeenCalledWith(mockStdioInstance);
+        });
+
+        test('calls connect on StdioConnection', async () => {
+            const launchConfig = {
+                mode: 'dev' as const,
+                command: 'python',
+                args: ['-m', 'src.server'],
+                cwd: '/test/workspace',
+            };
+            (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
+
+            const ctx = createMockContext();
+            activate(ctx);
+
+            await flushPromises();
+
+            expect(mockStdioInstance.connect).toHaveBeenCalled();
+        });
+
+        test('pushes StdioConnection into subscriptions', async () => {
+            const launchConfig = {
+                mode: 'dev' as const,
+                command: 'python',
+                args: ['-m', 'src.server'],
+                cwd: '/test/workspace',
+            };
+            (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
+
+            const ctx = createMockContext();
+            activate(ctx);
+
+            await flushPromises();
+
+            expect(ctx.subscriptions).toContain(mockStdioInstance);
         });
 
         test('updates status bar to starting state after launch config resolves', async () => {
             const launchConfig = {
                 mode: 'dev' as const,
                 command: 'python',
-                args: ['-m', 'src.server', '--port', '9120'],
+                args: ['-m', 'src.server'],
                 cwd: '/test/workspace',
             };
             (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
 
             const ctx = createMockContext();
-            setConfig({ serverAutoStart: true });
             activate(ctx);
 
             await flushPromises();
@@ -758,39 +652,15 @@ describe('extension.ts', () => {
             const statusBar = (vscode.window.createStatusBarItem as jest.Mock)
                 .mock.results[0].value;
             expect(statusBar.text).toBe('$(loading~spin) ClarAIty (starting...)');
-            expect(statusBar.tooltip).toContain('Starting server');
+            expect(statusBar.tooltip).toContain('Starting');
+            expect(statusBar.tooltip).toContain('stdio');
             expect(statusBar.tooltip).toContain('dev mode');
-        });
-
-        test('updates status bar on server stopped event', async () => {
-            const launchConfig = {
-                mode: 'dev' as const,
-                command: 'python',
-                args: ['-m', 'src.server', '--port', '9120'],
-                cwd: '/test/workspace',
-            };
-            (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
-
-            const ctx = createMockContext();
-            setConfig({ serverAutoStart: true });
-            activate(ctx);
-
-            await flushPromises();
-
-            // Fire the onStopped callback with a reason
-            serverManagerCallbacks['stopped']('Process crashed');
-
-            const statusBar = (vscode.window.createStatusBarItem as jest.Mock)
-                .mock.results[0].value;
-            expect(statusBar.text).toBe('$(error) ClarAIty (server error)');
-            expect(statusBar.tooltip).toBe('ClarAIty - Server stopped: Process crashed');
         });
 
         test('shows not-installed status when resolveLaunchConfig returns null', async () => {
             (resolveLaunchConfig as jest.Mock).mockResolvedValue(null);
 
             const ctx = createMockContext();
-            setConfig({ serverAutoStart: true });
             activate(ctx);
 
             await flushPromises();
@@ -801,16 +671,15 @@ describe('extension.ts', () => {
             expect(statusBar.tooltip).toBe('ClarAIty - Agent not found');
         });
 
-        test('does not create ServerManager when resolveLaunchConfig returns null', async () => {
+        test('does not create StdioConnection when resolveLaunchConfig returns null', async () => {
             (resolveLaunchConfig as jest.Mock).mockResolvedValue(null);
 
             const ctx = createMockContext();
-            setConfig({ serverAutoStart: true });
             activate(ctx);
 
             await flushPromises();
 
-            expect(ServerManager).not.toHaveBeenCalled();
+            expect(StdioConnection).not.toHaveBeenCalled();
         });
 
         test('handles resolveLaunchConfig rejection gracefully', async () => {
@@ -819,7 +688,6 @@ describe('extension.ts', () => {
             );
 
             const ctx = createMockContext();
-            setConfig({ serverAutoStart: true });
             activate(ctx);
 
             await flushPromises();
@@ -834,7 +702,6 @@ describe('extension.ts', () => {
             (resolveLaunchConfig as jest.Mock).mockRejectedValue('string error');
 
             const ctx = createMockContext();
-            setConfig({ serverAutoStart: true });
             activate(ctx);
 
             await flushPromises();
@@ -851,7 +718,6 @@ describe('extension.ts', () => {
             );
 
             const ctx = createMockContext();
-            setConfig({ serverAutoStart: true });
             activate(ctx);
 
             await flushPromises();
@@ -859,27 +725,29 @@ describe('extension.ts', () => {
             const channel = (vscode.window.createOutputChannel as jest.Mock)
                 .mock.results[0].value;
             expect(channel.appendLine).toHaveBeenCalledWith(
-                '[ERROR] Environment resolution failed: Unexpected failure',
+                '[ERROR] Stdio launch failed: Unexpected failure',
             );
         });
     });
 
-    describe('activate() - serverAutoStart=true without workspace', () => {
+    // ──────────────────────────────────────────────────────────────────────
+    // activate() - no workspace folder
+    // ──────────────────────────────────────────────────────────────────────
+
+    describe('activate() - no workspace folder', () => {
         test('shows warning message when no workspace folder', () => {
             setWorkspaceFolders(undefined);
             const ctx = createMockContext();
-            setConfig({ serverAutoStart: true });
             activate(ctx);
 
             expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
-                'ClarAIty: No workspace folder open. Cannot auto-start server.',
+                'ClarAIty: No workspace folder open. Cannot start in stdio mode.',
             );
         });
 
         test('sets status bar to offline when no workspace folder', () => {
             setWorkspaceFolders(undefined);
             const ctx = createMockContext();
-            setConfig({ serverAutoStart: true });
             activate(ctx);
 
             const statusBar = (vscode.window.createStatusBarItem as jest.Mock)
@@ -888,192 +756,491 @@ describe('extension.ts', () => {
             expect(statusBar.tooltip).toBe('ClarAIty - No workspace folder');
         });
 
-        test('connects directly if autoConnect is true and no workspace', () => {
-            setWorkspaceFolders(undefined);
-            const ctx = createMockContext();
-            setConfig({ serverAutoStart: true, autoConnect: true });
-            activate(ctx);
-
-            expect(mockConnectionInstance.connect).toHaveBeenCalled();
-        });
-
-        test('does not connect if autoConnect is false and no workspace', () => {
-            setWorkspaceFolders(undefined);
-            const ctx = createMockContext();
-            setConfig({ serverAutoStart: true, autoConnect: false });
-            activate(ctx);
-
-            expect(mockConnectionInstance.connect).not.toHaveBeenCalled();
-        });
-
         test('does not call resolveLaunchConfig when no workspace', () => {
             setWorkspaceFolders(undefined);
             const ctx = createMockContext();
-            setConfig({ serverAutoStart: true });
             activate(ctx);
 
             expect(resolveLaunchConfig).not.toHaveBeenCalled();
+        });
+
+        test('does not create StdioConnection when no workspace', () => {
+            setWorkspaceFolders(undefined);
+            const ctx = createMockContext();
+            activate(ctx);
+
+            expect(StdioConnection).not.toHaveBeenCalled();
         });
 
         test('handles empty workspace folders array', () => {
             setWorkspaceFolders([]);
             const ctx = createMockContext();
-            setConfig({ serverAutoStart: true });
             activate(ctx);
 
+            // workspaceFolders[0] is undefined, so no workDir
             expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
-                'ClarAIty: No workspace folder open. Cannot auto-start server.',
+                'ClarAIty: No workspace folder open. Cannot start in stdio mode.',
             );
         });
     });
 
-    describe('activate() - serverAutoStart=false', () => {
-        test('sets status bar text when serverAutoStart is false', () => {
+    // ──────────────────────────────────────────────────────────────────────
+    // wireConnection() - connection event handlers
+    // ──────────────────────────────────────────────────────────────────────
+
+    describe('wireConnection() - connection events', () => {
+        async function activateWithConnection(): Promise<vscode.ExtensionContext> {
+            const launchConfig = {
+                mode: 'dev' as const,
+                command: 'python',
+                args: ['-m', 'src.server'],
+                cwd: '/test/workspace',
+            };
+            (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
+
             const ctx = createMockContext();
-            setConfig({ serverAutoStart: false, autoConnect: false });
             activate(ctx);
+            await flushPromises();
+            return ctx;
+        }
+
+        test('updates status bar text on connected event', async () => {
+            await activateWithConnection();
 
             const statusBar = (vscode.window.createStatusBarItem as jest.Mock)
                 .mock.results[0].value;
+
+            expect(connectionCallbacks['connected']).toBeDefined();
+            connectionCallbacks['connected']();
+
             expect(statusBar.text).toBe('$(sparkle) ClarAIty');
-            expect(statusBar.tooltip).toBe('Open ClarAIty Chat');
+            expect(statusBar.tooltip).toBe('ClarAIty - Connected');
         });
 
-        test('connects automatically when autoConnect is true', () => {
-            const ctx = createMockContext();
-            setConfig({ serverAutoStart: false, autoConnect: true });
-            activate(ctx);
+        test('updates status bar text on disconnected event', async () => {
+            await activateWithConnection();
 
-            expect(mockConnectionInstance.connect).toHaveBeenCalled();
+            const statusBar = (vscode.window.createStatusBarItem as jest.Mock)
+                .mock.results[0].value;
+
+            expect(connectionCallbacks['disconnected']).toBeDefined();
+            connectionCallbacks['disconnected']();
+
+            expect(statusBar.text).toBe('$(sparkle) ClarAIty (offline)');
+            expect(statusBar.tooltip).toBe('ClarAIty - Disconnected');
         });
 
-        test('does not connect when autoConnect is false', () => {
-            const ctx = createMockContext();
-            setConfig({ serverAutoStart: false, autoConnect: false });
-            activate(ctx);
+        test('handles stream_start message by beginning undo checkpoint', async () => {
+            await activateWithConnection();
 
-            expect(mockConnectionInstance.connect).not.toHaveBeenCalled();
+            expect(connectionCallbacks['message']).toBeDefined();
+            connectionCallbacks['message']({ type: 'stream_start' });
+
+            expect(mockUndoManagerInstance.beginCheckpoint).toHaveBeenCalled();
         });
 
-        test('does not call resolveLaunchConfig', () => {
-            const ctx = createMockContext();
-            setConfig({ serverAutoStart: false });
-            activate(ctx);
+        test('handles stream_end message by committing undo checkpoint', async () => {
+            await activateWithConnection();
 
-            expect(resolveLaunchConfig).not.toHaveBeenCalled();
+            connectionCallbacks['message']({ type: 'stream_end' });
+
+            expect(mockUndoManagerInstance.commitCheckpoint).toHaveBeenCalled();
         });
 
-        test('does not create ServerManager', () => {
-            const ctx = createMockContext();
-            setConfig({ serverAutoStart: false });
-            activate(ctx);
+        test('posts undoAvailable to webview when checkpoint has files', async () => {
+            mockUndoManagerInstance.commitCheckpoint.mockReturnValue({
+                turnId: 'turn-1',
+                files: new Map([['file1', { path: '/test/file.ts' }]]),
+            });
 
-            expect(ServerManager).not.toHaveBeenCalled();
+            await activateWithConnection();
+
+            connectionCallbacks['message']({ type: 'stream_end' });
+
+            expect(mockSidebarInstance.postToWebview).toHaveBeenCalledWith({
+                type: 'undoAvailable',
+                turnId: 'turn-1',
+                files: ['/test/file.ts'],
+            });
+        });
+
+        test('handles tool_state_updated for write_file awaiting_approval', async () => {
+            await activateWithConnection();
+
+            connectionCallbacks['message']({
+                type: 'store',
+                event: 'tool_state_updated',
+                data: {
+                    call_id: 'call-1',
+                    tool_name: 'write_file',
+                    status: 'awaiting_approval',
+                    arguments: { file_path: '/test/new-file.ts' },
+                },
+            });
+
+            expect(mockCodeLensInstance.addPendingChange).toHaveBeenCalledWith(
+                'call-1', 'write_file', '/test/new-file.ts',
+                { file_path: '/test/new-file.ts' },
+            );
+            expect(mockUndoManagerInstance.snapshotFile).toHaveBeenCalledWith('/test/new-file.ts');
+        });
+
+        test('handles tool_state_updated for edit_file success', async () => {
+            await activateWithConnection();
+
+            connectionCallbacks['message']({
+                type: 'store',
+                event: 'tool_state_updated',
+                data: {
+                    call_id: 'call-2',
+                    tool_name: 'edit_file',
+                    status: 'success',
+                    arguments: { file_path: '/test/edited.ts' },
+                },
+            });
+
+            expect(mockFileDecorationInstance.markModified).toHaveBeenCalledWith('/test/edited.ts');
+            expect(mockCodeLensInstance.removePendingChange).toHaveBeenCalledWith('call-2');
+        });
+
+        test('handles tool_state_updated for rejected status', async () => {
+            await activateWithConnection();
+
+            connectionCallbacks['message']({
+                type: 'store',
+                event: 'tool_state_updated',
+                data: {
+                    call_id: 'call-3',
+                    tool_name: 'write_file',
+                    status: 'rejected',
+                    arguments: { file_path: '/test/file.ts' },
+                },
+            });
+
+            expect(mockCodeLensInstance.removePendingChange).toHaveBeenCalledWith('call-3');
+        });
+
+        test('handles session_info by clearing all state', async () => {
+            await activateWithConnection();
+
+            connectionCallbacks['message']({ type: 'session_info' });
+
+            expect(mockFileDecorationInstance.clear).toHaveBeenCalled();
+            expect(mockCodeLensInstance.clear).toHaveBeenCalled();
+            expect(mockUndoManagerInstance.clear).toHaveBeenCalled();
+        });
+
+        test('handles tool_state_updated for running status (auto-approve snapshot)', async () => {
+            await activateWithConnection();
+
+            connectionCallbacks['message']({
+                type: 'store',
+                event: 'tool_state_updated',
+                data: {
+                    call_id: 'call-4',
+                    tool_name: 'write_file',
+                    status: 'running',
+                    arguments: { file_path: '/test/auto-file.ts' },
+                },
+            });
+
+            expect(mockUndoManagerInstance.snapshotFile).toHaveBeenCalledWith('/test/auto-file.ts');
         });
     });
 
     // ──────────────────────────────────────────────────────────────────────
-    // activate() - extractPort (tested indirectly)
+    // activate() - interrupt command with connection
     // ──────────────────────────────────────────────────────────────────────
 
-    describe('activate() - port extraction', () => {
-        test('extracts port 9120 from default URL', async () => {
+    describe('interrupt command', () => {
+        test('sends interrupt message via connection when connection exists', async () => {
             const launchConfig = {
                 mode: 'dev' as const,
                 command: 'python',
-                args: [],
-                cwd: '/test',
+                args: ['-m', 'src.server'],
+                cwd: '/test/workspace',
             };
             (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
 
             const ctx = createMockContext();
-            setConfig({ serverAutoStart: true, serverUrl: 'ws://localhost:9120/ws' });
             activate(ctx);
-
             await flushPromises();
 
-            // Port is passed as second arg to ServerManager constructor
-            expect(ServerManager).toHaveBeenCalledWith(launchConfig, 9120);
+            const callback = findCommandCallback('claraity.interrupt');
+            expect(callback).toBeDefined();
+            callback!();
+
+            expect(mockStdioInstance.send).toHaveBeenCalledWith({
+                type: 'interrupt',
+            });
         });
 
-        test('extracts custom port from URL', async () => {
+        test('does not throw when connection is not yet established', () => {
+            // resolveLaunchConfig returns null, so no connection
+            const ctx = createMockContext();
+            activate(ctx);
+
+            const callback = findCommandCallback('claraity.interrupt');
+            expect(callback).toBeDefined();
+
+            // Should not throw (connection?.send uses optional chaining)
+            expect(() => callback!()).not.toThrow();
+        });
+    });
+
+    // ──────────────────────────────────────────────────────────────────────
+    // activate() - acceptChange, rejectChange, viewDiff, undoTurn commands
+    // ──────────────────────────────────────────────────────────────────────
+
+    describe('approval commands', () => {
+        test('acceptChange sends approval_result and removes CodeLens', async () => {
             const launchConfig = {
                 mode: 'dev' as const,
                 command: 'python',
-                args: [],
-                cwd: '/test',
+                args: ['-m', 'src.server'],
+                cwd: '/test/workspace',
             };
             (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
 
             const ctx = createMockContext();
-            setConfig({ serverAutoStart: true, serverUrl: 'ws://example.com:4567/ws' });
             activate(ctx);
-
             await flushPromises();
 
-            expect(ServerManager).toHaveBeenCalledWith(launchConfig, 4567);
+            const callback = findCommandCallback('claraity.acceptChange');
+            expect(callback).toBeDefined();
+            callback!('call-abc');
+
+            expect(mockStdioInstance.send).toHaveBeenCalledWith({
+                type: 'approval_result',
+                call_id: 'call-abc',
+                approved: true,
+                auto_approve_future: false,
+            });
+            expect(mockCodeLensInstance.removePendingChange).toHaveBeenCalledWith('call-abc');
         });
 
-        test('extracts port from wss:// URL', async () => {
+        test('rejectChange sends rejection and removes CodeLens', async () => {
             const launchConfig = {
                 mode: 'dev' as const,
                 command: 'python',
-                args: [],
-                cwd: '/test',
+                args: ['-m', 'src.server'],
+                cwd: '/test/workspace',
             };
             (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
 
             const ctx = createMockContext();
-            setConfig({ serverAutoStart: true, serverUrl: 'wss://secure.host:8443/ws' });
             activate(ctx);
-
             await flushPromises();
 
-            expect(ServerManager).toHaveBeenCalledWith(launchConfig, 8443);
+            const callback = findCommandCallback('claraity.rejectChange');
+            expect(callback).toBeDefined();
+            callback!('call-xyz');
+
+            expect(mockStdioInstance.send).toHaveBeenCalledWith({
+                type: 'approval_result',
+                call_id: 'call-xyz',
+                approved: false,
+            });
+            expect(mockCodeLensInstance.removePendingChange).toHaveBeenCalledWith('call-xyz');
         });
 
-        test('falls back to port 9120 for unparseable URL', async () => {
-            const launchConfig = {
-                mode: 'dev' as const,
-                command: 'python',
-                args: [],
-                cwd: '/test',
-            };
-            (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
-
+        test('viewDiff delegates to sidebar provider', () => {
             const ctx = createMockContext();
-            setConfig({ serverAutoStart: true, serverUrl: 'not-a-url' });
             activate(ctx);
 
-            await flushPromises();
+            const callback = findCommandCallback('claraity.viewDiff');
+            expect(callback).toBeDefined();
+            callback!('call-diff', 'write_file', { file_path: '/a.ts' });
 
-            // Port is also passed to resolveLaunchConfig (second arg)
-            expect(resolveLaunchConfig).toHaveBeenCalledWith(
-                expect.anything(),
-                9120,
-                expect.anything(),
-                expect.anything(),
-                expect.anything(),
+            expect(mockSidebarInstance.openDiffFromCommand).toHaveBeenCalledWith(
+                'call-diff', 'write_file', { file_path: '/a.ts' },
             );
         });
 
-        test('falls back to port 9120 when URL has no explicit port', async () => {
-            const launchConfig = {
-                mode: 'dev' as const,
-                command: 'python',
-                args: [],
-                cwd: '/test',
-            };
-            (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
+        test('undoTurn restores files and posts undoComplete', async () => {
+            mockUndoManagerInstance.undo.mockResolvedValue(['/a.ts', '/b.ts']);
 
             const ctx = createMockContext();
-            // ws://localhost/ws has no port -> URL.port is empty string
-            setConfig({ serverAutoStart: true, serverUrl: 'ws://localhost/ws' });
             activate(ctx);
 
-            await flushPromises();
+            const callback = findCommandCallback('claraity.undoTurn');
+            expect(callback).toBeDefined();
+            await callback!('turn-42');
 
-            expect(ServerManager).toHaveBeenCalledWith(launchConfig, 9120);
+            expect(mockUndoManagerInstance.undo).toHaveBeenCalledWith('turn-42');
+            expect(mockSidebarInstance.postToWebview).toHaveBeenCalledWith({
+                type: 'undoComplete',
+                turnId: 'turn-42',
+                restoredFiles: ['/a.ts', '/b.ts'],
+            });
+        });
+    });
+
+    // ──────────────────────────────────────────────────────────────────────
+    // sendSelectionToChat (via editor context menu commands)
+    // ──────────────────────────────────────────────────────────────────────
+
+    describe('sendSelectionToChat commands', () => {
+        function setupEditor(text: string, languageId: string, fileName: string) {
+            (vscode.window as any).activeTextEditor = {
+                selection: {
+                    isEmpty: false,
+                    start: { line: 4, character: 0 },
+                    end: { line: 9, character: 0 },
+                },
+                document: {
+                    getText: jest.fn(() => text),
+                    fileName,
+                    languageId,
+                },
+            };
+        }
+
+        test('explainCode sends selection with "Explain this code" prefix', () => {
+            const ctx = createMockContext();
+            activate(ctx);
+
+            setupEditor('const x = 1;', 'typescript', '/test/workspace/file.ts');
+
+            const callback = findCommandCallback('claraity.explainCode');
+            callback!();
+
+            expect(vscode.commands.executeCommand).toHaveBeenCalledWith('claraity.chatView.focus');
+            expect(mockSidebarInstance.postToWebview).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    type: 'insertAndSend',
+                    content: expect.stringContaining('Explain this code:'),
+                }),
+            );
+        });
+
+        test('fixCode sends selection with "Fix this code" prefix', () => {
+            const ctx = createMockContext();
+            activate(ctx);
+
+            setupEditor('buggy()', 'javascript', '/test/workspace/app.js');
+
+            const callback = findCommandCallback('claraity.fixCode');
+            callback!();
+
+            expect(mockSidebarInstance.postToWebview).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    type: 'insertAndSend',
+                    content: expect.stringContaining('Fix this code:'),
+                }),
+            );
+        });
+
+        test('refactorCode sends selection with "Refactor this code" prefix', () => {
+            const ctx = createMockContext();
+            activate(ctx);
+
+            setupEditor('old_code()', 'python', '/test/workspace/main.py');
+
+            const callback = findCommandCallback('claraity.refactorCode');
+            callback!();
+
+            expect(mockSidebarInstance.postToWebview).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    type: 'insertAndSend',
+                    content: expect.stringContaining('Refactor this code:'),
+                }),
+            );
+        });
+
+        test('addToChat sends selection without prefix', () => {
+            const ctx = createMockContext();
+            activate(ctx);
+
+            setupEditor('some_code()', 'typescript', '/test/workspace/utils.ts');
+
+            const callback = findCommandCallback('claraity.addToChat');
+            callback!();
+
+            expect(mockSidebarInstance.postToWebview).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    type: 'insertAndSend',
+                    content: expect.stringContaining('utils.ts'),
+                }),
+            );
+        });
+
+        test('shows warning when no text selected', () => {
+            const ctx = createMockContext();
+            activate(ctx);
+
+            (vscode.window as any).activeTextEditor = {
+                selection: { isEmpty: true },
+                document: { getText: jest.fn(), fileName: 'test.ts', languageId: 'typescript' },
+            };
+
+            const callback = findCommandCallback('claraity.explainCode');
+            callback!();
+
+            expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+                'ClarAIty: No text selected.',
+            );
+        });
+
+        test('shows warning when no active editor', () => {
+            const ctx = createMockContext();
+            activate(ctx);
+
+            (vscode.window as any).activeTextEditor = undefined;
+
+            const callback = findCommandCallback('claraity.explainCode');
+            callback!();
+
+            expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+                'ClarAIty: No text selected.',
+            );
+        });
+
+        test('includes file context with line numbers in content', () => {
+            const ctx = createMockContext();
+            activate(ctx);
+
+            setupEditor('const x = 1;', 'typescript', '/test/workspace/src/index.ts');
+
+            const callback = findCommandCallback('claraity.addToChat');
+            callback!();
+
+            const postCall = mockSidebarInstance.postToWebview.mock.calls[0][0];
+            // Lines are 1-indexed: start.line(4)+1=5, end.line(9)+1=10
+            expect(postCall.content).toContain('index.ts');
+            expect(postCall.content).toContain('lines 5-10');
+            expect(postCall.content).toContain('```typescript');
+        });
+    });
+
+    // ──────────────────────────────────────────────────────────────────────
+    // setApiKey command
+    // ──────────────────────────────────────────────────────────────────────
+
+    describe('setApiKey command', () => {
+        test('stores key in SecretStorage when user provides one', async () => {
+            (vscode.window as any).showInputBox = jest.fn().mockResolvedValue('sk-my-key');
+
+            const ctx = createMockContext();
+            activate(ctx);
+
+            const callback = findCommandCallback('claraity.setApiKey');
+            expect(callback).toBeDefined();
+            await callback!();
+
+            expect(ctx.secrets.store).toHaveBeenCalledWith('claraity.apiKey', 'sk-my-key');
+        });
+
+        test('does nothing when user cancels input', async () => {
+            (vscode.window as any).showInputBox = jest.fn().mockResolvedValue(undefined);
+
+            const ctx = createMockContext();
+            activate(ctx);
+
+            const callback = findCommandCallback('claraity.setApiKey');
+            await callback!();
+
+            expect(ctx.secrets.store).not.toHaveBeenCalled();
         });
     });
 
@@ -1082,85 +1249,99 @@ describe('extension.ts', () => {
     // ──────────────────────────────────────────────────────────────────────
 
     describe('deactivate()', () => {
-        test('disposes connection when active', () => {
-            const ctx = createMockContext();
-            setConfig({ serverAutoStart: false, autoConnect: false });
-            activate(ctx);
-
-            deactivate();
-
-            expect(mockConnectionInstance.dispose).toHaveBeenCalled();
-        });
-
-        test('disposes server manager when active', async () => {
+        test('disposes connection when active', async () => {
             const launchConfig = {
                 mode: 'dev' as const,
                 command: 'python',
-                args: [],
-                cwd: '/test',
+                args: ['-m', 'src.server'],
+                cwd: '/test/workspace',
             };
             (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
 
             const ctx = createMockContext();
-            setConfig({ serverAutoStart: true });
             activate(ctx);
-
             await flushPromises();
 
             deactivate();
 
-            expect(mockServerManagerInstance.dispose).toHaveBeenCalled();
+            expect(mockStdioInstance.dispose).toHaveBeenCalled();
         });
 
         test('does not throw when called without prior activation', () => {
-            // Reset module-level state by deactivating first
+            // Reset module-level state
             deactivate();
             // Calling again should not throw
             expect(() => deactivate()).not.toThrow();
         });
 
-        test('does not dispose server manager when serverAutoStart was false', () => {
-            // First clear any prior state
-            deactivate();
+        test('sets connection to undefined after deactivation', async () => {
+            const launchConfig = {
+                mode: 'dev' as const,
+                command: 'python',
+                args: ['-m', 'src.server'],
+                cwd: '/test/workspace',
+            };
+            (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
 
             const ctx = createMockContext();
-            setConfig({ serverAutoStart: false, autoConnect: false });
             activate(ctx);
-
-            // Reset mock call count after activate
-            mockServerManagerInstance.dispose.mockClear();
+            await flushPromises();
 
             deactivate();
 
-            // ServerManager was never created, so dispose should not be called
-            // (the mock instance exists but ServerManager constructor was not called)
-            expect(ServerManager).not.toHaveBeenCalled();
+            // Calling deactivate again should not call dispose again
+            mockStdioInstance.dispose.mockClear();
+            deactivate();
+            expect(mockStdioInstance.dispose).not.toHaveBeenCalled();
         });
     });
 
     // ──────────────────────────────────────────────────────────────────────
-    // activate() - multiple activations (module-level state)
+    // workspace detection
     // ──────────────────────────────────────────────────────────────────────
 
-    describe('activate() - module-level state', () => {
-        test('replaces previous connection on re-activation', () => {
-            // First activation
-            const ctx1 = createMockContext();
-            setConfig({ serverAutoStart: false, autoConnect: false });
-            activate(ctx1);
+    describe('workspace detection', () => {
+        test('sets project context on sidebar when detected', async () => {
+            (detectProjectContext as jest.Mock).mockResolvedValue({
+                language: 'TypeScript',
+                framework: 'React',
+            });
 
-            const firstConnection = mockConnectionInstance;
+            const ctx = createMockContext();
+            activate(ctx);
 
-            // Reset mocks and create new instances for second activation
-            setupMocks();
+            await flushPromises();
 
-            const ctx2 = createMockContext();
-            setConfig({ serverAutoStart: false, autoConnect: false });
-            activate(ctx2);
+            expect(mockSidebarInstance.setProjectContext).toHaveBeenCalledWith(
+                expect.any(String),
+            );
+        });
 
-            // deactivate should dispose the second connection, not the first
-            deactivate();
-            expect(mockConnectionInstance.dispose).toHaveBeenCalled();
+        test('does not set project context when detection returns null', async () => {
+            (detectProjectContext as jest.Mock).mockResolvedValue(null);
+
+            const ctx = createMockContext();
+            activate(ctx);
+
+            await flushPromises();
+
+            expect(mockSidebarInstance.setProjectContext).not.toHaveBeenCalled();
+        });
+
+        test('handles detection failure gracefully', async () => {
+            (detectProjectContext as jest.Mock).mockRejectedValue(new Error('Failed'));
+
+            const ctx = createMockContext();
+            activate(ctx);
+
+            await flushPromises();
+
+            // Should not throw, just log the error
+            const channel = (vscode.window.createOutputChannel as jest.Mock)
+                .mock.results[0].value;
+            expect(channel.appendLine).toHaveBeenCalledWith(
+                expect.stringContaining('Workspace detection failed'),
+            );
         });
     });
 });

@@ -7,9 +7,10 @@
  * - Message dispatch from extension -> state
  * - Layout orchestration
  */
-import { useEffect, useReducer } from "react";
+import { useEffect, useReducer, useMemo } from "react";
 import { useVSCode } from "./hooks/useVSCode";
 import { appReducer, initialState, dispatchServerMessage } from "./state/reducer";
+import { ChatContext, type ChatContextValue } from "./state/ChatContext";
 import type { ExtensionMessage } from "./types";
 
 import { StatusBar } from "./components/StatusBar";
@@ -29,9 +30,23 @@ export function App() {
 
   const { postMessage, onReady } = useVSCode((msg: ExtensionMessage) => {
     switch (msg.type) {
-      case "connectionStatus":
-        dispatch({ type: "SET_CONNECTED", connected: msg.status === "connected" });
+      case "connectionStatus": {
+        const wasConnected = state.connected;
+        const nowConnected = msg.status === "connected";
+        dispatch({ type: "SET_CONNECTED", connected: nowConnected });
+
+        // Stuck-streaming recovery: if connection drops during active stream,
+        // force-end the stream and show an error so UI doesn't hang forever
+        if (wasConnected && !nowConnected && state.isStreaming) {
+          dispatch({ type: "STREAM_END" });
+          dispatch({
+            type: "ERROR",
+            errorType: "connection_lost",
+            message: "Connection to agent lost during streaming. The agent may have crashed.",
+          });
+        }
         break;
+      }
 
       case "sessionInfo":
         dispatch({
@@ -117,6 +132,17 @@ export function App() {
     postMessage({ type: "interrupt" });
   };
 
+  // Memoized context value for ChatHistory's child components
+  const chatContextValue = useMemo<ChatContextValue>(() => ({
+    postMessage,
+    toolCards: state.toolCards,
+    toolOrder: state.toolOrder,
+    toolCardOwners: state.toolCardOwners,
+    subagents: state.subagents,
+    promotedApprovals: state.promotedApprovals,
+    onDismissApproval: (callId: string) => dispatch({ type: "DISMISS_SUBAGENT_APPROVAL", callId }),
+  }), [postMessage, state.toolCards, state.toolOrder, state.toolCardOwners, state.subagents, state.promotedApprovals]);
+
   // Session panel view
   if (state.activePanel === "sessions") {
     return (
@@ -185,30 +211,25 @@ export function App() {
         />
       )}
 
-      <ChatHistory
-        timeline={state.timeline}
-        toolCards={state.toolCards}
-        toolOrder={state.toolOrder}
-        toolCardOwners={state.toolCardOwners}
-        subagents={state.subagents}
-        promotedApprovals={state.promotedApprovals}
-        isStreaming={state.isStreaming}
-        markdownBuffer={state.markdownBuffer}
-        currentThinking={state.currentThinking}
-        currentCodeBlock={state.currentCodeBlock}
-        pausePrompt={state.pausePrompt}
-        clarifyRequest={state.clarifyRequest}
-        planApproval={state.planApproval}
-        undoAvailable={state.undoAvailable}
-        undoCompleted={state.undoCompleted}
-        lastTurnStats={state.lastTurnStats}
-        postMessage={postMessage}
-        onDismissApproval={(callId) => dispatch({ type: "DISMISS_SUBAGENT_APPROVAL", callId })}
-        onSendPrompt={(prompt) => handleSendMessage(prompt)}
-        connected={state.connected}
-        modelName={state.modelName}
-        workingDirectory={state.workingDirectory}
-      />
+      <ChatContext.Provider value={chatContextValue}>
+        <ChatHistory
+          timeline={state.timeline}
+          isStreaming={state.isStreaming}
+          markdownBuffer={state.markdownBuffer}
+          currentThinking={state.currentThinking}
+          currentCodeBlock={state.currentCodeBlock}
+          pausePrompt={state.pausePrompt}
+          clarifyRequest={state.clarifyRequest}
+          planApproval={state.planApproval}
+          undoAvailable={state.undoAvailable}
+          undoCompleted={state.undoCompleted}
+          lastTurnStats={state.lastTurnStats}
+          onSendPrompt={(prompt) => handleSendMessage(prompt)}
+          connected={state.connected}
+          modelName={state.modelName}
+          workingDirectory={state.workingDirectory}
+        />
+      </ChatContext.Provider>
 
       <AutoApprovePanel
         autoApprove={state.autoApprove}

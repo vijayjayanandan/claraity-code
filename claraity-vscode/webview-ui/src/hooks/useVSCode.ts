@@ -40,8 +40,11 @@ export function useVSCode(handler: MessageHandler) {
   // Register message listener once
   useEffect(() => {
     const listener = (event: MessageEvent) => {
-      const message = event.data as ExtensionMessage;
-      handlerRef.current(message);
+      const message = event.data;
+      // Validate that the message looks like an ExtensionMessage before dispatching
+      if (message && typeof message === "object" && "type" in message) {
+        handlerRef.current(message as ExtensionMessage);
+      }
     };
     window.addEventListener("message", listener);
     return () => window.removeEventListener("message", listener);

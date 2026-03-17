@@ -62,7 +62,7 @@ export function SubagentCard({ info, toolCards, postMessage }: SubagentCardProps
   return (
     <div className={`tool-card${info.active ? " subagent-active" : ""}`}>
       <details open={info.active || hasAwaitingApproval}>
-        <summary className="tool-header" style={{ cursor: "pointer" }}>
+        <summary className="tool-header" style={{ cursor: "pointer" }} aria-expanded={info.active || hasAwaitingApproval}>
           <span className="tool-icon">SA</span>
           <span className="tool-name">
             {info.subagentName}

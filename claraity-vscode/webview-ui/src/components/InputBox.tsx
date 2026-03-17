@@ -20,6 +20,7 @@ interface InputBoxProps {
 }
 
 const MAX_IMAGES = 5;
+const MAX_TEXT_LENGTH = 100_000; // 100KB max input to prevent UI freeze
 
 export function InputBox({
   isStreaming,
@@ -67,6 +68,10 @@ export function InputBox({
   // Handle @mention detection — triggers on "@" alone or "@query"
   const handleChange = useCallback(
     (value: string) => {
+      // Guard against massive pastes that would freeze the webview
+      if (value.length > MAX_TEXT_LENGTH) {
+        value = value.slice(0, MAX_TEXT_LENGTH);
+      }
       setText(value);
       const atMatch = value.match(/@(\S*)$/);
       if (atMatch) {
@@ -188,12 +193,20 @@ export function InputBox({
   return (
     <div className="input-container">
       {/* Mention dropdown */}
-      <div className={`mention-dropdown ${showMentions && mentionResults.length > 0 ? "visible" : ""}`}>
+      <div
+        className={`mention-dropdown ${showMentions && mentionResults.length > 0 ? "visible" : ""}`}
+        role="listbox"
+        id="mention-listbox"
+        aria-label="File suggestions"
+      >
         {mentionResults.map((file, i) => (
           <div
             key={file.path}
+            id={`mention-${i}`}
             className={`mention-item ${i === mentionIndex ? "selected" : ""}`}
             onClick={() => insertMention(file)}
+            role="option"
+            aria-selected={i === mentionIndex}
           >
             <span className="mention-name">{file.name}</span>
             <span className="mention-path">{file.relativePath}</span>
@@ -254,6 +267,10 @@ export function InputBox({
           onPaste={handlePaste}
           placeholder="Ask ClarAIty..."
           rows={1}
+          aria-label="Message input"
+          aria-autocomplete="list"
+          aria-controls={showMentions ? "mention-listbox" : undefined}
+          aria-activedescendant={showMentions && mentionResults.length > 0 ? `mention-${mentionIndex}` : undefined}
         />
       </div>
       <div className="input-toolbar">

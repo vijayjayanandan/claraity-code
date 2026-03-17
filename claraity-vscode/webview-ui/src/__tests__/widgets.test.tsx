@@ -494,17 +494,13 @@ describe("ClarifyWidget", () => {
     ).not.toBeInTheDocument();
   });
 
-  test("after cancel, shows '[Clarification submitted]' (responses still set)", async () => {
-    // Note: The component checks `responses` truthiness, not `submitted`.
-    // After cancel, `responses` state is still the init object (truthy),
-    // so the text says "submitted" rather than "cancelled".
+  test("after cancel, shows '[Clarification cancelled]'", async () => {
     renderClarifyWidget();
 
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Cancel" }));
 
-    // The dismissed text checks `responses` which is the state value (init obj = truthy)
-    expect(screen.getByText("[Clarification submitted]")).toBeInTheDocument();
+    expect(screen.getByText("[Clarification cancelled]")).toBeInTheDocument();
   });
 
   test("multi-choice checkboxes toggle selections correctly", async () => {

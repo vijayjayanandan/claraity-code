@@ -7,6 +7,12 @@
 
 import * as vscode from 'vscode';
 
+/** Normalize path for comparison: forward slashes + lowercase on Windows only. */
+function normalizePath(p: string): string {
+    const fwd = p.replace(/\\/g, '/');
+    return process.platform === 'win32' ? fwd.toLowerCase() : fwd;
+}
+
 export class ClarAItyFileDecorationProvider implements vscode.FileDecorationProvider {
     private modifiedFiles = new Set<string>();
 
@@ -19,7 +25,7 @@ export class ClarAItyFileDecorationProvider implements vscode.FileDecorationProv
      */
     markModified(filePath: string): void {
         // Normalize path separators
-        const normalized = filePath.replace(/\\/g, '/');
+        const normalized = normalizePath(filePath);
         if (this.modifiedFiles.has(normalized)) {
             return;
         }
@@ -44,12 +50,12 @@ export class ClarAItyFileDecorationProvider implements vscode.FileDecorationProv
      * Called by VS Code when rendering the file tree.
      */
     provideFileDecoration(uri: vscode.Uri): vscode.FileDecoration | undefined {
-        const normalized = uri.fsPath.replace(/\\/g, '/');
+        const normalized = normalizePath(uri.fsPath);
         if (this.modifiedFiles.has(normalized)) {
             return {
                 badge: 'AI',
                 tooltip: 'Modified by ClarAIty',
-                color: new vscode.ThemeColor('charts.green'),
+                color: new vscode.ThemeColor('gitDecoration.addedResourceForeground'),
             };
         }
         return undefined;

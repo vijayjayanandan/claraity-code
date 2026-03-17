@@ -30,8 +30,8 @@ export default defineConfig({
     // Inline assets < 100KB into the JS bundle
     assetsInlineLimit: 100_000,
 
-    // VS Code uses Chromium
-    target: "esnext",
+    // VS Code 1.85+ ships Chromium ~120. Use es2022 for safe compatibility.
+    target: "es2022",
 
     // Sourcemaps for debugging in Extension Dev Host
     sourcemap: true,

@@ -41,7 +41,7 @@ export function PauseWidget({
   }, [feedback, postMessage]);
 
   return (
-    <div className="interactive-widget pause-widget">
+    <div className="interactive-widget pause-widget" role="alertdialog" aria-label="Agent paused">
       <div className="widget-header">Agent Paused</div>
       <div className="widget-body">
         <div className="reason">{reason || "Agent has paused."}</div>

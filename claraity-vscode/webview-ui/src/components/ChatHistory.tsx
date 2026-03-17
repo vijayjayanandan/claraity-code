@@ -9,14 +9,14 @@
  *
  * Auto-scrolls to bottom unless the user has scrolled up.
  */
-import { useRef, useEffect, useCallback, useMemo, useState } from "react";
+import { useRef, useEffect, useCallback, useMemo, useState, memo } from "react";
 import type {
   TimelineEntry,
   ThinkingBlock as ThinkingBlockType,
   CodeBlock as CodeBlockType,
-  SubagentInfo,
 } from "../state/reducer";
-import type { ToolStateData, WebViewMessage } from "../types";
+import { useChatContext } from "../state/ChatContext";
+import type { ToolStateData } from "../types";
 import { renderMarkdown } from "../utils/markdown";
 import { MessageBubble } from "./MessageBubble";
 import { ToolCard } from "./ToolCard";
@@ -33,11 +33,6 @@ import { WelcomeScreen } from "./WelcomeScreen";
 
 interface ChatHistoryProps {
   timeline: TimelineEntry[];
-  toolCards: Record<string, ToolStateData>;
-  toolOrder: string[]; // Insertion-order tool call IDs
-  toolCardOwners: Record<string, string>; // call_id -> subagent_id
-  subagents: Record<string, SubagentInfo>;
-  promotedApprovals: Record<string, { data: ToolStateData; subagentId: string }>;
   isStreaming: boolean;
   markdownBuffer: string;
   currentThinking: ThinkingBlockType | null;
@@ -64,8 +59,6 @@ interface ChatHistoryProps {
   undoAvailable: { turnId: string; files: string[] } | null;
   undoCompleted: boolean;
   lastTurnStats: { tokens: number; durationMs: number } | null;
-  postMessage: (msg: WebViewMessage) => void;
-  onDismissApproval: (callId: string) => void;
   onSendPrompt?: (prompt: string) => void;
   connected?: boolean;
   modelName?: string;
@@ -74,11 +67,6 @@ interface ChatHistoryProps {
 
 export function ChatHistory({
   timeline,
-  toolCards,
-  toolOrder,
-  toolCardOwners,
-  subagents,
-  promotedApprovals,
   isStreaming,
   markdownBuffer,
   currentThinking,
@@ -89,13 +77,12 @@ export function ChatHistory({
   undoAvailable,
   undoCompleted,
   lastTurnStats,
-  postMessage,
-  onDismissApproval,
   onSendPrompt,
   connected,
   modelName,
   workingDirectory,
 }: ChatHistoryProps) {
+  const { postMessage, toolCards, toolOrder, toolCardOwners, subagents, promotedApprovals, onDismissApproval } = useChatContext();
   const containerRef = useRef<HTMLDivElement>(null);
   const userScrolledUp = useRef(false);
   const [showScrollPill, setShowScrollPill] = useState(false);
@@ -147,6 +134,15 @@ export function ChatHistory({
       setShowScrollPill(false);
     }
   }, []);
+
+  // Pre-compute set of tool callIds for O(1) subagent dedup lookups
+  const toolCallIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const entry of timeline) {
+      if (entry.type === "tool") ids.add(entry.callId);
+    }
+    return ids;
+  }, [timeline]);
 
   // Build subagent tool lists: group tool cards by owning subagent.
   // Uses toolOrder for deterministic insertion-order iteration.
@@ -272,13 +268,8 @@ export function ChatHistory({
           case "subagent": {
             const saInfo = subagents[entry.subagentId];
             if (!saInfo) return null;
-            // Skip if already rendered via a 'tool' entry (delegation tool)
-            const hasDelegationToolEntry = timeline.some(
-              (e) =>
-                e.type === "tool" &&
-                e.callId === saInfo.parentToolCallId,
-            );
-            if (hasDelegationToolEntry) return null;
+            // Skip if already rendered via a 'tool' entry (delegation tool) — O(1) lookup
+            if (toolCallIds.has(saInfo.parentToolCallId)) return null;
             return (
               <SubagentCard
                 key={entry.id}
@@ -326,7 +317,7 @@ export function ChatHistory({
 
       {/* Streaming markdown buffer */}
       {isStreaming && markdownBuffer && (
-        <div className="message assistant">
+        <div className="message assistant" aria-live="polite">
           <div
             className="content"
             dangerouslySetInnerHTML={{

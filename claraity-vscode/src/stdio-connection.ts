@@ -29,6 +29,15 @@ export interface LaunchConfig {
     cwd: string;
 }
 
+/** Max auto-restart attempts before giving up. */
+const MAX_RESTART_ATTEMPTS = 3;
+
+/** Base delay (ms) between restart attempts (doubles each time). */
+const RESTART_BASE_DELAY_MS = 2000;
+
+/** Seconds to wait for stream_start after sending chat_message. */
+const RESPONSE_TIMEOUT_S = 30;
+
 export class StdioConnection implements vscode.Disposable {
     private process: ChildProcess | null = null;
     private tcpServer: net.Server | null = null;
@@ -37,6 +46,15 @@ export class StdioConnection implements vscode.Disposable {
     private serverOutputChannel: vscode.OutputChannel;
     private _apiKey: string = '';
     private _tavilyKey: string = '';
+    private _disposed = false;
+
+    // Auto-restart state
+    private _restartCount = 0;
+    private _restartTimer: ReturnType<typeof setTimeout> | null = null;
+    private _intentionalDisconnect = false;
+
+    // Response timeout: detect hung agent after sending chat_message
+    private _responseTimer: ReturnType<typeof setTimeout> | null = null;
 
     // Same events as AgentConnection
     private _onMessage = new vscode.EventEmitter<ServerMessage>();
@@ -125,7 +143,7 @@ export class StdioConnection implements vscode.Disposable {
 
             let firstMessage = true;
 
-            socket.on('data', (chunk: string) => {
+            socket.on('data', (chunk: string | Buffer) => {
                 this.socketBuffer += chunk;
 
                 // Process complete lines
@@ -144,8 +162,15 @@ export class StdioConnection implements vscode.Disposable {
 
                         if (firstMessage) {
                             firstMessage = false;
+                            this._restartCount = 0; // Reset on successful connection
                             this.logLine('[STDIO] Connected (received first message)');
                             this._onConnected.fire();
+                        }
+
+                        // Clear response timeout when we receive any message
+                        // (stream_start, text_delta, etc.)
+                        if (msg.type === 'stream_start' || msg.type === 'text_delta' || msg.type === 'error') {
+                            this.clearResponseTimeout();
                         }
 
                         this._onMessage.fire(msg);
@@ -206,14 +231,18 @@ export class StdioConnection implements vscode.Disposable {
 
             this.process.on('exit', (code, signal) => {
                 this.logLine(`[STDIO] Process exited (code=${code}, signal=${signal})`);
+                this.clearResponseTimeout();
                 this._onDisconnected.fire();
                 this.cleanup();
+                this.maybeAutoRestart(`exit code=${code}, signal=${signal}`);
             });
 
             this.process.on('error', (err: Error) => {
                 this.logLine(`[STDIO] Process error: ${err.message}`);
+                this.clearResponseTimeout();
                 this._onDisconnected.fire();
                 this.cleanup();
+                this.maybeAutoRestart(err.message);
             });
         });
 
@@ -224,14 +253,42 @@ export class StdioConnection implements vscode.Disposable {
 
     /**
      * Send a ClientMessage by writing JSON + newline to stdin.
+     * For chat_message, starts a response timeout to detect hung agents.
      */
     send(message: ClientMessage): void {
         if (this.process?.stdin && !this.process.stdin.destroyed) {
             const wrapped = wrapNotification(message as Record<string, any>);
             const line = JSON.stringify(wrapped) + '\n';
-            this.process.stdin.write(line);
+            this.process.stdin.write(line, (err) => {
+                if (err) {
+                    this.logLine(`[STDIO] stdin write error: ${err.message}`);
+                    // Stdin pipe is broken — agent is dead
+                    this._onMessage.fire({
+                        type: 'error',
+                        error_type: 'connection_error',
+                        user_message: 'Lost connection to agent. Attempting to restart...',
+                        recoverable: true,
+                    } as ServerMessage);
+                    this._onDisconnected.fire();
+                    this.cleanup();
+                    this.maybeAutoRestart('stdin write error');
+                }
+            });
+
+            // Start response timeout for chat messages
+            if (message.type === 'chat_message') {
+                this.startResponseTimeout();
+            }
         } else {
             this.logLine('[STDIO] Cannot send: process not running');
+            // Notify the webview that the message couldn't be sent
+            this._onMessage.fire({
+                type: 'error',
+                error_type: 'connection_error',
+                user_message: 'Agent is not running. Attempting to restart...',
+                recoverable: true,
+            } as ServerMessage);
+            this.maybeAutoRestart('process not running on send');
         }
     }
 
@@ -239,11 +296,16 @@ export class StdioConnection implements vscode.Disposable {
         return this.process !== null && !this.process.killed;
     }
 
+    /**
+     * Intentionally disconnect — does NOT trigger auto-restart.
+     */
     disconnect(): void {
         if (!this.process) {
             return;
         }
 
+        this._intentionalDisconnect = true;
+        this.clearResponseTimeout();
         this.logLine('[STDIO] Disconnecting...');
 
         if (this.process.stdin && !this.process.stdin.destroyed) {
@@ -264,9 +326,101 @@ export class StdioConnection implements vscode.Disposable {
         }, 3000);
     }
 
+    /**
+     * Force restart: kill current process and reconnect.
+     * Resets restart counter so subsequent crashes get full retry budget.
+     */
+    restart(): void {
+        this.logLine('[STDIO] Manual restart requested');
+        this._restartCount = 0;
+        this._intentionalDisconnect = true; // Don't double-restart
+        this.clearResponseTimeout();
+
+        if (this.process) {
+            const proc = this.process;
+            const pid = proc.pid;
+            this.cleanup();
+            // Force kill then reconnect
+            if (pid) {
+                if (process.platform === 'win32') {
+                    execFile('taskkill', ['/pid', String(pid), '/f', '/t'], () => {});
+                } else {
+                    try { proc.kill('SIGKILL'); } catch { /* already dead */ }
+                }
+            }
+        }
+
+        this._intentionalDisconnect = false;
+        setTimeout(() => this.connect(), 500);
+    }
+
     // Stubs for AgentConnection interface compatibility
     setAuthToken(_token: string): void { /* no-op */ }
     updateUrl(_url: string): void { /* no-op */ }
+
+    // ── Auto-restart logic ──
+
+    /**
+     * Called after process exit/error. Attempts restart with exponential backoff.
+     */
+    private maybeAutoRestart(reason: string): void {
+        if (this._disposed || this._intentionalDisconnect) {
+            return;
+        }
+
+        if (this._restartCount >= MAX_RESTART_ATTEMPTS) {
+            this.logLine(`[STDIO] Auto-restart exhausted (${MAX_RESTART_ATTEMPTS} attempts). Reason: ${reason}`);
+            vscode.window.showErrorMessage(
+                `ClarAIty agent stopped unexpectedly (${reason}). Click "Restart" to try again.`,
+                'Restart',
+            ).then((choice) => {
+                if (choice === 'Restart') {
+                    this.restart();
+                }
+            });
+            return;
+        }
+
+        this._restartCount++;
+        const delay = RESTART_BASE_DELAY_MS * Math.pow(2, this._restartCount - 1);
+        this.logLine(`[STDIO] Auto-restart attempt ${this._restartCount}/${MAX_RESTART_ATTEMPTS} in ${delay}ms (reason: ${reason})`);
+
+        this._restartTimer = setTimeout(() => {
+            this._restartTimer = null;
+            if (!this._disposed) {
+                this.connect();
+            }
+        }, delay);
+    }
+
+    // ── Response timeout logic ──
+
+    /**
+     * Start a timer: if no stream_start/text_delta/error arrives within
+     * RESPONSE_TIMEOUT_S, fire a synthetic error so the webview knows.
+     */
+    private startResponseTimeout(): void {
+        this.clearResponseTimeout();
+        this._responseTimer = setTimeout(() => {
+            this._responseTimer = null;
+            this.logLine(`[STDIO] Response timeout (${RESPONSE_TIMEOUT_S}s) — agent may be hung`);
+            this._onMessage.fire({
+                type: 'error',
+                error_type: 'response_timeout',
+                user_message: `Agent did not respond within ${RESPONSE_TIMEOUT_S} seconds. It may have crashed or is unresponsive.`,
+                recoverable: true,
+            } as ServerMessage);
+        }, RESPONSE_TIMEOUT_S * 1000);
+    }
+
+    private clearResponseTimeout(): void {
+        if (this._responseTimer) {
+            clearTimeout(this._responseTimer);
+            this._responseTimer = null;
+        }
+    }
+
+    // ── Cleanup ──
 
     private cleanup(): void {
         this.dataSocket?.destroy();
@@ -281,6 +435,13 @@ export class StdioConnection implements vscode.Disposable {
     }
 
     dispose(): void {
+        this._disposed = true;
+        this._intentionalDisconnect = true;
+        this.clearResponseTimeout();
+        if (this._restartTimer) {
+            clearTimeout(this._restartTimer);
+            this._restartTimer = null;
+        }
         this.disconnect();
         this.cleanup();
         this._onMessage.dispose();

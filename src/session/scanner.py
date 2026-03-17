@@ -5,6 +5,7 @@ without pulling in Textual (which is excluded from the bundled binary).
 """
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -143,7 +144,15 @@ def _extract_session_info(jsonl_path: Path, session_id: str) -> SessionDisplay |
                         if role == "user":
                             content = data.get("content", "")
                             if content and isinstance(content, str):
-                                first_user_message = content
+                                # Strip <project_context>...</project_context> injected by
+                                # the VS Code extension so the title shows the real prompt.
+                                content = re.sub(
+                                    r"<project_context>[\s\S]*?</project_context>\s*",
+                                    "",
+                                    content,
+                                ).strip()
+                                if content:
+                                    first_user_message = content
                     except json.JSONDecodeError:
                         continue
 

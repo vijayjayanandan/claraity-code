@@ -1,13 +1,14 @@
 /**
  * Turn statistics display (tokens used, duration).
  */
+import { memo } from "react";
 
 interface TurnStatsProps {
   tokens: number;
   durationMs: number;
 }
 
-export function TurnStats({ tokens, durationMs }: TurnStatsProps) {
+export const TurnStats = memo(function TurnStats({ tokens, durationMs }: TurnStatsProps) {
   const durationStr = durationMs > 0
     ? `${(durationMs / 1000).toFixed(1)}s`
     : "";
@@ -18,4 +19,4 @@ export function TurnStats({ tokens, durationMs }: TurnStatsProps) {
       {durationStr && ` | ${durationStr}`}
     </div>
   );
-}
+});

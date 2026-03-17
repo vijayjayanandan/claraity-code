@@ -1,7 +1,7 @@
-"""Pure-function handlers for LLM configuration over WebSocket.
+"""Pure-function handlers for LLM configuration.
 
 Three functions that read/write config.yaml and keyring, with no
-WebSocket dependency. Called by ws_protocol dispatch branches.
+transport dependency. Called by protocol dispatch branches.
 """
 
 import ipaddress

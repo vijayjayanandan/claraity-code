@@ -10,33 +10,147 @@ triggers a read. TCP sockets use a different libuv code path and work reliably.
 
 Usage:
     python -m src.server --stdio --data-port 12345
+
+Wire Protocol:
+    All messages are JSON-RPC 2.0 notifications over newline-delimited TCP.
+    Client -> Agent (stdin): JSON lines with {"type": "<msg_type>", ...}
+    Agent -> Client (TCP):   JSON-RPC wrapped notifications
+
+    Inbound message types:
+        chat_message      {"content": str, "images": list}
+        get_config        {}
+        save_config       {"config": dict}
+        list_models       {"backend": str, "base_url": str, "api_key": str}
+        set_mode          {"mode": "plan"|"normal"|"auto"}
+        set_auto_approve  {"categories": dict}
+        get_auto_approve  {}
+        new_session       {}
+        list_sessions     {}
+        resume_session    {"session_id": str}  (UUID format)
+        get_jira_profiles {}
+        save_jira_config  {"profile": str, "jira_url": str, "username": str, "api_token": str}
+        connect_jira      {"profile": str}
+        disconnect_jira   {}
+        (UserAction types: approval_result, interrupt, retry, pause_result, etc.)
+
+    Outbound message types:
+        session_info, error, stream_start, stream_end, text_delta,
+        code_block_start, code_block_delta, code_block_end,
+        thinking_start, thinking_delta, thinking_end,
+        config_loaded, config_saved, models_list,
+        interactive (clarify_request, permission_mode_changed, plan_submitted),
+        auto_approve_changed, sessions_list, session_history,
+        store (tool_state_updated, message_added, message_finalized),
+        jira_profiles, jira_config_saved, jira_connect_result, jira_disconnect_result,
+        todos_updated, pause_prompt_start, pause_prompt_end
 """
 
 import asyncio
 import json
 import os
+import re
 import sys
 import threading
 import uuid
+from pathlib import Path
 from typing import Any
 
-from src.core.events import PausePromptStart, UIEvent
-from src.core.protocol import UIProtocol
+from src.core.events import PausePromptStart, StreamEnd, UIEvent
+from src.core.protocol import InterruptSignal, UIProtocol, UserAction
 from src.observability import get_logger
+from src.server.jsonrpc import is_jsonrpc, unwrap, wrap_notification
 from src.server.serializers import (
     deserialize_action,
     serialize_event,
     serialize_store_notification,
 )
+from src.session.persistence.writer import SessionWriter
 from src.session.store.memory_store import StoreNotification
 
 logger = get_logger("server.stdio")
 
-# Maximum chat message size (characters) — matches WebSocket behaviour
-_MAX_CHAT_MESSAGE_LEN = 100_000
+# ---------------------------------------------------------------------------
+# Tunables -- override via environment variables
+# ---------------------------------------------------------------------------
+
+_MAX_CHAT_MESSAGE_LEN = int(os.environ.get("CLARAITY_MAX_MESSAGE_LEN", "100000"))
+_MAX_LINE_BYTES = int(os.environ.get("CLARAITY_MAX_LINE_BYTES", str(10 * 1024 * 1024)))  # 10 MB
+_MAX_STDIN_QUEUE = int(os.environ.get("CLARAITY_MAX_STDIN_QUEUE", "200"))
+_MAX_CHAT_QUEUE = int(os.environ.get("CLARAITY_MAX_CHAT_QUEUE", "10"))
+_TCP_CONNECT_TIMEOUT = float(os.environ.get("CLARAITY_TCP_CONNECT_TIMEOUT", "10"))
+_TCP_DRAIN_TIMEOUT = float(os.environ.get("CLARAITY_TCP_DRAIN_TIMEOUT", "5"))
+_CHAT_POLL_INTERVAL = float(os.environ.get("CLARAITY_CHAT_POLL_INTERVAL", "1"))
+_JIRA_CONNECT_TIMEOUT = float(os.environ.get("CLARAITY_JIRA_TIMEOUT", "120"))
 
 # Valid permission modes
 _VALID_MODES = frozenset({"plan", "normal", "auto"})
+
+# Session ID validation (prevents path traversal).
+# Accepts two formats:
+#   UUID:       xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx  (stdio server)
+#   Date-based: session-YYYYMMDD-HHMMSS-xxxxxxxx      (TUI)
+_SESSION_ID_RE = re.compile(
+    r"^(?:"
+    r"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}"  # UUID
+    r"|session-\d{8}-\d{6}-[a-f0-9]{8}"                                # TUI date-based
+    r")$",
+    re.IGNORECASE,
+)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _error_response(
+    error_type: str,
+    user_message: str,
+    recoverable: bool = True,
+) -> dict:
+    """Build a standardized error response dict for the wire protocol."""
+    return {
+        "type": "error",
+        "error_type": error_type,
+        "user_message": user_message,
+        "recoverable": recoverable,
+    }
+
+
+def _build_replay_messages(store) -> list[dict[str, Any]]:
+    """Build session_history payload from a store's transcript view."""
+    messages = store.get_transcript_view(include_pre_compaction=True)
+    replay = []
+    for msg in messages:
+        content = msg.content
+        if isinstance(content, list):
+            content = " ".join(
+                p.get("text", "")
+                for p in content
+                if isinstance(p, dict) and p.get("type") == "text"
+            )
+        entry: dict[str, Any] = {"role": msg.role, "content": content or ""}
+        if msg.tool_calls:
+            entry["tool_calls"] = [
+                {
+                    "id": tc.id,
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments,
+                    },
+                }
+                for tc in msg.tool_calls
+            ]
+        if msg.tool_call_id:
+            entry["tool_call_id"] = msg.tool_call_id
+        if msg.meta:
+            meta: dict[str, Any] = {}
+            if hasattr(msg.meta, "stop_reason") and msg.meta.stop_reason:
+                meta["status"] = msg.meta.stop_reason
+            if meta:
+                entry["meta"] = meta
+        replay.append(entry)
+    return replay
 
 
 # ---------------------------------------------------------------------------
@@ -44,17 +158,46 @@ _VALID_MODES = frozenset({"plan", "normal", "auto"})
 # ---------------------------------------------------------------------------
 
 
-def _stdin_reader_thread(loop: asyncio.AbstractEventLoop, queue: asyncio.Queue):
-    """Read lines from stdin in a background thread, push to asyncio queue."""
+def _stdin_reader_thread(
+    loop: asyncio.AbstractEventLoop,
+    queue: asyncio.Queue,
+    max_line_bytes: int,
+    shutdown_event: threading.Event | None = None,
+):
+    """Read lines from stdin in a background thread, push to asyncio queue.
+
+    Lines exceeding *max_line_bytes* are silently dropped to prevent OOM
+    from oversized payloads (e.g. a multi-GB base64 image on a single line).
+
+    If *shutdown_event* is set, the thread exits cleanly on the next iteration
+    to avoid the "could not acquire lock for stdin at interpreter shutdown"
+    fatal error (0xC0000005 on Windows).
+    """
     try:
         for line in sys.stdin.buffer:
+            if shutdown_event and shutdown_event.is_set():
+                break
             stripped = line.strip()
-            if stripped:
+            if not stripped:
+                continue
+            if len(stripped) > max_line_bytes:
+                sys.stderr.write(
+                    f"[STDIO] Dropped oversized stdin line ({len(stripped)} bytes)\n"
+                )
+                sys.stderr.flush()
+                continue
+            try:
                 loop.call_soon_threadsafe(queue.put_nowait, stripped)
+            except (asyncio.QueueFull, RuntimeError):
+                # RuntimeError: event loop closed — shutting down
+                break
     except (EOFError, OSError, ValueError):
         pass
     finally:
-        loop.call_soon_threadsafe(queue.put_nowait, None)
+        try:
+            loop.call_soon_threadsafe(queue.put_nowait, None)
+        except RuntimeError:
+            pass  # Event loop already closed
 
 
 # ---------------------------------------------------------------------------
@@ -64,6 +207,24 @@ def _stdin_reader_thread(loop: asyncio.AbstractEventLoop, queue: asyncio.Queue):
 
 class StdioProtocol(UIProtocol):
     """UIProtocol that reads commands from stdin and sends events over TCP."""
+
+    # Message type -> handler method name. Handlers accept (self, data).
+    _HANDLERS: dict[str, str] = {
+        "chat_message": "_handle_chat_message",
+        "get_config": "_handle_get_config",
+        "save_config": "_handle_save_config",
+        "list_models": "_handle_list_models",
+        "set_mode": "_handle_set_mode",
+        "set_auto_approve": "_handle_set_auto_approve",
+        "get_auto_approve": "_handle_get_auto_approve",
+        "new_session": "_handle_new_session",
+        "list_sessions": "_handle_list_sessions",
+        "resume_session": "_handle_resume_session",
+        "get_jira_profiles": "_handle_jira_profiles",
+        "save_jira_config": "_handle_jira_save",
+        "connect_jira": "_handle_jira_connect_dispatch",
+        "disconnect_jira": "_handle_jira_disconnect",
+    }
 
     def __init__(
         self,
@@ -80,21 +241,79 @@ class StdioProtocol(UIProtocol):
         self._data_port = data_port
         self._working_directory = working_directory
         self._send_lock = asyncio.Lock()
-        self._loop = asyncio.get_event_loop()
+        self._loop = asyncio.get_running_loop()
         self._unsubscribe = None
-        self._chat_queue: asyncio.Queue[dict | None] = asyncio.Queue()
-        self._stdin_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+        self._chat_queue: asyncio.Queue[dict | None] = asyncio.Queue(
+            maxsize=_MAX_CHAT_QUEUE
+        )
+        self._stdin_queue: asyncio.Queue[bytes | None] = asyncio.Queue(
+            maxsize=_MAX_STDIN_QUEUE
+        )
         self._closed = False
         self._tcp_writer: asyncio.StreamWriter | None = None
         # Tracked by run_stdio_server for session management
         self._session_id: str = ""
+        self._session_writer: SessionWriter | None = None
+        # Streaming task -- cancelled on InterruptSignal for immediate stop
+        self._streaming_task: asyncio.Task | None = None
+
+    def set_streaming_task(self, task: asyncio.Task | None) -> None:
+        """Register the current streaming task so it can be cancelled on interrupt."""
+        self._streaming_task = task
+
+    def submit_action(self, action: UserAction) -> None:
+        """Override to cancel the streaming task on InterruptSignal.
+
+        In TUI mode, the Textual worker cancels the asyncio task directly.
+        Here we replicate that: setting the flag + cancelling the task gives
+        immediate interruption instead of waiting for the next poll checkpoint.
+        """
+        super().submit_action(action)
+        if isinstance(action, InterruptSignal):
+            if self._streaming_task and not self._streaming_task.done():
+                self._streaming_task.cancel()
+                logger.info("stdio_streaming_task_cancelled")
+
+    # -- Session writer lifecycle -------------------------------------------
+
+    async def _open_session_writer(self, session_id: str) -> None:
+        """Create, open, and bind a SessionWriter for the given session."""
+        if self._session_writer:
+            try:
+                await self._session_writer.close()
+            except Exception as e:
+                logger.warning("stdio_session_writer_close_error", error=str(e))
+            self._session_writer = None
+
+        sessions_dir = Path(self._working_directory) / ".clarity" / "sessions"
+        jsonl_path = sessions_dir / session_id / "session.jsonl"
+        writer = SessionWriter(file_path=jsonl_path)
+        await writer.open()
+        writer.bind_to_store(self._store)
+        self._session_writer = writer
+        logger.info("stdio_session_writer_opened", session_id=session_id)
+
+    async def _close_session_writer(self) -> None:
+        """Close the session writer if open."""
+        if self._session_writer:
+            try:
+                await self._session_writer.close()
+                logger.info("stdio_session_writer_closed")
+            except Exception as e:
+                logger.warning("stdio_session_writer_close_error", error=str(e))
+            self._session_writer = None
+
+    # -- TCP data channel ---------------------------------------------------
 
     async def connect_data_channel(self) -> None:
         """Connect to the extension's TCP data port."""
         logger.debug("stdio_tcp_connecting", data_port=self._data_port)
         sys.stderr.write(f"[STDIO] Connecting to data port {self._data_port}...\n")
         sys.stderr.flush()
-        _reader, writer = await asyncio.open_connection("127.0.0.1", self._data_port)
+        _reader, writer = await asyncio.wait_for(
+            asyncio.open_connection("127.0.0.1", self._data_port),
+            timeout=_TCP_CONNECT_TIMEOUT,
+        )
         self._tcp_writer = writer
         logger.debug("stdio_tcp_connected", data_port=self._data_port)
         sys.stderr.write("[STDIO] Data channel connected\n")
@@ -102,12 +321,18 @@ class StdioProtocol(UIProtocol):
 
     def start_stdin_reader(self):
         """Start the background stdin reader thread."""
+        self._stdin_shutdown = threading.Event()
         t = threading.Thread(
             target=_stdin_reader_thread,
-            args=(self._loop, self._stdin_queue),
+            args=(self._loop, self._stdin_queue, _MAX_LINE_BYTES, self._stdin_shutdown),
             daemon=True,
         )
         t.start()
+
+    def stop_stdin_reader(self):
+        """Signal the stdin reader thread to exit cleanly."""
+        if hasattr(self, "_stdin_shutdown"):
+            self._stdin_shutdown.set()
 
     # -- Sending (Agent -> Client) via TCP ----------------------------------
 
@@ -120,16 +345,22 @@ class StdioProtocol(UIProtocol):
         tag = f"{msg_type}/{event}" if event else msg_type
         logger.debug("stdio_send_json", msg_type=tag)
         try:
-            from src.server.jsonrpc import wrap_notification
-
             wire_data = wrap_notification(data)
             async with self._send_lock:
                 line = json.dumps(wire_data, separators=(",", ":")) + "\n"
                 self._tcp_writer.write(line.encode("utf-8"))
-                await self._tcp_writer.drain()
-        except (OSError, ValueError, ConnectionError) as e:
+                await asyncio.wait_for(
+                    self._tcp_writer.drain(), timeout=_TCP_DRAIN_TIMEOUT
+                )
+        except (OSError, ValueError, ConnectionError, asyncio.TimeoutError) as e:
             logger.warning("stdio_send_error", msg_type=tag, error=str(e))
             self._closed = True
+
+    async def _send_error(
+        self, error_type: str, message: str, recoverable: bool = True
+    ) -> None:
+        """Send a standardized error response to the client."""
+        await self._send_json(_error_response(error_type, message, recoverable))
 
     async def send_event(self, event: UIEvent) -> None:
         """Serialize a UIEvent and send to TCP."""
@@ -149,7 +380,7 @@ class StdioProtocol(UIProtocol):
         model_name: str,
         permission_mode: str,
         working_directory: str,
-        auto_approve_categories=None,
+        auto_approve_categories: dict[str, bool] | None = None,
     ) -> None:
         """Send session_info message (also serves as ready signal)."""
         payload = {
@@ -166,12 +397,20 @@ class StdioProtocol(UIProtocol):
     # -- Store subscription -------------------------------------------------
 
     def subscribe_to_store(self) -> None:
-        """Subscribe to MessageStore notifications, forward to TCP."""
+        """Subscribe to MessageStore notifications, forward to TCP.
+
+        Serialization is performed eagerly in the calling thread to avoid
+        races where the store mutates the notification object before the
+        event loop processes the coroutine.
+        """
 
         def on_notification(notification: StoreNotification) -> None:
+            data = serialize_store_notification(notification)
+            if data is None:
+                return
             self._loop.call_soon_threadsafe(
                 asyncio.ensure_future,
-                self._safe_background_send(self._send_store_notification(notification)),
+                self._safe_background_send(self._send_json(data)),
             )
 
         self._unsubscribe = self._store.subscribe(on_notification)
@@ -190,9 +429,15 @@ class StdioProtocol(UIProtocol):
     # -- Todo notifications -------------------------------------------------
 
     def notify_todos_updated(self, todos: list) -> None:
-        asyncio.ensure_future(
-            self._safe_background_send(self._send_json({"type": "todos_updated", "todos": todos}))
+        """Forward todo updates to the client.
+
+        May be called from a thread-pool executor, so we use
+        call_soon_threadsafe instead of bare ensure_future.
+        """
+        coro = self._safe_background_send(
+            self._send_json({"type": "todos_updated", "todos": todos})
         )
+        self._loop.call_soon_threadsafe(asyncio.ensure_future, coro)
 
     # -- Interactive overrides (pause, clarify) -----------------------------
 
@@ -249,7 +494,7 @@ class StdioProtocol(UIProtocol):
 
     # -- Receiving (Client -> Agent) via stdin ------------------------------
 
-    async def receive_loop(self) -> None:  # noqa: C901
+    async def receive_loop(self) -> None:
         """Read JSON messages from stdin queue and dispatch."""
         while True:
             raw = await self._stdin_queue.get()
@@ -261,86 +506,15 @@ class StdioProtocol(UIProtocol):
                 data = json.loads(raw)
 
                 # Unwrap JSON-RPC envelope if present (backward compat)
-                from src.server.jsonrpc import is_jsonrpc, unwrap
-
                 if is_jsonrpc(data):
                     data = unwrap(data)
 
                 msg_type = data.get("type")
+                handler_name = self._HANDLERS.get(msg_type)
 
-                # -- Chat messages -----------------------------------------
-                if msg_type == "chat_message":
-                    content = data.get("content", "")
-                    images = data.get("images", [])
-                    if len(content) > _MAX_CHAT_MESSAGE_LEN:
-                        await self._send_json(
-                            {
-                                "type": "error",
-                                "error_type": "message_too_large",
-                                "user_message": "Message too large. Maximum 100,000 characters.",
-                                "recoverable": True,
-                            }
-                        )
-                        continue
-                    if content.strip() or images:
-                        await self._chat_queue.put({"content": content, "images": images})
-
-                # -- Config handlers ---------------------------------------
-                elif msg_type == "get_config":
-                    await self._handle_get_config()
-
-                elif msg_type == "save_config":
-                    await self._handle_save_config(data)
-
-                elif msg_type == "list_models":
-                    await self._handle_list_models(data)
-
-                # -- Mode / auto-approve -----------------------------------
-                elif msg_type == "set_mode":
-                    await self._handle_set_mode(data)
-
-                elif msg_type == "set_auto_approve":
-                    await self._handle_set_auto_approve(data)
-
-                elif msg_type == "get_auto_approve":
-                    await self._handle_get_auto_approve()
-
-                # -- Session management ------------------------------------
-                elif msg_type == "new_session":
-                    await self._handle_new_session()
-
-                elif msg_type == "list_sessions":
-                    await self._handle_list_sessions()
-
-                elif msg_type == "resume_session":
-                    session_id = data.get("session_id", "")
-                    if session_id:
-                        await self._handle_resume_session(session_id)
-
-                # -- Jira integration --------------------------------------
-                elif msg_type == "get_jira_profiles":
-                    await self._handle_jira_profiles()
-
-                elif msg_type == "save_jira_config":
-                    await self._handle_jira_save(data)
-
-                elif msg_type == "connect_jira":
-                    profile = data.get("profile", "")
-                    if profile:
-                        await self._handle_jira_connect(profile)
-                    else:
-                        await self._send_json(
-                            {
-                                "type": "jira_connect_result",
-                                "success": False,
-                                "message": "Profile name is required.",
-                            }
-                        )
-
-                elif msg_type == "disconnect_jira":
-                    await self._handle_jira_disconnect()
-
-                # -- UserActions (approve, reject, continue, etc.) ---------
+                if handler_name:
+                    handler = getattr(self, handler_name)
+                    await handler(data)
                 else:
                     action = deserialize_action(data)
                     if action is not None:
@@ -358,10 +532,25 @@ class StdioProtocol(UIProtocol):
         return await self._chat_queue.get()
 
     # -----------------------------------------------------------------
+    # Chat message handler
+    # -----------------------------------------------------------------
+
+    async def _handle_chat_message(self, data: dict) -> None:
+        content = data.get("content", "")
+        images = data.get("images", [])
+        if len(content) > _MAX_CHAT_MESSAGE_LEN:
+            await self._send_error(
+                "message_too_large", "Message too large. Maximum 100,000 characters."
+            )
+            return
+        if content.strip() or images:
+            await self._chat_queue.put({"content": content, "images": images})
+
+    # -----------------------------------------------------------------
     # Config handlers
     # -----------------------------------------------------------------
 
-    async def _handle_get_config(self) -> None:
+    async def _handle_get_config(self, data: dict) -> None:
         from src.server.config_handler import get_config_response
 
         response = get_config_response(self._config_path)
@@ -393,7 +582,8 @@ class StdioProtocol(UIProtocol):
             except Exception as exc:
                 logger.warning("stdio_llm_reconfigure_failed", error=str(exc))
                 response["message"] = (
-                    f"Config saved but apply failed: {exc}. Restart server to apply changes."
+                    "Config saved but LLM reconfiguration failed. "
+                    "Restart server to apply changes."
                 )
 
         await self._send_json(response)
@@ -401,7 +591,7 @@ class StdioProtocol(UIProtocol):
     async def _handle_list_models(self, data: dict) -> None:
         from src.server.config_handler import list_models_from_request
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         response = await loop.run_in_executor(None, list_models_from_request, data)
         await self._send_json(response)
 
@@ -413,13 +603,9 @@ class StdioProtocol(UIProtocol):
         mode = data.get("mode", "")
         if mode not in _VALID_MODES:
             logger.warning("stdio_invalid_mode", mode=mode)
-            await self._send_json(
-                {
-                    "type": "error",
-                    "error_type": "invalid_mode",
-                    "user_message": f"Invalid mode: {mode}. Valid modes: {', '.join(sorted(_VALID_MODES))}",
-                    "recoverable": True,
-                }
+            await self._send_error(
+                "invalid_mode",
+                f"Invalid mode: {mode}. Valid modes: {', '.join(sorted(_VALID_MODES))}",
             )
             return
         if mode and self._agent:
@@ -434,14 +620,7 @@ class StdioProtocol(UIProtocol):
                     }
                 )
             except ValueError:
-                await self._send_json(
-                    {
-                        "type": "error",
-                        "error_type": "invalid_mode",
-                        "user_message": f"Invalid mode: {mode}",
-                        "recoverable": True,
-                    }
-                )
+                await self._send_error("invalid_mode", f"Invalid mode: {mode}")
 
     async def _handle_set_auto_approve(self, data: dict) -> None:
         categories = data.get("categories", {})
@@ -454,7 +633,7 @@ class StdioProtocol(UIProtocol):
                 }
             )
 
-    async def _handle_get_auto_approve(self) -> None:
+    async def _handle_get_auto_approve(self, data: dict) -> None:
         if self._agent:
             await self._send_json(
                 {
@@ -467,48 +646,54 @@ class StdioProtocol(UIProtocol):
     # Session management handlers
     # -----------------------------------------------------------------
 
-    async def _handle_new_session(self) -> None:
-        """Reset agent to a fresh session (New Chat)."""
-        from src.session.store.memory_store import MessageStore
+    async def _switch_session(
+        self, session_id: str, store, jsonl_path: Path
+    ) -> None:
+        """Wire a new or resumed session: store, writer, delegation, subscriptions."""
+        await self._close_session_writer()
 
-        new_session_id = str(uuid.uuid4())
-
-        # 1. Reset core agent state
-        self._agent.reset_session(new_session_id)
-
-        # 2. Create new MessageStore and wire it
-        new_store = MessageStore()
-        self._agent.memory.set_message_store(new_store, new_session_id)
-
-        # 3. Re-subscribe protocol to new store
         self.unsubscribe_from_store()
-        self._store = new_store
+        self._store = store
         self.subscribe_to_store()
-
-        # 3b. Re-wire delegation tool with fresh bridge for new session
         self.wire_delegation_tool()
+        self._session_id = session_id
 
-        # 4. Update session tracking
-        self._session_id = new_session_id
+        writer = SessionWriter(file_path=jsonl_path)
+        await writer.open()
+        writer.bind_to_store(store)
+        self._session_writer = writer
 
-        # 5. Send session_info so client clears chat and shows new session
         model_name = getattr(self._agent, "model_name", "unknown")
         permission_mode = self._agent.get_permission_mode()
-        auto_approve_categories = self._agent.get_auto_approve_categories()
+        auto_approve = self._agent.get_auto_approve_categories()
         await self.send_session_info(
-            session_id=new_session_id,
+            session_id=session_id,
             model_name=model_name,
             permission_mode=permission_mode,
             working_directory=self._working_directory,
-            auto_approve_categories=auto_approve_categories,
+            auto_approve_categories=auto_approve,
+        )
+
+    async def _handle_new_session(self, data: dict) -> None:
+        """Reset agent to a fresh session (New Chat)."""
+        from src.session.store.memory_store import MessageStore
+
+        from datetime import datetime
+        new_session_id = f"session-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
+
+        self._agent.reset_session(new_session_id)
+        new_store = MessageStore()
+        self._agent.memory.set_message_store(new_store, new_session_id)
+
+        sessions_dir = Path(self._working_directory) / ".clarity" / "sessions"
+        await self._switch_session(
+            new_session_id, new_store, sessions_dir / new_session_id / "session.jsonl"
         )
 
         logger.info("stdio_session_reset", session_id=new_session_id)
 
-    async def _handle_list_sessions(self) -> None:
+    async def _handle_list_sessions(self, data: dict) -> None:
         """List available sessions for the history panel."""
-        from pathlib import Path
-
         from src.session.scanner import scan_sessions
 
         sessions_dir = Path(self._working_directory) / ".clarity" / "sessions"
@@ -517,7 +702,6 @@ class StdioProtocol(UIProtocol):
 
             sessions_data = []
             for s in sessions:
-                # Skip the currently active session
                 if s.session_id == self._session_id:
                     continue
                 sessions_data.append(
@@ -538,142 +722,74 @@ class StdioProtocol(UIProtocol):
             )
         except Exception as e:
             logger.error("stdio_list_sessions_error", error=str(e))
-            await self._send_json(
-                {
-                    "type": "error",
-                    "error_type": "session_list_error",
-                    "user_message": f"Failed to list sessions: {e}",
-                    "recoverable": True,
-                }
+            await self._send_error(
+                "session_list_error", "Failed to list sessions. Check server logs."
             )
 
-    async def _handle_resume_session(self, session_id: str) -> None:
-        """Resume a previous session by session_id."""
-        from pathlib import Path
+    def _find_session_file(self, session_id: str) -> Path | None:
+        """Locate the JSONL file for a session (directory or flat structure).
+
+        Validates session_id as a UUID to prevent path traversal attacks.
+        """
+        if not _SESSION_ID_RE.match(session_id):
+            logger.warning("stdio_invalid_session_id", session_id=session_id[:50])
+            return None
 
         sessions_dir = Path(self._working_directory) / ".clarity" / "sessions"
+        for candidate in (
+            sessions_dir / session_id / "session.jsonl",
+            sessions_dir / f"{session_id}.jsonl",
+        ):
+            try:
+                resolved = candidate.resolve()
+                if resolved.is_relative_to(sessions_dir.resolve()) and candidate.exists():
+                    return candidate
+            except (OSError, ValueError):
+                continue
+        return None
 
-        # Find session JSONL file (both flat and directory structures)
-        jsonl_path = None
-        dir_path = sessions_dir / session_id / "session.jsonl"
-        flat_path = sessions_dir / f"{session_id}.jsonl"
+    async def _handle_resume_session(self, data: dict) -> None:
+        """Resume a previous session by session_id."""
+        session_id = data.get("session_id", "")
+        if not session_id:
+            return
 
-        if dir_path.exists():
-            jsonl_path = dir_path
-        elif flat_path.exists():
-            jsonl_path = flat_path
-
+        jsonl_path = self._find_session_file(session_id)
         if not jsonl_path:
-            await self._send_json(
-                {
-                    "type": "error",
-                    "error_type": "session_not_found",
-                    "user_message": f"Session not found: {session_id}",
-                    "recoverable": True,
-                }
-            )
+            await self._send_error("session_not_found", f"Session not found: {session_id}")
             return
 
         try:
-            # Hydrate session from JSONL
             result = self._agent.resume_session_from_jsonl(jsonl_path)
-
-            # Set session ID (is_new_session=False to preserve state)
             self._agent.set_session_id(session_id, is_new_session=False)
 
-            # Get the hydrated store
-            new_store = result.store
+            await self._switch_session(session_id, result.store, jsonl_path)
 
-            # Re-wire protocol to new store
-            self.unsubscribe_from_store()
-            self._store = new_store
-            self.subscribe_to_store()
-
-            # Re-wire delegation tool with fresh bridge
-            self.wire_delegation_tool()
-
-            # Update session tracking
-            self._session_id = session_id
-
-            # Build session_history payload from store's transcript view
-            messages = new_store.get_transcript_view(include_pre_compaction=True)
-            replay_messages = []
-            for msg in messages:
-                # Content can be str or list (multimodal) -- extract text
-                content = msg.content
-                if isinstance(content, list):
-                    content = " ".join(
-                        p.get("text", "")
-                        for p in content
-                        if isinstance(p, dict) and p.get("type") == "text"
-                    )
-                replay_msg: dict[str, Any] = {
-                    "role": msg.role,
-                    "content": content or "",
-                }
-                if msg.tool_calls:
-                    replay_msg["tool_calls"] = [
-                        {
-                            "id": tc.id,
-                            "function": {
-                                "name": tc.function.name,
-                                "arguments": tc.function.arguments,
-                            },
-                        }
-                        for tc in msg.tool_calls
-                    ]
-                if msg.tool_call_id:
-                    replay_msg["tool_call_id"] = msg.tool_call_id
-                if msg.meta:
-                    meta: dict[str, Any] = {}
-                    if hasattr(msg.meta, "stop_reason") and msg.meta.stop_reason:
-                        meta["status"] = msg.meta.stop_reason
-                    if meta:
-                        replay_msg["meta"] = meta
-                replay_messages.append(replay_msg)
-
-            # Send session_info FIRST so client clears old chat state
-            model_name = getattr(self._agent, "model_name", "unknown")
-            permission_mode = self._agent.get_permission_mode()
-            auto_approve_categories = self._agent.get_auto_approve_categories()
-            await self.send_session_info(
-                session_id=session_id,
-                model_name=model_name,
-                permission_mode=permission_mode,
-                working_directory=self._working_directory,
-                auto_approve_categories=auto_approve_categories,
-            )
-
-            # Then send batch history for the client to render
+            replay = _build_replay_messages(result.store)
             await self._send_json(
                 {
                     "type": "session_history",
-                    "messages": replay_messages,
+                    "messages": replay,
                 }
             )
 
             logger.info(
                 "stdio_session_resumed",
                 session_id=session_id,
-                message_count=len(replay_messages),
+                message_count=len(replay),
             )
 
         except Exception as e:
             logger.error("stdio_resume_session_error", error=str(e))
-            await self._send_json(
-                {
-                    "type": "error",
-                    "error_type": "session_resume_error",
-                    "user_message": f"Failed to resume session: {e}",
-                    "recoverable": True,
-                }
+            await self._send_error(
+                "session_resume_error", "Failed to resume session. Check server logs."
             )
 
     # -----------------------------------------------------------------
     # Jira integration handlers
     # -----------------------------------------------------------------
 
-    async def _handle_jira_profiles(self) -> None:
+    async def _handle_jira_profiles(self, data: dict) -> None:
         """List Jira profiles and their connection status."""
         try:
             from src.integrations.jira.connection import JiraConnection
@@ -693,14 +809,13 @@ class StdioProtocol(UIProtocol):
                     }
                 )
 
-            # Check if any profile is currently connected
             connected_profile = None
             if self._agent:
                 mcp_conn = self._agent._mcp_manager.get_connection("jira")
                 if mcp_conn:
                     config_name = mcp_conn.config.name
                     if config_name.startswith("mcp-atlassian-"):
-                        connected_profile = config_name[len("mcp-atlassian-") :]
+                        connected_profile = config_name[len("mcp-atlassian-"):]
 
             await self._send_json(
                 {
@@ -716,15 +831,13 @@ class StdioProtocol(UIProtocol):
                     "type": "jira_profiles",
                     "profiles": [],
                     "connected_profile": None,
-                    "error": str(e),
+                    "error": "Failed to load Jira profiles. Check server logs.",
                 }
             )
 
     async def _handle_jira_save(self, data: dict) -> None:
         """Save Jira profile configuration."""
         try:
-            import re
-
             from src.integrations.jira.connection import JiraConnection
 
             profile = data.get("profile", "").strip()
@@ -790,7 +903,21 @@ class StdioProtocol(UIProtocol):
                 {
                     "type": "jira_config_saved",
                     "success": False,
-                    "message": f"Save failed: {e}",
+                    "message": "Save failed. Check server logs.",
+                }
+            )
+
+    async def _handle_jira_connect_dispatch(self, data: dict) -> None:
+        """Dispatch connect_jira with profile validation."""
+        profile = data.get("profile", "")
+        if profile:
+            await self._handle_jira_connect(profile)
+        else:
+            await self._send_json(
+                {
+                    "type": "jira_connect_result",
+                    "success": False,
+                    "message": "Profile name is required.",
                 }
             )
 
@@ -836,7 +963,7 @@ class StdioProtocol(UIProtocol):
 
             count = await asyncio.wait_for(
                 self._agent.enable_mcp_integration("jira", registry, client),
-                timeout=120,
+                timeout=_JIRA_CONNECT_TIMEOUT,
             )
 
             await self._send_json(
@@ -853,7 +980,7 @@ class StdioProtocol(UIProtocol):
                 {
                     "type": "jira_connect_result",
                     "success": False,
-                    "message": "Connection timed out (120s). Is mcp-atlassian installed?",
+                    "message": f"Connection timed out ({int(_JIRA_CONNECT_TIMEOUT)}s). Is mcp-atlassian installed?",
                 }
             )
         except Exception as e:
@@ -862,11 +989,11 @@ class StdioProtocol(UIProtocol):
                 {
                     "type": "jira_connect_result",
                     "success": False,
-                    "message": f"Connection failed: {e}",
+                    "message": "Connection failed. Check server logs.",
                 }
             )
 
-    async def _handle_jira_disconnect(self) -> None:
+    async def _handle_jira_disconnect(self, data: dict) -> None:
         """Disconnect from Jira MCP server."""
         if not self._agent:
             await self._send_json(
@@ -901,9 +1028,38 @@ class StdioProtocol(UIProtocol):
                 {
                     "type": "jira_disconnect_result",
                     "success": False,
-                    "message": f"Disconnect failed: {e}",
+                    "message": "Disconnect failed. Check server logs.",
                 }
             )
+
+    # -----------------------------------------------------------------
+    # Streaming
+    # -----------------------------------------------------------------
+
+    async def _stream_and_send(self, agent, chat_content: str, attachments=None) -> int:
+        """Stream agent response and send each event to the client.
+
+        Checks for TCP disconnect to avoid burning tokens when the client
+        is gone.
+        """
+        count = 0
+        async for event in agent.stream_response(
+            user_input=chat_content, ui=self, attachments=attachments
+        ):
+            if self._closed:
+                logger.warning("stdio_tcp_disconnected_during_stream")
+                self.submit_action(InterruptSignal())
+                break
+            count += 1
+            if count == 1 or count % 10 == 0:
+                logger.debug(
+                    "stdio_stream_event",
+                    event_num=count,
+                    event_type=type(event).__name__,
+                )
+            await self.send_event(event)
+        logger.info("stdio_stream_complete", total_events=count)
+        return count
 
     # -----------------------------------------------------------------
 
@@ -912,6 +1068,7 @@ class StdioProtocol(UIProtocol):
         if self._tcp_writer:
             try:
                 self._tcp_writer.close()
+                await self._tcp_writer.wait_closed()
             except Exception:
                 pass
             self._tcp_writer = None
@@ -932,7 +1089,6 @@ async def run_stdio_server(
     """Run the agent over stdio+TCP."""
     from src.core.agent import CodingAgent
     from src.llm.config_loader import load_llm_config
-    from src.session.store.memory_store import MessageStore
 
     logger.info("stdio_server_starting", working_directory=working_directory, data_port=data_port)
     sys.stderr.write(f"[STDIO] Working directory: {working_directory}\n")
@@ -971,6 +1127,9 @@ async def run_stdio_server(
     protocol.subscribe_to_store()
     protocol.start_stdin_reader()
 
+    # Create and bind SessionWriter for JSONL persistence
+    await protocol._open_session_writer(session_id)
+
     # Set todos callback
     protocol.set_todos_callback(protocol.notify_todos_updated)
 
@@ -994,77 +1153,104 @@ async def run_stdio_server(
     try:
         while True:
             try:
-                chat_msg = await asyncio.wait_for(protocol.wait_for_chat_message(), timeout=1.0)
+                chat_msg = await asyncio.wait_for(
+                    protocol.wait_for_chat_message(), timeout=_CHAT_POLL_INTERVAL
+                )
             except asyncio.TimeoutError:
                 if receive_task.done():
                     break
+                # TCP dropped while idle -- shut down gracefully
+                if protocol._closed:
+                    logger.info("stdio_tcp_closed_shutting_down")
+                    break
                 continue
 
-            # Reset protocol state for new turn
-            protocol.reset()
-
-            # Extract content and images
-            chat_content = (
-                chat_msg.get("content", "") if isinstance(chat_msg, dict) else str(chat_msg)
-            )
-            raw_images = chat_msg.get("images", []) if isinstance(chat_msg, dict) else []
-
-            # Build attachments
-            attachments = None
-            if raw_images:
-                import base64 as b64
-
-                from src.core.attachment import Attachment
-
-                attachments = []
-                for img in raw_images:
-                    data_url = img.get("data_url", "")
-                    raw_bytes = b""
-                    if ";base64," in data_url:
-                        raw_bytes = b64.b64decode(data_url.split(";base64,", 1)[1])
-                    attachments.append(
-                        Attachment(
-                            kind="image",
-                            data=raw_bytes,
-                            mime=img.get("mime", "image/png"),
-                            filename=img.get("filename", "screenshot.png"),
-                        )
-                    )
-
-            # Stream response
-            logger.info("stdio_chat_received", content_preview=chat_content[:80])
-            logger.debug("stdio_stream_start")
-            event_count = 0
             try:
-                async for event in agent.stream_response(
-                    user_input=chat_content,
-                    ui=protocol,
-                    attachments=attachments,
-                ):
-                    event_count += 1
-                    etype = type(event).__name__
-                    if event_count == 1 or event_count % 10 == 0:
-                        logger.debug("stdio_stream_event", event_num=event_count, event_type=etype)
-                    await protocol.send_event(event)
-            except asyncio.CancelledError:
-                logger.info("stdio_stream_cancelled", event_count=event_count)
-            except Exception as e:
-                logger.error("stdio_stream_error", error=str(e))
-                await protocol._send_json(
-                    {
-                        "type": "error",
-                        "error_type": "api_error",
-                        "user_message": "An internal error occurred.",
-                        "recoverable": True,
-                    }
+                # Reset protocol state for new turn
+                protocol.reset()
+
+                # Extract content and images
+                chat_content = (
+                    chat_msg.get("content", "") if isinstance(chat_msg, dict) else str(chat_msg)
                 )
+                raw_images = chat_msg.get("images", []) if isinstance(chat_msg, dict) else []
+
+                # Build attachments
+                attachments = None
+                if raw_images:
+                    import base64 as b64
+
+                    from src.core.attachment import Attachment
+
+                    attachments = []
+                    for img in raw_images:
+                        data_url = img.get("data_url", "")
+                        raw_bytes = b""
+                        if ";base64," in data_url:
+                            try:
+                                payload = data_url.split(";base64,", 1)[1]
+                                # Fix padding if missing (common with browser data URLs)
+                                missing_padding = len(payload) % 4
+                                if missing_padding:
+                                    payload += "=" * (4 - missing_padding)
+                                raw_bytes = b64.b64decode(payload)
+                            except Exception as e:
+                                logger.warning("image_decode_failed", error=str(e))
+                                sys.stderr.write(f"[STDIO] Skipping image with invalid base64: {e}\n")
+                                sys.stderr.flush()
+                                continue
+                        attachments.append(
+                            Attachment(
+                                kind="image",
+                                data=raw_bytes,
+                                mime=img.get("mime", "image/png"),
+                                filename=img.get("filename", "screenshot.png"),
+                            )
+                        )
+
+                # Stream response -- wrapped in a task so InterruptSignal can cancel it
+                # immediately (mirrors TUI's _stream_worker.cancel() behaviour).
+                logger.info("stdio_chat_received", content_preview=chat_content[:80])
+                logger.debug("stdio_stream_start")
+
+                streaming_task = asyncio.create_task(
+                    protocol._stream_and_send(agent, chat_content, attachments)
+                )
+                protocol.set_streaming_task(streaming_task)
+                try:
+                    event_count = await streaming_task
+                except asyncio.CancelledError:
+                    logger.info("stdio_stream_cancelled")
+                    # Send stream_end so the extension resets its UI state
+                    await protocol.send_event(StreamEnd())
+                except Exception as e:
+                    logger.error("stdio_stream_error", error=str(e))
+                    await protocol._send_error("api_error", "An internal error occurred.")
+                finally:
+                    protocol.set_streaming_task(None)
+            except Exception as turn_err:
+                # Catch-all for unexpected errors in turn processing (e.g. bad
+                # base64, malformed message). Log and continue — don't kill server.
+                logger.error("stdio_turn_error", error=str(turn_err), error_type=type(turn_err).__name__)
+                sys.stderr.write(f"[FATAL] {turn_err}\n")
+                sys.stderr.flush()
+                try:
+                    await protocol._send_error("internal_error", f"Turn processing error: {turn_err}")
+                except Exception:
+                    pass
 
     finally:
+        # Signal stdin reader thread to exit before we tear down the event loop.
+        # This prevents the "could not acquire lock for stdin at interpreter
+        # shutdown" fatal error (0xC0000005 on Windows).
+        protocol.stop_stdin_reader()
+
         receive_task.cancel()
         try:
             await receive_task
         except asyncio.CancelledError:
             pass
+        await protocol._close_session_writer()
         protocol.unsubscribe_from_store()
         await protocol.shutdown()
         agent.shutdown()

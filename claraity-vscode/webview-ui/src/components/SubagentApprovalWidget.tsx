@@ -29,9 +29,7 @@ export function SubagentApprovalWidget({
   const toolName = data.tool_name ?? "tool";
   const primaryArg = getPrimaryArg(toolName, data.arguments);
 
-  const handleAccept = () => {
-    postMessage({ type: "approvalResult", callId, approved: true });
-    // For write/edit tools, auto-open diff viewer
+  const handleShowDiff = () => {
     if ((toolName === "write_file" || toolName === "edit_file" || toolName === "append_to_file") && data.arguments) {
       postMessage({
         type: "showDiff",
@@ -40,6 +38,10 @@ export function SubagentApprovalWidget({
         arguments: data.arguments as Record<string, unknown>,
       });
     }
+  };
+
+  const handleAccept = () => {
+    postMessage({ type: "approvalResult", callId, approved: true });
     onDismiss();
   };
 
@@ -63,6 +65,9 @@ export function SubagentApprovalWidget({
       </div>
       <div className="widget-actions">
         <button className="btn-primary" onClick={handleAccept}>Accept</button>
+        {(toolName === "write_file" || toolName === "edit_file" || toolName === "append_to_file") && data.arguments && (
+          <button className="btn-secondary" onClick={handleShowDiff}>View Diff</button>
+        )}
         <button className="btn-danger" onClick={handleReject}>Reject</button>
       </div>
       <div style={{ padding: "6px 10px" }}>

@@ -1,6 +1,7 @@
 /**
  * Collapsible thinking/reasoning block.
  */
+import { memo } from "react";
 import type { ThinkingBlock as ThinkingBlockType } from "../state/reducer";
 
 interface ThinkingBlockProps {
@@ -8,7 +9,7 @@ interface ThinkingBlockProps {
   isActive?: boolean;
 }
 
-export function ThinkingBlock({ thinking, isActive }: ThinkingBlockProps) {
+export const ThinkingBlock = memo(function ThinkingBlock({ thinking, isActive }: ThinkingBlockProps) {
   const className = `thinking-block${isActive ? " active" : ""}`;
 
   return (
@@ -20,4 +21,4 @@ export function ThinkingBlock({ thinking, isActive }: ThinkingBlockProps) {
       <div className="thinking-content">{thinking.content}</div>
     </details>
   );
-}
+});

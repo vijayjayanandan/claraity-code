@@ -155,9 +155,10 @@ export function checkDevMode(workDir: string): boolean {
 /** Return the installed version of claraity-code, or null if not installed. */
 export function checkInstalledPackage(pythonPath: string): Promise<string | null> {
     return new Promise((resolve) => {
+        // Use --  separator and JSON-safe constant to prevent injection
         const script =
-            `import importlib.metadata; print(importlib.metadata.version('${PYPI_PACKAGE}'))`;
-        execFile(pythonPath, ['-c', script], { timeout: 15_000 }, (err, stdout) => {
+            `import importlib.metadata,sys,json; print(importlib.metadata.version(json.loads(sys.argv[1])))`;
+        execFile(pythonPath, ['-c', script, JSON.stringify(PYPI_PACKAGE)], { timeout: 15_000 }, (err, stdout) => {
             if (err) {
                 resolve(null);
                 return;

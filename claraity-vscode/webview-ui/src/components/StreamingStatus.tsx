@@ -80,8 +80,8 @@ export function StreamingStatus({
   }
 
   return (
-    <div className="streaming-status">
-      <span className="status-spinner">&#x27F3;</span>
+    <div className="streaming-status" role="status" aria-live="polite" aria-label="Streaming status">
+      <span className="status-spinner" aria-hidden="true">&#x27F3;</span>
       <span className="status-text">{statusText}</span>
       <span className="status-elapsed">{formatElapsed(elapsed)}</span>
     </div>

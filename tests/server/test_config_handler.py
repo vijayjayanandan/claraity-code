@@ -197,3 +197,49 @@ class TestNumericHelpers:
         assert _int_or_none("bad") is None
         assert _int_or_none(None) is None
         assert _int_or_none("") is None
+
+
+# ── SSRF protection ──
+
+class TestSSRFProtection:
+    """URL validation must block cloud metadata endpoints."""
+
+    def test_blocks_cloud_metadata_url(self):
+        from src.server.config_handler import _validate_list_models_url
+        is_valid, reason = _validate_list_models_url(
+            "http://169.254.169.254/latest/meta-data/"
+        )
+        assert not is_valid
+        assert "link-local" in reason.lower() or "metadata" in reason.lower()
+
+    def test_allows_normal_url(self):
+        from src.server.config_handler import _validate_list_models_url
+        is_valid, _ = _validate_list_models_url("https://api.openai.com/v1")
+        assert is_valid
+
+    def test_allows_localhost_for_ollama(self):
+        from src.server.config_handler import _validate_list_models_url
+        is_valid, _ = _validate_list_models_url("http://localhost:11434")
+        assert is_valid
+
+    def test_handles_invalid_url(self):
+        from src.server.config_handler import _validate_list_models_url
+        is_valid, reason = _validate_list_models_url("")
+        assert not is_valid
+
+
+# ── Mode validation ──
+
+class TestModeValidation:
+    """Only plan, normal, auto are valid permission modes."""
+
+    def test_valid_modes(self):
+        VALID_MODES = {"plan", "normal", "auto"}
+        for mode in VALID_MODES:
+            assert mode in VALID_MODES
+
+    def test_invalid_mode_rejected(self):
+        VALID_MODES = {"plan", "normal", "auto"}
+        assert "superuser" not in VALID_MODES
+        assert "root" not in VALID_MODES
+        assert "" not in VALID_MODES

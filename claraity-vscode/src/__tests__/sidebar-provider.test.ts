@@ -8,7 +8,7 @@
  *
  * Mock strategy:
  * - vscode module: mocked via __mocks__/vscode.js (configured in jest.config.js)
- * - AgentConnection: manually mocked with EventEmitter-based events and jest.fn() methods
+ * - StdioConnection: manually mocked with EventEmitter-based events and jest.fn() methods
  */
 
 import * as vscode from 'vscode';
@@ -16,14 +16,15 @@ import { DiffContentProvider, ClarAItySidebarProvider } from '../sidebar-provide
 import type { ServerMessage, WebViewMessage } from '../types';
 
 // ---------------------------------------------------------------------------
-// Mock AgentConnection
+// Mock StdioConnection
 // ---------------------------------------------------------------------------
 
 /**
- * Creates a mock AgentConnection that mirrors the real class's public API:
+ * Creates a mock StdioConnection that mirrors the real class's public API:
  * - send(): jest.fn
  * - disconnect(): jest.fn
  * - isConnected: boolean (configurable)
+ * - setApiKey / setTavilyKey / connect / updateUrl: jest.fn (StdioConnection-specific)
  * - onMessage / onConnected / onDisconnected: EventEmitter-backed events
  */
 function createMockConnection() {
@@ -35,6 +36,11 @@ function createMockConnection() {
         send: jest.fn(),
         disconnect: jest.fn(),
         isConnected: false,
+        // StdioConnection-specific methods
+        setApiKey: jest.fn(),
+        setTavilyKey: jest.fn(),
+        connect: jest.fn(),
+        updateUrl: jest.fn(), // no-op stub for interface compat
         onMessage: onMessageEmitter.event,
         onConnected: onConnectedEmitter.event,
         onDisconnected: onDisconnectedEmitter.event,
@@ -244,9 +250,6 @@ describe('ClarAItySidebarProvider', () => {
         const mockView = createMockWebviewView();
         const context = {} as vscode.WebviewViewResolveContext;
         const token = { isCancellationRequested: false, onCancellationRequested: jest.fn() } as any;
-
-        // Need to mock fs.existsSync for getHtmlForWebview
-        jest.spyOn(require('fs'), 'existsSync').mockReturnValue(false);
 
         provider.resolveWebviewView(
             mockView as any,

@@ -36,6 +36,8 @@ function formatCost(cost: number | null): string {
   return ` ~$${cost.toFixed(2)}`;
 }
 
+import { memo } from "react";
+
 interface ContextBarProps {
   used: number;
   limit: number;
@@ -44,7 +46,7 @@ interface ContextBarProps {
   modelName: string;
 }
 
-export function ContextBar({ used, limit, totalTokens, turnCount, modelName }: ContextBarProps) {
+export const ContextBar = memo(function ContextBar({ used, limit, totalTokens, turnCount, modelName }: ContextBarProps) {
   const pct = limit > 0 ? Math.round((used / limit) * 100) : 0;
   const costStr = totalTokens > 0 ? formatCost(estimateCost(totalTokens, modelName)) : "";
 
@@ -66,4 +68,4 @@ export function ContextBar({ used, limit, totalTokens, turnCount, modelName }: C
       />
     </div>
   );
-}
+});

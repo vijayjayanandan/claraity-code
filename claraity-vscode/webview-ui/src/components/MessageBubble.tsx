@@ -4,7 +4,7 @@
  * Strips <project_context>...</project_context> blocks from user messages
  * (injected by the extension for LLM context, not meant to be displayed).
  */
-import { useMemo } from "react";
+import { useMemo, memo } from "react";
 import type { ChatMessage } from "../state/reducer";
 import { renderMarkdown } from "../utils/markdown";
 import { stripProjectContext } from "../utils/text";
@@ -13,7 +13,7 @@ interface MessageBubbleProps {
   message: ChatMessage;
 }
 
-export function MessageBubble({ message }: MessageBubbleProps) {
+export const MessageBubble = memo(function MessageBubble({ message }: MessageBubbleProps) {
   const html = useMemo(() => {
     const displayContent = message.role === "user"
       ? stripProjectContext(message.content)
@@ -29,4 +29,4 @@ export function MessageBubble({ message }: MessageBubbleProps) {
       />
     </div>
   );
-}
+});

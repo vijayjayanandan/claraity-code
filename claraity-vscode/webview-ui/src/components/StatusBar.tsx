@@ -1,6 +1,7 @@
 /**
  * Top header bar with ClarAIty title and toolbar icons.
  */
+import { memo } from "react";
 
 interface StatusBarProps {
   onNewChat: () => void;
@@ -9,24 +10,24 @@ interface StatusBarProps {
   onShowJira: () => void;
 }
 
-export function StatusBar({ onNewChat, onShowHistory, onShowConfig, onShowJira }: StatusBarProps) {
+export const StatusBar = memo(function StatusBar({ onNewChat, onShowHistory, onShowConfig, onShowJira }: StatusBarProps) {
   return (
-    <div className="status-bar">
+    <div className="status-bar" role="toolbar" aria-label="ClarAIty toolbar">
       <span className="title">ClarAIty</span>
       <div className="toolbar-icons">
-        <button className="toolbar-icon" onClick={onNewChat} title="New Chat">
+        <button className="toolbar-icon" onClick={onNewChat} title="New Chat" aria-label="New Chat">
           <i className="codicon codicon-add" />
         </button>
-        <button className="toolbar-icon" onClick={onShowHistory} title="Session History">
+        <button className="toolbar-icon" onClick={onShowHistory} title="Session History" aria-label="Session History">
           <i className="codicon codicon-history" />
         </button>
-        <button className="toolbar-icon" onClick={onShowJira} title="Jira Integration">
+        <button className="toolbar-icon" onClick={onShowJira} title="Jira Integration" aria-label="Jira Integration">
           <i className="codicon codicon-plug" />
         </button>
-        <button className="toolbar-icon" onClick={onShowConfig} title="LLM Configuration">
+        <button className="toolbar-icon" onClick={onShowConfig} title="LLM Configuration" aria-label="LLM Configuration">
           <i className="codicon codicon-gear" />
         </button>
       </div>
     </div>
   );
-}
+});

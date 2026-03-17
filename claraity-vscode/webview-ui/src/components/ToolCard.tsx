@@ -1,7 +1,7 @@
 /**
  * Tool execution card with status badge, arguments, result, and approval buttons.
  */
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, memo } from "react";
 import type { ToolStateData, WebViewMessage } from "../types";
 import { TOOL_ICONS, getPrimaryArg, formatDuration } from "../utils/tools";
 
@@ -10,7 +10,7 @@ interface ToolCardProps {
   postMessage: (msg: WebViewMessage) => void;
 }
 
-export function ToolCard({ data, postMessage }: ToolCardProps) {
+export const ToolCard = memo(function ToolCard({ data, postMessage }: ToolCardProps) {
   const [feedback, setFeedback] = useState("");
   const [showResult, setShowResult] = useState(false);
 
@@ -84,7 +84,7 @@ export function ToolCard({ data, postMessage }: ToolCardProps) {
       {/* Approval buttons */}
       {data.status === "awaiting_approval" && (
         <div className="approval-section">
-          <div className="approval-buttons">
+          <div className="approval-buttons" role="group" aria-label="Tool approval actions">
             <button className="btn-approve" onClick={handleApprove}>Accept</button>
             {(toolName === "write_file" || toolName === "edit_file" || toolName === "append_to_file") && data.arguments && (
               <button className="btn-secondary" onClick={handleShowDiff}>View Diff</button>
@@ -115,4 +115,4 @@ export function ToolCard({ data, postMessage }: ToolCardProps) {
       )}
     </div>
   );
-}
+});

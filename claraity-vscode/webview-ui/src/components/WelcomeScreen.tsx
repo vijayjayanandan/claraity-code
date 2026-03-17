@@ -110,7 +110,7 @@ const FEATURES: Feature[] = [
 const SHORTCUTS = [
   { keys: "Ctrl+Shift+L", action: "New chat" },
   { keys: "Ctrl+Shift+.", action: "Interrupt" },
-  { keys: "Ctrl+Shift+H", action: "Session history" },
+  { keys: "Ctrl+Shift+;", action: "Session history" },
   { keys: "Ctrl+'", action: "Add selection to chat" },
   { keys: "@", action: "Mention a file" },
   { keys: "Shift+Enter", action: "New line" },

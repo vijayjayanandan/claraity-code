@@ -30,7 +30,7 @@ export function ClarifyWidget({
   postMessage,
 }: ClarifyWidgetProps) {
   const questions = rawQuestions as ClarifyQuestion[];
-  const [dismissed, setDismissed] = useState(false);
+  const [dismissedAs, setDismissedAs] = useState<"submitted" | "cancelled" | null>(null);
   const [responses, setResponses] = useState<Record<string, string | string[]>>(() => {
     const init: Record<string, string | string[]> = {};
     for (const q of questions) {
@@ -48,7 +48,7 @@ export function ClarifyWidget({
       submitted: true,
       responses: responses as Record<string, unknown>,
     });
-    setDismissed(true);
+    setDismissedAs("submitted");
   }, [callId, responses, postMessage]);
 
   const handleCancel = useCallback(() => {
@@ -58,14 +58,14 @@ export function ClarifyWidget({
       submitted: false,
       responses: null,
     });
-    setDismissed(true);
+    setDismissedAs("cancelled");
   }, [callId, postMessage]);
 
-  if (dismissed) {
+  if (dismissedAs) {
     return (
       <div className="interactive-widget clarify-widget">
         <div className="widget-body" style={{ fontSize: 12, color: "var(--vscode-descriptionForeground)" }}>
-          [Clarification {responses ? "submitted" : "cancelled"}]
+          [Clarification {dismissedAs}]
         </div>
       </div>
     );

@@ -1,6 +1,6 @@
 """Pure functions for UIEvent/StoreNotification <-> JSON conversion.
 
-Separated from WebSocketProtocol for unit testing without WebSocket dependencies.
+Separated from protocol code for unit testing without transport dependencies.
 
 Serialization strategy:
 - Use dataclasses.asdict() as the default serializer for UIEvent dataclasses

@@ -461,9 +461,8 @@ button, .toolbar-icon, .session-card, .mention-item, .tool-badge {
   font-size: var(--font-size-sm);
   font-family: var(--font-mono);
   border-top: 1px solid var(--app-border);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: pre-wrap;
+  word-break: break-all;
   color: var(--app-fg-muted);
 }
 

@@ -1,4 +1,4 @@
-"""Lightweight subagent bridge for server transports (WebSocket + stdio).
+"""Lightweight subagent bridge for server transports (stdio+TCP).
 
 Duck-typed to match what delegation.py expects from ``self._registry``
 (register / push_notification / unregister). Instead of mounting TUI
@@ -7,7 +7,7 @@ so subagent tool cards, approval buttons, and progress updates appear in
 the sidebar.
 
 Uses ``asyncio.ensure_future()`` for fire-and-forget sends (same pattern
-as ``ws_protocol.py:97`` -- ``notify_todos_updated``).
+as ``stdio_server.py`` -- ``notify_todos_updated``).
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ class ServerSubagentBridge:
     messages the VS Code client already understands.
 
     Works with any protocol that exposes an async ``_send_json(dict)``
-    method (WebSocketProtocol, StdioProtocol, etc.).
+    method (StdioProtocol, etc.).
     """
 
     def __init__(self, protocol: Any) -> None:

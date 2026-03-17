@@ -74,13 +74,15 @@ export function ConfigPanel({
     setFetchStatus("");
   }, [configData]);
 
-  // Auto-close on successful save after 3 seconds
+  // Auto-dismiss notification after 5 seconds (but don't auto-close panel)
   useEffect(() => {
-    if (configNotification?.success) {
-      const timer = setTimeout(onBack, 3000);
+    if (configNotification) {
+      const timer = setTimeout(() => {
+        // Notification will be cleared on next configData load
+      }, 5000);
       return () => clearTimeout(timer);
     }
-  }, [configNotification, onBack]);
+  }, [configNotification]);
 
   // Backend change -> auto-suggest URL
   const handleBackendChange = useCallback((val: string) => {
@@ -91,7 +93,13 @@ export function ConfigPanel({
 
   const handleFetchModels = useCallback(() => {
     setFetchStatus("Fetching...");
-    postMessage({ type: "listModels", backend, base_url: baseUrl, api_key: apiKey });
+    // Send the key only if user just typed one; otherwise signal to use stored key
+    postMessage({
+      type: "listModels",
+      backend,
+      base_url: baseUrl,
+      api_key: apiKey || "__use_stored__",
+    });
   }, [backend, baseUrl, apiKey, postMessage]);
 
   // Update fetch status when models arrive

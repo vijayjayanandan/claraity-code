@@ -1,7 +1,7 @@
 /**
  * Streamed code block with language label and copy button.
  */
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef, memo } from "react";
 import type { CodeBlock as CodeBlockType } from "../state/reducer";
 import type { WebViewMessage } from "../types";
 
@@ -10,13 +10,22 @@ interface CodeBlockProps {
   postMessage: (msg: WebViewMessage) => void;
 }
 
-export function CodeBlock({ block, postMessage }: CodeBlockProps) {
+export const CodeBlock = memo(function CodeBlock({ block, postMessage }: CodeBlockProps) {
   const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clean up timer on unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
 
   const handleCopy = useCallback(() => {
     postMessage({ type: "copyToClipboard", text: block.content });
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => setCopied(false), 2000);
   }, [block.content, postMessage]);
 
   return (
@@ -32,4 +41,4 @@ export function CodeBlock({ block, postMessage }: CodeBlockProps) {
       </pre>
     </div>
   );
-}
+});

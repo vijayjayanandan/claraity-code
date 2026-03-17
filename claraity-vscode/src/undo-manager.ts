@@ -14,6 +14,12 @@
 
 import * as vscode from 'vscode';
 
+/** Normalize path for comparison: forward slashes + lowercase on Windows only. */
+function normalizePath(p: string): string {
+    const fwd = p.replace(/\\/g, '/');
+    return process.platform === 'win32' ? fwd.toLowerCase() : fwd;
+}
+
 export interface FileSnapshot {
     /** Original file path (as received from agent). */
     path: string;
@@ -28,7 +34,7 @@ export interface UndoCheckpoint {
     committed: boolean;
 }
 
-const MAX_HISTORY = 10;
+const MAX_HISTORY = 50;
 
 export class UndoManager {
     private checkpoints: UndoCheckpoint[] = [];
@@ -60,7 +66,7 @@ export class UndoManager {
     async snapshotFile(filePath: string): Promise<void> {
         if (!this.currentCheckpoint) { return; }
 
-        const normalized = filePath.replace(/\\/g, '/').toLowerCase();
+        const normalized = normalizePath(filePath);
         if (this.snapshotted.has(normalized)) { return; }
         this.snapshotted.add(normalized);
 
@@ -135,8 +141,8 @@ export class UndoManager {
             }
         }
 
-        // Remove this checkpoint and everything after it
-        this.checkpoints.splice(idx);
+        // Remove only this checkpoint (keep newer ones intact)
+        this.checkpoints.splice(idx, 1);
         this.log?.appendLine(`[Undo] Restored ${restored.length} file(s) from ${turnId}`);
         return restored;
     }

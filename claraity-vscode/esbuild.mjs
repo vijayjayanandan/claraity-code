@@ -12,7 +12,7 @@ const buildOptions = {
   format: "cjs",
   platform: "node",
   target: "node18",
-  sourcemap: !production,
+  sourcemap: true,
   minify: production,
   logLevel: "info",
 };

@@ -45,9 +45,7 @@ a = Analysis(
         "src.llm.config_loader",
         "src.llm.credential_store",
         # Server
-        "src.server.app",
         "src.server.stdio_server",
-        "src.server.ws_protocol",
         "src.server.config_handler",
         "src.server.serializers",
         "src.server.jsonrpc",

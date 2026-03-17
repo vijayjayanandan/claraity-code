@@ -2,7 +2,7 @@
   "name": "claraity-vscode",
   "displayName": "ClarAIty",
   "description": "AI Coding Agent - VS Code Integration",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "publisher": "VijayJayanandan",
   "license": "MIT",
   "author": {
@@ -156,8 +156,8 @@
       },
       {
         "command": "claraity.sessionHistory",
-        "key": "ctrl+shift+h",
-        "mac": "cmd+shift+h"
+        "key": "ctrl+shift+;",
+        "mac": "cmd+shift+;"
       },
       {
         "command": "claraity.addToChat",
@@ -177,17 +177,7 @@
         "claraity.serverAutoStart": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically start the Python server on activation"
-        },
-        "claraity.serverUrl": {
-          "type": "string",
-          "default": "ws://localhost:9120/ws",
-          "description": "WebSocket server URL (used when serverAutoStart is false)"
-        },
-        "claraity.autoConnect": {
-          "type": "boolean",
-          "default": true,
-          "description": "Connect automatically on extension activation (used when serverAutoStart is false)"
+          "description": "Automatically start the agent on activation"
         },
         "claraity.autoInstallAgent": {
           "type": "boolean",
@@ -203,31 +193,12 @@
           ],
           "default": "auto",
           "description": "Server launch mode. 'auto' detects source vs installed, 'always' forces source mode, 'never' skips source detection"
-        },
-        "claraity.connectionMode": {
-          "type": "string",
-          "enum": [
-            "websocket",
-            "stdio"
-          ],
-          "default": "websocket",
-          "description": "Connection transport: 'websocket' uses HTTP+WS server (default), 'stdio' uses stdin/stdout pipes (experimental)"
-        },
-        "claraity.webviewMode": {
-          "type": "string",
-          "enum": [
-            "auto",
-            "react",
-            "inline"
-          ],
-          "default": "auto",
-          "description": "Webview UI mode: 'auto' uses React if built, falls back to inline HTML; 'react' forces React (fails if not built); 'inline' forces inline HTML"
         }
       }
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run build",
+    "vscode:prepublish": "npm run build:webview && npm run build",
     "build": "node esbuild.mjs --production",
     "compile": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
@@ -242,15 +213,11 @@
     "@types/jest": "^30.0.0",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
-    "@types/ws": "^8.18.1",
     "@vscode/codicons": "^0.0.44",
     "@vscode/vsce": "^3.0.0",
     "esbuild": "^0.27.4",
     "jest": "^30.2.0",
     "ts-jest": "^29.4.6",
     "typescript": "^5.3.0"
-  },
-  "dependencies": {
-    "ws": "^8.19.0"
   }
 }

@@ -8,6 +8,12 @@
 
 import * as vscode from 'vscode';
 
+/** Normalize path for comparison: forward slashes + lowercase on Windows only. */
+function normalizePath(p: string): string {
+    const fwd = p.replace(/\\/g, '/');
+    return process.platform === 'win32' ? fwd.toLowerCase() : fwd;
+}
+
 interface PendingChange {
     callId: string;
     toolName: string;
@@ -26,7 +32,7 @@ export class ClarAItyCodeLensProvider implements vscode.CodeLensProvider {
      * Shows CodeLens in the editor for the target file.
      */
     addPendingChange(callId: string, toolName: string, filePath: string, args: Record<string, any>): void {
-        const normalizedPath = filePath.replace(/\\/g, '/').toLowerCase();
+        const normalizedPath = normalizePath(filePath);
         this.pendingChanges.set(callId, { callId, toolName, filePath, normalizedPath, args });
         this._onDidChangeCodeLenses.fire();
     }
@@ -48,7 +54,7 @@ export class ClarAItyCodeLensProvider implements vscode.CodeLensProvider {
     }
 
     provideCodeLenses(document: vscode.TextDocument): vscode.CodeLens[] {
-        const normalized = document.uri.fsPath.replace(/\\/g, '/').toLowerCase();
+        const normalized = normalizePath(document.uri.fsPath);
 
         // Find all pending changes targeting this file
         const matches: PendingChange[] = [];
