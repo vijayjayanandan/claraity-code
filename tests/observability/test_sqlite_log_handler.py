@@ -159,7 +159,6 @@ class TestExtractContextFields:
             "logger": "ctx.logger",
             "run_id": "run-001",
             "session_id": "sess-ctx",
-            "stream_id": "stream-42",
             "request_id": "req-abc",
             "component": "core.tools",
             "operation": "file_read",
@@ -172,7 +171,6 @@ class TestExtractContextFields:
         assert data["logger"] == "ctx.logger"
         assert data["run_id"] == "run-001"
         assert data["session_id"] == "sess-ctx"
-        assert data["stream_id"] == "stream-42"
         assert data["request_id"] == "req-abc"
         assert data["component"] == "core.tools"
         assert data["operation"] == "file_read"

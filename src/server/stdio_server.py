@@ -222,6 +222,7 @@ class StdioProtocol(UIProtocol):
         "save_jira_config": "_handle_jira_save",
         "connect_jira": "_handle_jira_connect_dispatch",
         "disconnect_jira": "_handle_jira_disconnect",
+        "webview_error": "_handle_webview_error",
     }
 
     def __init__(
@@ -520,6 +521,23 @@ class StdioProtocol(UIProtocol):
     async def wait_for_chat_message(self) -> dict:
         """Wait for the next chat message from stdin."""
         return await self._chat_queue.get()
+
+    # -----------------------------------------------------------------
+    # Webview error handler
+    # -----------------------------------------------------------------
+
+    async def _handle_webview_error(self, data: dict) -> None:
+        # session_id is passed explicitly from the webview because this handler
+        # runs in the receive-loop task, outside the stream_response async context
+        # where bind_context() set session_id. Logging it as a named field preserves
+        # correlation with the Python-side logs for that session.
+        logger.error(
+            "webview_error",
+            error=data.get("error", ""),
+            stack=data.get("stack", ""),
+            component_stack=data.get("component_stack", ""),
+            session_id=data.get("session_id", ""),
+        )
 
     # -----------------------------------------------------------------
     # Chat message handler
@@ -1175,6 +1193,16 @@ async def run_stdio_server(
                     attachments = []
                     for img in raw_images:
                         data_url = img.get("data_url", "")
+                        mime = img.get("mime", "")
+                        # Extract MIME from data URL if not provided separately
+                        if not mime and data_url.startswith("data:") and ";" in data_url:
+                            mime = data_url.split(":", 1)[1].split(";", 1)[0]
+                        mime = mime or "image/png"
+                        logger.debug(
+                            "stdio_image_received",
+                            mime=mime,
+                            data_url_length=len(data_url),
+                        )
                         raw_bytes = b""
                         if ";base64," in data_url:
                             try:
@@ -1195,7 +1223,7 @@ async def run_stdio_server(
                             Attachment(
                                 kind="image",
                                 data=raw_bytes,
-                                mime=img.get("mime", "image/png"),
+                                mime=mime,
                                 filename=img.get("filename", "screenshot.png"),
                             )
                         )

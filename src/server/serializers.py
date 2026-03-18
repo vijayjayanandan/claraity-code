@@ -52,6 +52,28 @@ from src.session.store.memory_store import (
     StoreNotification,
     ToolExecutionState,
 )
+from src.observability import get_logger
+
+logger = get_logger(__name__)
+
+
+def _content_to_str(content) -> str:
+    """Safely convert message content to a string for the wire protocol.
+
+    Content is normally a str, but multimodal messages (with images) store it
+    as a list of content blocks. The webview expects a string, so we extract
+    the text parts — same logic as _build_replay_messages in stdio_server.py.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            p.get("text", "")
+            for p in content
+            if isinstance(p, dict) and p.get("type") == "text"
+        )
+    return str(content) if content else ""
+
 
 # ============================================================================
 # UIEvent type name mapping
@@ -231,13 +253,28 @@ def serialize_store_notification(notification: StoreNotification) -> dict | None
                     },
                 }
 
+        content_type = type(msg.content).__name__
+        logger.debug(
+            "serialize_message_added",
+            uuid=msg.uuid,
+            role=msg.role,
+            content_type=content_type,
+        )
+        if not isinstance(msg.content, str):
+            logger.warning(
+                "serialize_message_added_non_string_content",
+                uuid=msg.uuid,
+                role=msg.role,
+                content_type=content_type,
+            )
+
         return {
             "type": "store",
             "event": "message_added",
             "data": {
                 "uuid": msg.uuid,
                 "role": msg.role,
-                "content": msg.content or "",
+                "content": _content_to_str(msg.content),
                 "stream_id": getattr(msg.meta, "stream_id", None),
             },
         }
@@ -246,13 +283,20 @@ def serialize_store_notification(notification: StoreNotification) -> dict | None
         msg = notification.message
         if msg is None:
             return None
+        if not isinstance(msg.content, str):
+            logger.warning(
+                "serialize_message_updated_non_string_content",
+                uuid=msg.uuid,
+                role=msg.role,
+                content_type=type(msg.content).__name__,
+            )
         return {
             "type": "store",
             "event": "message_updated",
             "data": {
                 "uuid": msg.uuid,
                 "role": msg.role,
-                "content": msg.content or "",
+                "content": _content_to_str(msg.content),
             },
         }
 

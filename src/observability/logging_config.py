@@ -72,8 +72,8 @@ MAX_TRACEBACK_LENGTH = 32768
 
 run_id: ContextVar[str] = ContextVar("run_id", default="")  # Process-level ID, set once at startup
 session_id: ContextVar[str] = ContextVar("session_id", default="")
-stream_id: ContextVar[str] = ContextVar("stream_id", default="")
 request_id: ContextVar[str] = ContextVar("request_id", default="")
+turn_id: ContextVar[int] = ContextVar("turn_id", default=0)  # Incremented per user message
 component: ContextVar[str] = ContextVar("component", default="")
 operation: ContextVar[str] = ContextVar("operation", default="")
 
@@ -209,8 +209,8 @@ def add_context(logger: Any, method_name: str, event_dict: dict[str, Any]) -> di
     """Structlog processor to inject context variables."""
     ctx_run = run_id.get()
     ctx_session = session_id.get()
-    ctx_stream = stream_id.get()
     ctx_request = request_id.get()
+    ctx_turn = turn_id.get()
     ctx_component = component.get()
     ctx_operation = operation.get()
 
@@ -218,10 +218,10 @@ def add_context(logger: Any, method_name: str, event_dict: dict[str, Any]) -> di
         event_dict["run_id"] = ctx_run
     if ctx_session:
         event_dict["session_id"] = ctx_session
-    if ctx_stream:
-        event_dict["stream_id"] = ctx_stream
     if ctx_request:
         event_dict["request_id"] = ctx_request
+    if ctx_turn:
+        event_dict["turn_id"] = ctx_turn
     if ctx_component:
         event_dict["component"] = ctx_component
     if ctx_operation:
@@ -949,8 +949,8 @@ def configure_logging(
 def bind_context(
     run: str | None = None,
     session: str | None = None,
-    stream: str | None = None,
     request: str | None = None,
+    turn: int | None = None,
     comp: str | None = None,
     op: str | None = None,
 ) -> None:
@@ -960,8 +960,8 @@ def bind_context(
     Args:
         run: Run ID (process-level, set once at startup)
         session: Session ID
-        stream: Stream ID (for streaming responses)
         request: Request ID (unique per request)
+        turn: Turn ID (incremented per user message, stable within a turn)
         comp: Component name (e.g., 'core.agent', 'llm.openai')
         op: Operation name (e.g., 'stream_response', 'execute_tool')
     """
@@ -969,10 +969,10 @@ def bind_context(
         run_id.set(run)
     if session is not None:
         session_id.set(session)
-    if stream is not None:
-        stream_id.set(stream)
     if request is not None:
         request_id.set(request)
+    if turn is not None:
+        turn_id.set(turn)
     if comp is not None:
         component.set(comp)
     if op is not None:
@@ -982,8 +982,8 @@ def bind_context(
 def clear_context() -> None:
     """Clear all context variables (except run_id which is process-level)."""
     session_id.set("")
-    stream_id.set("")
     request_id.set("")
+    turn_id.set(0)
     component.set("")
     operation.set("")
     # Note: run_id is intentionally NOT cleared as it's process-level

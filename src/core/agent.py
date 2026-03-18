@@ -1222,10 +1222,8 @@ class CodingAgent(AgentInterface):
             return
 
         # Bind context for logging correlation
-        stream_id = str(uuid.uuid4())[:8]
         bind_context(
             session=self.memory.session_id if hasattr(self.memory, "session_id") else None,
-            stream=stream_id,
             request=new_request_id(),
             comp="core.agent",
             op="stream_response",
@@ -1261,6 +1259,7 @@ class CodingAgent(AgentInterface):
             # Add user message to memory with attachments
             # MemoryManager will build multimodal content and store it in MessageStore
             self.memory.add_user_message(user_input, attachments=attachments)
+            bind_context(turn=self.memory._current_turn_id)
 
             # Parse and load file references
             file_references = self.file_reference_parser.parse_and_load(user_input)

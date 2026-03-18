@@ -233,8 +233,6 @@ def format_log(log: LogRecord, verbose: bool = False) -> str:
         ctx_parts.append(f"component={log.component}")
     if log.operation:
         ctx_parts.append(f"op={log.operation}")
-    if log.stream_id:
-        ctx_parts.append(f"stream={log.stream_id}")
     if log.request_id:
         ctx_parts.append(f"request={log.request_id}")
     if ctx_parts:

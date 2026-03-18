@@ -91,9 +91,12 @@ export class StdioConnection implements vscode.Disposable {
     /**
      * Resolve the agent binary path.
      * Returns bundled binary if it exists, otherwise falls back to Python.
+     * Respects claraity.devMode setting: "always" forces Python source mode.
      */
     private resolveAgent(): { command: string; args: string[] } {
-        if (this.extensionPath) {
+        const devMode = vscode.workspace.getConfiguration('claraity').get<string>('devMode', 'auto');
+
+        if (devMode !== 'always' && this.extensionPath) {
             const binaryName = process.platform === 'win32'
                 ? 'claraity-server.exe'
                 : 'claraity-server';
@@ -114,6 +117,8 @@ export class StdioConnection implements vscode.Disposable {
                     };
                 }
             }
+        } else if (devMode === 'always') {
+            this.logLine('[STDIO] devMode=always — skipping binary, using Python source');
         }
 
         // Fallback: Python mode (dev)

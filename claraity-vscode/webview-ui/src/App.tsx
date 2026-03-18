@@ -11,6 +11,7 @@ import { useEffect, useReducer, useMemo } from "react";
 import { useVSCode } from "./hooks/useVSCode";
 import { appReducer, initialState, dispatchServerMessage } from "./state/reducer";
 import { ChatContext, type ChatContextValue } from "./state/ChatContext";
+import { setCurrentSessionId } from "./state/currentContext";
 import type { ExtensionMessage } from "./types";
 
 import { StatusBar } from "./components/StatusBar";
@@ -49,6 +50,7 @@ export function App() {
       }
 
       case "sessionInfo":
+        setCurrentSessionId(msg.sessionId);
         dispatch({
           type: "SET_SESSION_INFO",
           sessionId: msg.sessionId,

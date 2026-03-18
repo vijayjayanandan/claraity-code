@@ -88,7 +88,7 @@ from .logging_config import (
     request_id,
     # Context variables
     session_id,
-    stream_id,
+    turn_id,
 )
 from .metrics import (
     cleanup_old_metrics,
@@ -136,8 +136,8 @@ __all__ = [
     "install_asyncio_handler",
     # Context variables
     "session_id",
-    "stream_id",
     "request_id",
+    "turn_id",
     "component",
     "operation",
     # Error Store (SQLite-based)

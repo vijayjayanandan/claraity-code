@@ -17,7 +17,7 @@ interface VSCodeApi {
 
 declare function acquireVsCodeApi(): VSCodeApi;
 
-const vscodeApi: VSCodeApi =
+export const vscodeApi: VSCodeApi =
   typeof acquireVsCodeApi === "function"
     ? acquireVsCodeApi()
     : {

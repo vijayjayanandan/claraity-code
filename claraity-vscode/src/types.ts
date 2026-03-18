@@ -142,6 +142,14 @@ export interface TerminalResultPayload {
     error?: string;
 }
 
+export interface WebviewErrorPayload {
+    type: 'webview_error';
+    error: string;
+    stack?: string;
+    component_stack?: string;
+    session_id?: string;
+}
+
 export type ClientMessage =
     | ChatMessagePayload
     | ApprovalResultPayload
@@ -162,7 +170,8 @@ export type ClientMessage =
     | SaveJiraConfigPayload
     | ConnectJiraPayload
     | DisconnectJiraPayload
-    | TerminalResultPayload;
+    | TerminalResultPayload
+    | WebviewErrorPayload;
 
 // ============================================================================
 // Extension <-> WebView postMessage types
@@ -207,7 +216,8 @@ export type WebViewMessage =
     | { type: 'getJiraProfiles' }
     | { type: 'saveJiraConfig'; profile: string; jira_url: string; username: string; api_token: string }
     | { type: 'connectJira'; profile: string }
-    | { type: 'disconnectJira' };
+    | { type: 'disconnectJira' }
+    | { type: 'webviewError'; error: string; stack?: string; componentStack?: string; sessionId?: string };
 
 // ============================================================================
 // Exhaustive check helper

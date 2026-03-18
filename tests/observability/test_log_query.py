@@ -48,7 +48,6 @@ def sample_log_record():
         session_id="sess-fmt-001",
         component="tools.file_ops",
         operation="read_file",
-        stream_id="strm-42",
         request_id="req-abc",
         source_file="file_operations.py",
         source_line=120,
@@ -385,7 +384,6 @@ class TestJsonlToLogRecord:
         assert record.logger == "test.logger"
         assert record.session_id == "sess-conv"
         assert record.run_id == "run-conv"
-        assert record.stream_id == "strm-conv"
         assert record.request_id == "req-conv"
         assert record.component == "test.comp"
         assert record.operation == "do_thing"

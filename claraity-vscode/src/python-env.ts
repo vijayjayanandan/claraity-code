@@ -64,7 +64,7 @@ export async function resolveLaunchConfig(
         return {
             mode: 'dev',
             command: pythonPath,
-            args: ['-m', 'src.server', '--port', String(port)],
+            args: ['-m', 'src.server'],
             cwd: workDir,
         };
     }
@@ -78,7 +78,7 @@ export async function resolveLaunchConfig(
             return {
                 mode: 'installed',
                 command: pythonPath,
-                args: ['-m', 'src.server', '--port', String(port), '--workdir', workDir],
+                args: ['-m', 'src.server', '--workdir', workDir],
                 cwd: workDir,
                 version: installedVersion,
             };
@@ -92,7 +92,7 @@ export async function resolveLaunchConfig(
                 return {
                     mode: 'installed',
                     command: pythonPath,
-                    args: ['-m', 'src.server', '--port', String(port), '--workdir', workDir],
+                    args: ['-m', 'src.server', '--workdir', workDir],
                     cwd: workDir,
                     version: newVersion ?? installedVersion,
                 };
@@ -102,7 +102,7 @@ export async function resolveLaunchConfig(
             return {
                 mode: 'installed',
                 command: pythonPath,
-                args: ['-m', 'src.server', '--port', String(port), '--workdir', workDir],
+                args: ['-m', 'src.server', '--workdir', workDir],
                 cwd: workDir,
                 version: installedVersion,
             };
@@ -118,7 +118,7 @@ export async function resolveLaunchConfig(
                 return {
                     mode: 'installed',
                     command: pythonPath,
-                    args: ['-m', 'src.server', '--port', String(port), '--workdir', workDir],
+                    args: ['-m', 'src.server', '--workdir', workDir],
                     cwd: workDir,
                     version: newVersion,
                 };

@@ -5,6 +5,8 @@
  * instead of a blank white panel.
  */
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { vscodeApi } from "../hooks/useVSCode";
+import { getCurrentSessionId } from "../state/currentContext";
 
 interface Props {
   children: ReactNode;
@@ -24,6 +26,13 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
     console.error("[ClarAIty] React error boundary caught:", error, info.componentStack);
+    vscodeApi.postMessage({
+      type: "webviewError",
+      error: error.message,
+      stack: error.stack,
+      componentStack: info.componentStack ?? undefined,
+      sessionId: getCurrentSessionId(),
+    });
   }
 
   handleReload = () => {

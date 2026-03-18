@@ -471,6 +471,17 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             case 'disconnectJira':
                 this.connection?.send({ type: 'disconnect_jira' } as ClientMessage);
                 break;
+
+            case 'webviewError':
+                this.log?.appendLine(`[ClarAIty] Webview error: ${msg.error}\n${msg.stack ?? ''}`);
+                this.connection?.send({
+                    type: 'webview_error',
+                    error: msg.error,
+                    stack: msg.stack,
+                    component_stack: msg.componentStack,
+                    session_id: msg.sessionId,
+                } as ClientMessage);
+                break;
         }
     }
 
@@ -686,9 +697,11 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
         }
 
         // Build the server payload — images are sent as base64 data URLs
+        // img.data is already a full data URL from FileReader.readAsDataURL()
+        // (e.g., "data:image/png;base64,iVBOR..."), so pass it directly.
         const imagePayload = (images && images.length > 0)
             ? images.map(img => ({
-                data_url: `data:${img.mimeType};base64,${img.data}`,
+                data_url: img.data,
                 mime: img.mimeType,
                 filename: img.name || 'screenshot.png',
             }))
