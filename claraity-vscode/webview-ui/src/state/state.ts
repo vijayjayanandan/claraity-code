@@ -12,12 +12,14 @@ import type {
   JiraProfile,
 } from "../types";
 
+export type { FileAttachment, ImageAttachment };
+
 // ============================================================================
 // Timeline entry — ordered sequence of UI elements
 // ============================================================================
 
 export type TimelineEntry =
-  | { type: "user_message"; id: string; content: string }
+  | { type: "user_message"; id: string; content: string; attachments?: FileAttachment[]; images?: ImageAttachment[] }
   | { type: "assistant_text"; id: string; content: string }
   | { type: "tool"; id: string; callId: string }
   | { type: "thinking"; id: string; content: string; tokenCount?: number }

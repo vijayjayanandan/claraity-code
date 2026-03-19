@@ -284,6 +284,13 @@ export function appReducer(state: AppState, action: Action): AppState {
     // ── Messages ──
     case "ADD_USER_MESSAGE": {
       const userId = `user-${Date.now()}`;
+      const userEntry: TimelineEntry = {
+        type: "user_message" as const,
+        id: userId,
+        content: action.content,
+        ...(action.attachments && action.attachments.length > 0 ? { attachments: action.attachments } : {}),
+        ...(action.images && action.images.length > 0 ? { images: action.images } : {}),
+      };
       return {
         ...state,
         messages: [
@@ -292,7 +299,7 @@ export function appReducer(state: AppState, action: Action): AppState {
         ],
         timeline: [
           ...state.timeline,
-          { type: "user_message" as const, id: userId, content: action.content },
+          userEntry,
         ],
       };
     }
@@ -505,7 +512,10 @@ export function appReducer(state: AppState, action: Action): AppState {
         replayMessages.push({ id: msgId, role: m.role as "user" | "assistant" | "system", content: m.content, finalized: true });
 
         if (m.role === "user") {
-          replayTimeline.push({ type: "user_message", id: msgId, content: m.content });
+          const userEntry: TimelineEntry = { type: "user_message", id: msgId, content: m.content };
+          if (m.images && m.images.length > 0) userEntry.images = m.images;
+          if (m.attachments && m.attachments.length > 0) userEntry.attachments = m.attachments;
+          replayTimeline.push(userEntry);
         } else if (m.role === "assistant") {
           if (m.tool_calls && m.tool_calls.length > 0) {
             if (m.content.trim()) {

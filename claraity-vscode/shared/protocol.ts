@@ -70,6 +70,10 @@ export interface ReplayMessage {
   }>;
   tool_call_id?: string;
   meta?: { status?: string; duration_ms?: number; tool_name?: string };
+  /** Image attachments extracted from multimodal content (for replay). */
+  images?: ImageAttachment[];
+  /** File attachments extracted from multimodal content (for replay). */
+  attachments?: FileAttachment[];
 }
 
 export interface JiraProfile {
@@ -84,6 +88,8 @@ export interface JiraProfile {
 export interface FileAttachment {
   path: string;
   name: string;
+  /** Inline content for pasted/dropped files that have no filesystem path. */
+  content?: string;
 }
 
 export interface ImageAttachment {

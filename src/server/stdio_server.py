@@ -118,18 +118,52 @@ def _error_response(
 
 
 def _build_replay_messages(store) -> list[dict[str, Any]]:
-    """Build session_history payload from a store's transcript view."""
+    """Build session_history payload from a store's transcript view.
+
+    For multimodal user messages (with images/files), extracts attachment
+    metadata so the webview can render chips on replayed sessions.
+    """
     messages = store.get_transcript_view(include_pre_compaction=True)
     replay = []
     for msg in messages:
         content = msg.content
+        images: list[dict[str, Any]] = []
+        attachments: list[dict[str, Any]] = []
+
         if isinstance(content, list):
-            content = " ".join(
-                p.get("text", "")
-                for p in content
-                if isinstance(p, dict) and p.get("type") == "text"
-            )
+            text_parts = []
+            for part in content:
+                if not isinstance(part, dict):
+                    continue
+                ptype = part.get("type")
+                if ptype == "text":
+                    text_parts.append(part.get("text", ""))
+                elif ptype == "image_url":
+                    image_url = part.get("image_url", {})
+                    images.append({
+                        "data": image_url.get("url", ""),
+                        "mimeType": part.get("mime", "image/png"),
+                        "name": part.get("filename", "image"),
+                    })
+            content = " ".join(text_parts)
+
+        # Extract file attachment metadata + content from <attached_file> XML blocks
+        if isinstance(content, str):
+            for match in re.finditer(
+                r'<attached_file\s+path="([^"]*)"\s+name="([^"]*)">\n([\s\S]*?)\n</attached_file>',
+                content,
+            ):
+                attachments.append({
+                    "path": match.group(1),
+                    "name": match.group(2),
+                    "content": match.group(3),
+                })
+
         entry: dict[str, Any] = {"role": msg.role, "content": content or ""}
+        if images:
+            entry["images"] = images
+        if attachments:
+            entry["attachments"] = attachments
         if msg.tool_calls:
             entry["tool_calls"] = [
                 {

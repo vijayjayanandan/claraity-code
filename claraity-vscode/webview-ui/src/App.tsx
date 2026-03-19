@@ -12,7 +12,7 @@ import { useVSCode } from "./hooks/useVSCode";
 import { appReducer, initialState, dispatchServerMessage } from "./state/reducer";
 import { ChatContext, type ChatContextValue } from "./state/ChatContext";
 import { setCurrentSessionId } from "./state/currentContext";
-import type { ExtensionMessage } from "./types";
+import type { ExtensionMessage, FileAttachment, ImageAttachment } from "./types";
 
 import { StatusBar } from "./components/StatusBar";
 import { ContextBar } from "./components/ContextBar";
@@ -119,13 +119,20 @@ export function App() {
     onReady();
   }, [onReady]);
 
-  const handleSendMessage = (content: string, attachments?: unknown[], images?: unknown[]) => {
-    dispatch({ type: "ADD_USER_MESSAGE", content });
+  const handleSendMessage = (content: string, attachments?: FileAttachment[], images?: ImageAttachment[]) => {
+    const resolvedAttachments = attachments ?? state.attachments;
+    const resolvedImages = images ?? state.images;
+    dispatch({
+      type: "ADD_USER_MESSAGE",
+      content,
+      attachments: resolvedAttachments.length > 0 ? resolvedAttachments : undefined,
+      images: resolvedImages.length > 0 ? resolvedImages : undefined,
+    });
     postMessage({
       type: "chatMessage",
       content,
-      attachments: (attachments ?? state.attachments) as never[],
-      images: (images ?? state.images) as never[],
+      attachments: resolvedAttachments.length > 0 ? resolvedAttachments : undefined,
+      images: resolvedImages.length > 0 ? resolvedImages : undefined,
     });
     dispatch({ type: "CLEAR_INPUT" });
   };

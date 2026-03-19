@@ -84,41 +84,6 @@ ClarAIty automatically detects your project type (language, framework, test runn
 
 Supported: TypeScript, JavaScript, Python, Rust, Go, Java | React, Next.js, Vue, Angular, Django, FastAPI, Flask, Express, and more.
 
-## Architecture
-
-```
-User Input
-  |
-  v
-[React Webview] — chat UI, tool cards, approval widgets, session history
-  |
-  v (postMessage)
-[Extension Host] — CodeLens, file badges, diff editor, undo manager
-  |
-  v (stdio + TCP / JSON-RPC 2.0)
-[Agent Core] — async streaming orchestrator
-  |
-  +---> [4-Layer Gating] — repeat / plan / director / approval
-  |
-  +---> [25+ Tools] — parallel execution, configurable timeouts
-  |       |
-  |       +---> File operations (read, write, edit, append)
-  |       +---> Search (grep, glob, web)
-  |       +---> Code intelligence (LSP outline, symbols)
-  |       +---> Commands (terminal execution)
-  |
-  +---> [Sub-Agents] — subprocess isolation, own context window
-  |       |
-  |       +---> code-reviewer, test-writer, doc-writer
-  |       +---> code-writer, explore, planner, general-purpose
-  |
-  +---> [LLM Backend] — OpenAI / Anthropic / Ollama / any compatible
-  |
-  +---> [Memory] — working + episodic memory with token-budgeted context
-  |
-  +---> [Persistence] — JSONL ledger with session resume
-```
-
 ## Keyboard Shortcuts
 
 | Action | Windows/Linux | Mac |

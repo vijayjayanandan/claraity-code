@@ -24,7 +24,7 @@ export type Action =
   | { type: "THINKING_DELTA"; content: string }
   | { type: "THINKING_END" }
   // Messages
-  | { type: "ADD_USER_MESSAGE"; content: string }
+  | { type: "ADD_USER_MESSAGE"; content: string; attachments?: FileAttachment[]; images?: ImageAttachment[] }
   | { type: "MESSAGE_ADDED"; data: { uuid: string; role: string; content: string; stream_id?: string }; subagentId?: string }
   | { type: "MESSAGE_UPDATED"; data: { uuid: string; content: string }; subagentId?: string }
   | { type: "MESSAGE_FINALIZED"; streamId: string }

@@ -20,7 +20,19 @@ interface InputBoxProps {
 }
 
 const MAX_IMAGES = 5;
+const MAX_FILES = 10;
+const MAX_IMAGE_SIZE = 10 * 1024 * 1024;   // 10MB
+const MAX_FILE_SIZE = 1 * 1024 * 1024;     // 1MB for text file reads
 const MAX_TEXT_LENGTH = 100_000; // 100KB max input to prevent UI freeze
+
+/** MIME types we can meaningfully read as text. */
+const TEXT_MIME_PREFIXES = ["text/", "application/json", "application/xml", "application/javascript", "application/typescript", "application/x-yaml", "application/toml"];
+function isTextFile(file: File): boolean {
+  if (TEXT_MIME_PREFIXES.some((p) => file.type.startsWith(p))) return true;
+  // Fallback: check common text extensions when MIME is empty (common for .log, .yaml, etc.)
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  return ["ts", "tsx", "js", "jsx", "py", "json", "yaml", "yml", "toml", "xml", "csv", "log", "txt", "md", "sh", "bat", "cfg", "ini", "env", "sql", "html", "css", "scss", "less", "svelte", "vue", "rs", "go", "java", "kt", "c", "cpp", "h", "hpp", "rb", "php", "swift", "r", "m", "ps1"].includes(ext);
+}
 
 export function InputBox({
   isStreaming,
@@ -126,10 +138,10 @@ export function InputBox({
       return;
     }
     const trimmed = text.trim();
-    if (!trimmed) return;
-    onSend(trimmed);
+    if (!trimmed && images.length === 0 && attachments.length === 0) return;
+    onSend(trimmed, attachments.length > 0 ? attachments : undefined, images.length > 0 ? images : undefined);
     setText("");
-  }, [text, isStreaming, onSend, onInterrupt]);
+  }, [text, isStreaming, onSend, onInterrupt, attachments, images]);
 
   // Keyboard shortcuts
   const handleKeyDown = useCallback(
@@ -165,16 +177,102 @@ export function InputBox({
     [showMentions, mentionResults, mentionIndex, insertMention, handleSend],
   );
 
-  // Handle image paste
+  // Drag-and-drop state — use a counter to prevent flicker when hovering child elements
+  const [isDragOver, setIsDragOver] = useState(false);
+  const dragCounter = useRef(0);
+  const [dropWarning, setDropWarning] = useState<string | null>(null);
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current++;
+    setIsDragOver(true);
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current--;
+    if (dragCounter.current === 0) setIsDragOver(false);
+  }, []);
+
+  // Show a brief warning then auto-dismiss (with cleanup to avoid stale timers)
+  const warningTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const showWarning = useCallback((msg: string) => {
+    if (warningTimerRef.current) clearTimeout(warningTimerRef.current);
+    setDropWarning(msg);
+    warningTimerRef.current = setTimeout(() => setDropWarning(null), 3000);
+  }, []);
+  useEffect(() => () => { if (warningTimerRef.current) clearTimeout(warningTimerRef.current); }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dragCounter.current = 0;
+      setIsDragOver(false);
+      const files = e.dataTransfer?.files;
+      if (!files) return;
+      let imgCount = images.length;
+      let fileCount = attachments.length;
+      for (const file of files) {
+        if (file.type.startsWith("image/")) {
+          if (imgCount >= MAX_IMAGES) { showWarning(`Max ${MAX_IMAGES} images allowed`); continue; }
+          if (file.size > MAX_IMAGE_SIZE) { showWarning("Image too large (max 10MB)"); continue; }
+          imgCount++;
+          const reader = new FileReader();
+          reader.onload = () => {
+            onAddImage({
+              data: reader.result as string,
+              mimeType: file.type,
+              name: file.name || "dropped-image",
+            });
+          };
+          reader.onerror = () => showWarning(`Failed to read ${file.name}`);
+          reader.readAsDataURL(file);
+        } else if (isTextFile(file)) {
+          if (fileCount >= MAX_FILES) { showWarning(`Max ${MAX_FILES} files allowed`); continue; }
+          if (file.size > MAX_FILE_SIZE) { showWarning("File too large (max 1MB)"); continue; }
+          fileCount++;
+          const reader = new FileReader();
+          reader.onload = () => {
+            onAddAttachment({
+              path: "",
+              name: file.name || "dropped-file",
+              content: reader.result as string,
+            });
+          };
+          reader.onerror = () => showWarning(`Failed to read ${file.name}`);
+          reader.readAsText(file);
+        } else {
+          showWarning(`Unsupported file type: ${file.name}`);
+        }
+      }
+    },
+    [images.length, attachments.length, onAddImage, onAddAttachment, showWarning],
+  );
+
+  // Handle paste (images + files)
   const handlePaste = useCallback(
     (e: React.ClipboardEvent) => {
       const items = e.clipboardData?.items;
       if (!items) return;
+      let imgCount = images.length;
+      let fileCount = attachments.length;
       for (const item of items) {
-        if (item.type.startsWith("image/") && images.length < MAX_IMAGES) {
+        if (item.kind !== "file") continue;
+        const file = item.getAsFile();
+        if (!file) continue;
+        if (item.type.startsWith("image/")) {
+          if (imgCount >= MAX_IMAGES) continue;
+          if (file.size > MAX_IMAGE_SIZE) continue;
           e.preventDefault();
-          const file = item.getAsFile();
-          if (!file || file.size > 10 * 1024 * 1024) continue;
+          imgCount++;
           const reader = new FileReader();
           reader.onload = () => {
             onAddImage({
@@ -183,15 +281,48 @@ export function InputBox({
               name: file.name || "pasted-image",
             });
           };
+          reader.onerror = () => { /* silent on paste */ };
           reader.readAsDataURL(file);
+        } else if (isTextFile(file)) {
+          if (fileCount >= MAX_FILES) continue;
+          if (file.size > MAX_FILE_SIZE) continue;
+          e.preventDefault();
+          fileCount++;
+          const reader = new FileReader();
+          reader.onload = () => {
+            onAddAttachment({
+              path: "",
+              name: file.name || "pasted-file",
+              content: reader.result as string,
+            });
+          };
+          reader.onerror = () => { /* silent on paste */ };
+          reader.readAsText(file);
         }
       }
     },
-    [images.length, onAddImage],
+    [images.length, attachments.length, onAddImage, onAddAttachment],
   );
 
   return (
-    <div className="input-container">
+    <div
+      className={`input-container${isDragOver ? " drag-over" : ""}`}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {/* Drag overlay */}
+      {isDragOver && (
+        <div className="drag-overlay">
+          <i className="codicon codicon-cloud-upload" />
+          <span>Drop files here</span>
+        </div>
+      )}
+      {/* Drop warning */}
+      {dropWarning && (
+        <div className="drop-warning">{dropWarning}</div>
+      )}
       {/* Mention dropdown */}
       <div
         className={`mention-dropdown ${showMentions && mentionResults.length > 0 ? "visible" : ""}`}

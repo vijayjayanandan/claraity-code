@@ -190,6 +190,8 @@ export function ChatHistory({
                   content: entry.content,
                   finalized: true,
                 }}
+                attachments={entry.attachments}
+                images={entry.images}
               />
             );
 

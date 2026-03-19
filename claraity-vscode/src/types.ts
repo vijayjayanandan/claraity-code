@@ -213,6 +213,7 @@ export type WebViewMessage =
     | { type: 'resumeSession'; sessionId: string }
     | { type: 'undoTurn'; turnId: string }
     | { type: 'pickFile' }
+    | { type: 'openFile'; path: string }
     | { type: 'getJiraProfiles' }
     | { type: 'saveJiraConfig'; profile: string; jira_url: string; username: string; api_token: string }
     | { type: 'connectJira'; profile: string }

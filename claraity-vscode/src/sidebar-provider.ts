@@ -8,6 +8,7 @@
  */
 
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { StdioConnection } from './stdio-connection';
 import { ServerMessage, ExtensionMessage, ClientMessage, WebViewMessage, FileAttachment, ImageAttachment } from './types';
 
@@ -450,6 +451,21 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                 this.pickFileFromDisk();
                 break;
 
+            case 'openFile':
+                if (msg.path) {
+                    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+                    const resolvedPath = path.resolve(msg.path);
+                    if (workspaceRoot && !resolvedPath.startsWith(path.resolve(workspaceRoot) + path.sep)) {
+                        vscode.window.showWarningMessage('Can only open files within the workspace.');
+                        break;
+                    }
+                    const uri = vscode.Uri.file(msg.path);
+                    vscode.window.showTextDocument(uri, { preview: true }).then(undefined, () => {
+                        vscode.window.showWarningMessage(`Could not open file: ${msg.path}`);
+                    });
+                }
+                break;
+
             case 'getJiraProfiles':
                 this.connection?.send({ type: 'get_jira_profiles' } as ClientMessage);
                 break;
@@ -485,9 +501,21 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
         }
     }
 
+    /** Binary file extensions that cannot be meaningfully read as text. */
+    private static readonly BINARY_EXTENSIONS = new Set([
+        '.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt',
+        '.pdf', '.zip', '.tar', '.gz', '.bz2', '.7z', '.rar',
+        '.exe', '.dll', '.so', '.dylib', '.bin',
+        '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.webp', '.tiff',
+        '.mp3', '.mp4', '.avi', '.mov', '.wav', '.flac',
+        '.pyc', '.pyo', '.class', '.o', '.obj',
+        '.woff', '.woff2', '.ttf', '.eot',
+        '.sqlite', '.db',
+    ]);
+
     /**
      * Open native file picker and send the selected file back to the webview
-     * as a FileAttachment (path + name).
+     * as a FileAttachment (path + name). Rejects binary files.
      */
     private async pickFileFromDisk(): Promise<void> {
         const result = await vscode.window.showOpenDialog({
@@ -498,6 +526,14 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
         if (!result || result.length === 0) return;
 
         const uri = result[0];
+        const ext = path.extname(uri.fsPath).toLowerCase();
+        if (ClarAItySidebarProvider.BINARY_EXTENSIONS.has(ext)) {
+            vscode.window.showWarningMessage(
+                `Cannot attach ${ext} files. Only text-based files are supported (code, config, logs, etc.).`
+            );
+            return;
+        }
+
         const name = uri.path.split('/').pop() ?? uri.fsPath.split(/[\\/]/).pop() ?? 'file';
         this.postToWebview({
             type: 'fileSelected',
@@ -679,16 +715,30 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
         if (attachments && attachments.length > 0) {
             const fileParts: string[] = [];
             for (const attachment of attachments) {
+                // Skip binary files as a safety net
+                const ext = path.extname(attachment.name).toLowerCase();
+                if (ClarAItySidebarProvider.BINARY_EXTENSIONS.has(ext)) continue;
+
                 try {
-                    const uri = vscode.Uri.file(attachment.path);
-                    const bytes = await vscode.workspace.fs.readFile(uri);
-                    const text = Buffer.from(bytes).toString('utf-8');
+                    let text: string;
+                    if (attachment.content != null) {
+                        // Inline content from paste/drop (no filesystem path)
+                        text = attachment.content;
+                    } else {
+                        const uri = vscode.Uri.file(attachment.path);
+                        const bytes = await vscode.workspace.fs.readFile(uri);
+                        text = Buffer.from(bytes).toString('utf-8');
+                    }
+                    const safePath = attachment.path.replace(/"/g, '&quot;');
+                    const safeName = attachment.name.replace(/"/g, '&quot;');
                     fileParts.push(
-                        `<attached_file path="${attachment.path}" name="${attachment.name}">\n${text}\n</attached_file>`
+                        `<attached_file path="${safePath}" name="${safeName}">\n${text}\n</attached_file>`
                     );
                 } catch (err) {
+                    const safePath = attachment.path.replace(/"/g, '&quot;');
+                    const safeName = attachment.name.replace(/"/g, '&quot;');
                     fileParts.push(
-                        `<attached_file path="${attachment.path}" name="${attachment.name}">\n[Error reading file: ${err}]\n</attached_file>`
+                        `<attached_file path="${safePath}" name="${safeName}">\n[Error reading file: ${err}]\n</attached_file>`
                     );
                 }
             }
