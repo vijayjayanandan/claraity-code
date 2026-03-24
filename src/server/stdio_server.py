@@ -140,11 +140,13 @@ def _build_replay_messages(store) -> list[dict[str, Any]]:
                     text_parts.append(part.get("text", ""))
                 elif ptype == "image_url":
                     image_url = part.get("image_url", {})
-                    images.append({
-                        "data": image_url.get("url", ""),
-                        "mimeType": part.get("mime", "image/png"),
-                        "name": part.get("filename", "image"),
-                    })
+                    images.append(
+                        {
+                            "data": image_url.get("url", ""),
+                            "mimeType": part.get("mime", "image/png"),
+                            "name": part.get("filename", "image"),
+                        }
+                    )
             content = " ".join(text_parts)
 
         # Extract file attachment metadata + content from <attached_file> XML blocks
@@ -153,11 +155,13 @@ def _build_replay_messages(store) -> list[dict[str, Any]]:
                 r'<attached_file\s+path="([^"]*)"\s+name="([^"]*)">\n([\s\S]*?)\n</attached_file>',
                 content,
             ):
-                attachments.append({
-                    "path": match.group(1),
-                    "name": match.group(2),
-                    "content": match.group(3),
-                })
+                attachments.append(
+                    {
+                        "path": match.group(1),
+                        "name": match.group(2),
+                        "content": match.group(3),
+                    }
+                )
 
         entry: dict[str, Any] = {"role": msg.role, "content": content or ""}
         if images:
@@ -257,6 +261,19 @@ class StdioProtocol(UIProtocol):
         "connect_jira": "_handle_jira_connect_dispatch",
         "disconnect_jira": "_handle_jira_disconnect",
         "webview_error": "_handle_webview_error",
+        # MCP
+        "get_mcp_servers": "_handle_mcp_servers",
+        "mcp_marketplace_search": "_handle_mcp_marketplace_search",
+        "mcp_install": "_handle_mcp_install",
+        "mcp_uninstall": "_handle_mcp_uninstall",
+        "mcp_toggle_server": "_handle_mcp_toggle_server",
+        "mcp_save_tools": "_handle_mcp_save_tools",
+        "mcp_reconnect": "_handle_mcp_reconnect",
+        "mcp_reload": "_handle_mcp_reload",
+        # ClarAIty Knowledge & Beads
+        "get_beads": "_handle_get_beads",
+        "get_architecture": "_handle_get_architecture",
+        "approve_knowledge": "_handle_approve_knowledge",
     }
 
     def __init__(
@@ -1075,6 +1092,598 @@ class StdioProtocol(UIProtocol):
             )
 
     # -----------------------------------------------------------------
+    # MCP
+    # -----------------------------------------------------------------
+
+    async def _handle_mcp_servers(self, data: dict) -> None:
+        """List configured MCP servers with per-tool details."""
+        try:
+            from src.integrations.mcp.settings import McpSettingsManager
+
+            settings = getattr(self._agent, "_mcp_settings", None)
+            if settings is None:
+                settings = McpSettingsManager()
+                settings.load()
+
+            servers = []
+            for name, server in settings.servers.items():
+                conn = self._agent._mcp_manager.get_connection(name) if self._agent else None
+
+                # Get ALL tool descriptions from registry (includes disabled tools)
+                tool_descriptions = conn.registry._all_tool_descriptions if conn and conn.registry else {}
+
+                tools = [
+                    {"name": tool_name, "enabled": override.enabled, "description": tool_descriptions.get(tool_name, "")}
+                    for tool_name, override in server.tools.items()
+                ]
+                # Get connection error if not connected
+                error = self._agent._mcp_manager.get_connection_error(name) if self._agent and conn is None else None
+
+                # Generate docs URL from package name or server URL
+                docs_url = ""
+                if server.args:
+                    for arg in server.args:
+                        if arg.startswith("@") and "/" in arg:
+                            # Scoped npm package: @scope/name -> npmjs.com/package/@scope/name
+                            docs_url = f"https://www.npmjs.com/package/{arg}"
+                            break
+                if not docs_url and server.server_url:
+                    docs_url = server.server_url
+
+                servers.append(
+                    {
+                        "name": name,
+                        "transport": server.transport,
+                        "enabled": server.enabled,
+                        "connected": conn is not None,
+                        "toolCount": len([t for t in tools if t["enabled"]]),
+                        "tools": tools,
+                        "command": server.command,
+                        "args": server.args,
+                        "serverUrl": server.server_url,
+                        "error": error,
+                        "docsUrl": docs_url,
+                        "scope": settings.get_scope(name),
+                    }
+                )
+
+            # Include pending notification if any (set by reload handler)
+            msg: dict = {"type": "mcp_servers_list", "servers": servers}
+            notification = getattr(self, "_pending_mcp_notification", None)
+            if notification:
+                msg["notification"] = notification
+                self._pending_mcp_notification = None
+            await self._send_json(msg)
+        except Exception as e:
+            logger.warning("stdio_mcp_servers_error", error=str(e))
+            await self._send_json({"type": "mcp_servers_list", "servers": []})
+
+    async def _handle_mcp_marketplace_search(self, data: dict) -> None:
+        """Search the MCP marketplace."""
+        try:
+            result = await self._agent.mcp_marketplace_search(
+                query=data.get("query", ""),
+                page=data.get("page", 1),
+            )
+            await self._send_json({"type": "mcp_marketplace_results", **result})
+        except Exception as e:
+            logger.warning("stdio_mcp_marketplace_error", error=str(e))
+            await self._send_json(
+                {
+                    "type": "mcp_marketplace_results",
+                    "entries": [],
+                    "totalCount": 0,
+                    "page": 1,
+                    "pageSize": 20,
+                    "hasNext": False,
+                }
+            )
+
+    async def _handle_mcp_install(self, data: dict) -> None:
+        """Install an MCP server from the marketplace."""
+        try:
+            result = await self._agent.mcp_marketplace_install(
+                server_id=data.get("server_id", ""),
+                display_name=data.get("name"),
+                env_values=data.get("env_values"),
+                scope=data.get("scope", "project"),
+            )
+            await self._send_json({"type": "mcp_install_result", **result})
+            # Refresh server list after install
+            await self._handle_mcp_servers({})
+        except Exception as e:
+            logger.warning("stdio_mcp_install_error", error=str(e))
+            await self._send_json(
+                {
+                    "type": "mcp_install_result",
+                    "status": "error",
+                    "message": str(e),
+                }
+            )
+
+    async def _handle_mcp_uninstall(self, data: dict) -> None:
+        """Uninstall an MCP server."""
+        try:
+            result = await self._agent.mcp_marketplace_uninstall(
+                server_name=data.get("server_name", ""),
+            )
+            await self._send_json({"type": "mcp_uninstall_result", **result})
+            # Refresh server list after uninstall
+            await self._handle_mcp_servers({})
+        except Exception as e:
+            logger.warning("stdio_mcp_uninstall_error", error=str(e))
+            await self._send_json(
+                {
+                    "type": "mcp_uninstall_result",
+                    "status": "error",
+                    "message": str(e),
+                }
+            )
+
+    async def _handle_mcp_toggle_server(self, data: dict) -> None:
+        """Toggle an MCP server's enabled state and connect/disconnect."""
+        try:
+            from src.integrations.mcp.settings import McpSettingsManager
+
+            server_name = data.get("server_name", "")
+            enabled = data.get("enabled", True)
+
+            settings = getattr(self._agent, "_mcp_settings", None)
+            if settings is None:
+                settings = McpSettingsManager()
+                settings.load()
+                self._agent._mcp_settings = settings
+
+            settings.update_server_enabled(server_name, enabled)
+            settings.save()
+
+            if not enabled:
+                # Disconnect if currently connected
+                if self._agent._mcp_manager.get_connection(server_name):
+                    await self._agent._mcp_manager.disconnect(
+                        server_name, self._agent.tool_executor
+                    )
+                    self._agent._invalidate_tools_cache()
+            else:
+                # Connect if not already connected
+                if not self._agent._mcp_manager.get_connection(server_name):
+                    server_settings = settings.get_server(server_name)
+                    if server_settings:
+                        from src.integrations.mcp.client import (
+                            McpClient,
+                            SseTransport,
+                            StdioTransport,
+                        )
+                        from src.integrations.mcp.policy import McpPolicyGate
+                        from src.integrations.mcp.registry import McpToolRegistry
+
+                        runtime_config = server_settings.to_runtime_config()
+                        transport = (
+                            SseTransport()
+                            if server_settings.transport == "sse"
+                            else StdioTransport()
+                        )
+                        client = McpClient(runtime_config, transport)
+                        registry = McpToolRegistry(runtime_config, McpPolicyGate())
+
+                        await self._agent._mcp_manager.connect(
+                            name=server_name,
+                            config=runtime_config,
+                            client=client,
+                            registry=registry,
+                            tool_executor=self._agent.tool_executor,
+                            disabled_tools=settings.get_tool_filter(server_name),
+                            settings_manager=settings,
+                        )
+                        self._agent._invalidate_tools_cache()
+
+            # Refresh server list
+            await self._handle_mcp_servers({})
+        except Exception as e:
+            logger.warning("stdio_mcp_toggle_server_error", error=str(e))
+            try:
+                await self._handle_mcp_servers({})
+            except Exception:
+                pass
+
+    async def _handle_mcp_save_tools(self, data: dict) -> None:
+        """Batch-save tool visibility for a server (single write + reconnect)."""
+        try:
+            from src.integrations.mcp.settings import McpSettingsManager
+
+            server_name = data.get("server_name", "")
+            tool_states = data.get("tools", {})  # { "toolName": true/false }
+
+            settings = getattr(self._agent, "_mcp_settings", None)
+            if settings is None:
+                settings = McpSettingsManager()
+                settings.load()
+                self._agent._mcp_settings = settings
+
+            # Apply all toggles at once
+            for tool_name, enabled in tool_states.items():
+                settings.update_tool_visibility(server_name, tool_name, enabled)
+
+            settings.save()
+
+            # Reconnect to apply changes
+            if self._agent._mcp_manager.get_connection(server_name):
+                await self._agent._mcp_manager.disconnect(server_name, self._agent.tool_executor)
+
+                server_settings = settings.get_server(server_name)
+                if server_settings and server_settings.enabled:
+                    from src.integrations.mcp.client import McpClient, SseTransport, StdioTransport
+                    from src.integrations.mcp.policy import McpPolicyGate
+                    from src.integrations.mcp.registry import McpToolRegistry
+
+                    runtime_config = server_settings.to_runtime_config()
+                    transport = SseTransport() if server_settings.transport == "sse" else StdioTransport()
+                    client = McpClient(runtime_config, transport)
+                    registry = McpToolRegistry(runtime_config, McpPolicyGate())
+
+                    await self._agent._mcp_manager.connect(
+                        name=server_name,
+                        config=runtime_config,
+                        client=client,
+                        registry=registry,
+                        tool_executor=self._agent.tool_executor,
+                        disabled_tools=settings.get_tool_filter(server_name),
+                        settings_manager=settings,
+                    )
+                    self._agent._invalidate_tools_cache()
+
+            # Refresh server list
+            await self._handle_mcp_servers({})
+        except Exception as e:
+            logger.warning("stdio_mcp_save_tools_error", error=str(e))
+            try:
+                await self._handle_mcp_servers({})
+            except Exception:
+                pass
+
+    async def _handle_mcp_reconnect(self, data: dict) -> None:
+        """Disconnect and reconnect an MCP server."""
+        server_name = data.get("server_name", "")
+        try:
+            from src.integrations.mcp.settings import McpSettingsManager
+
+            settings = getattr(self._agent, "_mcp_settings", None)
+            if settings is None:
+                settings = McpSettingsManager()
+                settings.load()
+                self._agent._mcp_settings = settings
+
+            # Disconnect if connected
+            if self._agent._mcp_manager.get_connection(server_name):
+                await self._agent._mcp_manager.disconnect(server_name, self._agent.tool_executor)
+
+            # Clear previous error
+            self._agent._mcp_manager._connection_errors.pop(server_name, None)
+
+            # Reconnect
+            server_settings = settings.get_server(server_name)
+            if server_settings and server_settings.enabled:
+                from src.integrations.mcp.client import McpClient, SseTransport, StdioTransport
+                from src.integrations.mcp.policy import McpPolicyGate
+                from src.integrations.mcp.registry import McpToolRegistry
+
+                runtime_config = server_settings.to_runtime_config()
+                transport = SseTransport() if server_settings.transport == "sse" else StdioTransport()
+                client = McpClient(runtime_config, transport)
+                registry = McpToolRegistry(runtime_config, McpPolicyGate())
+
+                try:
+                    await self._agent._mcp_manager.connect(
+                        name=server_name,
+                        config=runtime_config,
+                        client=client,
+                        registry=registry,
+                        tool_executor=self._agent.tool_executor,
+                        disabled_tools=settings.get_tool_filter(server_name),
+                        settings_manager=settings,
+                    )
+                    self._agent._invalidate_tools_cache()
+                except Exception as e:
+                    self._agent._mcp_manager._connection_errors[server_name] = str(e)
+
+            # Refresh server list
+            await self._handle_mcp_servers({})
+        except Exception as e:
+            logger.warning("stdio_mcp_reconnect_error", error=str(e))
+            try:
+                await self._handle_mcp_servers({})
+            except Exception:
+                pass
+
+    async def _handle_mcp_reload(self, data: dict) -> None:
+        """Reload settings from disk and sync connections."""
+        try:
+            from src.integrations.mcp.settings import McpSettingsManager
+
+            # Reload settings from disk
+            settings = McpSettingsManager()
+            settings.load()
+            self._agent._mcp_settings = settings
+
+            enabled_names = {s.name for s in settings.get_enabled_servers()}
+            current_names = set(self._agent._mcp_manager.connection_names)
+
+            # Disconnect servers that were removed or disabled
+            for name in current_names - enabled_names:
+                try:
+                    await self._agent._mcp_manager.disconnect(name, self._agent.tool_executor)
+                except Exception:
+                    pass
+
+            # Connect new/re-enabled servers
+            results = await self._agent._mcp_manager.connect_from_settings(
+                settings_manager=settings,
+                tool_executor=self._agent.tool_executor,
+            )
+            self._agent._invalidate_tools_cache()
+
+            total = sum(results.values())
+
+            # Refresh server list with notification (single message, no flicker)
+            self._pending_mcp_notification = {
+                "message": f"Reloaded ({total} tools from {len(results)} servers)",
+                "success": True,
+            }
+            await self._handle_mcp_servers({})
+        except Exception as e:
+            logger.warning("stdio_mcp_reload_error", error=str(e))
+            await self._send_json({
+                "type": "mcp_servers_list",
+                "servers": [],
+                "notification": {"message": f"Reload failed: {e}", "success": False},
+            })
+
+    # -----------------------------------------------------------------
+    # ClarAIty Knowledge & Beads handlers
+    # -----------------------------------------------------------------
+
+    async def _handle_get_beads(self, data: dict) -> None:
+        """Query the beads DB and send grouped task data to the client."""
+        try:
+            from src.claraity.claraity_beads import BeadStore
+
+            db_path = os.path.join(self._working_directory, ".clarity", "claraity_beads.db")
+            if not os.path.exists(db_path):
+                await self._send_json(
+                    {
+                        "type": "beads_data",
+                        "data": {
+                            "ready": [],
+                            "in_progress": [],
+                            "blocked": [],
+                            "closed": [],
+                            "stats": {
+                                "total": 0,
+                                "open": 0,
+                                "in_progress": 0,
+                                "closed": 0,
+                                "dependencies": 0,
+                            },
+                        },
+                    }
+                )
+                return
+
+            store = BeadStore(db_path)
+            try:
+                all_beads = store.get_all_beads()
+                ready_ids = {b["id"] for b in store.get_ready()}
+                stats = store.get_stats()
+
+                ready, in_progress, blocked, closed = [], [], [], []
+                for bead in all_beads:
+                    tags = []
+                    if bead.get("tags"):
+                        import json as _json
+
+                        try:
+                            tags = _json.loads(bead["tags"])
+                        except (ValueError, TypeError):
+                            pass
+
+                    # Get blockers for this bead
+                    deps = store.get_dependencies(bead["id"])
+                    blockers = [
+                        {"id": b["id"], "title": b["title"], "status": b["status"]}
+                        for b in deps.get("blockers", [])
+                    ]
+
+                    item = {
+                        "id": bead["id"],
+                        "title": bead["title"],
+                        "description": bead.get("description"),
+                        "status": bead["status"],
+                        "priority": bead.get("priority", 3),
+                        "tags": tags,
+                        "parent_id": bead.get("parent_id"),
+                        "created_at": bead.get("created_at", ""),
+                        "closed_at": bead.get("closed_at"),
+                        "summary": bead.get("summary"),
+                        "blockers": blockers,
+                    }
+
+                    if bead["status"] == "closed":
+                        closed.append(item)
+                    elif bead["status"] == "in_progress":
+                        in_progress.append(item)
+                    elif bead["id"] in ready_ids:
+                        ready.append(item)
+                    else:
+                        blocked.append(item)
+
+                by_status = stats.get("by_status", {})
+                await self._send_json(
+                    {
+                        "type": "beads_data",
+                        "data": {
+                            "ready": ready,
+                            "in_progress": in_progress,
+                            "blocked": blocked,
+                            "closed": closed,
+                            "stats": {
+                                "total": stats.get("total", 0),
+                                "open": by_status.get("open", 0),
+                                "in_progress": by_status.get("in_progress", 0),
+                                "closed": by_status.get("closed", 0),
+                                "dependencies": stats.get("dependencies", 0),
+                            },
+                        },
+                    }
+                )
+            finally:
+                store.close()
+        except Exception as e:
+            logger.warning("stdio_get_beads_error", error=str(e))
+            await self._send_error("beads_error", f"Failed to load beads: {e}")
+
+    async def _handle_get_architecture(self, data: dict) -> None:
+        """Query the knowledge DB and send architecture graph data to the client."""
+        try:
+            from src.claraity.claraity_db import ClarityStore
+
+            db_path = os.path.join(self._working_directory, ".clarity", "claraity_knowledge.db")
+            if not os.path.exists(db_path):
+                await self._send_json(
+                    {
+                        "type": "architecture_data",
+                        "data": {
+                            "nodes": [],
+                            "edges": [],
+                            "stats": {"node_count": 0, "edge_count": 0, "module_count": 0},
+                        },
+                    }
+                )
+                return
+
+            store = ClarityStore(db_path)
+            try:
+                raw_nodes = store.get_all_nodes()
+                raw_edges = store.get_all_edges()
+
+                nodes = []
+                for n in raw_nodes:
+                    props = n.get("properties", {})
+                    if isinstance(props, str):
+                        import json as _json
+
+                        try:
+                            props = _json.loads(props)
+                        except (ValueError, TypeError):
+                            props = {}
+                    nodes.append(
+                        {
+                            "id": n["id"],
+                            "type": n.get("type", ""),
+                            "layer": n.get("layer", ""),
+                            "name": n.get("name", ""),
+                            "description": n.get("description"),
+                            "file_path": n.get("file_path"),
+                            "properties": props,
+                        }
+                    )
+
+                edges = []
+                for e in raw_edges:
+                    edges.append(
+                        {
+                            "id": e.get("id", ""),
+                            "from_id": e["from_id"],
+                            "to_id": e["to_id"],
+                            "type": e.get("type", ""),
+                            "label": e.get("label"),
+                        }
+                    )
+
+                stats_data = store.get_stats()
+                module_count = sum(1 for n in nodes if n["type"] == "module")
+                metadata = store.get_metadata()
+                overview = metadata.get("architecture_overview", "")
+
+                await self._send_json(
+                    {
+                        "type": "architecture_data",
+                        "data": {
+                            "nodes": nodes,
+                            "edges": edges,
+                            "overview": overview,
+                            "stats": {
+                                "node_count": stats_data.get("nodes", len(nodes)),
+                                "edge_count": stats_data.get("edges", len(edges)),
+                                "module_count": module_count,
+                            },
+                            "approval": {
+                                "status": metadata.get("knowledge_status", "draft"),
+                                "approved_at": metadata.get("knowledge_approved_at"),
+                                "approved_by": metadata.get("knowledge_approved_by"),
+                                "version": int(metadata.get("knowledge_version", "0")),
+                                "comments": metadata.get("knowledge_review_comments"),
+                            },
+                            "scan": {
+                                "scanned_at": metadata.get("scanned_at"),
+                                "scanned_by": metadata.get("scanned_by"),
+                                "repo_name": metadata.get("repo_name"),
+                                "total_files": int(metadata.get("total_files", "0"))
+                                if metadata.get("total_files")
+                                else None,
+                            },
+                        },
+                    }
+                )
+            finally:
+                store.close()
+        except Exception as e:
+            logger.warning("stdio_get_architecture_error", error=str(e))
+            await self._send_error("architecture_error", f"Failed to load architecture: {e}")
+
+    async def _handle_approve_knowledge(self, data: dict) -> None:
+        """Review the knowledge DB - approve or reject with comments."""
+        try:
+            from src.claraity.claraity_db import ClarityStore
+            from datetime import datetime, timezone
+
+            approved_by = data.get("approved_by", "unknown")
+            status = data.get("status", "approved")
+            comments = data.get("comments", "")
+            db_path = os.path.join(self._working_directory, ".clarity", "claraity_knowledge.db")
+            if not os.path.exists(db_path):
+                await self._send_error("approve_error", "Knowledge DB not found")
+                return
+
+            store = ClarityStore(db_path)
+            try:
+                metadata = store.get_metadata()
+                version = int(metadata.get("knowledge_version", "0")) + 1
+                now = datetime.now(timezone.utc).isoformat()
+
+                store.set_metadata("knowledge_status", status)
+                store.set_metadata("knowledge_approved_at", now)
+                store.set_metadata("knowledge_approved_by", approved_by)
+                store.set_metadata("knowledge_version", str(version))
+                store.set_metadata("knowledge_review_comments", comments)
+
+                await self._send_json(
+                    {
+                        "type": "knowledge_approved",
+                        "data": {
+                            "status": status,
+                            "approved_at": now,
+                            "approved_by": approved_by,
+                            "version": version,
+                        },
+                    }
+                )
+            finally:
+                store.close()
+        except Exception as e:
+            logger.warning("stdio_approve_knowledge_error", error=str(e))
+            await self._send_error("approve_error", f"Failed to approve: {e}")
+
+    # -----------------------------------------------------------------
     # Streaming
     # -----------------------------------------------------------------
 
@@ -1188,6 +1797,19 @@ async def run_stdio_server(
         auto_approve_categories=agent.get_auto_approve_categories(),
     )
     logger.info("stdio_server_ready", session_id=session_id)
+
+    # Auto-connect MCP servers in background (mirrors TUI's _connect_mcp_servers)
+    async def _auto_connect_mcp():
+        try:
+            mcp_results = await agent.connect_mcp_from_settings()
+            if mcp_results:
+                total = sum(mcp_results.values())
+                servers = ", ".join(f"{k}({v})" for k, v in mcp_results.items())
+                logger.info("stdio_mcp_auto_connect_done", servers=servers, total_tools=total)
+        except Exception as e:
+            logger.error("stdio_mcp_auto_connect_error", error=str(e))
+
+    asyncio.create_task(_auto_connect_mcp())
 
     # Start receive loop in background
     receive_task = asyncio.create_task(protocol.receive_loop())

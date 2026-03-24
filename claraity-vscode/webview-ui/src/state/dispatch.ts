@@ -224,6 +224,62 @@ export function dispatchServerMessage(
       break;
     }
 
+    // ── MCP ──
+    case "mcp_servers_list": {
+      const msl = msg as { servers: unknown[]; notification?: { message: string; success: boolean } };
+      dispatch({
+        type: "MCP_SERVERS_LIST",
+        servers: (msl.servers ?? []) as import("../types").McpServerInfo[],
+        notification: msl.notification,
+      });
+      break;
+    }
+
+    case "mcp_marketplace_results": {
+      const mmr = msg as Record<string, unknown>;
+      dispatch({
+        type: "MCP_MARKETPLACE_RESULTS",
+        entries: (mmr.entries ?? []) as import("../types").McpMarketplaceEntry[],
+        totalCount: (mmr.totalCount as number) ?? 0,
+        page: (mmr.page as number) ?? 1,
+        hasNext: !!(mmr.hasNext),
+      });
+      break;
+    }
+
+    case "mcp_install_result": {
+      const mir = msg as { status: string; server?: string; toolCount?: number; message?: string };
+      const success = mir.status === "connected" || mir.status === "installed";
+      const text = mir.status === "connected"
+        ? `${mir.server} installed (${mir.toolCount ?? 0} tools)`
+        : mir.message ?? `${mir.server} installed`;
+      dispatch({ type: "MCP_NOTIFICATION", message: text, success });
+      break;
+    }
+
+    case "mcp_uninstall_result": {
+      const mur = msg as { status: string; server?: string };
+      dispatch({
+        type: "MCP_NOTIFICATION",
+        message: mur.status === "uninstalled" ? `${mur.server} removed` : `Server not found`,
+        success: mur.status === "uninstalled",
+      });
+      break;
+    }
+
+    // ── ClarAIty Knowledge & Beads ──
+    case "beads_data":
+      dispatch({ type: "BEADS_LOADED", data: msg.data });
+      break;
+
+    case "architecture_data":
+      dispatch({ type: "ARCHITECTURE_LOADED", data: msg.data });
+      break;
+
+    case "knowledge_approved":
+      // Refresh architecture data to pick up new approval status
+      break;
+
     // These are handled at a higher level or don't affect state
     case "session_info":
     case "context_compacting":

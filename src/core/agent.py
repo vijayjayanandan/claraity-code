@@ -319,6 +319,7 @@ class CodingAgent(AgentInterface):
         from src.integrations.mcp.manager import McpConnectionManager
 
         self._mcp_manager = McpConnectionManager()
+        self._mcp_settings = None  # Loaded lazily by connect_mcp_from_settings()
         self._tools_cache = None  # Invalidated when tools are registered/unregistered
 
         # Set workspace root on file operation tools so path validation works
@@ -822,6 +823,37 @@ class CodingAgent(AgentInterface):
 
         self.tool_executor.register_tool(ClarifyTool())
 
+        # ClarAIty Knowledge & Task tools
+        from src.tools.claraity_tools import (
+            ClaraityScanFilesTool,
+            ClaraityAddNodeTool,
+            ClaraityAddEdgeTool,
+            ClaraityRemoveNodeTool,
+            QueryKnowledgeBriefTool,
+            QueryModuleTool,
+            QueryFileTool,
+            SearchKnowledgeTool,
+            QueryImpactTool,
+            BeadReadyTool,
+            BeadCreateTool,
+            BeadUpdateTool,
+            BeadBlockTool,
+        )
+
+        self.tool_executor.register_tool(ClaraityScanFilesTool())
+        self.tool_executor.register_tool(ClaraityAddNodeTool())
+        self.tool_executor.register_tool(ClaraityAddEdgeTool())
+        self.tool_executor.register_tool(ClaraityRemoveNodeTool())
+        self.tool_executor.register_tool(QueryKnowledgeBriefTool())
+        self.tool_executor.register_tool(QueryModuleTool())
+        self.tool_executor.register_tool(QueryFileTool())
+        self.tool_executor.register_tool(SearchKnowledgeTool())
+        self.tool_executor.register_tool(QueryImpactTool())
+        self.tool_executor.register_tool(BeadReadyTool())
+        self.tool_executor.register_tool(BeadCreateTool())
+        self.tool_executor.register_tool(BeadUpdateTool())
+        self.tool_executor.register_tool(BeadBlockTool())
+
         # Plan mode tools (Claude Code-style planning workflow)
         # Note: These tools need plan_mode_state and session_id set
         # They are registered here but the state is passed during execution
@@ -895,6 +927,245 @@ class CodingAgent(AgentInterface):
         """
         await self._mcp_manager.disconnect(name, self.tool_executor)
         self._invalidate_tools_cache()
+
+    async def connect_mcp_from_settings(self) -> dict[str, int]:
+        """Auto-connect to MCP servers defined in .clarity/mcp_settings.json.
+
+        Loads the settings file, connects to all enabled servers, discovers
+        tools with per-tool visibility filtering applied. New tools found
+        during discovery are saved back to settings with enabled=True.
+
+        Returns:
+            Dict mapping server name -> number of tools registered.
+        """
+        from src.integrations.mcp.settings import McpSettingsManager
+
+        settings = McpSettingsManager()
+        settings.load()
+
+        if not settings.get_enabled_servers():
+            return {}
+
+        results = await self._mcp_manager.connect_from_settings(
+            settings_manager=settings,
+            tool_executor=self.tool_executor,
+        )
+        self._mcp_settings = settings
+        self._invalidate_tools_cache()
+        return results
+
+    async def update_mcp_tool_visibility(
+        self, server_name: str, tool_name: str, enabled: bool
+    ) -> bool:
+        """Toggle an MCP tool's visibility and reconnect the server.
+
+        Updates the settings file, disconnects the server, and reconnects
+        with the updated tool filter applied.
+
+        Args:
+            server_name: Server identifier.
+            tool_name: Raw MCP tool name (without prefix).
+            enabled: Whether the tool should be visible.
+
+        Returns:
+            True if successful, False if server not found.
+        """
+        settings = getattr(self, "_mcp_settings", None)
+        if settings is None:
+            return False
+
+        if not settings.update_tool_visibility(server_name, tool_name, enabled):
+            return False
+
+        settings.save()
+
+        # Reconnect the server to apply the change
+        if self._mcp_manager.get_connection(server_name):
+            await self._mcp_manager.disconnect(server_name, self.tool_executor)
+
+            server_settings = settings.get_server(server_name)
+            if server_settings and server_settings.enabled:
+                from src.integrations.mcp.client import McpClient, SseTransport, StdioTransport
+                from src.integrations.mcp.policy import McpPolicyGate
+                from src.integrations.mcp.registry import McpToolRegistry
+
+                runtime_config = server_settings.to_runtime_config()
+                transport = SseTransport() if server_settings.transport == "sse" else StdioTransport()
+                client = McpClient(runtime_config, transport)
+                registry = McpToolRegistry(runtime_config, McpPolicyGate())
+
+                await self._mcp_manager.connect(
+                    name=server_name,
+                    config=runtime_config,
+                    client=client,
+                    registry=registry,
+                    tool_executor=self.tool_executor,
+                    disabled_tools=settings.get_tool_filter(server_name),
+                    settings_manager=settings,
+                )
+
+        self._invalidate_tools_cache()
+        return True
+
+    # ------------------------------------------------------------------
+    # MCP Marketplace
+    # ------------------------------------------------------------------
+
+    async def mcp_marketplace_search(
+        self, query: str = "", page: int = 1, page_size: int = 20
+    ) -> dict[str, Any]:
+        """Search the MCP marketplace for available servers.
+
+        Queries the official MCP registry and npm for @modelcontextprotocol packages.
+
+        Args:
+            query: Search query (empty = browse all).
+            page: Page number (1-indexed).
+            page_size: Results per page.
+
+        Returns:
+            Dict with entries, totalCount, page, pageSize, hasNext.
+        """
+        from src.integrations.mcp.marketplace import McpMarketplace
+
+        marketplace = McpMarketplace()
+        try:
+            result = await marketplace.search(query, page, page_size)
+            return result.to_dict()
+        finally:
+            await marketplace.close()
+
+    async def mcp_marketplace_install(
+        self,
+        server_id: str,
+        display_name: str | None = None,
+        env_values: dict[str, str] | None = None,
+        scope: str = "project",
+    ) -> dict[str, Any]:
+        """Install an MCP server from the marketplace.
+
+        Fetches server details, creates config entry in mcp_settings.json,
+        and optionally connects to it.
+
+        Args:
+            server_id: Registry name or "npm:@scope/package-name".
+            display_name: Override for the server name in settings.
+            env_values: Values for required environment variables.
+            scope: 'project' or 'global'.
+
+        Returns:
+            Dict with status, server name, and tool count (if connected).
+        """
+        from src.integrations.mcp.marketplace import McpMarketplace
+        from src.integrations.mcp.settings import McpServerSettings, McpSettingsManager
+
+        marketplace = McpMarketplace()
+        try:
+            # Fetch server details
+            entry = await marketplace.get_server_detail(server_id)
+            if entry is None:
+                return {"status": "error", "message": f"Server '{server_id}' not found"}
+
+            # Generate install config
+            install_config = marketplace.create_install_config(entry, env_values)
+
+            if install_config is None:
+                return {
+                    "status": "error",
+                    "message": f"'{entry.name}' has no auto-install config. "
+                    f"Visit the project page for manual setup instructions.",
+                    "url": entry.url,
+                }
+
+            # Determine server name for settings
+            name = display_name or entry.name.replace("/", "-")
+
+            # Load settings, add server, save
+            settings = getattr(self, "_mcp_settings", None)
+            if settings is None:
+                settings = McpSettingsManager()
+                settings.load()
+                self._mcp_settings = settings
+
+            server_settings = McpServerSettings.from_dict(name, install_config)
+            settings.add_server(server_settings, scope=scope)
+            settings.save()
+
+            # Check for missing env vars
+            missing_env = [v for v in entry.env_vars if not (env_values or {}).get(v)]
+
+            result: dict[str, Any] = {
+                "status": "installed",
+                "server": name,
+                "description": entry.description,
+                "envVarsRequired": entry.env_vars,
+                "envVarsMissing": missing_env,
+            }
+
+            # Auto-connect if no missing env vars
+            if not missing_env and server_settings.enabled:
+                try:
+                    from src.integrations.mcp.client import McpClient, SseTransport, StdioTransport
+                    from src.integrations.mcp.policy import McpPolicyGate
+                    from src.integrations.mcp.registry import McpToolRegistry
+
+                    runtime_config = server_settings.to_runtime_config()
+                    transport = (
+                        SseTransport() if server_settings.transport == "sse" else StdioTransport()
+                    )
+                    client = McpClient(runtime_config, transport)
+                    registry = McpToolRegistry(runtime_config, McpPolicyGate())
+
+                    count = await self._mcp_manager.connect(
+                        name=name,
+                        config=runtime_config,
+                        client=client,
+                        registry=registry,
+                        tool_executor=self.tool_executor,
+                        settings_manager=settings,
+                    )
+                    self._invalidate_tools_cache()
+                    result["status"] = "connected"
+                    result["toolCount"] = count
+                except Exception as e:
+                    result["status"] = "installed_not_connected"
+                    result["connectError"] = str(e)
+
+            return result
+        finally:
+            await marketplace.close()
+
+    async def mcp_marketplace_uninstall(self, server_name: str) -> dict[str, Any]:
+        """Uninstall an MCP server.
+
+        Disconnects if connected, removes from settings file.
+
+        Args:
+            server_name: Server name in mcp_settings.json.
+
+        Returns:
+            Dict with status.
+        """
+        from src.integrations.mcp.settings import McpSettingsManager
+
+        settings = getattr(self, "_mcp_settings", None)
+        if settings is None:
+            settings = McpSettingsManager()
+            settings.load()
+            self._mcp_settings = settings
+
+        # Disconnect if connected
+        if self._mcp_manager.get_connection(server_name):
+            await self._mcp_manager.disconnect(server_name, self.tool_executor)
+            self._invalidate_tools_cache()
+
+        # Remove from settings
+        removed = settings.remove_server(server_name)
+        if removed:
+            settings.save()
+            return {"status": "uninstalled", "server": server_name}
+
+        return {"status": "not_found", "server": server_name}
 
     def _fix_orphaned_tool_calls(self, context: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """

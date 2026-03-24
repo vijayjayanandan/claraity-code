@@ -1,0 +1,1038 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ClarAIty - Codebase Architecture</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --orange: #d29922;
+    --red: #f85149;
+    --purple: #bc8cff;
+    --pink: #f778ba;
+    --cyan: #79c0ff;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+    height: 100vh;
+  }
+
+  /* Layout */
+  #app {
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    grid-template-rows: auto 1fr;
+    height: 100vh;
+  }
+
+  /* Header */
+  #header {
+    grid-column: 1 / -1;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+
+  #header h1 {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--accent);
+  }
+
+  #header .stats {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  /* Controls */
+  .controls {
+    display: flex;
+    gap: 8px;
+    margin-left: auto;
+    align-items: center;
+  }
+
+  .controls label {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .controls select, .controls input {
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+
+  .btn {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 12px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+
+  /* Graph */
+  #graph-container {
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* Mermaid takes full width (spans both columns) */
+  #mermaid-container {
+    grid-column: 1 / -1;
+  }
+
+  svg {
+    width: 100%;
+    height: 100%;
+  }
+
+  /* Nodes */
+  .node circle {
+    stroke-width: 2px;
+    cursor: pointer;
+    transition: stroke-width 0.15s;
+  }
+  .node:hover circle { stroke-width: 4px; }
+  .node.selected circle { stroke-width: 4px; stroke: #fff !important; }
+
+  .node text {
+    font-size: 10px;
+    fill: var(--text);
+    pointer-events: none;
+    text-anchor: middle;
+    dominant-baseline: central;
+  }
+
+  .node .label {
+    font-size: 11px;
+    fill: var(--text);
+    dy: 1.5em;
+  }
+
+  /* Edges */
+  .edge line {
+    stroke-opacity: 0.3;
+    transition: stroke-opacity 0.15s;
+  }
+  .edge.highlighted line { stroke-opacity: 0.9; stroke-width: 2px; }
+  .edge .edge-label {
+    font-size: 8px;
+    fill: var(--text-muted);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .edge.highlighted .edge-label { opacity: 1; }
+
+  /* Arrows */
+  marker { fill: var(--text-muted); }
+
+  /* Detail Panel */
+  #detail-panel {
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    padding: 16px;
+    overflow-y: auto;
+  }
+
+  #detail-panel h2 {
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 4px;
+    color: var(--accent);
+  }
+
+  #detail-panel .node-type {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+  }
+
+  #detail-panel .section {
+    margin-bottom: 16px;
+  }
+
+  #detail-panel .section h3 {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 4px;
+  }
+
+  #detail-panel p, #detail-panel li {
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text);
+  }
+
+  #detail-panel ul {
+    list-style: none;
+    padding: 0;
+  }
+
+  #detail-panel li {
+    padding: 3px 0;
+  }
+
+  #detail-panel .tag {
+    display: inline-block;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 2px 8px;
+    font-size: 11px;
+    margin: 2px 2px;
+    color: var(--text-muted);
+  }
+
+  #detail-panel .file-path {
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    font-size: 12px;
+    color: var(--cyan);
+  }
+
+  #detail-panel .risk-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .risk-high { background: rgba(248, 81, 73, 0.2); color: var(--red); }
+  .risk-medium { background: rgba(210, 153, 34, 0.2); color: var(--orange); }
+  .risk-low { background: rgba(63, 185, 80, 0.2); color: var(--green); }
+
+  .edge-item {
+    padding: 4px 0;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .edge-item .arrow { color: var(--text-muted); font-size: 10px; }
+  .edge-item .edge-type { color: var(--text-muted); font-size: 10px; }
+  .edge-item .edge-target {
+    color: var(--accent);
+    cursor: pointer;
+    text-decoration: none;
+  }
+  .edge-item .edge-target:hover { text-decoration: underline; }
+
+  .placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-muted);
+    font-size: 14px;
+    text-align: center;
+    gap: 8px;
+  }
+
+  /* Legend */
+  #legend {
+    position: absolute;
+    bottom: 16px;
+    left: 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    font-size: 11px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    z-index: 10;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .legend-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* Tooltip */
+  #tooltip {
+    position: absolute;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 12px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+    max-width: 300px;
+    z-index: 100;
+  }
+  #tooltip.visible { opacity: 1; }
+  #tooltip .tt-name { font-weight: 600; color: var(--accent); }
+  #tooltip .tt-desc { color: var(--text-muted); margin-top: 2px; }
+
+  /* Mermaid view */
+  #mermaid-container {
+    overflow: auto;
+    background: var(--bg);
+  }
+
+  #mermaid-scroll {
+    min-width: 100%;
+    min-height: 100%;
+    padding: 24px;
+    overflow: auto;
+  }
+
+  #mermaid-output {
+    background: var(--surface);
+    border-radius: 12px;
+    padding: 32px;
+    border: 1px solid var(--border);
+    overflow: auto;
+    min-width: fit-content;
+  }
+
+  /* Mermaid dark theme overrides */
+  #mermaid-output .node rect,
+  #mermaid-output .node polygon {
+    stroke-width: 1.5px !important;
+  }
+
+  #mermaid-output .cluster rect {
+    rx: 8 !important;
+    ry: 8 !important;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="header">
+    <h1>ClarAIty</h1>
+    <span class="stats" id="stats-text">Loading...</span>
+    <div class="controls">
+      <label>Layer:</label>
+      <select id="layer-filter">
+        <option value="all">All Layers</option>
+        <option value="1">L1: System Context</option>
+        <option value="2">L2: Modules</option>
+        <option value="3">L3: Components</option>
+        <option value="0">Cross-Cutting</option>
+      </select>
+      <label>Type:</label>
+      <select id="type-filter">
+        <option value="all">All Types</option>
+      </select>
+      <input type="text" id="search" placeholder="Search nodes..." style="width: 150px;">
+      <button class="btn" id="btn-reset">Reset Zoom</button>
+      <a href="architecture.html" class="btn" style="text-decoration:none;">Architecture View</a>
+    </div>
+  </div>
+
+  <div id="graph-container">
+    <svg id="graph"></svg>
+    <div id="legend"></div>
+    <div id="tooltip"></div>
+  </div>
+
+  <div id="mermaid-container" style="display:none;">
+    <div id="mermaid-scroll">
+      <div id="mermaid-output"></div>
+    </div>
+  </div>
+
+  <div id="detail-panel">
+    <div class="placeholder">
+      <div style="font-size: 24px; opacity: 0.3;">&#9678;</div>
+      <div>Click a node to see details</div>
+      <div style="font-size: 12px; opacity: 0.6;">Scroll to zoom, drag to pan</div>
+    </div>
+  </div>
+</div>
+
+<script>
+// =========================================================================
+// Color & size config
+// =========================================================================
+const TYPE_COLORS = {
+  system:    '#f85149',
+  module:    '#58a6ff',
+  component: '#3fb950',
+  decision:  '#d29922',
+  invariant: '#f778ba',
+  flow:      '#bc8cff',
+};
+
+const EDGE_COLORS = {
+  contains:   '#30363d',
+  uses:       '#58a6ff',
+  calls:      '#3fb950',
+  emits:      '#bc8cff',
+  constrains: '#d29922',
+  reads:      '#79c0ff',
+  writes:     '#f85149',
+  renders:    '#3fb950',
+  dispatches: '#79c0ff',
+  interacts:  '#f778ba',
+  default:    '#8b949e',
+};
+
+const LAYER_RADIUS = { 0: 10, 1: 18, 2: 14, 3: 8 };
+const LAYER_STRENGTH = { 0: -300, 1: -400, 2: -250, 3: -120 };
+
+// =========================================================================
+// Load data & render
+// =========================================================================
+async function init() {
+  const resp = await fetch('./graph.json');
+  const data = await resp.json();
+  window._graphData = data;
+  render(data);
+}
+
+function render(data) {
+  const container = document.getElementById('graph-container');
+  const svg = d3.select('#graph');
+  svg.selectAll('*').remove();
+
+  const width = container.clientWidth;
+  const height = container.clientHeight;
+
+  // Stats
+  document.getElementById('stats-text').textContent =
+    `${data.stats.total_nodes} nodes | ${data.stats.total_edges} edges | ` +
+    `Scanned: ${data.metadata.scanned_at?.split('T')[0] || 'unknown'}`;
+
+  // Populate type filter
+  const typeFilter = document.getElementById('type-filter');
+  const currentType = typeFilter.value;
+  typeFilter.innerHTML = '<option value="all">All Types</option>';
+  Object.keys(data.stats.node_types).forEach(t => {
+    const opt = document.createElement('option');
+    opt.value = t;
+    opt.textContent = `${t} (${data.stats.node_types[t]})`;
+    if (t === currentType) opt.selected = true;
+    typeFilter.appendChild(opt);
+  });
+
+  // Build legend
+  const legend = document.getElementById('legend');
+  legend.innerHTML = '';
+  Object.entries(TYPE_COLORS).forEach(([type, color]) => {
+    if (data.stats.node_types[type]) {
+      const item = document.createElement('div');
+      item.className = 'legend-item';
+      item.innerHTML = `<div class="legend-dot" style="background:${color}"></div>${type}`;
+      legend.appendChild(item);
+    }
+  });
+
+  // Filter
+  const layerVal = document.getElementById('layer-filter').value;
+  const typeVal = document.getElementById('type-filter').value;
+  const searchVal = document.getElementById('search').value.toLowerCase();
+
+  // Deep-clone nodes/edges so D3 mutation doesn't corrupt source data
+  let nodes = data.nodes
+    .filter(n => {
+      if (layerVal !== 'all' && String(n.layer) !== layerVal) return false;
+      if (typeVal !== 'all' && n.type !== typeVal) return false;
+      if (searchVal && !n.name.toLowerCase().includes(searchVal) &&
+          !(n.description || '').toLowerCase().includes(searchVal)) return false;
+      return true;
+    })
+    .map(n => ({...n}));
+
+  const nodeIds = new Set(nodes.map(n => n.id));
+
+  let edges = data.edges
+    .filter(e => nodeIds.has(e.from_id) && nodeIds.has(e.to_id))
+    .map(e => ({...e, source: e.from_id, target: e.to_id}));
+
+  // Hide 'contains' edges unless viewing all layers or layer 2
+  if (layerVal !== 'all' && layerVal !== '2') {
+    edges = edges.filter(e => e.type !== 'contains');
+  }
+
+  // Assign initial positions (random around center) to avoid NaN
+  nodes.forEach(n => {
+    n.x = width / 2 + (Math.random() - 0.5) * width * 0.5;
+    n.y = height / 2 + (Math.random() - 0.5) * height * 0.5;
+  });
+
+  // D3 force simulation
+  const simulation = d3.forceSimulation(nodes)
+    .force('link', d3.forceLink(edges).id(d => d.id)
+      .distance(d => d.type === 'contains' ? 50 : 120)
+      .strength(d => d.type === 'contains' ? 0.7 : 0.2))
+    .force('charge', d3.forceManyBody()
+      .strength(d => LAYER_STRENGTH[d.layer] || -150))
+    .force('center', d3.forceCenter(width / 2, height / 2))
+    .force('collision', d3.forceCollide()
+      .radius(d => (LAYER_RADIUS[d.layer] || 8) + 15))
+    .alpha(1)
+    .alphaDecay(0.02);
+
+  // Arrow markers
+  const defs = svg.append('defs');
+  Object.entries(EDGE_COLORS).forEach(([type, color]) => {
+    defs.append('marker')
+      .attr('id', `arrow-${type}`)
+      .attr('viewBox', '0 -5 10 10')
+      .attr('refX', 20)
+      .attr('refY', 0)
+      .attr('markerWidth', 6)
+      .attr('markerHeight', 6)
+      .attr('orient', 'auto')
+      .append('path')
+      .attr('d', 'M0,-5L10,0L0,5')
+      .attr('fill', color);
+  });
+
+  // Zoom
+  const g = svg.append('g');
+  const zoom = d3.zoom()
+    .scaleExtent([0.1, 4])
+    .on('zoom', (event) => g.attr('transform', event.transform));
+  svg.call(zoom);
+
+  document.getElementById('btn-reset').onclick = () => {
+    svg.transition().duration(500).call(zoom.transform, d3.zoomIdentity);
+  };
+
+  // Edges
+  const edgeGroup = g.append('g').attr('class', 'edges');
+  const edgeElements = edgeGroup.selectAll('.edge')
+    .data(edges)
+    .enter().append('g')
+    .attr('class', 'edge');
+
+  edgeElements.append('line')
+    .attr('stroke', d => EDGE_COLORS[d.type] || EDGE_COLORS.default)
+    .attr('stroke-width', d => d.type === 'contains' ? 0.5 : 1)
+    .attr('marker-end', d => d.type !== 'contains' ? `url(#arrow-${EDGE_COLORS[d.type] ? d.type : 'default'})` : null);
+
+  edgeElements.append('text')
+    .attr('class', 'edge-label')
+    .text(d => d.label || d.type);
+
+  // Nodes
+  const nodeGroup = g.append('g').attr('class', 'nodes');
+  const nodeElements = nodeGroup.selectAll('.node')
+    .data(nodes)
+    .enter().append('g')
+    .attr('class', 'node')
+    .call(d3.drag()
+      .on('start', (event, d) => {
+        if (!event.active) simulation.alphaTarget(0.3).restart();
+        d.fx = d.x; d.fy = d.y;
+      })
+      .on('drag', (event, d) => { d.fx = event.x; d.fy = event.y; })
+      .on('end', (event, d) => {
+        if (!event.active) simulation.alphaTarget(0);
+        d.fx = null; d.fy = null;
+      }));
+
+  nodeElements.append('circle')
+    .attr('r', d => LAYER_RADIUS[d.layer] || 8)
+    .attr('fill', d => TYPE_COLORS[d.type] || '#8b949e')
+    .attr('stroke', d => d3.color(TYPE_COLORS[d.type] || '#8b949e').brighter(0.5));
+
+  nodeElements.append('text')
+    .attr('class', 'label')
+    .attr('dy', d => (LAYER_RADIUS[d.layer] || 8) + 12)
+    .text(d => {
+      if (d.type === 'module') return d.name.replace('src/', '').replace('/', '');
+      return d.name.length > 25 ? d.name.substring(0, 22) + '...' : d.name;
+    });
+
+  // Tooltip
+  const tooltip = document.getElementById('tooltip');
+
+  nodeElements
+    .on('mouseover', (event, d) => {
+      tooltip.innerHTML = `<div class="tt-name">${d.name}</div><div class="tt-desc">${d.description || ''}</div>`;
+      tooltip.classList.add('visible');
+
+      // Highlight connected edges
+      edgeElements.classed('highlighted', e =>
+        (e.source.id || e.source) === d.id || (e.target.id || e.target) === d.id);
+    })
+    .on('mousemove', (event) => {
+      const rect = container.getBoundingClientRect();
+      tooltip.style.left = (event.clientX - rect.left + 12) + 'px';
+      tooltip.style.top = (event.clientY - rect.top - 10) + 'px';
+    })
+    .on('mouseout', () => {
+      tooltip.classList.remove('visible');
+      edgeElements.classed('highlighted', false);
+    })
+    .on('click', (event, d) => {
+      nodeElements.classed('selected', n => n.id === d.id);
+      showDetail(d, data);
+    });
+
+  // Tick
+  simulation.on('tick', () => {
+    edgeElements.select('line')
+      .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+      .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+
+    edgeElements.select('text')
+      .attr('x', d => (d.source.x + d.target.x) / 2)
+      .attr('y', d => (d.source.y + d.target.y) / 2);
+
+    nodeElements.attr('transform', d => `translate(${d.x},${d.y})`);
+  });
+
+  // Initial zoom to fit
+  simulation.on('end', () => {
+    const bounds = g.node().getBBox();
+    const fullWidth = bounds.width;
+    const fullHeight = bounds.height;
+    const midX = bounds.x + fullWidth / 2;
+    const midY = bounds.y + fullHeight / 2;
+    const scale = 0.85 / Math.max(fullWidth / width, fullHeight / height);
+    const tx = width / 2 - midX * scale;
+    const ty = height / 2 - midY * scale;
+    svg.transition().duration(750)
+      .call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
+  });
+}
+
+// =========================================================================
+// Detail Panel
+// =========================================================================
+function showDetail(node, data) {
+  const panel = document.getElementById('detail-panel');
+
+  // Find connected edges
+  const outgoing = data.edges.filter(e => (e.from_id || (e.source && e.source.id) || e.source) === node.id && e.type !== 'contains');
+  const incoming = data.edges.filter(e => (e.to_id || (e.target && e.target.id) || e.target) === node.id && e.type !== 'contains');
+  const children = data.edges.filter(e => (e.from_id || (e.source && e.source.id) || e.source) === node.id && e.type === 'contains');
+
+  const nodeMap = {};
+  data.nodes.forEach(n => nodeMap[n.id] = n);
+
+  let html = '';
+
+  // Header
+  html += `<h2>${node.name}</h2>`;
+  html += `<div class="node-type">${node.type} &middot; Layer ${node.layer}</div>`;
+
+  // Description
+  if (node.description) {
+    html += `<div class="section"><p>${node.description}</p></div>`;
+  }
+
+  // File path & metrics
+  if (node.file_path || node.line_count || node.risk_level) {
+    html += `<div class="section"><h3>Info</h3>`;
+    if (node.file_path) html += `<p class="file-path">${node.file_path}</p>`;
+    if (node.line_count) html += `<p>${node.line_count.toLocaleString()} lines</p>`;
+    if (node.risk_level) {
+      html += `<p>Risk: <span class="risk-badge risk-${node.risk_level}">${node.risk_level}</span></p>`;
+    }
+    html += `</div>`;
+  }
+
+  // Properties
+  const props = typeof node.properties === 'string' ? JSON.parse(node.properties) : (node.properties || {});
+  const propKeys = Object.keys(props).filter(k => k !== 'affects');
+  if (propKeys.length > 0) {
+    html += `<div class="section"><h3>Properties</h3><ul>`;
+    propKeys.forEach(key => {
+      const val = props[key];
+      if (Array.isArray(val)) {
+        html += `<li><strong>${key}:</strong><br>`;
+        val.forEach(v => html += `<span class="tag">${v}</span> `);
+        html += `</li>`;
+      } else {
+        html += `<li><strong>${key}:</strong> ${val}</li>`;
+      }
+    });
+    html += `</ul></div>`;
+  }
+
+  // Children (contains)
+  if (children.length > 0) {
+    html += `<div class="section"><h3>Contains (${children.length})</h3><ul>`;
+    children.forEach(e => {
+      const tid = e.to_id || (e.target && e.target.id) || e.target;
+      const target = nodeMap[tid];
+      if (target) {
+        html += `<li class="edge-item">
+          <span class="edge-target" onclick="selectNode('${tid}')">${target.name}</span>
+        </li>`;
+      }
+    });
+    html += `</ul></div>`;
+  }
+
+  // Outgoing
+  if (outgoing.length > 0) {
+    html += `<div class="section"><h3>Depends On (${outgoing.length})</h3><ul>`;
+    outgoing.forEach(e => {
+      const tid = e.to_id || (e.target && e.target.id) || e.target;
+      const target = nodeMap[tid];
+      if (target) {
+        html += `<li class="edge-item">
+          <span class="arrow">&#8594;</span>
+          <span class="edge-type">${e.type}</span>
+          <span class="edge-target" onclick="selectNode('${tid}')">${target.name}</span>
+          ${e.label ? `<span style="color:var(--text-muted);font-size:10px;"> - ${e.label}</span>` : ''}
+        </li>`;
+      }
+    });
+    html += `</ul></div>`;
+  }
+
+  // Incoming
+  if (incoming.length > 0) {
+    html += `<div class="section"><h3>Used By (${incoming.length})</h3><ul>`;
+    incoming.forEach(e => {
+      const fid = e.from_id || (e.source && e.source.id) || e.source;
+      const source = nodeMap[fid];
+      if (source) {
+        html += `<li class="edge-item">
+          <span class="arrow">&#8592;</span>
+          <span class="edge-type">${e.type}</span>
+          <span class="edge-target" onclick="selectNode('${fid}')">${source.name}</span>
+        </li>`;
+      }
+    });
+    html += `</ul></div>`;
+  }
+
+  panel.innerHTML = html;
+}
+
+function selectNode(nodeId) {
+  const data = window._graphData;
+  const node = data.nodes.find(n => n.id === nodeId);
+  if (node) {
+    d3.selectAll('.node').classed('selected', d => d.id === nodeId);
+    showDetail(node, data);
+  }
+}
+
+// =========================================================================
+// Filter handlers
+// =========================================================================
+document.getElementById('layer-filter').onchange = () => render(window._graphData);
+document.getElementById('type-filter').onchange = () => render(window._graphData);
+
+let searchTimeout;
+document.getElementById('search').oninput = () => {
+  clearTimeout(searchTimeout);
+  searchTimeout = setTimeout(() => render(window._graphData), 300);
+};
+
+// =========================================================================
+// Mermaid diagram generation from DB data
+// =========================================================================
+
+// Track which modules are expanded
+const expandedModules = new Set();
+
+// Global callback for Mermaid node clicks
+window.mermaidClick = function(nodeId) {
+  // Convert back from mermaid ID (underscores) to our ID (hyphens)
+  const realId = nodeId.replace(/_/g, '-');
+  if (realId.startsWith('mod-')) {
+    if (expandedModules.has(realId)) {
+      expandedModules.delete(realId);
+    } else {
+      expandedModules.add(realId);
+    }
+    renderMermaid(window._graphData);
+  }
+};
+
+function generateMermaid(data) {
+  const nodeMap = {};
+  data.nodes.forEach(n => nodeMap[n.id] = n);
+
+  // Get modules and their children via 'contains' edges
+  const modules = data.nodes.filter(n => n.type === 'module');
+  const containsEdges = data.edges.filter(e => e.type === 'contains');
+  const moduleChildren = {};
+  containsEdges.forEach(e => {
+    if (!moduleChildren[e.from_id]) moduleChildren[e.from_id] = [];
+    moduleChildren[e.from_id].push(e.to_id);
+  });
+
+  // Map child to parent module
+  const childToModule = {};
+  containsEdges.forEach(e => { childToModule[e.to_id] = e.from_id; });
+
+  // Get all non-structural edges between components/modules
+  const interEdges = data.edges.filter(e =>
+    e.type !== 'contains' && e.type !== 'constrains' &&
+    nodeMap[e.from_id] && nodeMap[e.to_id]
+  );
+
+  // Get system nodes
+  const systems = data.nodes.filter(n => n.type === 'system');
+
+  // Sanitize ID for Mermaid
+  const mid = id => id.replace(/-/g, '_');
+  const shortName = (name, max = 30) =>
+    name.length > max ? name.substring(0, max - 2) + '..' : name;
+
+  // For collapsed modules, remap component edges to the module node
+  // Returns the visible node ID for a given component
+  function visibleId(compId) {
+    const parentMod = childToModule[compId];
+    if (parentMod && !expandedModules.has(parentMod)) {
+      return parentMod; // collapsed: route to module node
+    }
+    return compId; // expanded: use component directly
+  }
+
+  let lines = [];
+  lines.push('graph TB');
+
+  // System context
+  if (systems.length > 0) {
+    lines.push('    subgraph EXTERNAL["External Systems"]');
+    lines.push('    direction LR');
+    systems.forEach(s => {
+      lines.push(`        ${mid(s.id)}["${shortName(s.name)}"]`);
+    });
+    lines.push('    end');
+    lines.push('');
+  }
+
+  // Modules: expanded = subgraph, collapsed = single clickable node
+  modules.forEach(mod => {
+    const children = (moduleChildren[mod.id] || [])
+      .map(cid => nodeMap[cid])
+      .filter(Boolean);
+
+    if (children.length === 0) return;
+
+    const label = mod.name.replace('src/', '').replace(/\/$/, '');
+    const count = children.length;
+
+    if (expandedModules.has(mod.id)) {
+      // EXPANDED: show as subgraph with components
+      lines.push(`    subgraph ${mid(mod.id)}["${label} (${count}) [-]"]`);
+
+      children.forEach(c => {
+        const risk = c.risk_level === 'high' ? ':::risk_high' :
+                     c.risk_level === 'medium' ? ':::risk_med' : '';
+        const lc = c.line_count ? ` (${c.line_count})` : '';
+        lines.push(`        ${mid(c.id)}["${shortName(c.name)}${lc}"]${risk}`);
+      });
+
+      lines.push('    end');
+
+      // Make the subgraph clickable by adding a click on a hidden anchor node
+      // Mermaid doesn't support click on subgraphs, so we add click on each child
+      // Actually, we'll add a special collapse node
+      lines.push(`    click ${mid(mod.id)} mermaidClick`);
+    } else {
+      // COLLAPSED: single node representing the whole module
+      lines.push(`    ${mid(mod.id)}["${label} (${count}) [+]"]:::module_node`);
+      lines.push(`    click ${mid(mod.id)} mermaidClick`);
+    }
+
+    lines.push('');
+  });
+
+  // Build visible edges (remapping collapsed components to their module)
+  const visibleEdgeSet = new Set(); // dedup
+  lines.push('    %% Dependencies');
+
+  interEdges.forEach(e => {
+    const fromNode = nodeMap[e.from_id];
+    const toNode = nodeMap[e.to_id];
+    if (!fromNode || !toNode) return;
+
+    // Skip edges between systems and non-module/component nodes
+    const fromVis = (fromNode.type === 'component') ? visibleId(e.from_id) : e.from_id;
+    const toVis = (toNode.type === 'component') ? visibleId(e.to_id) : e.to_id;
+
+    // Skip self-loops (both components in same collapsed module)
+    if (fromVis === toVis) return;
+
+    // Dedup
+    const edgeKey = `${fromVis}:${toVis}`;
+    if (visibleEdgeSet.has(edgeKey)) return;
+    visibleEdgeSet.add(edgeKey);
+
+    const arrow = e.type === 'writes' ? '==>' :
+                  e.type === 'calls' ? '-->' :
+                  e.type === 'reads' ? '-.->' :
+                  e.type === 'spawns' ? '-.->' : '-->';
+
+    // Only show labels for cross-module edges when both sides are expanded
+    const fromExpanded = !childToModule[e.from_id] || expandedModules.has(childToModule[e.from_id]);
+    const toExpanded = !childToModule[e.to_id] || expandedModules.has(childToModule[e.to_id]);
+    const showLabel = fromExpanded && toExpanded && e.label;
+    const lbl = showLabel ? `|${shortName(e.label, 20)}|` : '';
+
+    lines.push(`    ${mid(fromVis)} ${arrow}${lbl} ${mid(toVis)}`);
+  });
+
+  // Styles
+  lines.push('');
+  lines.push('    %% Styles');
+  lines.push('    classDef risk_high stroke:#f85149,stroke-width:3px');
+  lines.push('    classDef risk_med stroke:#d29922,stroke-width:2px');
+  lines.push('    classDef system_node fill:#1a1e24,stroke:#f85149,color:#f85149');
+  lines.push('    classDef module_node fill:#1a2332,stroke:#58a6ff,color:#58a6ff,stroke-width:2px');
+
+  if (systems.length > 0) {
+    lines.push(`    class ${systems.map(s => mid(s.id)).join(',')} system_node`);
+  }
+
+  return lines.join('\n');
+}
+
+let mermaidRenderCount = 0;
+
+async function renderMermaid(data) {
+  const mermaidSrc = generateMermaid(data);
+
+  window._mermaidSource = mermaidSrc;
+  console.log('Mermaid source:\n', mermaidSrc);
+
+  const output = document.getElementById('mermaid-output');
+  output.innerHTML = '';
+
+  // Mermaid needs a unique ID each render
+  mermaidRenderCount++;
+  const diagId = `mermaid-diagram-${mermaidRenderCount}`;
+
+  try {
+    const { svg } = await mermaid.render(diagId, mermaidSrc);
+    output.innerHTML = svg;
+
+    const svgEl = output.querySelector('svg');
+    if (svgEl) {
+      svgEl.removeAttribute('width');
+      svgEl.removeAttribute('height');
+      svgEl.style.width = 'max-content';
+      svgEl.style.minWidth = '1400px';
+      svgEl.style.height = 'auto';
+      svgEl.style.cursor = 'default';
+    }
+
+    // Show expand hint
+    const hint = document.createElement('div');
+    hint.style.cssText = 'text-align:center;color:var(--text-muted);font-size:12px;padding:12px 0 0;';
+    const expanded = expandedModules.size;
+    hint.textContent = expanded > 0
+      ? `${expanded} module(s) expanded. Click [+] to expand, [-] to collapse.`
+      : 'Click any module [+] to expand and see its components.';
+    output.appendChild(hint);
+
+  } catch (err) {
+    output.innerHTML = `<pre style="color:var(--red);white-space:pre-wrap;">Mermaid render error:\n${err.message}\n\nSource:\n${mermaidSrc}</pre>`;
+  }
+}
+
+// =========================================================================
+// View toggle
+// =========================================================================
+let currentView = 'graph';
+
+function setView(view) {
+  currentView = view;
+  const graphContainer = document.getElementById('graph-container');
+  const mermaidContainer = document.getElementById('mermaid-container');
+  const btnGraph = document.getElementById('btn-view-graph');
+  const btnMermaid = document.getElementById('btn-view-mermaid');
+  const detailPanel = document.getElementById('detail-panel');
+
+  if (view === 'graph') {
+    graphContainer.style.display = '';
+    mermaidContainer.style.display = 'none';
+    detailPanel.style.display = '';
+    btnGraph.classList.add('active');
+    btnMermaid.classList.remove('active');
+  } else {
+    graphContainer.style.display = 'none';
+    mermaidContainer.style.display = '';
+    detailPanel.style.display = 'none';
+    btnGraph.classList.remove('active');
+    btnMermaid.classList.add('active');
+    renderMermaid(window._graphData);
+  }
+}
+
+document.getElementById('btn-view-graph').onclick = () => setView('graph');
+document.getElementById('btn-view-mermaid').onclick = () => setView('mermaid');
+
+// Initialize mermaid
+mermaid.initialize({
+  startOnLoad: false,
+  theme: 'dark',
+  themeVariables: {
+    primaryColor: '#1f2937',
+    primaryBorderColor: '#58a6ff',
+    primaryTextColor: '#e6edf3',
+    lineColor: '#8b949e',
+    secondaryColor: '#161b22',
+    tertiaryColor: '#0d1117',
+    clusterBg: '#161b22',
+    clusterBorder: '#30363d',
+    edgeLabelBackground: '#161b22',
+    nodeTextColor: '#e6edf3',
+  },
+  flowchart: {
+    htmlLabels: true,
+    curve: 'basis',
+    rankSpacing: 60,
+    nodeSpacing: 40,
+    padding: 15,
+  },
+  securityLevel: 'loose',
+  maxTextSize: 200000,
+});
+
+// Start
+init();
+</script>
+</body>
+</html>

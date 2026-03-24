@@ -425,6 +425,7 @@ describe("StatusBar", () => {
     onShowHistory: vi.fn(),
     onShowConfig: vi.fn(),
     onShowJira: vi.fn(),
+    onShowMcp: vi.fn(),
   };
 
   beforeEach(() => {
@@ -432,6 +433,7 @@ describe("StatusBar", () => {
     defaultProps.onShowHistory.mockClear();
     defaultProps.onShowConfig.mockClear();
     defaultProps.onShowJira.mockClear();
+    defaultProps.onShowMcp.mockClear();
   });
 
   test("renders title 'ClarAIty'", () => {
@@ -499,7 +501,7 @@ describe("StatusBar", () => {
 describe("BottomBar", () => {
   test("shows 'Connected' when connected is true", () => {
     render(
-      <BottomBar connected={true} modelName="gpt-4o" permissionMode="normal" onSetMode={vi.fn()} />
+      <BottomBar connected={true} modelName="gpt-4o" permissionMode="normal" onSetMode={vi.fn()} onShowArchitecture={vi.fn()} onShowBeads={vi.fn()} />
     );
 
     expect(screen.getByText("Connected")).toBeInTheDocument();
@@ -507,7 +509,7 @@ describe("BottomBar", () => {
 
   test("shows 'Disconnected' when connected is false", () => {
     render(
-      <BottomBar connected={false} modelName="gpt-4o" permissionMode="normal" onSetMode={vi.fn()} />
+      <BottomBar connected={false} modelName="gpt-4o" permissionMode="normal" onSetMode={vi.fn()} onShowArchitecture={vi.fn()} onShowBeads={vi.fn()} />
     );
 
     expect(screen.getByText("Disconnected")).toBeInTheDocument();
@@ -515,7 +517,7 @@ describe("BottomBar", () => {
 
   test("applies 'connected' CSS class when connected", () => {
     const { container } = render(
-      <BottomBar connected={true} modelName="" permissionMode="normal" onSetMode={vi.fn()} />
+      <BottomBar connected={true} modelName="" permissionMode="normal" onSetMode={vi.fn()} onShowArchitecture={vi.fn()} onShowBeads={vi.fn()} />
     );
 
     const statusSpan = container.querySelector(".connection-status.connected");
@@ -524,7 +526,7 @@ describe("BottomBar", () => {
 
   test("applies 'disconnected' CSS class when not connected", () => {
     const { container } = render(
-      <BottomBar connected={false} modelName="" permissionMode="normal" onSetMode={vi.fn()} />
+      <BottomBar connected={false} modelName="" permissionMode="normal" onSetMode={vi.fn()} onShowArchitecture={vi.fn()} onShowBeads={vi.fn()} />
     );
 
     const statusSpan = container.querySelector(".connection-status.disconnected");
@@ -533,7 +535,7 @@ describe("BottomBar", () => {
 
   test("shows model name when provided", () => {
     render(
-      <BottomBar connected={true} modelName="claude-opus-4" permissionMode="normal" onSetMode={vi.fn()} />
+      <BottomBar connected={true} modelName="claude-opus-4" permissionMode="normal" onSetMode={vi.fn()} onShowArchitecture={vi.fn()} onShowBeads={vi.fn()} />
     );
 
     expect(screen.getByText("claude-opus-4")).toBeInTheDocument();
@@ -541,7 +543,7 @@ describe("BottomBar", () => {
 
   test("does not show model name when empty", () => {
     const { container } = render(
-      <BottomBar connected={true} modelName="" permissionMode="normal" onSetMode={vi.fn()} />
+      <BottomBar connected={true} modelName="" permissionMode="normal" onSetMode={vi.fn()} onShowArchitecture={vi.fn()} onShowBeads={vi.fn()} />
     );
 
     const modelSpan = container.querySelector(".model-name");
@@ -551,7 +553,7 @@ describe("BottomBar", () => {
   test("Plan button triggers onSetMode with 'plan'", () => {
     const onSetMode = vi.fn();
     render(
-      <BottomBar connected={true} modelName="" permissionMode="normal" onSetMode={onSetMode} />
+      <BottomBar connected={true} modelName="" permissionMode="normal" onSetMode={onSetMode} onShowArchitecture={vi.fn()} onShowBeads={vi.fn()} />
     );
 
     fireEvent.click(screen.getByText("Plan"));
@@ -562,7 +564,7 @@ describe("BottomBar", () => {
   test("Act button triggers onSetMode with 'normal'", () => {
     const onSetMode = vi.fn();
     render(
-      <BottomBar connected={true} modelName="" permissionMode="plan" onSetMode={onSetMode} />
+      <BottomBar connected={true} modelName="" permissionMode="plan" onSetMode={onSetMode} onShowArchitecture={vi.fn()} onShowBeads={vi.fn()} />
     );
 
     fireEvent.click(screen.getByText("Act"));
@@ -572,7 +574,7 @@ describe("BottomBar", () => {
 
   test("Plan button has 'active' class when mode is 'plan'", () => {
     render(
-      <BottomBar connected={true} modelName="" permissionMode="plan" onSetMode={vi.fn()} />
+      <BottomBar connected={true} modelName="" permissionMode="plan" onSetMode={vi.fn()} onShowArchitecture={vi.fn()} onShowBeads={vi.fn()} />
     );
 
     const planBtn = screen.getByText("Plan");
@@ -581,7 +583,7 @@ describe("BottomBar", () => {
 
   test("Act button has 'active' class when mode is not 'plan'", () => {
     render(
-      <BottomBar connected={true} modelName="" permissionMode="normal" onSetMode={vi.fn()} />
+      <BottomBar connected={true} modelName="" permissionMode="normal" onSetMode={vi.fn()} onShowArchitecture={vi.fn()} onShowBeads={vi.fn()} />
     );
 
     const actBtn = screen.getByText("Act");
@@ -590,7 +592,7 @@ describe("BottomBar", () => {
 
   test("Plan button does not have 'active' class when mode is 'normal'", () => {
     render(
-      <BottomBar connected={true} modelName="" permissionMode="normal" onSetMode={vi.fn()} />
+      <BottomBar connected={true} modelName="" permissionMode="normal" onSetMode={vi.fn()} onShowArchitecture={vi.fn()} onShowBeads={vi.fn()} />
     );
 
     const planBtn = screen.getByText("Plan");

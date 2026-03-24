@@ -1,0 +1,242 @@
+{
+  "metadata": {},
+  "stats": {
+    "total_nodes": 9,
+    "total_edges": 8,
+    "node_types": {
+      "component": 3,
+      "module": 2,
+      "decision": 1,
+      "flow": 1,
+      "invariant": 1,
+      "system": 1
+    },
+    "edge_types": {
+      "contains": 3,
+      "constrains": 2,
+      "uses": 2,
+      "calls": 1
+    }
+  },
+  "nodes": [
+    {
+      "id": "dec-async",
+      "type": "decision",
+      "layer": 0,
+      "name": "Async Processing",
+      "description": "All processing must be async to avoid blocking",
+      "file_path": null,
+      "line_count": null,
+      "risk_level": "low",
+      "properties": {
+        "affects": [
+          "comp-engine"
+        ],
+        "rationale": "Non-blocking I/O"
+      },
+      "created_at": "2026-03-21T15:36:17.267403+00:00",
+      "updated_at": "2026-03-21T15:36:17.267403+00:00"
+    },
+    {
+      "id": "flow-main",
+      "type": "flow",
+      "layer": 0,
+      "name": "Main Processing Flow",
+      "description": "Input -> Parse -> Process -> Store",
+      "file_path": null,
+      "line_count": null,
+      "risk_level": "low",
+      "properties": {
+        "trigger": "API request",
+        "steps": [
+          "Parse input",
+          "Process data",
+          "Store result"
+        ]
+      },
+      "created_at": "2026-03-21T15:36:17.270460+00:00",
+      "updated_at": "2026-03-21T15:36:17.270460+00:00"
+    },
+    {
+      "id": "inv-validation",
+      "type": "invariant",
+      "layer": 0,
+      "name": "Input Validation",
+      "description": "All inputs must be validated before processing",
+      "file_path": null,
+      "line_count": null,
+      "risk_level": "low",
+      "properties": {
+        "severity": "critical",
+        "affects": [
+          "comp-parser"
+        ]
+      },
+      "created_at": "2026-03-21T15:36:17.270460+00:00",
+      "updated_at": "2026-03-21T15:36:17.270460+00:00"
+    },
+    {
+      "id": "sys-api",
+      "type": "system",
+      "layer": 1,
+      "name": "External API",
+      "description": "Third-party REST API",
+      "file_path": null,
+      "line_count": null,
+      "risk_level": "low",
+      "properties": {},
+      "created_at": "2026-03-21T15:36:17.218470+00:00",
+      "updated_at": "2026-03-21T15:36:17.218470+00:00"
+    },
+    {
+      "id": "mod-core",
+      "type": "module",
+      "layer": 2,
+      "name": "src/core/",
+      "description": "Core application logic",
+      "file_path": null,
+      "line_count": null,
+      "risk_level": "high",
+      "properties": {
+        "flow_rank": 1,
+        "flow_col": 0
+      },
+      "created_at": "2026-03-21T15:36:17.234097+00:00",
+      "updated_at": "2026-03-21T15:36:17.234097+00:00"
+    },
+    {
+      "id": "mod-db",
+      "type": "module",
+      "layer": 2,
+      "name": "src/db/",
+      "description": "Database access layer",
+      "file_path": null,
+      "line_count": null,
+      "risk_level": "medium",
+      "properties": {
+        "flow_rank": 2,
+        "flow_col": 0
+      },
+      "created_at": "2026-03-21T15:36:17.234097+00:00",
+      "updated_at": "2026-03-21T15:36:17.234097+00:00"
+    },
+    {
+      "id": "comp-engine",
+      "type": "component",
+      "layer": 3,
+      "name": "Engine",
+      "description": "Main processing engine",
+      "file_path": "src/core/engine.py",
+      "line_count": 500,
+      "risk_level": "high",
+      "properties": {
+        "key_methods": [
+          "process",
+          "run"
+        ]
+      },
+      "created_at": "2026-03-21T15:36:17.234097+00:00",
+      "updated_at": "2026-03-21T15:36:17.234097+00:00"
+    },
+    {
+      "id": "comp-parser",
+      "type": "component",
+      "layer": 3,
+      "name": "Parser",
+      "description": "Input parser for various formats",
+      "file_path": "src/core/parser.py",
+      "line_count": 200,
+      "risk_level": "low",
+      "properties": {},
+      "created_at": "2026-03-21T15:36:17.234097+00:00",
+      "updated_at": "2026-03-21T15:36:17.234097+00:00"
+    },
+    {
+      "id": "comp-repo",
+      "type": "component",
+      "layer": 3,
+      "name": "Repository",
+      "description": "Data access repository",
+      "file_path": "src/db/repo.py",
+      "line_count": 300,
+      "risk_level": "medium",
+      "properties": {},
+      "created_at": "2026-03-21T15:36:17.234097+00:00",
+      "updated_at": "2026-03-21T15:36:17.234097+00:00"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-3e2455",
+      "from_id": "comp-engine",
+      "to_id": "comp-repo",
+      "type": "calls",
+      "weight": 1.0,
+      "label": "Stores results",
+      "properties": {}
+    },
+    {
+      "id": "e-f12f14",
+      "from_id": "dec-async",
+      "to_id": "comp-engine",
+      "type": "constrains",
+      "weight": 1.0,
+      "label": null,
+      "properties": {}
+    },
+    {
+      "id": "e-c63d8f",
+      "from_id": "inv-validation",
+      "to_id": "comp-parser",
+      "type": "constrains",
+      "weight": 1.0,
+      "label": null,
+      "properties": {}
+    },
+    {
+      "id": "e-d29648",
+      "from_id": "mod-core",
+      "to_id": "comp-engine",
+      "type": "contains",
+      "weight": 1.0,
+      "label": null,
+      "properties": {}
+    },
+    {
+      "id": "e-eb4d45",
+      "from_id": "mod-core",
+      "to_id": "comp-parser",
+      "type": "contains",
+      "weight": 1.0,
+      "label": null,
+      "properties": {}
+    },
+    {
+      "id": "e-9617e9",
+      "from_id": "mod-db",
+      "to_id": "comp-repo",
+      "type": "contains",
+      "weight": 1.0,
+      "label": null,
+      "properties": {}
+    },
+    {
+      "id": "e-daac8d",
+      "from_id": "comp-engine",
+      "to_id": "comp-parser",
+      "type": "uses",
+      "weight": 1.0,
+      "label": "Parses input",
+      "properties": {}
+    },
+    {
+      "id": "e-ec89a4",
+      "from_id": "mod-core",
+      "to_id": "mod-db",
+      "type": "uses",
+      "weight": 1.0,
+      "label": "Data persistence",
+      "properties": {}
+    }
+  ]
+}

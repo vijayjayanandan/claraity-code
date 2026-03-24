@@ -1,0 +1,1578 @@
+"""
+ClarAIty Knowledge DB - Codebase Knowledge Database
+
+A property graph database that stores an LLM agent's understanding of a codebase.
+Two tables: nodes (entities at multiple zoom levels) and edges (typed relationships).
+
+Usage:
+    python -m src.claraity.claraity_db populate
+    python -m src.claraity.claraity_db export
+    python -m src.claraity.claraity_db brief
+    python -m src.claraity.claraity_db all
+"""
+
+import json
+import sqlite3
+import hashlib
+import sys
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Optional
+
+
+# ---------------------------------------------------------------------------
+# ClarityStore - thin wrapper around SQLite
+# ---------------------------------------------------------------------------
+
+class ClarityStore:
+    """Read/write interface to claraity_knowledge.db (nodes + edges property graph)."""
+
+    SCHEMA = """
+    CREATE TABLE IF NOT EXISTS nodes (
+        id          TEXT PRIMARY KEY,
+        type        TEXT NOT NULL,
+        layer       INTEGER NOT NULL DEFAULT 3,
+        name        TEXT NOT NULL,
+        description TEXT,
+        file_path   TEXT,
+        line_count  INTEGER,
+        risk_level  TEXT DEFAULT 'low',
+        properties  TEXT DEFAULT '{}',
+        created_at  TEXT NOT NULL,
+        updated_at  TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS edges (
+        id          TEXT PRIMARY KEY,
+        from_id     TEXT NOT NULL,
+        to_id       TEXT NOT NULL,
+        type        TEXT NOT NULL,
+        weight      REAL DEFAULT 1.0,
+        label       TEXT,
+        properties  TEXT DEFAULT '{}',
+        FOREIGN KEY (from_id) REFERENCES nodes(id),
+        FOREIGN KEY (to_id)   REFERENCES nodes(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS scan_metadata (
+        key   TEXT PRIMARY KEY,
+        value TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_nodes_type  ON nodes(type);
+    CREATE INDEX IF NOT EXISTS idx_nodes_layer ON nodes(layer);
+    CREATE INDEX IF NOT EXISTS idx_edges_from  ON edges(from_id);
+    CREATE INDEX IF NOT EXISTS idx_edges_to    ON edges(to_id);
+    CREATE INDEX IF NOT EXISTS idx_edges_type  ON edges(type);
+    """
+
+    def __init__(self, db_path: str = ".clarity/claraity_knowledge.db"):
+        self.db_path = Path(db_path)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.conn: Optional[sqlite3.Connection] = None
+        self._ensure_schema()
+
+    @contextmanager
+    def _cursor(self):
+        if self.conn is None:
+            self.conn = sqlite3.connect(str(self.db_path))
+            self.conn.row_factory = sqlite3.Row
+            self.conn.execute("PRAGMA foreign_keys = ON")
+            self.conn.execute("PRAGMA journal_mode = WAL")
+        cursor = self.conn.cursor()
+        try:
+            yield cursor
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+        finally:
+            cursor.close()
+
+    def _ensure_schema(self):
+        with self._cursor() as cur:
+            cur.executescript(self.SCHEMA)
+
+    def close(self):
+        if self.conn:
+            self.conn.close()
+            self.conn = None
+
+    # -- Helpers ---------------------------------------------------------------
+
+    @staticmethod
+    def _make_id(prefix: str, name: str) -> str:
+        """Deterministic short hash ID: prefix + 6-char hex."""
+        h = hashlib.sha256(name.encode()).hexdigest()[:6]
+        return f"{prefix}-{h}"
+
+    @staticmethod
+    def _now() -> str:
+        return datetime.now(timezone.utc).isoformat()
+
+    # -- Write -----------------------------------------------------------------
+
+    def add_node(
+        self,
+        id: str,
+        type: str,
+        layer: int,
+        name: str,
+        description: str = "",
+        file_path: str = None,
+        line_count: int = None,
+        risk_level: str = "low",
+        properties: dict = None,
+    ) -> str:
+        now = self._now()
+        with self._cursor() as cur:
+            cur.execute(
+                """INSERT OR REPLACE INTO nodes
+                   (id, type, layer, name, description, file_path, line_count,
+                    risk_level, properties, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    id, type, layer, name, description, file_path, line_count,
+                    risk_level, json.dumps(properties or {}), now, now,
+                ),
+            )
+        return id
+
+    def add_edge(
+        self,
+        from_id: str,
+        to_id: str,
+        type: str,
+        weight: float = 1.0,
+        label: str = None,
+        properties: dict = None,
+    ) -> str:
+        eid = self._make_id("e", f"{from_id}:{to_id}:{type}")
+        with self._cursor() as cur:
+            cur.execute(
+                """INSERT OR REPLACE INTO edges
+                   (id, from_id, to_id, type, weight, label, properties)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (eid, from_id, to_id, type, weight, label,
+                 json.dumps(properties or {})),
+            )
+        return eid
+
+    def set_metadata(self, key: str, value: str):
+        with self._cursor() as cur:
+            cur.execute(
+                "INSERT OR REPLACE INTO scan_metadata (key, value) VALUES (?, ?)",
+                (key, value),
+            )
+
+    def remove_node(self, node_id: str) -> tuple[bool, int]:
+        """Remove a node and all its connected edges. Returns (node_deleted, edges_removed)."""
+        with self._cursor() as cur:
+            cur.execute("DELETE FROM edges WHERE from_id=? OR to_id=?", (node_id, node_id))
+            edge_count = cur.rowcount
+            cur.execute("DELETE FROM nodes WHERE id=?", (node_id,))
+            node_deleted = cur.rowcount > 0
+        return node_deleted, edge_count
+
+    # -- Read ------------------------------------------------------------------
+
+    def get_all_nodes(self) -> list[dict]:
+        with self._cursor() as cur:
+            cur.execute("SELECT * FROM nodes ORDER BY layer, type, name")
+            return [dict(r) for r in cur.fetchall()]
+
+    def get_all_edges(self) -> list[dict]:
+        with self._cursor() as cur:
+            cur.execute("SELECT * FROM edges ORDER BY type")
+            return [dict(r) for r in cur.fetchall()]
+
+    def get_metadata(self) -> dict:
+        with self._cursor() as cur:
+            cur.execute("SELECT key, value FROM scan_metadata")
+            return {r["key"]: r["value"] for r in cur.fetchall()}
+
+    def get_stats(self) -> dict:
+        with self._cursor() as cur:
+            cur.execute("SELECT COUNT(*) as c FROM nodes")
+            nodes = cur.fetchone()["c"]
+            cur.execute("SELECT COUNT(*) as c FROM edges")
+            edges = cur.fetchone()["c"]
+            cur.execute("SELECT type, COUNT(*) as c FROM nodes GROUP BY type ORDER BY c DESC")
+            node_types = {r["type"]: r["c"] for r in cur.fetchall()}
+            cur.execute("SELECT type, COUNT(*) as c FROM edges GROUP BY type ORDER BY c DESC")
+            edge_types = {r["type"]: r["c"] for r in cur.fetchall()}
+        return {
+            "total_nodes": nodes,
+            "total_edges": edges,
+            "node_types": node_types,
+            "edge_types": edge_types,
+        }
+
+    # -- Export ----------------------------------------------------------------
+
+    def export_graph_json(self, path: str = ".clarity/graph.json"):
+        """Export full graph as JSON for D3.js visualization."""
+        nodes = self.get_all_nodes()
+        edges = self.get_all_edges()
+        metadata = self.get_metadata()
+        stats = self.get_stats()
+
+        # Parse properties JSON strings back to dicts
+        for n in nodes:
+            if isinstance(n.get("properties"), str):
+                n["properties"] = json.loads(n["properties"])
+        for e in edges:
+            if isinstance(e.get("properties"), str):
+                e["properties"] = json.loads(e["properties"])
+
+        graph = {
+            "metadata": metadata,
+            "stats": stats,
+            "nodes": nodes,
+            "edges": edges,
+        }
+
+        # Write to primary location
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with open(out, "w", encoding="utf-8") as f:
+            json.dump(graph, f, indent=2, default=str)
+
+        # Also write to clarity-ui/ for local HTTP serving
+        ui_path = Path("clarity-ui/graph.json")
+        if ui_path.parent.exists():
+            with open(ui_path, "w", encoding="utf-8") as f:
+                json.dump(graph, f, indent=2, default=str)
+
+        return graph
+
+
+# ---------------------------------------------------------------------------
+# Populate - encode ClarAIty codebase knowledge
+# ---------------------------------------------------------------------------
+
+def populate(store: ClarityStore):
+    """Populate the DB with ClarAIty codebase architectural knowledge."""
+
+    store.set_metadata("repo_name", "ai-coding-agent")
+    store.set_metadata("repo_language", "python")
+    store.set_metadata("scanned_at", ClarityStore._now())
+    store.set_metadata("scanned_by", "claude-opus-4")
+    store.set_metadata("total_files", "224")
+    store.set_metadata("total_lines", "~79,320")
+
+    # ======================================================================
+    # LAYER 1: System Context
+    # ======================================================================
+
+    # flow_rank = vertical row (0=top), flow_col = horizontal position in row
+    # Flow: User -> VS Code -> Server -> Core -> Tools/Memory/LLM -> Session -> Persistence
+
+    store.add_node(
+        id="sys-user", type="system", layer=1, name="User",
+        description="Human developer interacting via TUI or VS Code sidebar",
+        properties={"actor_type": "human", "flow_rank": 0, "flow_col": 0},
+    )
+    store.add_node(
+        id="sys-vscode", type="system", layer=1, name="VS Code Extension",
+        description="ClarAIty sidebar panel communicating via stdio+TCP protocol",
+        properties={"protocol": "stdio+tcp", "framework": "react", "flow_rank": 0, "flow_col": 1},
+    )
+    store.add_node(
+        id="sys-llm-api", type="system", layer=1, name="LLM Providers",
+        description="OpenAI, Anthropic, Ollama APIs for language model inference",
+        properties={"providers": ["openai", "anthropic", "ollama", "vllm"], "flow_rank": 0, "flow_col": 4},
+    )
+    store.add_node(
+        id="sys-filesystem", type="system", layer=1, name="Local Filesystem",
+        description="Workspace files, project code, configuration, session data",
+        properties={"flow_rank": 0, "flow_col": 5},
+    )
+    store.add_node(
+        id="sys-lsp", type="system", layer=1, name="Language Server (LSP)",
+        description="jedi-language-server for Python code intelligence",
+        properties={"server": "jedi-language-server", "flow_rank": 0, "flow_col": 6},
+    )
+    store.add_node(
+        id="sys-mcp", type="system", layer=1, name="MCP Servers",
+        description="Model Context Protocol servers providing external tools",
+        properties={"flow_rank": 0, "flow_col": 7},
+    )
+    store.add_node(
+        id="sys-web", type="system", layer=1, name="Web / APIs",
+        description="Web search, web fetch, Jira, GitHub integrations",
+        properties={"flow_rank": 0, "flow_col": 8},
+    )
+
+    # ======================================================================
+    # LAYER 2: Modules
+    # ======================================================================
+
+    # Modules laid out by data flow:
+    # Row 1: ui, server (entry points from user/vscode)
+    # Row 2: core, director (orchestration hub)
+    # Row 3: tools, memory, llm, subagents (capabilities used by core)
+    # Row 4: session, hooks, prompts (support layers)
+    # Row 5: observability, code_intelligence, integrations, platform (infrastructure)
+
+    modules = [
+        ("mod-ui", "module", "src/ui/", "Textual TUI: app shell, widgets, formatters",
+         20, 12000, "high",
+         {"key_files": ["app.py", "widgets/tool_card.py", "widgets/message.py", "store_adapter.py"],
+          "flow_rank": 1, "flow_col": 0}),
+
+        ("mod-server", "module", "src/server/", "VS Code communication: stdio+TCP transport, serialization",
+         4, 3500, "medium",
+         {"key_files": ["stdio_server.py", "ws_protocol.py", "serializers.py"],
+          "flow_rank": 1, "flow_col": 1}),
+
+        ("mod-core", "core", "src/core/", "Agent control loop, streaming, events, protocol",
+         31, 8500, "high",
+         {"key_files": ["agent.py", "events.py", "protocol.py", "streaming/pipeline.py"],
+          "flow_rank": 2, "flow_col": 0}),
+
+        ("mod-director", "module", "src/director/", "Disciplined workflow: UNDERSTAND > PLAN > EXECUTE > COMPLETE",
+         6, 1500, "medium",
+         {"key_files": ["adapter.py", "protocol.py", "tools.py"],
+          "flow_rank": 2, "flow_col": 1}),
+
+        ("mod-tools", "module", "src/tools/", "Tool definitions, execution, file ops, search, web, delegation",
+         11, 6300, "medium",
+         {"key_files": ["file_operations.py", "tool_schemas.py", "delegation.py", "web_tools.py"],
+          "flow_rank": 3, "flow_col": 0}),
+
+        ("mod-memory", "module", "src/memory/", "Multi-layer memory: working, episodic, file-based, observation store",
+         6, 3700, "high",
+         {"key_files": ["memory_manager.py", "working_memory.py", "observation_store.py"],
+          "flow_rank": 3, "flow_col": 1}),
+
+        ("mod-llm", "module", "src/llm/", "LLM provider abstraction: OpenAI, Anthropic, Ollama backends",
+         11, 6000, "medium",
+         {"key_files": ["openai_backend.py", "anthropic_backend.py", "base.py", "failure_handler.py"],
+          "flow_rank": 3, "flow_col": 2}),
+
+        ("mod-subagents", "module", "src/subagents/", "Isolated lightweight agents for task delegation",
+         5, 2900, "medium",
+         {"key_files": ["subagent.py", "manager.py", "config.py"],
+          "flow_rank": 3, "flow_col": 3}),
+
+        ("mod-session", "module", "src/session/", "Unified persistence: JSONL ledger + in-memory MessageStore projection",
+         15, 3500, "medium",
+         {"key_files": ["store/memory_store.py", "models/message.py", "persistence/writer.py"],
+          "flow_rank": 4, "flow_col": 0}),
+
+        ("mod-hooks", "module", "src/hooks/", "User-defined hook extensibility",
+         4, 700, "low",
+         {"key_files": ["manager.py"],
+          "flow_rank": 4, "flow_col": 1}),
+
+        ("mod-prompts", "module", "src/prompts/", "System prompts, subagent prompts, templates",
+         5, 4100, "low",
+         {"key_files": ["system_prompts.py", "enhanced_prompts.py", "subagents/__init__.py"],
+          "flow_rank": 4, "flow_col": 2}),
+
+        ("mod-observability", "module", "src/observability/", "Structured logging, error tracking, metrics",
+         10, 4500, "low",
+         {"key_files": ["logging_config.py", "log_query.py", "error_store.py"],
+          "flow_rank": 5, "flow_col": 0}),
+
+        ("mod-code-intel", "module", "src/code_intelligence/", "LSP-based code analysis and symbol context",
+         5, 2000, "low",
+         {"key_files": ["lsp_client_manager.py", "lsp_runtime.py"],
+          "flow_rank": 5, "flow_col": 1}),
+
+        ("mod-integrations", "module", "src/integrations/", "MCP, Jira, secrets management",
+         10, 2500, "low",
+         {"key_files": ["mcp/manager.py", "mcp/client.py", "mcp/registry.py"],
+          "flow_rank": 5, "flow_col": 2}),
+
+        ("mod-platform", "module", "src/platform/", "Cross-platform compatibility (Windows console encoding)",
+         2, 620, "low",
+         {"key_files": ["windows.py"],
+          "flow_rank": 5, "flow_col": 3}),
+    ]
+
+    for mid, mtype, fpath, desc, files, lines, risk, props in modules:
+        store.add_node(
+            id=mid, type="module", layer=2, name=fpath,
+            description=desc, file_path=fpath,
+            line_count=lines, risk_level=risk, properties=props,
+        )
+
+    # Module inter-dependencies
+    mod_deps = [
+        ("mod-core", "mod-llm", "uses", "Calls LLM backends via call_llm()"),
+        ("mod-core", "mod-memory", "uses", "Reads/writes context via MemoryManager"),
+        ("mod-core", "mod-tools", "uses", "Executes tools via ToolExecutor"),
+        ("mod-core", "mod-session", "uses", "Persists messages via MessageStore"),
+        ("mod-core", "mod-observability", "uses", "Structured logging"),
+        ("mod-memory", "mod-session", "uses", "Writes to MessageStore (single writer)"),
+        ("mod-memory", "mod-observability", "uses", "Structured logging"),
+        ("mod-ui", "mod-core", "uses", "Consumes UIEvents from agent"),
+        ("mod-ui", "mod-session", "uses", "Reads from MessageStore via StoreAdapter"),
+        ("mod-ui", "mod-observability", "uses", "Structured logging"),
+        ("mod-tools", "mod-core", "uses", "Tool base classes, agent interface"),
+        ("mod-tools", "mod-code-intel", "uses", "LSP tools call code intelligence"),
+        ("mod-llm", "mod-observability", "uses", "Structured logging"),
+        ("mod-server", "mod-core", "uses", "Serializes UIEvents for VS Code"),
+        ("mod-server", "mod-session", "uses", "Reads store for notifications"),
+        ("mod-subagents", "mod-core", "uses", "Implements AgentInterface"),
+        ("mod-subagents", "mod-tools", "uses", "Scoped tool access"),
+        ("mod-subagents", "mod-llm", "uses", "Own LLM backend"),
+        ("mod-subagents", "mod-session", "uses", "Own MessageStore"),
+        ("mod-director", "mod-core", "uses", "Phase-based gating of agent"),
+        ("mod-director", "mod-prompts", "uses", "Director-specific prompts"),
+        ("mod-integrations", "mod-observability", "uses", "Structured logging"),
+        ("mod-code-intel", "mod-observability", "uses", "Structured logging"),
+        ("mod-hooks", "mod-observability", "uses", "Structured logging"),
+        ("mod-prompts", "mod-core", "uses", "References core types"),
+        ("mod-prompts", "mod-memory", "uses", "References memory types"),
+    ]
+
+    for from_id, to_id, etype, label in mod_deps:
+        store.add_edge(from_id, to_id, etype, label=label)
+
+    # System context edges
+    sys_edges = [
+        ("sys-user", "mod-ui", "interacts", "Types commands in TUI"),
+        ("sys-user", "sys-vscode", "interacts", "Uses VS Code sidebar"),
+        ("sys-vscode", "mod-server", "communicates", "stdio+TCP protocol"),
+        ("mod-llm", "sys-llm-api", "calls", "HTTP API requests"),
+        ("mod-tools", "sys-filesystem", "reads_writes", "File operations"),
+        ("mod-code-intel", "sys-lsp", "queries", "Symbol/outline requests"),
+        ("mod-integrations", "sys-mcp", "connects", "MCP protocol"),
+        ("mod-tools", "sys-web", "fetches", "Web search/fetch"),
+    ]
+
+    for from_id, to_id, etype, label in sys_edges:
+        store.add_edge(from_id, to_id, etype, label=label)
+
+    # ======================================================================
+    # LAYER 3: Key Components
+    # ======================================================================
+
+    components = [
+        # -- Core --
+        ("comp-coding-agent", "component", "CodingAgent",
+         "Main agent facade: orchestrates LLM calls, tool execution, streaming, memory",
+         "src/core/agent.py", 3307, "high",
+         {"key_methods": ["stream_response()", "execute_tool()", "call_llm()", "from_config()"],
+          "pattern": "async generator yields UIEvents"}),
+
+        ("comp-tool-gating", "component", "ToolGatingService",
+         "4-check pipeline: repeat/plan/director/approval gating before tool execution",
+         "src/core/tool_gating.py", 289, "medium",
+         {"checks": ["repeat", "plan_mode", "director", "approval"]}),
+
+        ("comp-special-handlers", "component", "SpecialToolHandlers",
+         "Async handlers that pause for UI interaction: clarify, plan approval, director",
+         "src/core/special_tool_handlers.py", 417, "medium",
+         {"handlers": ["handle_clarify", "handle_plan_approval", "handle_director_approval"]}),
+
+        ("comp-streaming-pipeline", "component", "StreamingPipeline",
+         "Canonical parser: LLM provider deltas to structured Message segments",
+         "src/core/streaming/pipeline.py", 515, "high",
+         {"input": "ProviderDelta", "output": "Message with segments",
+          "segments": ["TextSegment", "CodeBlockSegment", "ThinkingSegment", "ToolCallRefSegment"]}),
+
+        ("comp-ui-protocol", "component", "UIProtocol",
+         "Bidirectional communication contract between agent and UI layer",
+         "src/core/protocol.py", 645, "medium",
+         {"actions": ["ApprovalResult", "InterruptSignal", "PauseResult", "ClarifyResult"]}),
+
+        ("comp-context-builder", "component", "ContextBuilder",
+         "Builds LLM context from memory layers, constraints, and system prompts",
+         "src/core/context_builder.py", 490, "medium",
+         {}),
+
+        ("comp-plan-mode", "component", "PlanMode",
+         "Claude Code-style planning workflow: generate plan, approve, execute",
+         "src/core/plan_mode.py", 410, "medium",
+         {}),
+
+        ("comp-permission-mgr", "component", "PermissionManager",
+         "Controls tool approval policy: plan mode, normal mode, auto-approve mode",
+         "src/core/permission_mode.py", None, "low",
+         {"modes": ["plan", "normal", "auto"]}),
+
+        ("comp-session-mgr", "component", "SessionManager",
+         "Session lifecycle: create, resume, persist, list sessions",
+         "src/core/session_manager.py", 475, "medium",
+         {}),
+
+        # -- Memory --
+        ("comp-memory-mgr", "component", "MemoryManager",
+         "Orchestrates all memory layers; SINGLE WRITER to MessageStore",
+         "src/memory/memory_manager.py", 1450, "high",
+         {"layers": ["working", "episodic", "file_based", "observation"],
+          "constraint": "Only component that writes to MessageStore"}),
+
+        ("comp-working-memory", "component", "WorkingMemory",
+         "Token-tracked recent conversation turns for LLM context window",
+         "src/memory/working_memory.py", 419, "medium",
+         {}),
+
+        ("comp-episodic-memory", "component", "EpisodicMemory",
+         "Compressed event summaries for long-term context retention",
+         "src/memory/episodic_memory.py", None, "low",
+         {}),
+
+        ("comp-observation-store", "component", "ObservationStore",
+         "Reversible tool output masking to manage context window pressure",
+         "src/memory/observation_store.py", 591, "medium",
+         {}),
+
+        ("comp-compaction", "component", "Summarizer",
+         "LLM-based compression of conversation history to reduce token usage",
+         "src/memory/compaction/summarizer.py", 797, "medium",
+         {}),
+
+        # -- Session --
+        ("comp-message-store", "component", "MessageStore",
+         "Thread-safe in-memory message projection with reactive subscriptions",
+         "src/session/store/memory_store.py", 1009, "high",
+         {"features": ["O(1) lookup", "stream_id collapse", "tool linkage", "subscriptions"],
+          "notifications": ["MESSAGE_ADDED", "MESSAGE_UPDATED", "MESSAGE_FINALIZED",
+                            "TOOL_STATE_UPDATED", "BULK_LOAD_COMPLETE"]}),
+
+        ("comp-message-model", "component", "Message",
+         "Unified message class with segments: text, code, thinking, tool refs",
+         "src/session/models/message.py", 993, "medium",
+         {"segments": ["TextSegment", "CodeBlockSegment", "ThinkingSegment", "ToolCallRefSegment"]}),
+
+        ("comp-session-writer", "component", "SessionWriter",
+         "Append-only JSONL file writer for session persistence",
+         "src/session/persistence/writer.py", 423, "low",
+         {}),
+
+        ("comp-hydrator", "component", "SessionHydrator",
+         "Replays JSONL session files into MessageStore for session resume",
+         "src/session/manager/hydrator.py", None, "low",
+         {}),
+
+        # -- UI --
+        ("comp-tui-app", "component", "CodingAgentApp",
+         "Main Textual TUI application: widget composition, event dispatch, store binding",
+         "src/ui/app.py", 3555, "high",
+         {"key_methods": ["compose()", "_stream_response()", "_handle_event()", "replay_session()"],
+          "pattern": "Textual App with async event loop"}),
+
+        ("comp-store-adapter", "component", "StoreAdapter",
+         "READ-ONLY bridge from MessageStore to TUI widgets (never writes)",
+         "src/ui/store_adapter.py", 550, "low",
+         {"constraint": "READ-ONLY - no write methods allowed"}),
+
+        ("comp-tool-card", "component", "ToolCard",
+         "Widget displaying tool execution status, arguments, results, diffs",
+         "src/ui/widgets/tool_card.py", 1083, "medium",
+         {}),
+
+        ("comp-assistant-msg", "component", "AssistantMessage",
+         "Widget rendering streamed assistant responses with segments",
+         "src/ui/widgets/message.py", 1165, "medium",
+         {}),
+
+        ("comp-status-bar", "component", "StatusBar",
+         "Displays model name, token usage, context pressure indicator",
+         "src/ui/widgets/status_bar.py", 660, "low",
+         {}),
+
+        ("comp-clarify-widget", "component", "ClarifyWidget",
+         "Interactive clarification form widget for agent questions",
+         "src/ui/widgets/clarify_widget.py", 639, "low",
+         {}),
+
+        ("comp-subagent-card", "component", "SubAgentCard",
+         "Nested card displaying delegated subagent execution progress",
+         "src/ui/widgets/subagent_card.py", 725, "low",
+         {}),
+
+        # -- Tools --
+        ("comp-tool-executor", "component", "ToolExecutor",
+         "Tool registry and thread-pool execution engine",
+         "src/tools/base.py", None, "medium",
+         {}),
+
+        ("comp-file-ops", "component", "FileOperations",
+         "File system tools: read_file, write_file, edit_file, glob, directory_tree",
+         "src/tools/file_operations.py", 865, "medium",
+         {"tools": ["read_file", "write_file", "edit_file", "glob_files", "directory_tree"]}),
+
+        ("comp-delegation", "component", "DelegateToSubagent",
+         "Tool for spawning isolated subagents to handle delegated tasks",
+         "src/tools/delegation.py", 651, "medium",
+         {}),
+
+        ("comp-search-tools", "component", "SearchTools",
+         "Code search tools: grep, ripgrep, semantic search",
+         "src/tools/search_tools.py", 772, "low",
+         {}),
+
+        ("comp-web-tools", "component", "WebTools",
+         "Web interaction tools: web_search, web_fetch",
+         "src/tools/web_tools.py", 1157, "low",
+         {}),
+
+        ("comp-lsp-tools", "component", "LSPTools",
+         "Code intelligence tools: get_file_outline, get_symbol_context",
+         "src/tools/lsp_tools.py", 650, "low",
+         {}),
+
+        # -- LLM --
+        ("comp-openai-backend", "component", "OpenAIBackend",
+         "OpenAI-compatible API client with streaming, tool calling, vision",
+         "src/llm/openai_backend.py", 1678, "medium",
+         {}),
+
+        ("comp-anthropic-backend", "component", "AnthropicBackend",
+         "Anthropic API client with extended thinking, tool use, caching",
+         "src/llm/anthropic_backend.py", 1510, "medium",
+         {}),
+
+        ("comp-failure-handler", "component", "FailureHandler",
+         "Retry logic with exponential backoff and error classification",
+         "src/llm/failure_handler.py", 812, "medium",
+         {}),
+
+        # -- Server --
+        ("comp-stdio-server", "component", "StdioServer",
+         "stdio+TCP server for VS Code extension communication",
+         "src/server/stdio_server.py", 1445, "high",
+         {"inbound": ["chat_message", "approval_result", "pause_result"],
+          "outbound": ["UIEvents", "StoreNotifications"]}),
+
+        # -- Subagents --
+        ("comp-subagent", "component", "SubAgent",
+         "Isolated lightweight agent with own MessageStore, LLM backend, tools",
+         "src/subagents/subagent.py", 1174, "medium",
+         {}),
+
+        ("comp-subagent-mgr", "component", "SubAgentManager",
+         "Discovery and lifecycle management of subagent configurations",
+         "src/subagents/manager.py", 495, "low",
+         {}),
+
+        # -- Director --
+        ("comp-director-adapter", "component", "DirectorAdapter",
+         "State machine enforcing disciplined workflow phases",
+         "src/director/adapter.py", None, "medium",
+         {"phases": ["IDLE", "UNDERSTAND", "PLAN", "EXECUTE", "COMPLETE"]}),
+
+        # -- Observability --
+        ("comp-logging", "component", "LoggingSystem",
+         "structlog + stdlib integration: async-safe, JSONL, redaction, context vars",
+         "src/observability/logging_config.py", 1049, "low",
+         {"features": ["QueueHandler", "JSONL rotation", "redaction", "context_vars"]}),
+
+        # -- Code Intelligence --
+        ("comp-lsp-client", "component", "LSPClientManager",
+         "Manages jedi-language-server lifecycle and request/response",
+         "src/code_intelligence/lsp_client_manager.py", 964, "low",
+         {}),
+
+        # -- Hooks --
+        ("comp-hook-mgr", "component", "HookManager",
+         "Loads and executes user-defined hooks from .clarity/hooks.py",
+         "src/hooks/manager.py", 536, "low",
+         {"events": ["PreToolUse", "PostToolUse", "SessionStart"]}),
+
+        # -- MCP --
+        ("comp-mcp-mgr", "component", "McpConnectionManager",
+         "MCP server connection lifecycle and tool discovery",
+         "src/integrations/mcp/manager.py", None, "low",
+         {}),
+    ]
+
+    for cid, ctype, name, desc, fpath, lines, risk, props in components:
+        store.add_node(
+            id=cid, type=ctype, layer=3, name=name,
+            description=desc, file_path=fpath,
+            line_count=lines, risk_level=risk, properties=props,
+        )
+
+    # Component containment (module -> component)
+    containment = [
+        ("mod-core", "comp-coding-agent"),
+        ("mod-core", "comp-tool-gating"),
+        ("mod-core", "comp-special-handlers"),
+        ("mod-core", "comp-streaming-pipeline"),
+        ("mod-core", "comp-ui-protocol"),
+        ("mod-core", "comp-context-builder"),
+        ("mod-core", "comp-plan-mode"),
+        ("mod-core", "comp-permission-mgr"),
+        ("mod-core", "comp-session-mgr"),
+        ("mod-memory", "comp-memory-mgr"),
+        ("mod-memory", "comp-working-memory"),
+        ("mod-memory", "comp-episodic-memory"),
+        ("mod-memory", "comp-observation-store"),
+        ("mod-memory", "comp-compaction"),
+        ("mod-session", "comp-message-store"),
+        ("mod-session", "comp-message-model"),
+        ("mod-session", "comp-session-writer"),
+        ("mod-session", "comp-hydrator"),
+        ("mod-ui", "comp-tui-app"),
+        ("mod-ui", "comp-store-adapter"),
+        ("mod-ui", "comp-tool-card"),
+        ("mod-ui", "comp-assistant-msg"),
+        ("mod-ui", "comp-status-bar"),
+        ("mod-ui", "comp-clarify-widget"),
+        ("mod-ui", "comp-subagent-card"),
+        ("mod-tools", "comp-tool-executor"),
+        ("mod-tools", "comp-file-ops"),
+        ("mod-tools", "comp-delegation"),
+        ("mod-tools", "comp-search-tools"),
+        ("mod-tools", "comp-web-tools"),
+        ("mod-tools", "comp-lsp-tools"),
+        ("mod-llm", "comp-openai-backend"),
+        ("mod-llm", "comp-anthropic-backend"),
+        ("mod-llm", "comp-failure-handler"),
+        ("mod-server", "comp-stdio-server"),
+        ("mod-subagents", "comp-subagent"),
+        ("mod-subagents", "comp-subagent-mgr"),
+        ("mod-director", "comp-director-adapter"),
+        ("mod-observability", "comp-logging"),
+        ("mod-code-intel", "comp-lsp-client"),
+        ("mod-hooks", "comp-hook-mgr"),
+        ("mod-integrations", "comp-mcp-mgr"),
+    ]
+
+    for parent, child in containment:
+        store.add_edge(parent, child, "contains")
+
+    # Component-to-component relationships
+    comp_edges = [
+        # CodingAgent is the hub
+        ("comp-coding-agent", "comp-memory-mgr", "uses", "Reads/writes context"),
+        ("comp-coding-agent", "comp-tool-gating", "uses", "Gates tool execution"),
+        ("comp-coding-agent", "comp-special-handlers", "uses", "Delegates interactive tools"),
+        ("comp-coding-agent", "comp-streaming-pipeline", "uses", "Parses LLM deltas"),
+        ("comp-coding-agent", "comp-tool-executor", "uses", "Executes tools"),
+        ("comp-coding-agent", "comp-context-builder", "uses", "Builds LLM context"),
+        ("comp-coding-agent", "comp-ui-protocol", "uses", "Sends/receives UI actions"),
+        ("comp-coding-agent", "comp-openai-backend", "calls", "LLM API calls"),
+        ("comp-coding-agent", "comp-anthropic-backend", "calls", "LLM API calls"),
+        ("comp-coding-agent", "comp-session-mgr", "uses", "Session lifecycle"),
+        ("comp-coding-agent", "comp-plan-mode", "uses", "Planning workflow"),
+        ("comp-coding-agent", "comp-permission-mgr", "uses", "Approval policy"),
+
+        # Memory layer
+        ("comp-memory-mgr", "comp-working-memory", "uses", "Recent turns"),
+        ("comp-memory-mgr", "comp-episodic-memory", "uses", "Compressed history"),
+        ("comp-memory-mgr", "comp-observation-store", "uses", "Tool output masking"),
+        ("comp-memory-mgr", "comp-message-store", "writes", "SINGLE WRITER to store"),
+        ("comp-memory-mgr", "comp-compaction", "uses", "Context compression"),
+
+        # Session layer
+        ("comp-message-store", "comp-session-writer", "uses", "Appends to JSONL"),
+        ("comp-hydrator", "comp-message-store", "writes", "Replays JSONL into store"),
+
+        # UI layer
+        ("comp-tui-app", "comp-store-adapter", "uses", "Reads messages for display"),
+        ("comp-store-adapter", "comp-message-store", "reads", "READ-ONLY bridge"),
+        ("comp-tui-app", "comp-tool-card", "renders", "Tool execution display"),
+        ("comp-tui-app", "comp-assistant-msg", "renders", "Message display"),
+        ("comp-tui-app", "comp-status-bar", "renders", "Status display"),
+        ("comp-tui-app", "comp-clarify-widget", "renders", "Clarification forms"),
+        ("comp-tui-app", "comp-subagent-card", "renders", "Subagent display"),
+        ("comp-tui-app", "comp-ui-protocol", "uses", "Sends user actions"),
+
+        # Tool dispatch
+        ("comp-tool-executor", "comp-file-ops", "dispatches", "File operations"),
+        ("comp-tool-executor", "comp-search-tools", "dispatches", "Search operations"),
+        ("comp-tool-executor", "comp-web-tools", "dispatches", "Web operations"),
+        ("comp-tool-executor", "comp-lsp-tools", "dispatches", "Code intelligence"),
+        ("comp-tool-executor", "comp-delegation", "dispatches", "Subagent delegation"),
+
+        # Subagent
+        ("comp-delegation", "comp-subagent", "spawns", "Creates isolated agent"),
+        ("comp-subagent", "comp-subagent-mgr", "uses", "Gets configuration"),
+
+        # Director
+        ("comp-director-adapter", "comp-coding-agent", "controls", "Phase-based gating"),
+        ("comp-director-adapter", "comp-tool-gating", "configures", "Director gate"),
+
+        # Server
+        ("comp-stdio-server", "comp-coding-agent", "drives", "Routes user messages"),
+        ("comp-stdio-server", "comp-message-store", "reads", "Store notifications"),
+        ("comp-stdio-server", "comp-ui-protocol", "bridges", "VS Code <-> agent"),
+
+        # Code Intelligence
+        ("comp-lsp-tools", "comp-lsp-client", "uses", "LSP requests"),
+
+        # LLM
+        ("comp-failure-handler", "comp-openai-backend", "wraps", "Retry logic"),
+        ("comp-failure-handler", "comp-anthropic-backend", "wraps", "Retry logic"),
+
+        # Hooks
+        ("comp-coding-agent", "comp-hook-mgr", "calls", "Pre/post tool hooks"),
+
+        # MCP
+        ("comp-tool-executor", "comp-mcp-mgr", "uses", "Dynamic MCP tools"),
+    ]
+
+    for from_id, to_id, etype, label in comp_edges:
+        store.add_edge(from_id, to_id, etype, label=label)
+
+    # ======================================================================
+    # CROSS-CUTTING: Design Decisions
+    # ======================================================================
+
+    decisions = [
+        ("dec-single-writer", "decision", "Single Writer Pattern",
+         "Only MemoryManager writes to MessageStore. StoreAdapter is READ-ONLY. Prevents race conditions in persistence.",
+         {"affects": ["comp-memory-mgr", "comp-store-adapter", "comp-message-store"],
+          "rationale": "Prevents race conditions in multi-consumer persistence"}),
+
+        ("dec-async-only", "decision", "Async-Only Execution",
+         "All agent logic flows through stream_response() async generator. No sync paths. Removed CLI sync mode in v3.0.",
+         {"affects": ["comp-coding-agent", "comp-tui-app"],
+          "rationale": "Single code path, simpler to maintain and test"}),
+
+        ("dec-canonical-delta", "decision", "Canonical ProviderDelta Contract",
+         "All LLM providers emit ProviderDelta. StreamingPipeline is the ONLY structural parser. No other component parses raw LLM output.",
+         {"affects": ["comp-streaming-pipeline", "comp-openai-backend", "comp-anthropic-backend"],
+          "rationale": "Single parsing point eliminates duplicate logic across providers"}),
+
+        ("dec-jsonl-ledger", "decision", "JSONL Ledger + In-Memory Projection",
+         "JSONL file is immutable ledger. MessageStore is in-memory projection with stream_id collapse. Hydrator replays on resume.",
+         {"affects": ["comp-session-writer", "comp-message-store", "comp-hydrator"],
+          "rationale": "Append-only is crash-safe; in-memory gives fast queries"}),
+
+        ("dec-tool-gating", "decision", "4-Check Tool Gating Pipeline",
+         "Every tool call passes through repeat/plan/director/approval checks before execution.",
+         {"affects": ["comp-tool-gating", "comp-coding-agent", "comp-permission-mgr"],
+          "rationale": "Defense in depth: multiple independent safety checks"}),
+
+        ("dec-structlog", "decision", "structlog for Observability",
+         "All logging via get_logger() factory. JSONL output only, no console. Context vars for request tracing.",
+         {"affects": ["comp-logging"],
+          "rationale": "Structured logs enable automated analysis; no console avoids TUI corruption"}),
+
+        ("dec-no-emojis", "decision", "No Emojis in Python Code",
+         "Windows console cp1252 encoding crashes on emoji characters. All Python output must use ASCII-safe markers.",
+         {"affects": ["all"],
+          "rationale": "Windows cp1252 encoding crashes on emoji codepoints"}),
+
+        ("dec-stdin-devnull", "decision", "subprocess.run stdin=DEVNULL",
+         "Every subprocess.run() call must use stdin=DEVNULL. Background stdin reader thread + child inheriting stdin = Windows deadlock.",
+         {"affects": ["comp-tool-executor", "comp-file-ops"],
+          "rationale": "Prevents Windows handle deadlock in stdio mode"}),
+    ]
+
+    for did, dtype, name, desc, props in decisions:
+        store.add_node(
+            id=did, type="decision", layer=0, name=name,
+            description=desc, properties=props,
+        )
+
+    # Decision constraint edges
+    for did, _, _, _, props in decisions:
+        for comp_id in props.get("affects", []):
+            if comp_id != "all":
+                store.add_edge(did, comp_id, "constrains", label="design decision")
+
+    # ======================================================================
+    # CROSS-CUTTING: Invariants
+    # ======================================================================
+
+    invariants = [
+        ("inv-tool-order", "invariant", "Tool Results Must Match Call Order",
+         "Tool results must appear in same order as tool calls in the requesting message, or the LLM API rejects them.",
+         {"severity": "critical", "affects": ["comp-coding-agent"]}),
+
+        ("inv-orphan-detection", "invariant", "No Orphaned Tool Results",
+         "A tool_result with no matching tool_call in context causes LLM API rejection. Agent has _fix_orphaned_tool_calls().",
+         {"severity": "critical", "affects": ["comp-coding-agent"]}),
+
+        ("inv-interrupt-clear", "invariant", "Clear Interrupt After Continue",
+         "_interrupted flag must be cleared after Continue on a pause prompt via clear_interrupt(). Forgetting causes infinite pause loop.",
+         {"severity": "high", "affects": ["comp-ui-protocol", "comp-coding-agent"]}),
+
+        ("inv-agent-subagent-parity", "invariant", "Agent/Subagent Metadata Parity",
+         "Both agent.py and subagent.py must use build_tool_metadata() from tool_metadata.py. VS Code expects identical keys.",
+         {"severity": "high", "affects": ["comp-coding-agent", "comp-subagent"]}),
+
+        ("inv-finalize-before-complete", "invariant", "Finalize Before Complete",
+         "Assistant messages start as streaming placeholders. Must call finalize_message() before marking complete.",
+         {"severity": "medium", "affects": ["comp-tui-app", "comp-message-store"]}),
+    ]
+
+    for iid, itype, name, desc, props in invariants:
+        store.add_node(
+            id=iid, type="invariant", layer=0, name=name,
+            description=desc, properties=props,
+        )
+        for comp_id in props.get("affects", []):
+            store.add_edge(iid, comp_id, "constrains", label="invariant")
+
+    # ======================================================================
+    # CROSS-CUTTING: Execution Flows
+    # ======================================================================
+
+    flows = [
+        ("flow-user-msg", "flow", "User Message Flow",
+         "User input -> TUI -> CodingAgent.stream_response() -> LLM -> Tool loop -> UIEvents -> TUI render",
+         {"trigger": "User presses Enter in ChatInput",
+          "steps": [
+              "ChatInput -> InputSubmittedMessage",
+              "CodingAgentApp._stream_response()",
+              "CodingAgent.stream_response() [async generator]",
+              "ContextBuilder.build_context()",
+              "LLMBackend.stream() -> ProviderDelta",
+              "StreamingPipeline.process_delta() -> Segments",
+              "ToolGatingService.evaluate() -> gate decision",
+              "ToolExecutor.execute_tool() -> ToolResult",
+              "yield UIEvents (TextDelta, ToolCallStatus, etc.)",
+              "CodingAgentApp._handle_event() -> widget updates",
+              "MemoryManager.add_message() -> MessageStore",
+          ],
+          "complexity": "high"}),
+
+        ("flow-tool-exec", "flow", "Tool Execution Flow",
+         "Tool call from LLM -> gating -> approval -> execution -> result back to LLM",
+         {"trigger": "LLM response contains tool_calls",
+          "steps": [
+              "Parse tool_calls from LLM response",
+              "ToolGatingService.evaluate() (4 checks)",
+              "UIProtocol.wait_for_approval() if needed",
+              "ToolExecutor.execute_tool()",
+              "update_tool_state() -> MessageStore notification",
+              "Tool result appended to messages",
+              "Next LLM call with tool results",
+          ],
+          "complexity": "medium"}),
+
+        ("flow-session-resume", "flow", "Session Resume Flow",
+         "Load JSONL -> Hydrate MessageStore -> Replay UI -> Ready for input",
+         {"trigger": "User selects existing session or app starts with session_id",
+          "steps": [
+              "SessionManager.resume_session(session_id)",
+              "SessionHydrator.hydrate(jsonl_path)",
+              "Parse JSONL lines -> Message objects",
+              "MessageStore.add_message() for each",
+              "CodingAgentApp.replay_session()",
+              "Render messages in TUI",
+          ],
+          "complexity": "low"}),
+
+        ("flow-vscode-comm", "flow", "VS Code Communication Flow",
+         "VS Code sidebar -> stdio -> StdioServer -> CodingAgent -> events -> TCP -> sidebar",
+         {"trigger": "User sends message in VS Code sidebar",
+          "steps": [
+              "Sidebar posts chat_message via stdin JSON",
+              "StdioServer reads stdin, dispatches to handler",
+              "CodingAgent.stream_response() starts",
+              "UIEvents serialized via serializers.py",
+              "Events sent over TCP data channel",
+              "Extension forwards to webview via postMessage",
+              "React components update",
+          ],
+          "complexity": "medium"}),
+
+        ("flow-subagent", "flow", "Subagent Delegation Flow",
+         "Main agent -> delegate_to_subagent -> SubAgent process -> IPC results -> main agent",
+         {"trigger": "Agent calls delegate_to_subagent tool",
+          "steps": [
+              "DelegateToSubagent.execute()",
+              "SubAgentManager creates SubAgent config",
+              "Subprocess spawned with IPC channel",
+              "SubAgent.execute() in isolated process",
+              "Own MessageStore, own LLM backend",
+              "Results communicated via IPC",
+              "Main agent receives result, continues",
+          ],
+          "complexity": "medium"}),
+    ]
+
+    for fid, ftype, name, desc, props in flows:
+        store.add_node(
+            id=fid, type="flow", layer=0, name=name,
+            description=desc, properties=props,
+        )
+
+    print(f"[OK] Populated {len(components)} components, {len(modules)} modules, "
+          f"{len(decisions)} decisions, {len(invariants)} invariants, {len(flows)} flows")
+
+
+# ---------------------------------------------------------------------------
+# File Scanner: auto-populate layer 4 file nodes
+# ---------------------------------------------------------------------------
+
+DEFAULT_EXTENSIONS = {".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".java", ".rs", ".rb", ".cs"}
+
+
+def scan_files(store: ClarityStore, root: str = "src", extensions: list[str] = None):
+    """Scan source files and add as layer 4 nodes. Language-agnostic."""
+    import ast
+
+    root_path = Path(root)
+    if not root_path.exists():
+        print(f"[WARN] Root path not found: {root}")
+        return
+
+    # Map directory prefixes to module node IDs
+    MODULE_MAP = {
+        "src/core/": "mod-core",
+        "src/memory/": "mod-memory",
+        "src/session/": "mod-session",
+        "src/ui/": "mod-ui",
+        "src/tools/": "mod-tools",
+        "src/llm/": "mod-llm",
+        "src/server/": "mod-server",
+        "src/observability/": "mod-observability",
+        "src/prompts/": "mod-prompts",
+        "src/subagents/": "mod-subagents",
+        "src/director/": "mod-director",
+        "src/code_intelligence/": "mod-code-intel",
+        "src/integrations/": "mod-integrations",
+        "src/platform/": "mod-platform",
+        "src/hooks/": "mod-hooks",
+        "src/claraity/": "mod-claraity",
+        "src/execution/": "mod-execution",
+        "src/orchestration/": "mod-orchestration",
+        "src/security/": "mod-security",
+        "src/testing/": "mod-testing",
+        "src/validation/": "mod-validation",
+        "src/utils/": "mod-utils",
+    }
+
+    def get_module_id(file_path: str) -> Optional[str]:
+        """Find which module a file belongs to."""
+        fp = file_path.replace("\\", "/")
+        for prefix, mod_id in MODULE_MAP.items():
+            if fp.startswith(prefix):
+                return mod_id
+        return None
+
+    def extract_description(file_path: Path) -> tuple[str, int]:
+        """Extract first docstring or comment and line count. Language-agnostic."""
+        try:
+            content = file_path.read_text(encoding="utf-8", errors="replace")
+            line_count = content.count("\n") + 1
+
+            # Python: try AST for module docstring
+            if file_path.suffix == ".py":
+                try:
+                    tree = ast.parse(content)
+                    docstring = ast.get_docstring(tree)
+                    if docstring:
+                        first_line = docstring.strip().split("\n")[0].strip()
+                        if len(first_line) > 120:
+                            first_line = first_line[:117] + "..."
+                        return first_line, line_count
+                except SyntaxError:
+                    pass
+
+            # Universal: first comment line
+            comment_prefixes = ["#", "//", "/*", "*", "///"]
+            for line in content.split("\n")[:15]:
+                stripped = line.strip()
+                for prefix in comment_prefixes:
+                    if stripped.startswith(prefix) and not stripped.startswith("#!"):
+                        desc = stripped.lstrip("/#* ").strip()
+                        if desc and len(desc) > 5 and not desc.startswith("eslint") and not desc.startswith("@"):
+                            if len(desc) > 120:
+                                desc = desc[:117] + "..."
+                            return desc, line_count
+                        break
+
+            return "", line_count
+        except Exception:
+            return "", 0
+
+    # Ensure all module nodes exist (some may not be in the main populate)
+    existing_nodes = {n["id"] for n in store.get_all_nodes()}
+    for prefix, mod_id in MODULE_MAP.items():
+        if mod_id not in existing_nodes:
+            label = prefix.replace("src/", "").rstrip("/")
+            store.add_node(
+                id=mod_id, type="module", layer=2, name=prefix,
+                description=f"{label} module",
+                file_path=prefix, risk_level="low",
+                properties={"flow_rank": 99, "flow_col": 0},
+            )
+
+    # Find source files matching extensions
+    scan_exts = set(extensions) if extensions else DEFAULT_EXTENSIONS
+    # Normalize: ensure dot prefix
+    scan_exts = {e if e.startswith(".") else f".{e}" for e in scan_exts}
+
+    skip_dirs = {"__pycache__", "node_modules", ".git", ".venv", "dist", "build", ".tox", ".mypy_cache"}
+
+    file_count = 0
+    for src_file in sorted(root_path.rglob("*")):
+        if not src_file.is_file():
+            continue
+        if src_file.suffix not in scan_exts:
+            continue
+        if any(skip in src_file.parts for skip in skip_dirs):
+            continue
+
+        rel_path = str(src_file).replace("\\", "/")
+        file_name = src_file.name
+        module_id = get_module_id(rel_path)
+
+        description, line_count = extract_description(src_file)
+
+        # Determine role from filename patterns
+        role = "source"
+        if file_name in ("__init__.py", "index.ts", "index.js", "mod.rs"):
+            role = "package init"
+        elif file_name in ("__main__.py", "main.go", "main.rs"):
+            role = "entry point"
+        elif file_name.startswith("test_") or file_name.endswith("_test.go") or file_name.endswith(".test.ts") or file_name.endswith(".spec.ts"):
+            role = "test"
+
+        file_id = store._make_id("file", rel_path)
+
+        store.add_node(
+            id=file_id,
+            type="file",
+            layer=4,
+            name=file_name,
+            description=description,
+            file_path=rel_path,
+            line_count=line_count,
+            risk_level="low",
+            properties={"role": role, "module": module_id or "none"},
+        )
+
+        # Link to parent module
+        if module_id:
+            store.add_edge(module_id, file_id, "contains")
+
+        file_count += 1
+
+    print(f"[OK] Scanned {file_count} files as layer 4 nodes")
+
+
+# ---------------------------------------------------------------------------
+# Render: DB -> Markdown for LLM consumption
+# ---------------------------------------------------------------------------
+
+def _load_graph(store: ClarityStore) -> dict:
+    """Load and index all nodes/edges from the DB."""
+    nodes = store.get_all_nodes()
+    edges = store.get_all_edges()
+    metadata = store.get_metadata()
+
+    for n in nodes:
+        if isinstance(n.get("properties"), str):
+            n["properties"] = json.loads(n["properties"])
+
+    node_map = {n["id"]: n for n in nodes}
+
+    contains_edges = [e for e in edges if e["type"] == "contains"]
+    mod_children = {}
+    child_to_mod = {}
+    for e in contains_edges:
+        mod_children.setdefault(e["from_id"], []).append(e["to_id"])
+        child_to_mod[e["to_id"]] = e["from_id"]
+
+    dep_edges = [e for e in edges if e["type"] not in ("contains", "constrains")]
+
+    return {
+        "nodes": nodes, "edges": edges, "metadata": metadata,
+        "node_map": node_map, "mod_children": mod_children,
+        "child_to_mod": child_to_mod, "dep_edges": dep_edges,
+    }
+
+
+def render_compact_briefing(store: ClarityStore) -> str:
+    """Compact overview for system prompt injection (~1500 tokens).
+    Covers: modules, cross-module deps, decisions, invariants."""
+    g = _load_graph(store)
+    node_map, mod_children = g["node_map"], g["mod_children"]
+
+    modules = [n for n in g["nodes"] if n["type"] == "module" and n["properties"].get("flow_rank", 99) < 99]
+    modules.sort(key=lambda m: (m["properties"].get("flow_rank", 99), m["properties"].get("flow_col", 99)))
+    decisions = [n for n in g["nodes"] if n["type"] == "decision"]
+    invariants = [n for n in g["nodes"] if n["type"] == "invariant"]
+
+    repo = g["metadata"].get("repo_name", "unknown")
+    lang = g["metadata"].get("repo_language", "unknown")
+    total_lines = g["metadata"].get("total_lines", "?")
+    total_files = g["metadata"].get("total_files", "?")
+
+    lines = []
+    lines.append(f"# Codebase: {repo} ({lang}, {total_files} files, {total_lines} lines)")
+    lines.append("")
+
+    # Modules table
+    lines.append("## Modules")
+    lines.append("")
+    lines.append("| Module | Purpose | Components | Risk |")
+    lines.append("|--------|---------|------------|------|")
+    for m in modules:
+        child_ids = [cid for cid in mod_children.get(m["id"], []) if node_map.get(cid, {}).get("type") == "component"]
+        label = m["name"].replace("src/", "").rstrip("/")
+        desc = m["description"][:60] + ("..." if len(m["description"]) > 60 else "")
+        lines.append(f"| {label} | {desc} | {len(child_ids)} | {m['risk_level']} |")
+    lines.append("")
+
+    # Cross-module dependencies
+    mod_dep_edges = [e for e in g["dep_edges"] if e["from_id"].startswith("mod-") and e["to_id"].startswith("mod-")]
+    if mod_dep_edges:
+        lines.append("## Key Dependencies")
+        lines.append("")
+        for e in mod_dep_edges:
+            fl = node_map.get(e["from_id"], {}).get("name", "").replace("src/", "").rstrip("/")
+            tl = node_map.get(e["to_id"], {}).get("name", "").replace("src/", "").rstrip("/")
+            lbl = f" ({e['label']})" if e.get("label") else ""
+            lines.append(f"- {fl} --> {tl}{lbl}")
+        lines.append("")
+
+    # Decisions
+    if decisions:
+        lines.append("## Decisions (must follow)")
+        lines.append("")
+        for d in decisions:
+            lines.append(f"- **{d['name']}**: {d['description']}")
+        lines.append("")
+
+    # Invariants
+    if invariants:
+        lines.append("## Invariants (must not break)")
+        lines.append("")
+        for inv in invariants:
+            sev = inv["properties"].get("severity", "medium")
+            lines.append(f"- **[{sev.upper()}]** {inv['name']}: {inv['description']}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def render_module_detail(store: ClarityStore, module_id: str) -> str:
+    """Detailed view of a single module: components + files + relationships."""
+    g = _load_graph(store)
+    node_map, mod_children = g["node_map"], g["mod_children"]
+
+    mod = node_map.get(module_id)
+    if not mod:
+        return f"Module '{module_id}' not found."
+
+    child_ids = mod_children.get(module_id, [])
+    components = [node_map[cid] for cid in child_ids if node_map.get(cid, {}).get("type") == "component"]
+    files = [node_map[cid] for cid in child_ids if node_map.get(cid, {}).get("type") == "file"]
+    label = mod["name"].replace("src/", "").rstrip("/")
+
+    lines = []
+    lines.append(f"# Module: {label}")
+    lines.append(f"> {mod['description']}")
+    lines.append(f"> Risk: {mod['risk_level']} | Files: {len(files)} | Components: {len(components)}")
+    lines.append("")
+
+    # Components
+    if components:
+        lines.append("## Components")
+        lines.append("")
+        for c in components:
+            lc = f" ({c['line_count']} lines)" if c.get("line_count") else ""
+            lines.append(f"### {c['name']}{lc}")
+            lines.append(f"- **File**: {c.get('file_path', '')}")
+            lines.append(f"- **Risk**: {c['risk_level']}")
+            lines.append(f"- **Purpose**: {c['description']}")
+
+            # Outgoing edges
+            out = [e for e in g["dep_edges"] if e["from_id"] == c["id"]]
+            if out:
+                lines.append(f"- **Depends on**: {', '.join(node_map.get(e['to_id'], {}).get('name', e['to_id']) for e in out)}")
+
+            # Incoming edges
+            inc = [e for e in g["dep_edges"] if e["to_id"] == c["id"]]
+            if inc:
+                lines.append(f"- **Used by**: {', '.join(node_map.get(e['from_id'], {}).get('name', e['from_id']) for e in inc)}")
+
+            # Properties
+            props = c.get("properties", {})
+            for k, v in props.items():
+                if k in ("flow_rank", "flow_col"):
+                    continue
+                if isinstance(v, list):
+                    lines.append(f"- **{k}**: {', '.join(str(x) for x in v)}")
+                elif v:
+                    lines.append(f"- **{k}**: {v}")
+            lines.append("")
+
+    # Files
+    if files:
+        lines.append("## Files")
+        lines.append("")
+        lines.append("| File | Lines | Role | Description |")
+        lines.append("|------|-------|------|-------------|")
+        for f in sorted(files, key=lambda x: x.get("file_path", "")):
+            desc = (f.get("description") or "")[:50]
+            if len(f.get("description") or "") > 50:
+                desc += "..."
+            role = f.get("properties", {}).get("role", "")
+            lines.append(f"| {f.get('file_path', '')} | {f.get('line_count', '')} | {role} | {desc} |")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def render_file_detail(store: ClarityStore, file_path: str) -> str:
+    """Detail view of a single file: role, parent module/component, related decisions."""
+    g = _load_graph(store)
+    node_map, child_to_mod = g["node_map"], g["child_to_mod"]
+
+    # Find file node by path
+    file_node = None
+    for n in g["nodes"]:
+        if n["type"] == "file" and n.get("file_path") == file_path:
+            file_node = n
+            break
+
+    if not file_node:
+        return f"File '{file_path}' not found in knowledge DB."
+
+    # Find parent module
+    parent_mod_id = child_to_mod.get(file_node["id"])
+    parent_mod = node_map.get(parent_mod_id) if parent_mod_id else None
+
+    # Find component that this file defines (match by file_path)
+    component = None
+    for n in g["nodes"]:
+        if n["type"] == "component" and n.get("file_path") == file_path:
+            component = n
+            break
+
+    lines = []
+    lines.append(f"# File: {file_path}")
+    lines.append(f"- **Name**: {file_node['name']}")
+    lines.append(f"- **Lines**: {file_node.get('line_count', '?')}")
+    lines.append(f"- **Role**: {file_node.get('properties', {}).get('role', 'source')}")
+    if file_node.get("description"):
+        lines.append(f"- **Description**: {file_node['description']}")
+    if parent_mod:
+        lines.append(f"- **Module**: {parent_mod['name'].replace('src/', '').rstrip('/')}")
+    lines.append("")
+
+    if component:
+        lines.append(f"## Defines Component: {component['name']}")
+        lines.append(f"> {component.get('description', '')}")
+        lines.append(f"- Risk: {component['risk_level']}")
+        lines.append("")
+
+        out = [e for e in g["dep_edges"] if e["from_id"] == component["id"]]
+        if out:
+            lines.append("### Depends On")
+            for e in out:
+                t = node_map.get(e["to_id"])
+                lbl = f" - {e['label']}" if e.get("label") else ""
+                lines.append(f"- {t['name'] if t else e['to_id']} ({e['type']}){lbl}")
+            lines.append("")
+
+        inc = [e for e in g["dep_edges"] if e["to_id"] == component["id"]]
+        if inc:
+            lines.append("### Used By")
+            for e in inc:
+                s = node_map.get(e["from_id"])
+                lines.append(f"- {s['name'] if s else e['from_id']} ({e['type']})")
+            lines.append("")
+
+        # Related decisions
+        constraints = [e for e in g["edges"] if e["type"] == "constrains" and e["to_id"] == component["id"]]
+        if constraints:
+            lines.append("### Applicable Decisions/Invariants")
+            for e in constraints:
+                dec = node_map.get(e["from_id"])
+                if dec:
+                    lines.append(f"- **{dec['name']}**: {dec['description']}")
+            lines.append("")
+
+    return "\n".join(lines)
+
+
+def render_search(store: ClarityStore, keyword: str) -> str:
+    """Search nodes by keyword. Returns matches + one-hop neighbors."""
+    g = _load_graph(store)
+    node_map = g["node_map"]
+    kw = keyword.lower()
+
+    # Search across name, description, properties
+    matches = []
+    for n in g["nodes"]:
+        if n["type"] == "file" and n.get("properties", {}).get("role") == "package init":
+            continue  # skip __init__.py noise
+        name_match = kw in (n.get("name") or "").lower()
+        desc_match = kw in (n.get("description") or "").lower()
+        prop_match = kw in json.dumps(n.get("properties", {})).lower()
+        if name_match or desc_match or prop_match:
+            matches.append(n)
+
+    if not matches:
+        return f"No results for '{keyword}'."
+
+    lines = []
+    lines.append(f"## Search: \"{keyword}\" ({len(matches)} matches)")
+    lines.append("")
+
+    for m in matches[:15]:  # limit to 15 results
+        lines.append(f"### {m['name']} ({m['type']})")
+        if m.get("file_path"):
+            lc = f", {m['line_count']} lines" if m.get("line_count") else ""
+            lines.append(f"- **File**: {m['file_path']}{lc}")
+        if m.get("description"):
+            lines.append(f"- **Description**: {m['description']}")
+        if m.get("risk_level") and m["type"] == "component":
+            lines.append(f"- **Risk**: {m['risk_level']}")
+
+        # One-hop neighbors
+        out = [e for e in g["dep_edges"] if e["from_id"] == m["id"]]
+        inc = [e for e in g["dep_edges"] if e["to_id"] == m["id"]]
+        if out:
+            targets = [f"{node_map.get(e['to_id'], {}).get('name', e['to_id'])}" for e in out[:5]]
+            lines.append(f"- **Depends on**: {', '.join(targets)}")
+        if inc:
+            sources = [f"{node_map.get(e['from_id'], {}).get('name', e['from_id'])}" for e in inc[:5]]
+            lines.append(f"- **Used by**: {', '.join(sources)}")
+
+        lines.append("")
+
+    if len(matches) > 15:
+        lines.append(f"*... and {len(matches) - 15} more results*")
+
+    return "\n".join(lines)
+
+
+def render_impact(store: ClarityStore, component_id: str) -> str:
+    """Show what would be affected by changes to a component."""
+    g = _load_graph(store)
+    node_map = g["node_map"]
+
+    comp = node_map.get(component_id)
+    if not comp:
+        return f"Component '{component_id}' not found."
+
+    # BFS: follow incoming edges (who depends on this component)
+    from collections import deque
+
+    visited = set()
+    queue = deque([(component_id, 0)])  # (node_id, depth)
+    impact_chain = []  # (node, depth, edge_type)
+
+    while queue:
+        current, current_depth = queue.popleft()
+        if current in visited:
+            continue
+        visited.add(current)
+
+        dependents = [e for e in g["dep_edges"] if e["to_id"] == current]
+        for e in dependents:
+            from_node = node_map.get(e["from_id"])
+            if from_node and e["from_id"] not in visited:
+                impact_chain.append((from_node, current_depth + 1, e["type"]))
+                queue.append((e["from_id"], current_depth + 1))
+
+    lines = []
+    lines.append(f"## Impact Analysis: {comp['name']}")
+    lines.append(f"> Changing this component may affect {len(impact_chain)} other components.")
+    lines.append("")
+
+    if not impact_chain:
+        lines.append("No dependents found. This component can be modified safely.")
+        return "\n".join(lines)
+
+    # Group by type
+    direct = [(n, t) for n, d, t in impact_chain if d == 1]
+    indirect = [(n, t) for n, d, t in impact_chain if d > 1]
+
+    if direct:
+        lines.append(f"### Direct dependents ({len(direct)})")
+        for n, t in direct:
+            risk = f" [{n['risk_level'].upper()}]" if n.get("risk_level") == "high" else ""
+            lines.append(f"- **{n['name']}** ({t}){risk} - {n.get('file_path', '')}")
+        lines.append("")
+
+    if indirect:
+        lines.append(f"### Indirect dependents ({len(indirect)})")
+        for n, t in indirect:
+            lines.append(f"- {n['name']} ({t}) - {n.get('file_path', '')}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+# Keep backwards compat
+render_briefing = render_compact_briefing
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def main():
+    if len(sys.argv) < 2:
+        print("""Usage: python -m src.claraity.claraity_db <command> [args]
+
+Commands:
+  populate          Populate DB with architecture knowledge
+  scan              Scan Python files and add as layer 4 nodes
+  export            Export graph.json for visualization
+  all               populate + scan + export
+  brief             Compact architecture overview (for system prompt)
+  module <id>       Module detail (e.g., mod-core, mod-memory)
+  file <path>       File detail (e.g., src/core/agent.py)
+  search <keyword>  Search knowledge base
+  impact <id>       Impact analysis (e.g., comp-message-store)""")
+        sys.exit(1)
+
+    cmd = sys.argv[1]
+    store = ClarityStore()
+
+    try:
+        if cmd in ("populate", "all"):
+            populate(store)
+            stats = store.get_stats()
+            print(f"[OK] DB: {stats['total_nodes']} nodes, {stats['total_edges']} edges")
+            print(f"     Node types: {stats['node_types']}")
+            print(f"     Edge types: {stats['edge_types']}")
+
+        if cmd in ("scan", "all"):
+            scan_files(store)
+            stats = store.get_stats()
+            print(f"[OK] DB after scan: {stats['total_nodes']} nodes, {stats['total_edges']} edges")
+
+        if cmd in ("export", "all"):
+            graph = store.export_graph_json()
+            print(f"[OK] Exported graph.json: {len(graph['nodes'])} nodes, {len(graph['edges'])} edges")
+
+        if cmd == "brief":
+            print(render_compact_briefing(store))
+
+        elif cmd == "module":
+            if len(sys.argv) < 3:
+                print("Usage: module <module_id>  (e.g., mod-core)")
+                sys.exit(1)
+            print(render_module_detail(store, sys.argv[2]))
+
+        elif cmd == "file":
+            if len(sys.argv) < 3:
+                print("Usage: file <path>  (e.g., src/core/agent.py)")
+                sys.exit(1)
+            print(render_file_detail(store, sys.argv[2]))
+
+        elif cmd == "search":
+            if len(sys.argv) < 3:
+                print("Usage: search <keyword>")
+                sys.exit(1)
+            print(render_search(store, " ".join(sys.argv[2:])))
+
+        elif cmd == "impact":
+            if len(sys.argv) < 3:
+                print("Usage: impact <component_id>  (e.g., comp-message-store)")
+                sys.exit(1)
+            print(render_impact(store, sys.argv[2]))
+
+        elif cmd not in ("populate", "scan", "export", "all"):
+            print(f"Unknown command: {cmd}")
+            sys.exit(1)
+
+    finally:
+        store.close()
+
+
+if __name__ == "__main__":
+    main()

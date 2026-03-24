@@ -47,6 +47,7 @@ class McpToolRegistry:
         self._adapter = McpToolAdapter(config)
         self._tool_definitions: list[ToolDefinition] = []
         self._mcp_tool_names: set = set()
+        self._all_tool_descriptions: dict[str, str] = {}  # raw_name -> description (ALL tools, including disabled)
         self._last_discovery: float = 0.0
         self._enabled = False
 
@@ -86,7 +87,8 @@ class McpToolRegistry:
         self,
         client: McpClient,
         tool_executor: ToolExecutor,
-    ) -> int:
+        disabled_tools: set[str] | None = None,
+    ) -> tuple[int, list[str]]:
         """Discover MCP tools and register allowed ones in ToolExecutor.
 
         Skips discovery if cache is still valid.
@@ -94,9 +96,10 @@ class McpToolRegistry:
         Args:
             client: Connected McpClient.
             tool_executor: ToolExecutor to register bridge tools into.
+            disabled_tools: Set of raw MCP tool names to skip (from user config).
 
         Returns:
-            Number of tools registered.
+            Tuple of (number of tools registered, list of all discovered raw tool names).
         """
         if self._is_cache_valid():
             logger.info(
@@ -104,20 +107,36 @@ class McpToolRegistry:
                 server=self._config.name,
                 cached_tools=len(self._tool_definitions),
             )
-            return len(self._tool_definitions)
+            return len(self._tool_definitions), []
+
+        disabled = disabled_tools or set()
 
         # Fetch raw MCP tool schemas
         raw_tools = await client.list_tools()
 
+        # Collect all discovered tool names and descriptions for settings merge + UI
+        all_discovered_names = [t.get("name", "unknown") for t in raw_tools]
+        self._all_tool_descriptions = {
+            t.get("name", "unknown"): t.get("description", "")
+            for t in raw_tools
+        }
+
         # Adapt schemas (adds prefix)
         adapted = self._adapter.adapt_schemas(raw_tools)
 
-        # Filter through policy gate
+        # Filter through policy gate + user visibility config
         registered_count = 0
         self._tool_definitions.clear()
         self._mcp_tool_names.clear()
 
         for raw_tool, tool_def in zip(raw_tools, adapted, strict=False):
+            mcp_name = raw_tool.get("name", "unknown")
+
+            # Check user-level tool visibility first
+            if mcp_name in disabled:
+                logger.debug("mcp_tool_disabled_by_user", tool_name=tool_def.name, mcp_name=mcp_name)
+                continue
+
             # Register tool in policy gate using MCP annotations
             annotations = raw_tool.get("annotations", {})
             policy = self._policy_gate.register_tool(tool_def.name, annotations)
@@ -125,9 +144,6 @@ class McpToolRegistry:
             if not policy.allowed:
                 logger.debug("mcp_tool_filtered", tool_name=tool_def.name)
                 continue
-
-            # Get original MCP name (without prefix) for invoke calls
-            mcp_name = raw_tool.get("name", "unknown")
 
             # Create bridge tool and register.
             # Pass the current event loop so the bridge can dispatch async
@@ -159,9 +175,10 @@ class McpToolRegistry:
             discovered=len(raw_tools),
             allowed=registered_count,
             blocked=len(raw_tools) - registered_count,
+            user_disabled=len(disabled),
         )
 
-        return registered_count
+        return registered_count, all_discovered_names
 
     def invalidate_cache(self) -> None:
         """Force re-discovery on next call."""
@@ -171,5 +188,6 @@ class McpToolRegistry:
         """Remove all MCP tools (e.g. on disconnect)."""
         self._tool_definitions.clear()
         self._mcp_tool_names.clear()
+        self._all_tool_descriptions.clear()
         self._last_discovery = 0.0
         self._enabled = False

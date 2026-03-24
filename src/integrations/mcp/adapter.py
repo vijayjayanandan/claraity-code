@@ -59,6 +59,9 @@ class McpToolAdapter:
 
         raw_name = mcp_tool.get("name", "unknown")
         prefixed_name = f"{self._prefix}_{raw_name}" if self._prefix else raw_name
+        # Sanitize: LLM APIs require tool names matching ^[a-zA-Z0-9_-]{1,128}$
+        import re
+        prefixed_name = re.sub(r"[^a-zA-Z0-9_-]", "_", prefixed_name)[:128]
 
         description = mcp_tool.get("description", "")
 

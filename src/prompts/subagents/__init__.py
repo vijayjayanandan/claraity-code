@@ -864,6 +864,13 @@ KNOWLEDGE_BUILDER_TOOLS = [
     "edit_file",
     "kb_detect_changes",
     "kb_update_manifest",
+    # ClarAIty Knowledge DB tools
+    "claraity_scan_files",
+    "claraity_add_node",
+    "claraity_add_edge",
+    "claraity_remove_node",
+    "claraity_brief",
+    "claraity_search",
 ]
 
 KNOWLEDGE_BUILDER_PROMPT = f"""{SUBAGENT_BASE_PROMPT}
@@ -1115,6 +1122,76 @@ which I learned is important because the standard logging breaks the TUI...
 3. Register router in `src/api/main.py`: `app.include_router(<name>_router, prefix="/<name>")`
 4. Add test in `tests/unit/test_<name>.py` (mock dependencies via constructor injection)
 ```
+
+# Phase 6: Populate ClarAIty Knowledge DB
+
+After writing markdown knowledge files (Phases 4-5), ALSO populate the ClarAIty knowledge \
+graph database. This enables the agent to query structured architecture data and powers \
+the visual architecture diagram.
+
+## Step 1: Scan files
+Call `claraity_scan_files` with the project's source root directory. This auto-discovers \
+all source files and adds them as layer 4 nodes.
+
+## Step 2: Add modules (layer 2)
+For each major directory/package, add a module node:
+```
+claraity_add_node(node_id="mod-<name>", node_type="module", name="src/<name>/", \
+    layer=2, description="<one-line purpose>", file_path="src/<name>/", \
+    risk_level="low|medium|high", \
+    properties='{{"flow_rank": <row>, "flow_col": <col>}}')
+```
+`flow_rank` determines vertical position in the architecture diagram (0=top, higher=lower). \
+`flow_col` determines horizontal order within a row.
+
+## Step 3: Add components (layer 3)
+For each architecturally significant class/module, add a component node:
+```
+claraity_add_node(node_id="comp-<name>", node_type="component", name="<ClassName>", \
+    layer=3, description="<what it does>", file_path="<file>", \
+    line_count=<lines>, risk_level="low|medium|high", \
+    properties='{{"key_methods": ["method1", "method2"]}}')
+```
+
+## Step 4: Add edges
+For each relationship between nodes, add an edge:
+```
+claraity_add_edge(from_id="mod-core", to_id="mod-memory", edge_type="uses", \
+    label="Reads/writes context via MemoryManager")
+claraity_add_edge(from_id="mod-core", to_id="comp-coding-agent", edge_type="contains")
+```
+Use "contains" for module->component hierarchy. Other types: uses, calls, writes, reads, \
+emits, constrains, dispatches, renders, spawns, controls, bridges.
+
+## Step 5: Add cross-cutting concerns (layer 0)
+Add design decisions, invariants, and execution flows:
+```
+claraity_add_node(node_id="dec-<name>", node_type="decision", name="<Decision Name>", \
+    layer=0, description="<rule and rationale>")
+claraity_add_node(node_id="inv-<name>", node_type="invariant", name="<Invariant Name>", \
+    layer=0, description="<what must never break>", \
+    properties='{{"severity": "critical|high|medium"}}')
+```
+Link decisions/invariants to affected components:
+```
+claraity_add_edge(from_id="dec-<name>", to_id="comp-<name>", edge_type="constrains")
+```
+
+## Step 6: Add external systems (layer 1)
+Add external systems the codebase interacts with:
+```
+claraity_add_node(node_id="sys-<name>", node_type="system", name="<System Name>", \
+    layer=1, description="<what it is>")
+```
+
+## Guidelines for Knowledge DB
+- Not every class is a component. Only architecturally significant ones (entry points, \
+  facades, major abstractions, persistence layers)
+- Use consistent ID prefixes: sys-, mod-, comp-, dec-, inv-, flow-
+- Descriptions should be concrete and LLM-actionable, not vague
+- risk_level reflects how dangerous modifications are (based on coupling, complexity, \
+  async behavior)
+- flow_rank/flow_col in properties determine visual layout in the architecture diagram
 """
 
 

@@ -300,7 +300,7 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
     private async handleWebviewMessage(msg: WebViewMessage): Promise<void> {
         switch (msg.type) {
             case 'chatMessage':
-                this.sendChatWithAttachments(msg.content, msg.attachments, msg.images);
+                this.sendChatWithAttachments(msg.content, msg.attachments, msg.images, msg.systemContext);
                 break;
 
             case 'searchFiles':
@@ -454,12 +454,15 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             case 'openFile':
                 if (msg.path) {
                     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-                    const resolvedPath = path.resolve(msg.path);
+                    // Resolve relative paths against workspace root
+                    const resolvedPath = workspaceRoot && !path.isAbsolute(msg.path)
+                        ? path.join(workspaceRoot, msg.path)
+                        : path.resolve(msg.path);
                     if (workspaceRoot && !resolvedPath.startsWith(path.resolve(workspaceRoot) + path.sep)) {
                         vscode.window.showWarningMessage('Can only open files within the workspace.');
                         break;
                     }
-                    const uri = vscode.Uri.file(msg.path);
+                    const uri = vscode.Uri.file(resolvedPath);
                     vscode.window.showTextDocument(uri, { preview: true }).then(undefined, () => {
                         vscode.window.showWarningMessage(`Could not open file: ${msg.path}`);
                     });
@@ -486,6 +489,106 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
 
             case 'disconnectJira':
                 this.connection?.send({ type: 'disconnect_jira' } as ClientMessage);
+                break;
+
+            // ── MCP ──
+            case 'getMcpServers':
+                this.connection?.send({ type: 'get_mcp_servers' });
+                break;
+
+            case 'mcpOpenConfig': {
+                const scope = (msg as { scope?: string }).scope ?? 'project';
+                let configPath: string;
+                if (scope === 'global') {
+                    const homeDir = require('os').homedir();
+                    configPath = path.join(homeDir, '.clarity', 'mcp_settings.json');
+                } else {
+                    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+                    if (!workspaceRoot) break;
+                    configPath = path.join(workspaceRoot, '.clarity', 'mcp_settings.json');
+                }
+                const uri = vscode.Uri.file(configPath);
+                const fs = require('fs') as typeof import('fs');
+                if (!fs.existsSync(configPath)) {
+                    const dir = path.dirname(configPath);
+                    if (!fs.existsSync(dir)) { fs.mkdirSync(dir, { recursive: true }); }
+                    fs.writeFileSync(configPath, JSON.stringify({ mcpServers: {} }, null, 2) + '\n', 'utf-8');
+                }
+                vscode.window.showTextDocument(uri, { preview: false });
+                break;
+            }
+
+            case 'mcpReload':
+                this.connection?.send({ type: 'mcp_reload' });
+                break;
+
+            case 'mcpMarketplaceSearch':
+                this.connection?.send({
+                    type: 'mcp_marketplace_search',
+                    query: msg.query,
+                    page: msg.page,
+                });
+                break;
+
+            case 'mcpInstall':
+                this.connection?.send({
+                    type: 'mcp_install',
+                    server_id: msg.serverId,
+                    name: msg.name,
+                    scope: msg.scope ?? 'project',
+                });
+                break;
+
+            case 'mcpUninstall':
+                this.connection?.send({
+                    type: 'mcp_uninstall',
+                    server_name: msg.serverName,
+                });
+                break;
+
+            case 'mcpToggleServer':
+                this.connection?.send({
+                    type: 'mcp_toggle_server',
+                    server_name: msg.serverName,
+                    enabled: msg.enabled,
+                });
+                break;
+
+            case 'mcpSaveTools':
+                this.connection?.send({
+                    type: 'mcp_save_tools',
+                    server_name: msg.serverName,
+                    tools: msg.tools,
+                });
+                break;
+
+            case 'mcpReconnect':
+                this.connection?.send({
+                    type: 'mcp_reconnect',
+                    server_name: msg.serverName,
+                });
+                break;
+
+            case 'mcpOpenDocs':
+                vscode.env.openExternal(vscode.Uri.parse(msg.url));
+                break;
+
+            // ── ClarAIty Knowledge & Beads ──
+            case 'getBeads':
+                this.connection?.send({ type: 'get_beads' });
+                break;
+
+            case 'getArchitecture':
+                this.connection?.send({ type: 'get_architecture' });
+                break;
+
+            case 'approveKnowledge':
+                this.connection?.send({
+                    type: 'approve_knowledge',
+                    approved_by: msg.approvedBy,
+                    status: msg.status,
+                    comments: msg.comments,
+                } as ClientMessage);
                 break;
 
             case 'webviewError':
@@ -705,9 +808,13 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
         content: string,
         attachments?: FileAttachment[],
         images?: ImageAttachment[],
+        systemContext?: string,
     ): Promise<void> {
-        // Prepend project context on the first message of each session
+        // Prepend system context (hidden from UI, visible to agent)
         let finalContent = content;
+        if (systemContext) {
+            finalContent = `<system-context>\n${systemContext}\n</system-context>\n\n${content}`;
+        }
         if (this.projectContext && !this.contextSentThisSession) {
             this.contextSentThisSession = true;
             finalContent = this.projectContext + '\n\n' + finalContent;

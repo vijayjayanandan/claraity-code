@@ -665,6 +665,199 @@ BACKGROUND_TOOLS = [
     CHECK_BACKGROUND_TASK_TOOL,
 ]
 
+# ClarAIty Knowledge & Task Tools
+
+CLARAITY_SCAN_FILES_TOOL = ToolDefinition(
+    name="claraity_scan_files",
+    description="Auto-discover source files and add as layer 4 nodes. Language-agnostic. Run as first step when building knowledge for a new repo.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "root": {"type": "string", "description": "Root directory to scan (default: 'src')"},
+            "extensions": {"type": "string", "description": "Comma-separated extensions (default: .py,.ts,.tsx,.js,.jsx,.go,.java,.rs)"},
+        },
+        "required": [],
+    },
+)
+
+CLARAITY_ADD_NODE_TOOL = ToolDefinition(
+    name="claraity_add_node",
+    description="Add a node to the knowledge graph: system (L1), module (L2), component (L3), decision, invariant, or flow (L0).",
+    parameters={
+        "type": "object",
+        "properties": {
+            "node_id": {"type": "string", "description": "Unique ID. Convention: sys-<name>, mod-<name>, comp-<name>, dec-<name>, inv-<name>, flow-<name>"},
+            "node_type": {"type": "string", "enum": ["system", "module", "component", "decision", "invariant", "flow"], "description": "Node type"},
+            "name": {"type": "string", "description": "Human-readable name"},
+            "description": {"type": "string", "description": "What this entity does"},
+            "layer": {"type": "integer", "description": "Zoom level: 0=cross-cutting, 1=system, 2=module, 3=component"},
+            "file_path": {"type": "string", "description": "Source file path"},
+            "line_count": {"type": "integer", "description": "Lines of code"},
+            "risk_level": {"type": "string", "enum": ["low", "medium", "high"]},
+            "properties": {"type": "string", "description": "JSON string of additional properties"},
+        },
+        "required": ["node_id", "node_type", "name"],
+    },
+)
+
+CLARAITY_ADD_EDGE_TOOL = ToolDefinition(
+    name="claraity_add_edge",
+    description="Add a relationship edge between two nodes. Types: uses, calls, contains, writes, reads, emits, constrains, dispatches, renders, spawns, controls, bridges.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "from_id": {"type": "string", "description": "Source node ID"},
+            "to_id": {"type": "string", "description": "Target node ID"},
+            "edge_type": {"type": "string", "description": "Relationship type"},
+            "label": {"type": "string", "description": "Description of the relationship"},
+        },
+        "required": ["from_id", "to_id", "edge_type"],
+    },
+)
+
+CLARAITY_REMOVE_NODE_TOOL = ToolDefinition(
+    name="claraity_remove_node",
+    description="Remove a node and all connected edges from the knowledge graph. Use for corrections.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "node_id": {"type": "string", "description": "ID of the node to remove"},
+        },
+        "required": ["node_id"],
+    },
+)
+
+CLARAITY_BRIEF_TOOL = ToolDefinition(
+    name="claraity_brief",
+    description="Get a compact architecture overview of the codebase: modules, dependencies, design decisions, and invariants. Use at session start or when you need to understand the overall structure.",
+    parameters={"type": "object", "properties": {}, "required": []},
+)
+
+CLARAITY_MODULE_TOOL = ToolDefinition(
+    name="claraity_module",
+    description="Get detailed information about a module: its components, files, dependencies, and relationships. Use when you need to understand or modify a specific module.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "module_id": {
+                "type": "string",
+                "description": "Module ID (e.g., mod-core, mod-memory, mod-ui, mod-tools, mod-llm, mod-server)",
+            },
+        },
+        "required": ["module_id"],
+    },
+)
+
+CLARAITY_FILE_TOOL = ToolDefinition(
+    name="claraity_file",
+    description="Get a file's role, parent module, component it defines, dependencies, and applicable design decisions. Use BEFORE reading a file to understand its context.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "file_path": {
+                "type": "string",
+                "description": "File path relative to project root (e.g., src/core/agent.py)",
+            },
+        },
+        "required": ["file_path"],
+    },
+)
+
+CLARAITY_SEARCH_TOOL = ToolDefinition(
+    name="claraity_search",
+    description="Search the codebase knowledge base by keyword. Returns matching components, modules, files, decisions, and their relationships.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "keyword": {
+                "type": "string",
+                "description": "Search keyword (e.g., 'memory', 'auth', 'streaming')",
+            },
+        },
+        "required": ["keyword"],
+    },
+)
+
+CLARAITY_IMPACT_TOOL = ToolDefinition(
+    name="claraity_impact",
+    description="Show what would be affected by changing a component. Returns direct and indirect dependents (blast radius). Use BEFORE modifying a component to understand risk.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "component_id": {
+                "type": "string",
+                "description": "Component ID (e.g., comp-coding-agent, comp-memory-mgr, comp-message-store)",
+            },
+        },
+        "required": ["component_id"],
+    },
+)
+
+CLARAITY_READY_TOOL = ToolDefinition(
+    name="claraity_ready",
+    description="Get tasks that are unblocked and ready to start, sorted by priority. Use to find what to work on next.",
+    parameters={"type": "object", "properties": {}, "required": []},
+)
+
+CLARAITY_CREATE_TASK_TOOL = ToolDefinition(
+    name="claraity_create_task",
+    description="Create a new task with title, description, priority, and optional tags.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "description": "Task title"},
+            "description": {"type": "string", "description": "Task description"},
+            "priority": {"type": "integer", "description": "Priority (0=highest, 5=default)"},
+            "parent_id": {"type": "string", "description": "Parent task ID for subtasks"},
+            "tags": {"type": "string", "description": "Comma-separated tags"},
+        },
+        "required": ["title"],
+    },
+)
+
+CLARAITY_UPDATE_TASK_TOOL = ToolDefinition(
+    name="claraity_update_task",
+    description="Update a task's status (start/close) or add a note.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "bead_id": {"type": "string", "description": "Task ID (e.g., bd-a1b2)"},
+            "action": {"type": "string", "enum": ["start", "close", "note"], "description": "Action to take"},
+            "summary": {"type": "string", "description": "For close: what was done. For note: content."},
+        },
+        "required": ["bead_id", "action"],
+    },
+)
+
+CLARAITY_BLOCK_TASK_TOOL = ToolDefinition(
+    name="claraity_block_task",
+    description="Add a blocking dependency: blocker must complete before blocked can start.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "blocker_id": {"type": "string", "description": "Task that must complete first"},
+            "blocked_id": {"type": "string", "description": "Task that cannot start until blocker completes"},
+        },
+        "required": ["blocker_id", "blocked_id"],
+    },
+)
+
+CLARAITY_TOOLS = [
+    CLARAITY_SCAN_FILES_TOOL,
+    CLARAITY_ADD_NODE_TOOL,
+    CLARAITY_ADD_EDGE_TOOL,
+    CLARAITY_REMOVE_NODE_TOOL,
+    CLARAITY_BRIEF_TOOL,
+    CLARAITY_MODULE_TOOL,
+    CLARAITY_FILE_TOOL,
+    CLARAITY_SEARCH_TOOL,
+    CLARAITY_IMPACT_TOOL,
+    CLARAITY_READY_TOOL,
+    CLARAITY_CREATE_TASK_TOOL,
+    CLARAITY_UPDATE_TASK_TOOL,
+    CLARAITY_BLOCK_TASK_TOOL,
+]
+
 
 # Tool Collections
 
@@ -694,6 +887,8 @@ ALL_TOOLS = [
     DIRECTOR_COMPLETE_PLAN_TOOL,
     DIRECTOR_COMPLETE_SLICE_TOOL,
     DIRECTOR_COMPLETE_INTEGRATION_TOOL,
+    # ClarAIty Knowledge & Task tools
+    *CLARAITY_TOOLS,
 ]
 
 PLAN_MODE_TOOLS = [

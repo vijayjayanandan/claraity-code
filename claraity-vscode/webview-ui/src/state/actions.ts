@@ -4,7 +4,7 @@
  * Each action represents a user interaction or server event
  * that triggers a state transition.
  */
-import type { ToolStateData, SessionSummary, ReplayMessage, FileAttachment, ImageAttachment, JiraProfile } from "../types";
+import type { ToolStateData, SessionSummary, ReplayMessage, FileAttachment, ImageAttachment, JiraProfile, McpServerInfo, McpMarketplaceEntry, BeadsResponse, ArchitectureResponse } from "../types";
 import type { AppState, SubagentInfo } from "./state";
 
 export type Action =
@@ -70,5 +70,12 @@ export type Action =
   | { type: "JIRA_PROFILES"; profiles: JiraProfile[]; connectedProfile: string | null; error?: string }
   | { type: "JIRA_NOTIFICATION"; success: boolean; message: string }
   | { type: "JIRA_CONNECTED"; profile: string | null; success: boolean; message: string }
+  // MCP
+  | { type: "MCP_SERVERS_LIST"; servers: McpServerInfo[]; notification?: { message: string; success: boolean } }
+  | { type: "MCP_MARKETPLACE_RESULTS"; entries: McpMarketplaceEntry[]; totalCount: number; page: number; hasNext: boolean }
+  | { type: "MCP_NOTIFICATION"; message: string; success: boolean }
+  // ClarAIty Knowledge & Beads
+  | { type: "BEADS_LOADED"; data: BeadsResponse }
+  | { type: "ARCHITECTURE_LOADED"; data: ArchitectureResponse }
   // Error
   | { type: "ERROR"; errorType: string; message: string };

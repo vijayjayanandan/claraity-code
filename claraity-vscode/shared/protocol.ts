@@ -99,6 +99,113 @@ export interface ImageAttachment {
 }
 
 // ============================================================================
+// ClarAIty Knowledge & Beads data shapes
+// ============================================================================
+
+export interface BeadData {
+  id: string;
+  title: string;
+  description: string | null;
+  status: "open" | "in_progress" | "closed";
+  priority: number;
+  tags: string[];
+  parent_id: string | null;
+  created_at: string;
+  closed_at: string | null;
+  summary: string | null;
+  blockers: Array<{ id: string; title: string; status: string }>;
+}
+
+export interface BeadsResponse {
+  ready: BeadData[];
+  in_progress: BeadData[];
+  blocked: BeadData[];
+  closed: BeadData[];
+  stats: { total: number; open: number; in_progress: number; closed: number; dependencies: number };
+}
+
+export interface ArchitectureNode {
+  id: string;
+  type: string;
+  layer: string;
+  name: string;
+  description: string | null;
+  file_path: string | null;
+  properties: Record<string, unknown>;
+}
+
+export interface ArchitectureEdge {
+  id: string;
+  from_id: string;
+  to_id: string;
+  type: string;
+  label: string | null;
+}
+
+export interface KnowledgeApproval {
+  status: "draft" | "approved" | "rejected";
+  approved_at: string | null;
+  approved_by: string | null;
+  version: number;
+  comments: string | null;
+}
+
+export interface ScanInfo {
+  scanned_at: string | null;
+  scanned_by: string | null;
+  repo_name: string | null;
+  total_files: number | null;
+}
+
+export interface ArchitectureResponse {
+  nodes: ArchitectureNode[];
+  edges: ArchitectureEdge[];
+  overview: string;
+  stats: { node_count: number; edge_count: number; module_count: number };
+  approval: KnowledgeApproval;
+  scan: ScanInfo;
+}
+
+// ============================================================================
+// MCP data shapes
+// ============================================================================
+
+export interface McpToolInfo {
+  name: string;
+  enabled: boolean;
+  description?: string;
+}
+
+export interface McpServerInfo {
+  name: string;
+  transport: string;
+  enabled: boolean;
+  connected: boolean;
+  toolCount: number;
+  tools: McpToolInfo[];
+  command?: string;
+  args?: string[];
+  serverUrl?: string;
+  error?: string;
+  docsUrl?: string;
+  scope: "project" | "global";
+}
+
+export interface McpMarketplaceEntry {
+  id: string;
+  name: string;
+  author: string;
+  description: string;
+  tags: string[];
+  iconUrl: string;
+  useCount: number;
+  verified: boolean;
+  isRemote: boolean;
+  envVars: string[];
+  source: string;
+}
+
+// ============================================================================
 // Server -> Client messages (discriminated union)
 // ============================================================================
 
@@ -147,4 +254,13 @@ export type ServerMessage =
   | { type: "jira_config_saved"; success: boolean; message: string; profile?: string }
   | { type: "jira_connect_result"; success: boolean; message: string; profile?: string; tool_count?: number }
   | { type: "jira_disconnect_result"; success: boolean; message: string }
-  | { type: "execute_in_terminal"; task_id: string; command: string; working_dir?: string; timeout?: number };
+  | { type: "execute_in_terminal"; task_id: string; command: string; working_dir?: string; timeout?: number }
+  // MCP
+  | { type: "mcp_servers_list"; servers: McpServerInfo[]; notification?: { message: string; success: boolean } }
+  | { type: "mcp_marketplace_results"; entries: McpMarketplaceEntry[]; totalCount: number; page: number; pageSize: number; hasNext: boolean }
+  | { type: "mcp_install_result"; status: string; server?: string; toolCount?: number; message?: string; envVarsRequired?: string[]; envVarsMissing?: string[] }
+  | { type: "mcp_uninstall_result"; status: string; server?: string; message?: string }
+  // ClarAIty Knowledge & Beads
+  | { type: "beads_data"; data: BeadsResponse }
+  | { type: "architecture_data"; data: ArchitectureResponse }
+  | { type: "knowledge_approved"; data: KnowledgeApproval };

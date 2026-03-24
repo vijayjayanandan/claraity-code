@@ -14,7 +14,8 @@ class McpServerConfig:
     # Server identity
     name: str  # e.g. "atlassian-rovo"
     server_url: str | None = None  # For remote (SSE) transport
-    command: str | None = None  # For local (stdio) transport
+    command: str | None = None  # For local (stdio) transport - full command string
+    args: list[str] = field(default_factory=list)  # CLI args (used by settings layer)
 
     # Timeouts (seconds)
     connect_timeout: float = 30.0

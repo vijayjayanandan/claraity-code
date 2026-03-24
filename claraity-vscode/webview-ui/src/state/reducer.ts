@@ -589,6 +589,26 @@ export function appReducer(state: AppState, action: Action): AppState {
     case "JIRA_CONNECTED":
       return { ...state, jiraConnectedProfile: action.success ? action.profile : state.jiraConnectedProfile, jiraNotification: { message: action.message, success: action.success } };
 
+    // ── MCP ──
+    case "MCP_SERVERS_LIST":
+      return { ...state, mcpServers: action.servers, mcpNotification: action.notification ?? state.mcpNotification };
+    case "MCP_MARKETPLACE_RESULTS":
+      return {
+        ...state,
+        mcpMarketplace: action.page > 1
+          ? [...state.mcpMarketplace, ...action.entries]
+          : action.entries,
+        mcpMarketplaceMeta: { totalCount: action.totalCount, page: action.page, hasNext: action.hasNext },
+      };
+    case "MCP_NOTIFICATION":
+      return { ...state, mcpNotification: { message: action.message, success: action.success } };
+
+    // ── ClarAIty Knowledge & Beads ──
+    case "BEADS_LOADED":
+      return { ...state, beadsData: action.data };
+    case "ARCHITECTURE_LOADED":
+      return { ...state, architectureData: action.data };
+
     // ── Error ──
     case "ERROR": {
       const flushed = commitMarkdownBuffer(state);

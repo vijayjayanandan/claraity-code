@@ -76,6 +76,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.registerWebviewViewProvider(
             'claraity.chatView',
             sidebarProvider,
+            { webviewOptions: { retainContextWhenHidden: true } },
         ),
     );
 

@@ -10,6 +10,10 @@ import type {
   FileAttachment,
   ImageAttachment,
   JiraProfile,
+  McpServerInfo,
+  McpMarketplaceEntry,
+  BeadsResponse,
+  ArchitectureResponse,
 } from "../types";
 
 export type { FileAttachment, ImageAttachment };
@@ -109,7 +113,7 @@ export interface AppState {
   planApproval: { callId: string; planHash: string; excerpt: string; truncated: boolean; planPath?: string; isDirector?: boolean } | null;
 
   // Panels
-  activePanel: "chat" | "config" | "jira" | "sessions" | null;
+  activePanel: "chat" | "config" | "jira" | "sessions" | "mcp" | "architecture" | "beads" | null;
   sessions: SessionSummary[];
 
   // Context
@@ -146,6 +150,16 @@ export interface AppState {
   jiraProfiles: JiraProfile[];
   jiraConnectedProfile: string | null;
   jiraNotification: { message: string; success: boolean } | null;
+
+  // MCP panel
+  mcpServers: McpServerInfo[];
+  mcpMarketplace: McpMarketplaceEntry[];
+  mcpMarketplaceMeta: { totalCount: number; page: number; hasNext: boolean } | null;
+  mcpNotification: { message: string; success: boolean } | null;
+
+  // ClarAIty Knowledge & Beads
+  beadsData: BeadsResponse | null;
+  architectureData: ArchitectureResponse | null;
 }
 
 // ============================================================================
@@ -210,4 +224,12 @@ export const initialState: AppState = {
   jiraProfiles: [],
   jiraConnectedProfile: null,
   jiraNotification: null,
+
+  mcpServers: [],
+  mcpMarketplace: [],
+  mcpMarketplaceMeta: null,
+  mcpNotification: null,
+
+  beadsData: null,
+  architectureData: null,
 };

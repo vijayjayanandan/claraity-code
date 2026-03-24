@@ -245,10 +245,11 @@ class TestMcpToolRegistry:
         # Must connect first
         await client.connect()
 
-        count = await registry.discover_and_register(client, executor)
+        count, discovered = await registry.discover_and_register(client, executor)
 
         # 3 allowed (search, get, create), 1 blocked (admin_danger)
         assert count == 3
+        assert len(discovered) == 4
         assert registry.enabled is True
 
         # Check tool definitions

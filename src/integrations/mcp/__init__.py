@@ -18,4 +18,6 @@ __all__ = [
     "McpToolRegistry",
     "McpServerConfig",
     "McpConnectionManager",
+    "McpSettingsManager",
+    "McpMarketplace",
 ]

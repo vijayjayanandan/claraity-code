@@ -178,7 +178,7 @@ function setupMocks() {
     };
 
     (StdioConnection as jest.Mock).mockImplementation(() => mockStdioInstance);
-    (ClarAItySidebarProvider as jest.Mock).mockImplementation(() => mockSidebarInstance);
+    (ClarAItySidebarProvider as unknown as jest.Mock).mockImplementation(() => mockSidebarInstance);
     (ClarAItyFileDecorationProvider as jest.Mock).mockImplementation(() => mockFileDecorationInstance);
     (ClarAItyCodeLensProvider as jest.Mock).mockImplementation(() => mockCodeLensInstance);
     (UndoManager as jest.Mock).mockImplementation(() => mockUndoManagerInstance);

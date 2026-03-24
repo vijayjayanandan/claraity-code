@@ -15,6 +15,60 @@ python -m src.observability.log_query --tail 50
 
 ---
 
+## CLARAITY KNOWLEDGE DB
+
+Before reading files to understand the codebase, query the knowledge DB first. It contains a pre-scanned understanding of the architecture, components, files, decisions, and invariants.
+
+### Knowledge Queries
+```bash
+# Architecture overview (compact, use at session start)
+python -m src.claraity.claraity_db brief
+
+# Module detail (components + files)
+python -m src.claraity.claraity_db module mod-core
+
+# File detail (role, component, decisions that apply)
+python -m src.claraity.claraity_db file src/core/agent.py
+
+# Search knowledge base
+python -m src.claraity.claraity_db search "memory"
+
+# Impact analysis (what breaks if I change this)
+python -m src.claraity.claraity_db impact comp-message-store
+```
+
+### Task Management (Beads)
+```bash
+# See what's ready to work on
+python -m src.claraity.claraity_beads ready
+
+# Full task briefing with blocked/ready/closed
+python -m src.claraity.claraity_beads brief
+
+# Show task detail
+python -m src.claraity.claraity_beads show bd-xxxx
+
+# Create a task
+python -m src.claraity.claraity_beads create "Task title" --priority 2 --desc "Description" --tags tag1,tag2
+
+# Start working on a task
+python -m src.claraity.claraity_beads start bd-xxxx
+
+# Close a task
+python -m src.claraity.claraity_beads close bd-xxxx --summary "What was done"
+
+# Add blocking dependency (A must complete before B)
+python -m src.claraity.claraity_beads block bd-aaaa bd-bbbb
+
+# Add a note to a task
+python -m src.claraity.claraity_beads note bd-xxxx "Progress update"
+```
+
+### Module IDs
+`mod-core`, `mod-memory`, `mod-session`, `mod-ui`, `mod-tools`, `mod-llm`, `mod-server`, `mod-observability`, `mod-prompts`, `mod-subagents`, `mod-director`, `mod-code-intel`, `mod-integrations`, `mod-platform`, `mod-hooks`
+
+---
+
 ## CODEBASE MAP
 
 ```

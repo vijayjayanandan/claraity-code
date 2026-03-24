@@ -1087,6 +1087,10 @@ class CodingAgentApp(App):
         # Create and wire subagent registry for live visibility
         self._setup_subagent_registry()
 
+        # Auto-connect MCP servers from .clarity/mcp_settings.json
+        if self.agent is not None:
+            asyncio.create_task(self._connect_mcp_servers())
+
         # Setup mode: auto-present config wizard when no agent is configured
         if self.agent is None:
             self.call_after_refresh(self._show_setup_wizard)
@@ -1121,6 +1125,27 @@ class CodingAgentApp(App):
         # Synchronously kill MCP subprocesses (event loop may be closed)
         if self.agent and self.agent._mcp_manager.has_connections:
             self.agent._mcp_manager.shutdown_sync()
+
+    # ---- MCP auto-connect ----
+
+    async def _connect_mcp_servers(self) -> None:
+        """Auto-connect to MCP servers from .clarity/mcp_settings.json.
+
+        Runs as a background task during startup. Errors are logged but
+        do not block the TUI from becoming interactive.
+        """
+        try:
+            results = await self.agent.connect_mcp_from_settings()
+            if results:
+                total = sum(results.values())
+                servers = ", ".join(f"{k}({v})" for k, v in results.items())
+                logger.info(
+                    "mcp_auto_connect_done",
+                    servers=servers,
+                    total_tools=total,
+                )
+        except Exception as e:
+            logger.error("mcp_auto_connect_error", error=str(e))
 
     # ---- Subagent lifecycle (delegated to SubagentCoordinator - Phase 5) ----
 

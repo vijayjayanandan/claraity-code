@@ -120,6 +120,9 @@ test-*-workspace/
 # ClarAIty agent workspace (runtime data)
 .clarity/
 
+# Roo Code workspace config
+.roo/
+
 # VS Code extension build output
 claraity-vscode/out/
 claraity-vscode/bin/

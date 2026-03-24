@@ -171,7 +171,20 @@ export type ClientMessage =
     | ConnectJiraPayload
     | DisconnectJiraPayload
     | TerminalResultPayload
-    | WebviewErrorPayload;
+    | WebviewErrorPayload
+    // MCP
+    | { type: 'get_mcp_servers' }
+    | { type: 'mcp_marketplace_search'; query: string; page: number }
+    | { type: 'mcp_install'; server_id: string; name?: string; scope?: string }
+    | { type: 'mcp_uninstall'; server_name: string }
+    | { type: 'mcp_toggle_server'; server_name: string; enabled: boolean }
+    | { type: 'mcp_save_tools'; server_name: string; tools: Record<string, boolean> }
+    | { type: 'mcp_reconnect'; server_name: string }
+    | { type: 'mcp_reload' }
+    // ClarAIty Knowledge & Beads
+    | { type: 'get_beads' }
+    | { type: 'get_architecture' }
+    | { type: 'approve_knowledge'; approved_by: string; status: string; comments: string };
 
 // ============================================================================
 // Extension <-> WebView postMessage types
@@ -192,7 +205,7 @@ export type ExtensionMessage =
     | { type: 'insertAndSend'; content: string };
 
 export type WebViewMessage =
-    | { type: 'chatMessage'; content: string; attachments?: FileAttachment[]; images?: ImageAttachment[] }
+    | { type: 'chatMessage'; content: string; attachments?: FileAttachment[]; images?: ImageAttachment[]; systemContext?: string }
     | { type: 'searchFiles'; query: string }
     | { type: 'approvalResult'; callId: string; approved: boolean; autoApproveFuture?: boolean; feedback?: string }
     | { type: 'interrupt' }
@@ -218,7 +231,22 @@ export type WebViewMessage =
     | { type: 'saveJiraConfig'; profile: string; jira_url: string; username: string; api_token: string }
     | { type: 'connectJira'; profile: string }
     | { type: 'disconnectJira' }
-    | { type: 'webviewError'; error: string; stack?: string; componentStack?: string; sessionId?: string };
+    | { type: 'webviewError'; error: string; stack?: string; componentStack?: string; sessionId?: string }
+    // MCP
+    | { type: 'getMcpServers' }
+    | { type: 'mcpMarketplaceSearch'; query: string; page: number }
+    | { type: 'mcpInstall'; serverId: string; name: string; scope?: 'project' | 'global' }
+    | { type: 'mcpUninstall'; serverName: string }
+    | { type: 'mcpToggleServer'; serverName: string; enabled: boolean }
+    | { type: 'mcpSaveTools'; serverName: string; tools: Record<string, boolean> }
+    | { type: 'mcpReconnect'; serverName: string }
+    | { type: 'mcpOpenDocs'; url: string }
+    | { type: 'mcpOpenConfig'; scope?: 'project' | 'global' }
+    | { type: 'mcpReload' }
+    // ClarAIty Knowledge & Beads
+    | { type: 'getBeads' }
+    | { type: 'getArchitecture' }
+    | { type: 'approveKnowledge'; approvedBy: string };
 
 // ============================================================================
 // Exhaustive check helper

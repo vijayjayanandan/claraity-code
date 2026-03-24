@@ -8,9 +8,10 @@ interface StatusBarProps {
   onShowHistory: () => void;
   onShowConfig: () => void;
   onShowJira: () => void;
+  onShowMcp: () => void;
 }
 
-export const StatusBar = memo(function StatusBar({ onNewChat, onShowHistory, onShowConfig, onShowJira }: StatusBarProps) {
+export const StatusBar = memo(function StatusBar({ onNewChat, onShowHistory, onShowConfig, onShowJira, onShowMcp }: StatusBarProps) {
   return (
     <div className="status-bar" role="toolbar" aria-label="ClarAIty toolbar">
       <span className="title">ClarAIty</span>
@@ -20,6 +21,9 @@ export const StatusBar = memo(function StatusBar({ onNewChat, onShowHistory, onS
         </button>
         <button className="toolbar-icon" onClick={onShowHistory} title="Session History" aria-label="Session History">
           <i className="codicon codicon-history" />
+        </button>
+        <button className="toolbar-icon" onClick={onShowMcp} title="MCP Servers" aria-label="MCP Servers">
+          <i className="codicon codicon-extensions" />
         </button>
         <button className="toolbar-icon" onClick={onShowJira} title="Jira Integration" aria-label="Jira Integration">
           <i className="codicon codicon-plug" />

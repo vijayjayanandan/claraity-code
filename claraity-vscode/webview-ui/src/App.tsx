@@ -25,6 +25,9 @@ import { BottomBar } from "./components/BottomBar";
 import { SessionPanel } from "./components/SessionPanel";
 import { ConfigPanel } from "./components/ConfigPanel";
 import { JiraPanel } from "./components/JiraPanel";
+import { MCPPanel } from "./components/MCPPanel";
+import { BeadsPanel } from "./components/BeadsPanel";
+import { ArchitecturePanel } from "./components/ArchitecturePanel";
 
 export function App() {
   const [state, dispatch] = useReducer(appReducer, initialState);
@@ -197,6 +200,59 @@ export function App() {
     );
   }
 
+  // MCP panel view
+  if (state.activePanel === "mcp") {
+    return (
+      <div className="app">
+        <MCPPanel
+          postMessage={postMessage}
+          onBack={() => dispatch({ type: "SET_ACTIVE_PANEL", panel: "chat" })}
+          servers={state.mcpServers}
+          marketplace={state.mcpMarketplace}
+          marketplaceMeta={state.mcpMarketplaceMeta}
+          notification={state.mcpNotification}
+        />
+      </div>
+    );
+  }
+
+  // Architecture panel view
+  if (state.activePanel === "architecture") {
+    return (
+      <div className="app">
+        <ArchitecturePanel
+          data={state.architectureData}
+          onBack={() => dispatch({ type: "SET_ACTIVE_PANEL", panel: "chat" })}
+          onRefresh={() => postMessage({ type: "getArchitecture" })}
+          onDiscuss={(message) => {
+            const { question, context } = JSON.parse(message);
+            dispatch({ type: "ADD_USER_MESSAGE", content: question });
+            postMessage({ type: "chatMessage", content: question, systemContext: context });
+            dispatch({ type: "SET_ACTIVE_PANEL", panel: "chat" });
+          }}
+          onReview={(reviewedBy, status, comments) => {
+            postMessage({ type: "approveKnowledge", approvedBy: reviewedBy, status, comments });
+            setTimeout(() => postMessage({ type: "getArchitecture" }), 500);
+          }}
+          onOpenFile={(path) => postMessage({ type: "openFile", path })}
+        />
+      </div>
+    );
+  }
+
+  // Beads panel view
+  if (state.activePanel === "beads") {
+    return (
+      <div className="app">
+        <BeadsPanel
+          data={state.beadsData}
+          onBack={() => dispatch({ type: "SET_ACTIVE_PANEL", panel: "chat" })}
+          onRefresh={() => postMessage({ type: "getBeads" })}
+        />
+      </div>
+    );
+  }
+
   // Main chat view
   return (
     <div className="app">
@@ -208,6 +264,7 @@ export function App() {
         }}
         onShowConfig={() => dispatch({ type: "SET_ACTIVE_PANEL", panel: "config" })}
         onShowJira={() => dispatch({ type: "SET_ACTIVE_PANEL", panel: "jira" })}
+        onShowMcp={() => dispatch({ type: "SET_ACTIVE_PANEL", panel: "mcp" })}
       />
 
       {state.contextLimit > 0 && (
@@ -278,6 +335,15 @@ export function App() {
         modelName={state.modelName}
         permissionMode={state.permissionMode}
         onSetMode={(mode) => postMessage({ type: "setMode", mode })}
+        onShowArchitecture={() => {
+          postMessage({ type: "getArchitecture" });
+          dispatch({ type: "SET_ACTIVE_PANEL", panel: "architecture" });
+        }}
+        onShowBeads={() => {
+          postMessage({ type: "getBeads" });
+          dispatch({ type: "SET_ACTIVE_PANEL", panel: "beads" });
+        }}
+        beadsReadyCount={state.beadsData?.ready.length}
       />
     </div>
   );

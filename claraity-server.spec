@@ -82,7 +82,14 @@ a = Analysis(
         "src.integrations.jira.connection",
         "src.integrations.jira.tools",
         "src.integrations.mcp.client",
+        "src.integrations.mcp.config",
         "src.integrations.mcp.registry",
+        "src.integrations.mcp.manager",
+        "src.integrations.mcp.adapter",
+        "src.integrations.mcp.bridge",
+        "src.integrations.mcp.policy",
+        "src.integrations.mcp.settings",
+        "src.integrations.mcp.marketplace",
         # Testing
         "src.testing.test_runner",
         # Third-party hidden imports

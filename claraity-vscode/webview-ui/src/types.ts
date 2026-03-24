@@ -18,6 +18,15 @@ export type {
   FileAttachment,
   ImageAttachment,
   ServerMessage,
+  McpServerInfo,
+  McpToolInfo,
+  McpMarketplaceEntry,
+  BeadData,
+  BeadsResponse,
+  ArchitectureNode,
+  ArchitectureEdge,
+  ArchitectureResponse,
+  KnowledgeApproval,
 } from "../../shared/protocol";
 
 // ============================================================================
@@ -46,7 +55,7 @@ export type ExtensionMessage =
 import type { FileAttachment, ImageAttachment } from "../../shared/protocol";
 
 export type WebViewMessage =
-  | { type: "chatMessage"; content: string; attachments?: FileAttachment[]; images?: ImageAttachment[] }
+  | { type: "chatMessage"; content: string; attachments?: FileAttachment[]; images?: ImageAttachment[]; systemContext?: string }
   | { type: "searchFiles"; query: string }
   | { type: "approvalResult"; callId: string; approved: boolean; autoApproveFuture?: boolean; feedback?: string }
   | { type: "interrupt" }
@@ -71,4 +80,19 @@ export type WebViewMessage =
   | { type: "getJiraProfiles" }
   | { type: "saveJiraConfig"; profile: string; jira_url: string; username: string; api_token: string }
   | { type: "connectJira"; profile: string }
-  | { type: "disconnectJira" };
+  | { type: "disconnectJira" }
+  // MCP
+  | { type: "getMcpServers" }
+  | { type: "mcpMarketplaceSearch"; query: string; page: number }
+  | { type: "mcpInstall"; serverId: string; name: string; scope?: "project" | "global" }
+  | { type: "mcpUninstall"; serverName: string }
+  | { type: "mcpToggleServer"; serverName: string; enabled: boolean }
+  | { type: "mcpSaveTools"; serverName: string; tools: Record<string, boolean> }
+  | { type: "mcpReconnect"; serverName: string }
+  | { type: "mcpOpenDocs"; url: string }
+  | { type: "mcpOpenConfig"; scope?: "project" | "global" }
+  | { type: "mcpReload" }
+  // ClarAIty Knowledge & Beads
+  | { type: "getBeads" }
+  | { type: "getArchitecture" }
+  | { type: "approveKnowledge"; approvedBy: string; status: string; comments: string };
