@@ -140,6 +140,7 @@ class TestSerializeEvent:
             "used": 45000,
             "limit": 128000,
             "pressure_level": "green",
+            "iteration": None,
         }
 
     def test_context_compacting(self):

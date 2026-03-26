@@ -27,6 +27,8 @@ export type {
   ArchitectureEdge,
   ArchitectureResponse,
   KnowledgeApproval,
+  SubAgentInfo,
+  LimitsData,
 } from "../../shared/protocol";
 
 // ============================================================================
@@ -52,7 +54,7 @@ export type ExtensionMessage =
 // Webview -> Extension (postMessage)
 // ============================================================================
 
-import type { FileAttachment, ImageAttachment } from "../../shared/protocol";
+import type { FileAttachment, ImageAttachment, LimitsData } from "../../shared/protocol";
 
 export type WebViewMessage =
   | { type: "chatMessage"; content: string; attachments?: FileAttachment[]; images?: ImageAttachment[]; systemContext?: string }
@@ -95,4 +97,14 @@ export type WebViewMessage =
   // ClarAIty Knowledge & Beads
   | { type: "getBeads" }
   | { type: "getArchitecture" }
-  | { type: "approveKnowledge"; approvedBy: string; status: string; comments: string };
+  | { type: "approveKnowledge"; approvedBy: string; status: string; comments: string }
+  | { type: "exportKnowledge" }
+  // Subagents panel
+  | { type: "listSubagents" }
+  | { type: "saveSubagent"; name: string; description: string; systemPrompt: string; tools?: string[] | null; isFork?: boolean }
+  | { type: "deleteSubagent"; name: string }
+  | { type: "forkSubagent"; name: string; baseDescription: string; basePrompt: string; baseTools?: string[] | null }
+  | { type: "openSubagentFile"; name: string }
+  // Limits
+  | { type: "getLimits" }
+  | { type: "saveLimits"; limits: LimitsData };

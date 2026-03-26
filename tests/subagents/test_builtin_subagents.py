@@ -109,19 +109,22 @@ class TestBuiltinSubagentDiscovery:
         assert set(all_configs.keys()) >= EXPECTED_BUILTINS
 
     def test_builtin_count(self, all_configs):
-        """Should have at least 7 built-in subagents."""
-        builtin_configs = {
-            k: v for k, v in all_configs.items()
-            if v.metadata.get("source") == "builtin"
-        }
-        assert len(builtin_configs) >= 7
+        """Should have at least 7 subagents total (built-in or project overrides).
+
+        Project .clarity/agents/ files take priority over built-ins (by design),
+        so the source may be 'project' for forked built-ins.
+        """
+        # Count all configs that correspond to expected built-in names
+        covered = {k for k in all_configs if k in EXPECTED_BUILTINS}
+        assert len(covered) >= 7
 
     def test_builtin_metadata_source(self, all_configs):
-        """All built-ins should have metadata['source'] == 'builtin'."""
+        """All built-in names should be present; source is 'builtin' or 'project' (fork)."""
         for name in EXPECTED_BUILTINS:
             config = all_configs[name]
-            assert config.metadata.get("source") == "builtin", (
-                f"{name} missing builtin metadata"
+            source = config.metadata.get("source")
+            assert source in ("builtin", "project"), (
+                f"{name} has unexpected source '{source}' (expected 'builtin' or 'project')"
             )
 
     def test_builtin_names_are_kebab_case(self, all_configs):

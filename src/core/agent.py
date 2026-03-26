@@ -44,11 +44,6 @@ from src.tools import (
     ReadFileTool,
     RequestPlanApprovalTool,
     RunCommandTool,
-    TaskCreateTool,
-    TaskGetTool,
-    TaskListTool,
-    TaskState,
-    TaskUpdateTool,
     ToolExecutionError,
     ToolExecutor,
     ToolNotFoundError,
@@ -174,12 +169,91 @@ class CodingAgent(AgentInterface):
 
     @property
     def todo_state(self) -> dict[str, Any]:
-        """Backward-compat dict view for context_builder, pause logic, UI."""
+        """Backward-compat dict view for context_builder, pause logic, UI.
+
+        Returns the same dict shape ContextBuilder expects:
+        {todos, current_todo_id, last_stop_reason}
+        where todos and current_todo_id are sourced live from BeadStore.
+        """
         return {
-            "todos": self.task_state.get_todos_list(),
-            "current_todo_id": self.task_state.current_task_id,
-            "last_stop_reason": self.task_state.last_stop_reason,
+            "todos": self._get_bead_todos(),
+            "current_todo_id": self._get_in_progress_bead_id(),
+            "last_stop_reason": self.last_stop_reason,
         }
+
+    def _open_bead_store(self):
+        """Open a BeadStore connection.
+
+        Thin indirection used as a test seam: tests can monkeypatch this method
+        to inject a fake/in-memory BeadStore without touching SQLite.
+        """
+        from src.claraity.claraity_beads import BeadStore
+        return BeadStore()
+
+    def _get_in_progress_bead_id(self) -> str | None:
+        """Return the ID of the current in_progress bead, or None if none exists.
+
+        Derived live from BeadStore so it never goes stale after task_update calls.
+        Used by todo_state and _format_pause_message.
+        """
+        try:
+            store = self._open_bead_store()
+            try:
+                beads = store.get_all_beads(status="in_progress")
+                return beads[0]["id"] if beads else None
+            finally:
+                store.close()
+        except Exception as e:
+            logger.warning("bead_in_progress_error", error=str(e))
+            return None
+
+    def _get_bead_todos(self) -> list[dict[str, Any]]:
+        """Return active beads in TodoBar/ContextBuilder-compatible format.
+
+        Maps BeadStore fields to the dict shape expected by TodoBar and ContextBuilder:
+        {id, subject, activeForm, content, status}
+        Filters in SQL (open + in_progress only) for efficiency.
+        """
+        status_map = {"open": "pending", "in_progress": "in_progress"}
+        result = []
+        try:
+            store = self._open_bead_store()
+            try:
+                for status in ("open", "in_progress"):
+                    for b in store.get_all_beads(status=status):
+                        result.append({
+                            "id": b["id"],
+                            "subject": b["title"],
+                            "activeForm": b["title"],
+                            "content": b["title"],  # ContextBuilder reads t.get("content","")
+                            "status": status_map[status],
+                        })
+            finally:
+                store.close()
+        except Exception as e:
+            logger.warning("bead_todos_error", error=str(e))
+        return result
+
+    def _get_pending_summary(self) -> list[str]:
+        """Return a list of pending/in-progress bead summaries.
+
+        Used by pause prompts (PausePromptStart.pending_todos) to show
+        the user what work remains. Returns a list so the webview can
+        render each item individually.
+        """
+        lines: list[str] = []
+        try:
+            store = self._open_bead_store()
+            try:
+                for b in store.get_all_beads(status="in_progress"):
+                    lines.append(f"[IN PROGRESS] {b['title']}")
+                for b in store.get_all_beads(status="open"):
+                    lines.append(f"[TODO] {b['title']}")
+            finally:
+                store.close()
+        except Exception as e:
+            logger.warning("bead_pending_summary_error", error=str(e))
+        return lines
 
     @property
     def session_id(self) -> str | None:
@@ -207,6 +281,7 @@ class CodingAgent(AgentInterface):
         load_file_memories: bool = True,
         permission_mode: str = "normal",
         hook_manager: Optional["HookManager"] = None,
+        limits: "LimitsConfig | None" = None,
     ):
         """
         Initialize coding agent.
@@ -233,6 +308,11 @@ class CodingAgent(AgentInterface):
         self.context_window = context_window
         self.working_directory = Path(working_directory)
         self.hook_manager = hook_manager
+
+        # Configurable limits (defaults if not provided)
+        from src.llm.config_loader import LimitsConfig
+
+        self._limits = limits if limits is not None else LimitsConfig()
 
         # Initialize LLM backend
         # Read from .env if not provided
@@ -278,11 +358,17 @@ class CodingAgent(AgentInterface):
             starting_directory=self.working_directory,
         )
 
-        # Initialize task state for CRUD task tracking (before tools registration)
-        self.task_state = TaskState()
+        # Pause/resume metadata (replaces TaskState scalar fields)
+        self.last_stop_reason: str | None = None
+        # current_todo_id is a persistence snapshot only.
+        # It is written once at pause time (_build_pause_message) and restored on
+        # resume (resume_session_from_jsonl). The live runtime value is always
+        # obtained via _get_in_progress_bead_id() which queries BeadStore directly.
+        self.current_todo_id: str | None = None
+        self._error_budget_resume_count: int = 0
+        self._successful_tools_since_resume: int = 0
 
         # Initialize error recovery tracker (for intelligent retry behavior)
-        # Uses defaults: max_same_tool_error_failures=4, max_total_failures=10
         self._error_tracker = ErrorRecoveryTracker()
 
         # Approval state tracking (for pause/approval precedence)
@@ -483,6 +569,7 @@ class CodingAgent(AgentInterface):
             load_file_memories=load_file_memories,
             permission_mode=permission_mode,
             hook_manager=hook_manager,
+            limits=config.limits,
         )
 
         # 3. Generate session ID if not provided
@@ -499,7 +586,16 @@ class CodingAgent(AgentInterface):
         agent.set_session_id(session_id, is_new_session=True)
         agent.memory.set_message_store(message_store, session_id)
 
-        # 6. Apply subagent LLM overrides from config
+        # 6. Apply persisted auto-approve categories from config
+        aa = config.auto_approve
+        agent.set_auto_approve_categories({
+            "read": aa.read,
+            "edit": aa.edit,
+            "execute": aa.execute,
+            "browser": aa.browser,
+        })
+
+        # 7. Apply subagent LLM overrides from config
         if config.subagents and hasattr(agent, "subagent_manager"):
             agent.subagent_manager.config_loader.apply_llm_overrides(config)
 
@@ -624,11 +720,6 @@ class CodingAgent(AgentInterface):
         if hasattr(self, "_enter_plan_mode_tool"):
             self._enter_plan_mode_tool.session_id = session_id
 
-        # Enable task state file persistence for this session
-        # Saves to .clarity/sessions/{session_id}/todos.json
-        todos_path = self.working_directory / ".clarity" / "sessions" / session_id / "todos.json"
-        self.task_state.set_persistence_path(todos_path)
-
     def reset_session(self, new_session_id: str) -> None:
         """
         Reset conversation state for a new chat session.
@@ -640,8 +731,6 @@ class CodingAgent(AgentInterface):
             new_session_id: UUID for the new session
         """
         from datetime import datetime
-
-        from src.tools.task_state import TaskState
 
         # 1. Session ID + plan mode (reuses existing set_session_id)
         self.set_session_id(new_session_id, is_new_session=True)
@@ -661,8 +750,11 @@ class CodingAgent(AgentInterface):
         self._compaction_failed = False
         self.tool_execution_history.clear()
 
-        # 4. Tasks + Director
-        self.task_state = TaskState()
+        # 4. Pause/resume metadata reset + Director
+        self.last_stop_reason = None
+        self.current_todo_id = None
+        self._error_budget_resume_count = 0
+        self._successful_tools_since_resume = 0
         self.director_adapter.reset()
 
         logger.info(f"Session reset to {new_session_id}")
@@ -787,12 +879,6 @@ class CodingAgent(AgentInterface):
         # System operations
         self.tool_executor.register_tool(RunCommandTool(registry=self._bg_registry))
 
-        # Task management (CRUD tools share TaskState)
-        self.tool_executor.register_tool(TaskCreateTool(task_state=self.task_state))
-        self.tool_executor.register_tool(TaskUpdateTool(task_state=self.task_state))
-        self.tool_executor.register_tool(TaskListTool(task_state=self.task_state))
-        self.tool_executor.register_tool(TaskGetTool(task_state=self.task_state))
-
         # Checkpoint tool (controller will be set later by CLI)
         self.tool_executor.register_tool(CreateCheckpointTool(controller=None))
 
@@ -838,6 +924,8 @@ class CodingAgent(AgentInterface):
             BeadCreateTool,
             BeadUpdateTool,
             BeadBlockTool,
+            ClaraityAutoLayoutTool,
+            ClaraityExportTool,
         )
 
         self.tool_executor.register_tool(ClaraityScanFilesTool())
@@ -853,6 +941,8 @@ class CodingAgent(AgentInterface):
         self.tool_executor.register_tool(BeadCreateTool())
         self.tool_executor.register_tool(BeadUpdateTool())
         self.tool_executor.register_tool(BeadBlockTool())
+        self.tool_executor.register_tool(ClaraityAutoLayoutTool())
+        self.tool_executor.register_tool(ClaraityExportTool())
 
         # Plan mode tools (Claude Code-style planning workflow)
         # Note: These tools need plan_mode_state and session_id set
@@ -1298,7 +1388,7 @@ class CodingAgent(AgentInterface):
     # _handle_director_plan_approval moved to src/core/special_tool_handlers.py
     # -> SpecialToolHandlers (Phase 3 refactor)
 
-    async def _handle_error_budget_pause(
+    def _prepare_error_budget_pause(
         self,
         reason,
         tool_name,
@@ -1309,134 +1399,154 @@ class CodingAgent(AgentInterface):
         ui,
         max_resumes,
     ):
-        """Handle error budget exceeded pause flow.
+        """Synchronous preflight for error budget pause.
+
+        Evaluates all early-exit conditions and, for the interactive path,
+        builds the PausePromptStart payload. Does NOT block -- no awaits.
 
         Returns dict with:
-            action: 'defer' | 'break' | 'continue'
-            events: list of UIEvent objects to yield
-            context_additions: list of messages to append to current_context
-            tool_message: optional tool result message dict
-            user_rejected: True if user chose to stop
+            action:
+                'defer'       -- approval already pending, skip pause entirely
+                'cap_exceeded' -- resume cap hit, emit fallback text and stop
+                'interactive' -- show pause widget, then call _complete_error_budget_pause
+                'fallback'    -- no interactive UI, emit text and stop
+            # interactive path only:
+            pause_reason:      str  -- reason for PausePromptStart
+            pause_reason_code: str  -- reason_code for PausePromptStart
+            pause_stats:       dict -- stats for PausePromptStart
+            pause_pending_todos: list -- pending todos for PausePromptStart
+            # cap_exceeded / fallback path only:
+            fallback_text: str | None
+            # defer path only:
+            tool_message: dict | None
         """
-        from src.core.events import (
-            PausePromptEnd,
-            PausePromptStart,
-            TextDelta,
-        )
-
-        result = {
-            "action": "break",
-            "events": [],
-            "context_additions": [],
-            "tool_message": None,
-            "user_rejected": False,
-        }
-
         # Check approval precedence (don't show pause during approval wait)
         if self._awaiting_approval:
             logger.debug("error budget exceeded but approval pending; deferring pause")
-            result["action"] = "defer"
-            result["tool_message"] = {
-                "role": "tool",
-                "tool_call_id": call_id,
-                "name": tool_name,
-                "content": error_context_block,
+            return {
+                "action": "defer",
+                "tool_message": {
+                    "role": "tool",
+                    "tool_call_id": call_id,
+                    "name": tool_name,
+                    "content": error_context_block,
+                },
             }
-            return result
 
         # Set state for potential resumption
-        self.task_state.last_stop_reason = "error_budget"
+        self.last_stop_reason = "error_budget"
 
         # Check resume cap (prevent infinite Continue loops)
-        resume_count = self.task_state.error_budget_resume_count
-        progress_since_resume = self.task_state.successful_tools_since_resume
+        resume_count = self._error_budget_resume_count
+        progress_since_resume = self._successful_tools_since_resume
 
-        if resume_count >= max_resumes:
-            result["events"].append(
-                TextDelta(
-                    content=(
-                        f"\n[ERROR] Reached maximum error recovery attempts "
-                        f"({max_resumes}). "
-                        "Please provide guidance on how to proceed."
-                    )
-                )
-            )
-            result["user_rejected"] = True
-            return result
+        if max_resumes and resume_count >= max_resumes:
+            return {
+                "action": "cap_exceeded",
+                "fallback_text": (
+                    f"\n[ERROR] Reached maximum error recovery attempts "
+                    f"({max_resumes}). "
+                    "Please provide guidance on how to proceed."
+                ),
+            }
 
-        # Check for no-progress (resumed but still failing)
+        # Compute reason/code (no-progress variant)
         pause_reason_code = "error_budget"
         if resume_count > 0 and progress_since_resume == 0:
             pause_reason_code = "error_budget_no_progress"
             reason = f"{reason} (no progress since last resume)"
 
-        # Check if UI supports interactive pause
+        # Interactive path
         if hasattr(ui, "has_pause_capability") and ui.has_pause_capability():
-            pending_todos = self.task_state.get_pending_summary()
             error_stats = self._error_tracker.get_stats()
-            stats = {
-                "tool_calls": tool_call_count,
-                "elapsed_s": elapsed_seconds,
-                "errors_total": error_stats["total_failures"],
-                "error_reason": reason,
+            return {
+                "action": "interactive",
+                "pause_reason": f"Error budget: {reason}",
+                "pause_reason_code": pause_reason_code,
+                "pause_stats": {
+                    "tool_calls": tool_call_count,
+                    "elapsed_s": elapsed_seconds,
+                    "errors_total": error_stats["total_failures"],
+                    "error_reason": reason,
+                },
+                "pause_pending_todos": self._get_pending_summary(),
             }
 
-            result["events"].append(
-                PausePromptStart(
-                    reason=f"Error budget: {reason}",
-                    reason_code=pause_reason_code,
-                    pending_todos=pending_todos,
-                    stats=stats,
-                )
+        # Fallback -- no interactive UI available
+        return {
+            "action": "fallback",
+            "fallback_text": self._build_pause_message("error_budget"),
+        }
+
+    async def _complete_error_budget_pause(
+        self,
+        tool_name,
+        call_id,
+        error_context_block,
+        ui,
+    ):
+        """Async completion of error budget pause -- waits for user response.
+
+        Called only when _prepare_error_budget_pause returned action='interactive'.
+        Caller must yield PausePromptStart BEFORE calling this method so the
+        prompt reaches the UI before we block.
+
+        Returns dict with:
+            action: 'continue' | 'break'
+            pause_result: PauseResult (always set -- never None)
+            context_additions: list of messages to append to current_context
+            tool_message: dict | None
+            user_rejected: bool
+        """
+        from src.core.protocol import PauseResult
+
+        result = {
+            "action": "break",
+            "pause_result": None,
+            "context_additions": [],
+            "tool_message": None,
+            "user_rejected": False,
+        }
+
+        try:
+            pause_result = await ui.wait_for_pause_response(timeout=None)
+        except asyncio.CancelledError:
+            # Normalise cancellation to a stop result so PausePromptEnd is
+            # always emitted when PausePromptStart was (consistent with other
+            # pause flows in stream_response).
+            pause_result = PauseResult(continue_work=False, feedback="Pause cancelled")
+
+        result["pause_result"] = pause_result
+
+        if not pause_result.continue_work:
+            result["user_rejected"] = True
+            return result
+
+        # User chose to continue - partial reset
+        self._error_budget_resume_count += 1
+        self._successful_tools_since_resume = 0
+        self._error_tracker.reset_tool_error_counts(tool_name=tool_name)
+
+        result["context_additions"].append(
+            {
+                "role": "system",
+                "content": "<notice>Continuing after error budget pause. Try a different approach; repeated identical calls are blocked.</notice>",
+            }
+        )
+
+        if pause_result.feedback:
+            result["context_additions"].append(
+                {"role": "user", "content": f"[User guidance: {pause_result.feedback}]"}
             )
 
-            try:
-                pause_result = await ui.wait_for_pause_response(timeout=None)
-                result["events"].append(
-                    PausePromptEnd(
-                        continue_work=pause_result.continue_work,
-                        feedback=pause_result.feedback,
-                    )
-                )
-
-                if not pause_result.continue_work:
-                    result["user_rejected"] = True
-                    return result
-
-                # User chose to continue - partial reset
-                self.task_state.error_budget_resume_count += 1
-                self.task_state.successful_tools_since_resume = 0
-                self._error_tracker.reset_tool_error_counts(tool_name=tool_name)
-
-                result["context_additions"].append(
-                    {
-                        "role": "system",
-                        "content": "<notice>Continuing after error budget pause. Try a different approach; repeated identical calls are blocked.</notice>",
-                    }
-                )
-
-                if pause_result.feedback:
-                    result["context_additions"].append(
-                        {"role": "user", "content": f"[User guidance: {pause_result.feedback}]"}
-                    )
-
-                result["tool_message"] = {
-                    "role": "tool",
-                    "tool_call_id": call_id,
-                    "name": tool_name,
-                    "content": error_context_block,
-                }
-                result["action"] = "continue"
-                return result
-
-            except asyncio.CancelledError:
-                result["user_rejected"] = True
-                return result
-        else:
-            # Fallback - no interactive pause available
-            result["events"].append(TextDelta(content=self._build_pause_message("error_budget")))
-            result["user_rejected"] = False
-            return result
+        result["tool_message"] = {
+            "role": "tool",
+            "tool_call_id": call_id,
+            "name": tool_name,
+            "content": error_context_block,
+        }
+        result["action"] = "continue"
+        return result
 
     async def stream_response(
         self,
@@ -1510,11 +1620,6 @@ class CodingAgent(AgentInterface):
         # Track blocked calls for controller constraint injection
         blocked_calls: list[str] = []
 
-        # Safety limit for iterations (emergency brake only)
-        # Primary limits are: MAX_TOOL_CALLS (200) and MAX_WALL_TIME_SECONDS (90)
-        # Definition: 1 iteration = 1 LLM call cycle (can produce 0-5+ tool calls)
-        ABSOLUTE_MAX_ITERATIONS = 50
-
         # Approval check delegated to self._gating.needs_approval()
 
         try:
@@ -1563,12 +1668,13 @@ class CodingAgent(AgentInterface):
 
             # Build initial context (with agent state for task continuation)
             # MemoryManager uses MessageStore when configured (Option A: Single Source of Truth)
+            _todo_state = self.todo_state  # cache to avoid double DB query
             context = self.context_builder.build_context(
                 user_query=user_input,
                 task_type="chat",
                 language="python",
                 file_references=file_references if file_references else None,
-                agent_state=self.todo_state if self.todo_state.get("todos") else None,
+                agent_state=_todo_state if _todo_state.get("todos") else None,
                 plan_mode_state=self.plan_mode_state,
                 director_adapter=self.director_adapter,
             )
@@ -1586,10 +1692,11 @@ class CodingAgent(AgentInterface):
             # Multimodal content (attachments) is now properly stored in MessageStore
             # and will be included in context automatically via build_context()
 
-            # Tool execution loop with realistic budgets
-            # These limits are for real coding workflows (reading files, searching, etc.)
-            MAX_TOOL_CALLS = 200  # Primary budget - generous for multi-step workflows
-            MAX_WALL_TIME_SECONDS = None  # Disabled - tool_call limit is primary constraint
+            # Tool execution loop budgets — read from configurable limits.
+            # When iteration limit is disabled (toggle off), only the safety cap applies.
+            _lc = self._limits
+            MAX_ITERATIONS = _lc.max_iterations if _lc.iteration_limit_enabled else 0
+            MAX_WALL_TIME_SECONDS = None  # Disabled - iteration limit is primary constraint
             MAX_PAUSE_CONTINUES = 3  # Safety cap - prevent infinite continuation
             MAX_ERROR_BUDGET_RESUMES = 2  # Cap on error budget "Continue" to prevent infinite loops
 
@@ -1609,19 +1716,16 @@ class CodingAgent(AgentInterface):
                 pause_reason = None
                 pause_reason_code = None
 
-                if tool_call_count >= MAX_TOOL_CALLS:
-                    pause_reason = f"Tool limit reached ({tool_call_count}/{MAX_TOOL_CALLS})"
-                    pause_reason_code = "max_tool_calls"
+                if MAX_ITERATIONS and iteration > MAX_ITERATIONS:
+                    pause_reason = (
+                        f"Iteration limit reached ({iteration}/{MAX_ITERATIONS})"
+                    )
+                    pause_reason_code = "max_iterations"
                 elif MAX_WALL_TIME_SECONDS and elapsed_seconds >= MAX_WALL_TIME_SECONDS:
                     pause_reason = (
                         f"Time limit reached ({elapsed_seconds:.0f}s/{MAX_WALL_TIME_SECONDS}s)"
                     )
                     pause_reason_code = "max_wall_time"
-                elif iteration >= ABSOLUTE_MAX_ITERATIONS:
-                    pause_reason = (
-                        f"Iteration limit reached ({iteration}/{ABSOLUTE_MAX_ITERATIONS})"
-                    )
-                    pause_reason_code = "max_iterations"
                 elif ui.check_interrupted():
                     pause_reason = "User interrupted"
                     pause_reason_code = "user_interrupt"
@@ -1636,12 +1740,12 @@ class CodingAgent(AgentInterface):
                         break
 
                     # Set state for potential resumption
-                    self.task_state.last_stop_reason = pause_reason_code
+                    self.last_stop_reason = pause_reason_code
 
                     # Check if UI supports interactive pause
                     if hasattr(ui, "has_pause_capability") and ui.has_pause_capability():
                         # TUI mode - use interactive widget
-                        pending_todos = self.task_state.get_pending_summary()
+                        pending_todos = self._get_pending_summary()
 
                         yield PausePromptStart(
                             reason=pause_reason,
@@ -1813,6 +1917,7 @@ class CodingAgent(AgentInterface):
                             used=input_tokens,
                             limit=self.context_builder.max_context_tokens,
                             pressure_level=pressure_level,
+                            iteration=iteration,
                         )
 
                         # Compaction trigger: if context usage >= 85%, compact
@@ -1843,6 +1948,7 @@ class CodingAgent(AgentInterface):
 
                                 if messages_removed > 0:
                                     # Rebuild current_context from compacted MessageStore
+                                    _todo_state = self.todo_state  # cache to avoid double DB query
                                     current_context = self.context_builder.build_context(
                                         user_query=user_input,
                                         task_type="chat",
@@ -1850,8 +1956,8 @@ class CodingAgent(AgentInterface):
                                         file_references=file_references
                                         if file_references
                                         else None,
-                                        agent_state=self.todo_state
-                                        if self.todo_state.get("todos")
+                                        agent_state=_todo_state
+                                        if _todo_state.get("todos")
                                         else None,
                                         plan_mode_state=self.plan_mode_state,
                                         director_adapter=self.director_adapter,
@@ -1966,7 +2072,7 @@ class CodingAgent(AgentInterface):
                     # Transition to pause state (same as other limits)
                     if hasattr(ui, "has_pause_capability") and ui.has_pause_capability():
                         # TUI mode - emit PausePromptStart and wait
-                        pending_todos = self.task_state.get_pending_summary()
+                        pending_todos = self._get_pending_summary()
 
                         yield PausePromptStart(
                             reason=pause_reason,
@@ -2487,8 +2593,9 @@ class CodingAgent(AgentInterface):
                     for p_idx, p_call_id, p_tc, p_outcome in parallel_results:
                         # Deferred side effects: task notifications
                         tool_name = p_outcome.get("_tool_name", "")
-                        if tool_name in ("task_create", "task_update"):
-                            ui.notify_todos_updated(self.task_state.get_todos_list())
+                        if tool_name in ("task_create", "task_update", "task_block"):
+                            ui.notify_todos_updated(self._get_bead_todos())
+                            ui.notify_beads_updated()
                         # Deferred side effects: director context refresh
                         if tool_name in (
                             "director_complete_understand",
@@ -2500,7 +2607,13 @@ class CodingAgent(AgentInterface):
                         # Handle error budget pause (needs await + yield)
                         if p_outcome.get("_needs_error_budget_pause"):
                             elapsed_seconds = time.monotonic() - loop_start_time
-                            pause = await self._handle_error_budget_pause(
+
+                            from src.core.events import PausePromptEnd, PausePromptStart
+
+                            # Step 1: synchronous preflight -- evaluates all
+                            # early-exit conditions and builds the PausePromptStart
+                            # payload if the interactive path applies. No blocking.
+                            prep = self._prepare_error_budget_pause(
                                 p_outcome["_pause_reason"],
                                 p_outcome["_pause_tool_name"],
                                 p_outcome["_pause_call_id"],
@@ -2510,17 +2623,70 @@ class CodingAgent(AgentInterface):
                                 ui,
                                 MAX_ERROR_BUDGET_RESUMES,
                             )
-                            for evt in pause["events"]:
-                                yield evt
-                            if pause["tool_message"]:
-                                # Override the tool_msg with the pause handler's version
-                                p_outcome["tool_msg"] = pause["tool_message"]
-                            current_context.extend(pause["context_additions"])
-                            if pause["user_rejected"] or pause["action"] == "break":
+
+                            if prep["action"] == "defer":
+                                # Approval already pending -- pass tool result
+                                # through and continue without pausing.
+                                if prep.get("tool_message"):
+                                    p_outcome["tool_msg"] = prep["tool_message"]
+
+                            elif prep["action"] == "cap_exceeded":
+                                # Resume cap hit -- tell user and stop.
+                                yield TextDelta(content=prep["fallback_text"])
                                 if p_outcome.get("tool_msg"):
                                     resolved.append((p_idx, p_call_id, p_tc, p_outcome["tool_msg"]))
-                                user_rejected = pause.get("user_rejected", False)
+                                user_rejected = True
                                 break
+
+                            elif prep["action"] == "fallback":
+                                # No interactive UI -- emit text message and stop.
+                                yield TextDelta(content=prep["fallback_text"])
+                                if p_outcome.get("tool_msg"):
+                                    resolved.append((p_idx, p_call_id, p_tc, p_outcome["tool_msg"]))
+                                break
+
+                            elif prep["action"] == "interactive":
+                                # Step 2: yield PausePromptStart NOW, before
+                                # blocking on wait_for_pause_response. This is the
+                                # fix for the deadlock -- the original code appended
+                                # PausePromptStart to a list inside the helper and
+                                # only yielded it after the helper returned, but the
+                                # helper was blocked waiting for user input that
+                                # could never arrive because VS Code never received
+                                # the prompt.
+                                yield PausePromptStart(
+                                    reason=prep["pause_reason"],
+                                    reason_code=prep["pause_reason_code"],
+                                    pending_todos=prep["pause_pending_todos"],
+                                    stats=prep["pause_stats"],
+                                )
+
+                                # Step 3: block waiting for user response. All
+                                # decision logic and state updates happen here.
+                                completion = await self._complete_error_budget_pause(
+                                    p_outcome["_pause_tool_name"],
+                                    p_outcome["_pause_call_id"],
+                                    p_outcome["_pause_error_content"],
+                                    ui,
+                                )
+
+                                # Step 4: yield PausePromptEnd -- always emitted
+                                # when PausePromptStart was (pause_result is
+                                # guaranteed non-None by _complete_error_budget_pause,
+                                # even on CancelledError).
+                                yield PausePromptEnd(
+                                    continue_work=completion["pause_result"].continue_work,
+                                    feedback=completion["pause_result"].feedback,
+                                )
+
+                                if completion["tool_message"]:
+                                    p_outcome["tool_msg"] = completion["tool_message"]
+                                current_context.extend(completion["context_additions"])
+                                if completion["user_rejected"] or completion["action"] == "break":
+                                    if p_outcome.get("tool_msg"):
+                                        resolved.append((p_idx, p_call_id, p_tc, p_outcome["tool_msg"]))
+                                    user_rejected = completion["user_rejected"]
+                                    break
 
                         if p_outcome.get("tool_msg"):
                             resolved.append((p_idx, p_call_id, p_tc, p_outcome["tool_msg"]))
@@ -2775,8 +2941,12 @@ class CodingAgent(AgentInterface):
         """
         Resume session from JSONL file using SessionHydrator.
 
-        Restores conversation history only. Task state (todos) is restored
-        separately from todos.json when the caller invokes set_session_id().
+        Restores:
+        - Conversation history (MessageStore, injected into MemoryManager)
+        - Pause metadata: last_stop_reason and current_todo_id (from agent_state event)
+
+        Tasks (beads) are NOT restored from JSONL -- BeadStore (SQLite) persists
+        across sessions automatically and is already up-to-date.
 
         Args:
             jsonl_path: Path to session.jsonl file
@@ -2786,7 +2956,7 @@ class CodingAgent(AgentInterface):
 
         Usage:
             result = agent.resume_session_from_jsonl(Path(".clarity/sessions/abc/session.jsonl"))
-            agent.set_session_id(session_id, is_new_session=False)  # enables todo persistence
+            agent.set_session_id(session_id, is_new_session=False)
         """
         from src.session import HydrationResult, SessionHydrator
 
@@ -2804,10 +2974,18 @@ class CodingAgent(AgentInterface):
         # Now MemoryManager.get_context_for_llm() uses MessageStore directly
         self.memory.set_message_store(result.store, session_id)
 
-        # Todos are NOT restored from JSONL. The JSON file (todos.json) is the
-        # single source of truth for task state. It gets loaded automatically
-        # when set_session_id() -> set_persistence_path() is called by the
-        # caller (e.g. app._load_session).
+        # Restore pause metadata from JSONL agent_state event.
+        # Tasks are NOT restored -- BeadStore (SQLite) is the single source of truth
+        # and persists across sessions automatically.
+        # current_todo_id is a persistence snapshot written at pause time; the live
+        # runtime value comes from _get_in_progress_bead_id(), but we restore it here
+        # so callers that read self.current_todo_id directly get the right value
+        # before the first bead query of the session.
+        if getattr(result, "agent_state", None) is not None:
+            if result.agent_state.last_stop_reason is not None:
+                self.last_stop_reason = result.agent_state.last_stop_reason
+            if result.agent_state.current_todo_id is not None:
+                self.current_todo_id = result.agent_state.current_todo_id
 
         from src.observability import get_logger
 
@@ -2885,6 +3063,23 @@ class CodingAgent(AgentInterface):
     def get_auto_approve_categories(self) -> dict[str, bool]:
         """Get current auto-approve category state."""
         return self._gating.get_auto_approve_categories()
+
+    def get_limits(self) -> dict[str, object]:
+        """Get current configurable limits as a plain dict."""
+        lc = self._limits
+        return {
+            "iteration_limit_enabled": lc.iteration_limit_enabled,
+            "max_iterations": lc.max_iterations,
+        }
+
+    def set_limits(self, data: dict) -> dict[str, object]:
+        """Update configurable limits. Returns confirmed state."""
+        lc = self._limits
+        if "iteration_limit_enabled" in data:
+            lc.iteration_limit_enabled = bool(data["iteration_limit_enabled"])
+        if "max_iterations" in data:
+            lc.max_iterations = max(1, int(data["max_iterations"]))
+        return self.get_limits()
 
     def get_permission_mode_description(self) -> str:
         """Get description of current permission mode.
@@ -3067,8 +3262,8 @@ class CodingAgent(AgentInterface):
             )
 
             # Track successful tool since error budget resume
-            if self.task_state.error_budget_resume_count > 0:
-                self.task_state.successful_tools_since_resume += 1
+            if self._error_budget_resume_count > 0:
+                self._successful_tools_since_resume += 1
 
             # Side effects: task notifications, mode changes, director phases
             # NOTE: ui.notify_todos_updated cannot run here (no ui reference);
@@ -3270,17 +3465,13 @@ class CodingAgent(AgentInterface):
         Returns:
             Formatted pause message string for user display
         """
-        self.task_state.last_stop_reason = reason
+        self.last_stop_reason = reason
 
-        # Preserve current_task_id if we have an in_progress task
-        in_progress = next(
-            (t for t in self.task_state.list_all() if t.get("status") == "in_progress"), None
-        )
-        if in_progress:
-            self.task_state.current_task_id = in_progress.get("id")
+        # Snapshot current_todo_id for session persistence
+        self.current_todo_id = self._get_in_progress_bead_id()
 
         # Build user-visible message
-        pending = self.task_state.get_pending_summary()
+        pending = self._get_pending_summary()
 
         reason_text = {
             "max_iterations": "iteration limit",

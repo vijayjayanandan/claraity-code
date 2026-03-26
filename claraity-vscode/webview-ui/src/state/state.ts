@@ -14,6 +14,8 @@ import type {
   McpMarketplaceEntry,
   BeadsResponse,
   ArchitectureResponse,
+  SubAgentInfo,
+  LimitsData,
 } from "../types";
 
 export type { FileAttachment, ImageAttachment };
@@ -113,7 +115,7 @@ export interface AppState {
   planApproval: { callId: string; planHash: string; excerpt: string; truncated: boolean; planPath?: string; isDirector?: boolean } | null;
 
   // Panels
-  activePanel: "chat" | "config" | "jira" | "sessions" | "mcp" | "architecture" | "beads" | null;
+  activePanel: "chat" | "config" | "jira" | "sessions" | "mcp" | "architecture" | "beads" | "subagents" | null;
   sessions: SessionSummary[];
 
   // Context
@@ -123,7 +125,7 @@ export interface AppState {
   sessionTurnCount: number;
 
   // Auto-approve
-  autoApprove: { edit: boolean; execute: boolean; browser: boolean };
+  autoApprove: { read: boolean; edit: boolean; execute: boolean; browser: boolean };
 
   // Todos
   todos: unknown[];
@@ -160,6 +162,15 @@ export interface AppState {
   // ClarAIty Knowledge & Beads
   beadsData: BeadsResponse | null;
   architectureData: ArchitectureResponse | null;
+
+  // Subagents panel
+  subagentsList: SubAgentInfo[];
+  subagentsAvailableTools: string[];
+  subagentNotification: { message: string; success: boolean } | null;
+
+  // Limits
+  limits: LimitsData;
+  lastIterations: number | null;
 }
 
 // ============================================================================
@@ -205,7 +216,7 @@ export const initialState: AppState = {
   sessionTotalTokens: 0,
   sessionTurnCount: 0,
 
-  autoApprove: { edit: false, execute: false, browser: false },
+  autoApprove: { read: true, edit: false, execute: false, browser: false },
   todos: [],
 
   attachments: [],
@@ -232,4 +243,14 @@ export const initialState: AppState = {
 
   beadsData: null,
   architectureData: null,
+
+  subagentsList: [],
+  subagentsAvailableTools: [],
+  subagentNotification: null,
+
+  limits: {
+    iteration_limit_enabled: true,
+    max_iterations: 50,
+  },
+  lastIterations: null,
 };

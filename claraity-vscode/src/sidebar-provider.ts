@@ -431,6 +431,14 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                 this.connection?.send({ type: 'get_auto_approve' } as ClientMessage);
                 break;
 
+            case 'getLimits':
+                this.connection?.send({ type: 'get_limits' } as ClientMessage);
+                break;
+
+            case 'saveLimits':
+                this.connection?.send({ type: 'save_limits', limits: msg.limits } as ClientMessage);
+                break;
+
             case 'newSession':
                 this.connection?.send({ type: 'new_session' });
                 break;
@@ -586,10 +594,74 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                 this.connection?.send({
                     type: 'approve_knowledge',
                     approved_by: msg.approvedBy,
-                    status: msg.status,
-                    comments: msg.comments,
+                    status: (msg as any).status,
+                    comments: (msg as any).comments,
                 } as ClientMessage);
                 break;
+
+            case 'exportKnowledge':
+                this.connection?.send({ type: 'export_knowledge' } as ClientMessage);
+                break;
+
+            // ── Subagent management ──
+            case 'listSubagents':
+                this.connection?.send({ type: 'list_subagents' });
+                break;
+
+            case 'saveSubagent':
+                if (!this.connection) {
+                    this.postToWebview({ type: 'serverMessage', payload: { type: 'subagent_saved', success: false, name: msg.name, message: 'Not connected to agent.' } });
+                    break;
+                }
+                this.connection.send({
+                    type: 'save_subagent',
+                    name: msg.name,
+                    description: msg.description,
+                    system_prompt: msg.systemPrompt,
+                    tools: msg.tools ?? null,
+                    is_fork: msg.isFork ?? false,
+                } as ClientMessage);
+                break;
+
+            case 'deleteSubagent':
+                if (!this.connection) {
+                    this.postToWebview({ type: 'serverMessage', payload: { type: 'subagent_deleted', success: false, name: msg.name, message: 'Not connected to agent.' } });
+                    break;
+                }
+                this.connection.send({
+                    type: 'delete_subagent',
+                    name: msg.name,
+                } as ClientMessage);
+                break;
+
+            case 'forkSubagent':
+                this.connection?.send({
+                    type: 'save_subagent',
+                    name: msg.name,
+                    description: msg.baseDescription,
+                    system_prompt: msg.basePrompt,
+                    tools: msg.baseTools ?? null,
+                    is_fork: true,
+                } as ClientMessage);
+                break;
+
+            case 'openSubagentFile': {
+                const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+                if (!workspaceRoot) {
+                    vscode.window.showWarningMessage('No workspace folder open.');
+                    break;
+                }
+                const agentFilePath = path.join(workspaceRoot, '.clarity', 'agents', `${msg.name}.md`);
+                const fs = require('fs') as typeof import('fs');
+                if (!fs.existsSync(agentFilePath)) {
+                    vscode.window.showWarningMessage(
+                        `No project-level config for '${msg.name}'. Fork it first to create an editable copy.`
+                    );
+                    break;
+                }
+                vscode.window.showTextDocument(vscode.Uri.file(agentFilePath), { preview: false });
+                break;
+            }
 
             case 'webviewError':
                 this.log?.appendLine(`[ClarAIty] Webview error: ${msg.error}\n${msg.stack ?? ''}`);

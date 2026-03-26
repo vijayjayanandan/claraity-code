@@ -152,7 +152,12 @@ class SessionHydrator:
 
         # 3. Find and restore agent_state
         agent_state = self._extract_agent_state(store)
-        agent_state_restored = agent_state.has_todos or agent_state.last_stop_reason is not None
+        # Restored if we have pause metadata OR a current bead (tasks now come from BeadStore)
+        agent_state_restored = (
+            agent_state.last_stop_reason is not None
+            or agent_state.current_todo_id is not None
+            or agent_state.has_todos  # backward compat: older sessions with persisted todos
+        )
 
         # 4. Build report
         report = HydrationReport(

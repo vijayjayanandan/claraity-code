@@ -330,14 +330,16 @@ You are an expert in [YOUR DOMAIN].
 
 
 class SubAgentConfigLoader:
-    """Loads subagent configurations from prompts directory.
+    """Loads subagent configurations from prompts directory and .clarity/agents/.
 
     Search order (highest to lowest priority):
-    1. Built-in: src/prompts/subagents/*.py (Python constants)
-    2. Legacy: ./.clarity/agents/*.md (Markdown files, deprecated)
-    3. User: ~/.clarity/agents/*.md (Markdown files, deprecated)
+    1. Project: .clarity/agents/*.md  -- user customizations, overrides built-ins
+    2. Built-in: src/prompts/subagents/ (Python constants)
+    3. User: ~/.clarity/agents/*.md   -- global user customizations
 
-    Note: Markdown format is deprecated. Use Python constants in src/prompts/subagents/
+    Project-level configs intentionally override built-ins so users can fork
+    and customize any built-in subagent by creating a same-named .md file in
+    .clarity/agents/.
     """
 
     def __init__(self, working_directory: Path | None = None):
@@ -352,6 +354,8 @@ class SubAgentConfigLoader:
     def discover_all(self) -> dict[str, SubAgentConfig]:
         """Discover all subagent configurations.
 
+        Priority (highest wins): project .clarity/agents/ > built-in > user ~/.clarity/agents/
+
         Returns:
             dict mapping subagent names to configs
 
@@ -363,45 +367,34 @@ class SubAgentConfigLoader:
         """
         configs: dict[str, SubAgentConfig] = {}
 
-        # Load from built-in prompts (highest priority)
+        # 1. User global directory (lowest priority -- loaded first, overridden by everything)
+        user_dir = Path.home() / ".clarity" / "agents"
+        if user_dir.exists():
+            user_configs = self._load_from_directory(user_dir, source="user")
+            configs.update(user_configs)
+            if user_configs:
+                logger.info(
+                    f"Loaded {len(user_configs)} subagent(s) from user directory {user_dir}"
+                )
+
+        # 2. Built-in prompts (overrides user global)
         builtin_configs = self._load_from_python_prompts()
-        builtin_names = set(builtin_configs.keys())  # Track built-in names
         configs.update(builtin_configs)
         if builtin_configs:
             logger.info(
                 f"Loaded {len(builtin_configs)} built-in subagent(s) from src/prompts/subagents/"
             )
 
-        # Load from user directory (legacy, lower priority)
-        user_dir = Path.home() / ".clarity" / "agents"
-        if user_dir.exists():
-            user_configs = self._load_from_directory(user_dir)
-            added_count = 0
-            for name, config in user_configs.items():
-                if name not in builtin_names:  # Don't override built-in
-                    configs[name] = config
-                    added_count += 1
-                else:
-                    logger.debug(f"Skipping user subagent '{name}' (overridden by built-in)")
-            if added_count > 0:
-                logger.warning(
-                    f"Loaded {added_count} subagent(s) from legacy user directory (consider migrating to src/prompts/subagents/)"
-                )
-
-        # Load from project directory (legacy, can override user but not built-in)
+        # 3. Project directory (highest priority -- overrides built-ins, enables fork/customize)
         project_dir = self.working_directory / ".clarity" / "agents"
         if project_dir.exists():
-            project_configs = self._load_from_directory(project_dir)
-            added_count = 0
-            for name, config in project_configs.items():
-                if name not in builtin_names:  # Don't override built-in
-                    configs[name] = config
-                    added_count += 1
-                else:
-                    logger.debug(f"Skipping project subagent '{name}' (overridden by built-in)")
-            if added_count > 0:
-                logger.warning(
-                    f"Loaded {added_count} subagent(s) from legacy project directory (consider migrating to src/prompts/subagents/)"
+            project_configs = self._load_from_directory(project_dir, source="project")
+            overrides = [n for n in project_configs if n in configs]
+            configs.update(project_configs)
+            if project_configs:
+                logger.info(
+                    f"Loaded {len(project_configs)} subagent(s) from project directory"
+                    + (f" ({len(overrides)} override built-in)" if overrides else "")
                 )
 
         # Cache loaded configs
@@ -508,26 +501,28 @@ class SubAgentConfigLoader:
 
         return configs
 
-    def _load_from_directory(self, directory: Path) -> dict[str, SubAgentConfig]:
-        """Load all .md files from a directory (legacy format).
+    def _load_from_directory(
+        self, directory: Path, source: str = "project"
+    ) -> dict[str, SubAgentConfig]:
+        """Load all .md files from a directory.
 
         Args:
             directory: Directory to scan
+            source: Source label stamped into config metadata ("project" or "user")
 
         Returns:
             dict mapping subagent names to configs
         """
         configs = {}
 
-        # Find all .md files
-        for md_file in directory.glob("*.md"):
+        for md_file in sorted(directory.glob("*.md")):
             try:
                 config = SubAgentConfig.from_file(md_file)
+                config.metadata["source"] = source
                 configs[config.name] = config
                 logger.debug(f"Loaded subagent: {config.name} from {md_file}")
             except Exception as e:
                 logger.error(f"Failed to load subagent from {md_file}: {e}")
-                # Continue loading other configs
 
         return configs
 

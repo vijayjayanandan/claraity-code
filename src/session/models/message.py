@@ -635,26 +635,27 @@ class Message:
     def create_agent_state(
         cls,
         session_id: str,
-        todos: list[dict[str, Any]],
+        todos: list[dict[str, Any]] | None = None,
         current_todo_id: str | None = None,
         last_stop_reason: str | None = None,
         seq: int = 0,
     ) -> "Message":
         """Create an agent_state system event for session persistence.
 
-        This event type stores agent runtime state (todos, current task, etc.)
-        and is NOT included in LLM context. Used for session resume.
+        Stores pause/resume metadata (last_stop_reason, current_todo_id) in JSONL.
+        Tasks are no longer persisted here -- BeadStore (SQLite) is the source of truth.
+        The todos param is kept for backward compatibility with older session logs.
 
         Args:
             session_id: Session ID
-            todos: List of todo dicts
-            current_todo_id: ID of currently active todo
-            last_stop_reason: Last stop reason for context
+            todos: Legacy todo list (ignored on write, read back for old sessions)
+            current_todo_id: ID of the currently active bead
+            last_stop_reason: Why the agent last paused
             seq: Sequence number
         """
-        extra = {
-            "todos": todos,
-        }
+        extra: dict[str, Any] = {}
+        if todos is not None:
+            extra["todos"] = todos  # backward compat: preserve if caller provides
         if current_todo_id is not None:
             extra["current_todo_id"] = current_todo_id
         if last_stop_reason is not None:

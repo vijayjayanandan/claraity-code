@@ -55,6 +55,32 @@ class SubAgentLLMOverride:
 
 
 @dataclass
+class AutoApproveConfig:
+    """Persisted auto-approve category settings.
+
+    Each field maps to a tool category. True means tools in that
+    category run without asking for user confirmation.
+    """
+
+    read: bool = True
+    edit: bool = False
+    execute: bool = False
+    browser: bool = False
+
+
+@dataclass
+class LimitsConfig:
+    """Configurable limits for the tool execution loop.
+
+    When iteration_limit_enabled is False, the iteration check is skipped
+    and the agent runs until it finishes or the user interrupts.
+    """
+
+    iteration_limit_enabled: bool = True
+    max_iterations: int = 50
+
+
+@dataclass
 class LLMConfigData:
     """LLM configuration from config.yaml.
 
@@ -81,6 +107,8 @@ class LLMConfigData:
     top_p: float = 0.95
     thinking_budget: int | None = None  # Extended thinking token budget (Claude, etc.)
     subagents: dict[str, SubAgentLLMOverride] = field(default_factory=dict)
+    limits: LimitsConfig = field(default_factory=LimitsConfig)
+    auto_approve: AutoApproveConfig = field(default_factory=AutoApproveConfig)
 
 
 # =============================================================================
@@ -258,6 +286,31 @@ def load_llm_config(config_path: str = DEFAULT_CONFIG_PATH) -> LLMConfigData:
 
             config.subagents[str(name)] = override
 
+    # -- Limits (top-level `limits:` section, separate from `llm:`) --
+    limits_data = data.get("limits")
+    if isinstance(limits_data, dict):
+        lc = config.limits
+        for key, attr, type_fn in [
+            ("iteration_limit_enabled", "iteration_limit_enabled", bool),
+            ("max_iterations", "max_iterations", int),
+        ]:
+            if key in limits_data:
+                try:
+                    setattr(lc, attr, type_fn(limits_data[key]))
+                except (TypeError, ValueError):
+                    _safe_stderr(f"Invalid value for limits.{key}, ignoring")
+
+    # -- Auto-approve (top-level `auto_approve:` section) --
+    aa_data = data.get("auto_approve")
+    if isinstance(aa_data, dict):
+        ac = config.auto_approve
+        for key in ("read", "edit", "execute", "browser"):
+            if key in aa_data:
+                try:
+                    setattr(ac, key, bool(aa_data[key]))
+                except (TypeError, ValueError):
+                    _safe_stderr(f"Invalid value for auto_approve.{key}, ignoring")
+
     # Populate api_key from credential store (runtime only, never saved to YAML)
     try:
         from src.llm.credential_store import load_api_key
@@ -355,6 +408,20 @@ def save_llm_config(
 
     # Merge into existing data
     existing_data["llm"] = llm_section
+
+    # Build limits section (top-level, separate from llm)
+    existing_data["limits"] = {
+        "iteration_limit_enabled": config.limits.iteration_limit_enabled,
+        "max_iterations": config.limits.max_iterations,
+    }
+
+    # Build auto_approve section (top-level)
+    existing_data["auto_approve"] = {
+        "read": config.auto_approve.read,
+        "edit": config.auto_approve.edit,
+        "execute": config.auto_approve.execute,
+        "browser": config.auto_approve.browser,
+    }
 
     # Write back
     try:

@@ -102,7 +102,7 @@ SILENT_TOOLS = {
     "task_create",
     "task_update",
     "task_list",
-    "task_get",
+    "task_block",
     "enter_plan_mode",
     "director_complete_understand",
     "director_complete_plan",
@@ -1655,8 +1655,8 @@ class CodingAgentApp(App):
                 # (is_new_session=False preserves plan mode state)
                 self.agent.set_session_id(session_id, is_new_session=False)
 
-                # Refresh TodoBar and StatusBar with loaded tasks
-                todos = self.agent.task_state.get_todos_list()
+                # Refresh TodoBar and StatusBar with active beads from BeadStore
+                todos = self.agent._get_bead_todos()
                 if todos:
                     self._on_todos_updated(todos)
 

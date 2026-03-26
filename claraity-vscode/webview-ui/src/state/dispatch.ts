@@ -54,7 +54,7 @@ export function dispatchServerMessage(
 
     // ── Context ──
     case "context_updated":
-      dispatch({ type: "CONTEXT_UPDATED", used: msg.used, limit: msg.limit });
+      dispatch({ type: "CONTEXT_UPDATED", used: msg.used, limit: msg.limit, iteration: msg.iteration });
       break;
 
     // ── Pause ──
@@ -85,6 +85,14 @@ export function dispatchServerMessage(
     // ── Auto-approve ──
     case "auto_approve_changed":
       dispatch({ type: "AUTO_APPROVE_CHANGED", categories: msg.categories });
+      break;
+
+    // ── Limits ──
+    case "limits_loaded":
+      dispatch({ type: "LIMITS_LOADED", limits: msg.limits });
+      break;
+    case "limits_saved":
+      dispatch({ type: "LIMITS_SAVED", success: msg.success, message: msg.message, limits: msg.limits });
       break;
 
     // ── Sessions ──
@@ -266,6 +274,19 @@ export function dispatchServerMessage(
       });
       break;
     }
+
+    // ── Subagents panel ──
+    case "subagents_list":
+      dispatch({ type: "SUBAGENTS_LIST", subagents: msg.subagents, availableTools: msg.available_tools ?? [] });
+      break;
+
+    case "subagent_saved":
+      dispatch({ type: "SUBAGENT_NOTIFICATION", success: msg.success, message: msg.message });
+      break;
+
+    case "subagent_deleted":
+      dispatch({ type: "SUBAGENT_NOTIFICATION", success: msg.success, message: msg.message });
+      break;
 
     // ── ClarAIty Knowledge & Beads ──
     case "beads_data":

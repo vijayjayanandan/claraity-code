@@ -426,6 +426,7 @@ describe("StatusBar", () => {
     onShowConfig: vi.fn(),
     onShowJira: vi.fn(),
     onShowMcp: vi.fn(),
+    onShowSubagents: vi.fn(),
   };
 
   beforeEach(() => {
@@ -434,6 +435,7 @@ describe("StatusBar", () => {
     defaultProps.onShowConfig.mockClear();
     defaultProps.onShowJira.mockClear();
     defaultProps.onShowMcp.mockClear();
+    defaultProps.onShowSubagents.mockClear();
   });
 
   test("renders title 'ClarAIty'", () => {
@@ -486,11 +488,20 @@ describe("StatusBar", () => {
     expect(defaultProps.onShowJira).toHaveBeenCalledOnce();
   });
 
-  test("renders four toolbar buttons", () => {
+  test("renders six toolbar buttons", () => {
     const { container } = render(<StatusBar {...defaultProps} />);
 
     const buttons = container.querySelectorAll(".toolbar-icon");
-    expect(buttons).toHaveLength(4);
+    expect(buttons).toHaveLength(6);
+  });
+
+  test("Subagents button triggers onShowSubagents callback", () => {
+    render(<StatusBar {...defaultProps} />);
+
+    const subagentsBtn = screen.getByTitle("Subagents");
+    fireEvent.click(subagentsBtn);
+
+    expect(defaultProps.onShowSubagents).toHaveBeenCalledOnce();
   });
 });
 
@@ -710,8 +721,12 @@ describe("AutoApprovePanel", () => {
   test("starts collapsed (checkboxes not visible)", () => {
     const { container } = render(
       <AutoApprovePanel
-        autoApprove={{ edit: false, execute: false, browser: false }}
+        autoApprove={{ read: true, edit: false, execute: false, browser: false }}
         onChange={vi.fn()}
+        limits={{ iteration_limit_enabled: true, max_iterations: 50 }}
+        onSaveLimits={vi.fn()}
+        onLoadLimits={vi.fn()}
+        lastIterations={null}
       />
     );
 
@@ -722,8 +737,12 @@ describe("AutoApprovePanel", () => {
   test("expand/collapse works by clicking header", () => {
     const { container } = render(
       <AutoApprovePanel
-        autoApprove={{ edit: false, execute: false, browser: false }}
+        autoApprove={{ read: true, edit: false, execute: false, browser: false }}
         onChange={vi.fn()}
+        limits={{ iteration_limit_enabled: true, max_iterations: 50 }}
+        onSaveLimits={vi.fn()}
+        onLoadLimits={vi.fn()}
+        lastIterations={null}
       />
     );
 
@@ -741,8 +760,12 @@ describe("AutoApprovePanel", () => {
   test("shows '+' when collapsed and '-' when expanded", () => {
     const { container } = render(
       <AutoApprovePanel
-        autoApprove={{ edit: false, execute: false, browser: false }}
+        autoApprove={{ read: true, edit: false, execute: false, browser: false }}
         onChange={vi.fn()}
+        limits={{ iteration_limit_enabled: true, max_iterations: 50 }}
+        onSaveLimits={vi.fn()}
+        onLoadLimits={vi.fn()}
+        lastIterations={null}
       />
     );
 
@@ -756,22 +779,27 @@ describe("AutoApprovePanel", () => {
     const onChange = vi.fn();
     const { container } = render(
       <AutoApprovePanel
-        autoApprove={{ edit: false, execute: false, browser: false }}
+        autoApprove={{ read: true, edit: false, execute: false, browser: false }}
         onChange={onChange}
+        limits={{ iteration_limit_enabled: true, max_iterations: 50 }}
+        onSaveLimits={vi.fn()}
+        onLoadLimits={vi.fn()}
+        lastIterations={null}
       />
     );
 
     // Expand first
     fireEvent.click(container.querySelector(".auto-approve-header")!);
 
-    // Find checkboxes - there are 3 checkboxes for edit, execute, browser
+    // Find checkboxes - 4 for read/edit/execute/browser + 1 for iteration limit
     const checkboxes = container.querySelectorAll("input[type='checkbox']");
-    expect(checkboxes).toHaveLength(3);
+    expect(checkboxes).toHaveLength(5);
 
-    // Check the "Edit files" checkbox (first one)
-    fireEvent.click(checkboxes[0]);
+    // Check the "Edit files" checkbox (second one, after read)
+    fireEvent.click(checkboxes[1]);
 
     expect(onChange).toHaveBeenCalledWith({
+      read: true,
       edit: true,
       execute: false,
       browser: false,
@@ -782,18 +810,23 @@ describe("AutoApprovePanel", () => {
     const onChange = vi.fn();
     const { container } = render(
       <AutoApprovePanel
-        autoApprove={{ edit: false, execute: false, browser: false }}
+        autoApprove={{ read: true, edit: false, execute: false, browser: false }}
         onChange={onChange}
+        limits={{ iteration_limit_enabled: true, max_iterations: 50 }}
+        onSaveLimits={vi.fn()}
+        onLoadLimits={vi.fn()}
+        lastIterations={null}
       />
     );
 
     fireEvent.click(container.querySelector(".auto-approve-header")!);
 
     const checkboxes = container.querySelectorAll("input[type='checkbox']");
-    // Check the "Run commands" checkbox (second one)
-    fireEvent.click(checkboxes[1]);
+    // Check the "Run commands" checkbox (third one, after read/edit)
+    fireEvent.click(checkboxes[2]);
 
     expect(onChange).toHaveBeenCalledWith({
+      read: true,
       edit: false,
       execute: true,
       browser: false,
@@ -804,62 +837,83 @@ describe("AutoApprovePanel", () => {
     const onChange = vi.fn();
     const { container } = render(
       <AutoApprovePanel
-        autoApprove={{ edit: false, execute: false, browser: false }}
+        autoApprove={{ read: true, edit: false, execute: false, browser: false }}
         onChange={onChange}
+        limits={{ iteration_limit_enabled: true, max_iterations: 50 }}
+        onSaveLimits={vi.fn()}
+        onLoadLimits={vi.fn()}
+        lastIterations={null}
       />
     );
 
     fireEvent.click(container.querySelector(".auto-approve-header")!);
 
     const checkboxes = container.querySelectorAll("input[type='checkbox']");
-    // Check the "Browser tools" checkbox (third one)
-    fireEvent.click(checkboxes[2]);
+    // Check the "Browser tools" checkbox (fourth one, after read/edit/execute)
+    fireEvent.click(checkboxes[3]);
 
     expect(onChange).toHaveBeenCalledWith({
+      read: true,
       edit: false,
       execute: false,
       browser: true,
     });
   });
 
-  test("summary shows 'Auto-approve' when no categories active", () => {
+  test("summary shows 'None' when no categories active", () => {
     render(
       <AutoApprovePanel
-        autoApprove={{ edit: false, execute: false, browser: false }}
+        autoApprove={{ read: false, edit: false, execute: false, browser: false }}
         onChange={vi.fn()}
+        limits={{ iteration_limit_enabled: false, max_iterations: 50 }}
+        onSaveLimits={vi.fn()}
+        onLoadLimits={vi.fn()}
+        lastIterations={null}
       />
     );
 
-    expect(screen.getByText("Auto-approve")).toBeInTheDocument();
+    expect(screen.getByText("Auto-approve: None")).toBeInTheDocument();
   });
 
   test("summary shows active categories", () => {
     render(
       <AutoApprovePanel
-        autoApprove={{ edit: true, execute: false, browser: true }}
+        autoApprove={{ read: true, edit: true, execute: false, browser: true }}
         onChange={vi.fn()}
+        limits={{ iteration_limit_enabled: false, max_iterations: 50 }}
+        onSaveLimits={vi.fn()}
+        onLoadLimits={vi.fn()}
+        lastIterations={null}
       />
     );
 
-    expect(screen.getByText("Auto-approve: Edit, Browser")).toBeInTheDocument();
+    expect(screen.getByText("Auto-approve: Read, Edit, Browser")).toBeInTheDocument();
   });
 
   test("summary shows all active categories", () => {
     render(
       <AutoApprovePanel
-        autoApprove={{ edit: true, execute: true, browser: true }}
+        autoApprove={{ read: true, edit: true, execute: true, browser: true }}
         onChange={vi.fn()}
+        limits={{ iteration_limit_enabled: true, max_iterations: 50 }}
+        onSaveLimits={vi.fn()}
+        onLoadLimits={vi.fn()}
+        lastIterations={null}
       />
     );
 
-    expect(screen.getByText("Auto-approve: Edit, Commands, Browser")).toBeInTheDocument();
+    expect(screen.getByText(/Auto-approve: Read, Edit, Commands, Browser/)).toBeInTheDocument();
   });
 
   test("summary has 'has-active' class when categories are active", () => {
     const { container } = render(
       <AutoApprovePanel
-        autoApprove={{ edit: true, execute: false, browser: false }}
+        autoApprove={{ read: true, edit: true, execute: false, browser: false }}
         onChange={vi.fn()}
+        limits={{ iteration_limit_enabled: true, max_iterations: 50 }}
+        onSaveLimits={vi.fn()}
+        onLoadLimits={vi.fn()}
+        lastIterations={null}
       />
     );
 
@@ -870,8 +924,12 @@ describe("AutoApprovePanel", () => {
   test("summary does not have 'has-active' class when no categories active", () => {
     const { container } = render(
       <AutoApprovePanel
-        autoApprove={{ edit: false, execute: false, browser: false }}
+        autoApprove={{ read: true, edit: false, execute: false, browser: false }}
         onChange={vi.fn()}
+        limits={{ iteration_limit_enabled: true, max_iterations: 50 }}
+        onSaveLimits={vi.fn()}
+        onLoadLimits={vi.fn()}
+        lastIterations={null}
       />
     );
 
@@ -882,8 +940,12 @@ describe("AutoApprovePanel", () => {
   test("checkboxes reflect current autoApprove state", () => {
     const { container } = render(
       <AutoApprovePanel
-        autoApprove={{ edit: true, execute: false, browser: true }}
+        autoApprove={{ read: true, edit: true, execute: false, browser: true }}
         onChange={vi.fn()}
+        limits={{ iteration_limit_enabled: true, max_iterations: 50 }}
+        onSaveLimits={vi.fn()}
+        onLoadLimits={vi.fn()}
+        lastIterations={null}
       />
     );
 
@@ -891,27 +953,33 @@ describe("AutoApprovePanel", () => {
     fireEvent.click(container.querySelector(".auto-approve-header")!);
 
     const checkboxes = container.querySelectorAll("input[type='checkbox']") as NodeListOf<HTMLInputElement>;
-    expect(checkboxes[0].checked).toBe(true);   // edit
-    expect(checkboxes[1].checked).toBe(false);  // execute
-    expect(checkboxes[2].checked).toBe(true);   // browser
+    expect(checkboxes[0].checked).toBe(true);   // read
+    expect(checkboxes[1].checked).toBe(true);   // edit
+    expect(checkboxes[2].checked).toBe(false);  // execute
+    expect(checkboxes[3].checked).toBe(true);   // browser
   });
 
   test("unchecking an active checkbox sends false for that category", () => {
     const onChange = vi.fn();
     const { container } = render(
       <AutoApprovePanel
-        autoApprove={{ edit: true, execute: true, browser: false }}
+        autoApprove={{ read: true, edit: true, execute: true, browser: false }}
         onChange={onChange}
+        limits={{ iteration_limit_enabled: true, max_iterations: 50 }}
+        onSaveLimits={vi.fn()}
+        onLoadLimits={vi.fn()}
+        lastIterations={null}
       />
     );
 
     fireEvent.click(container.querySelector(".auto-approve-header")!);
 
     const checkboxes = container.querySelectorAll("input[type='checkbox']");
-    // Uncheck edit (first checkbox)
-    fireEvent.click(checkboxes[0]);
+    // Uncheck edit (second checkbox, after read)
+    fireEvent.click(checkboxes[1]);
 
     expect(onChange).toHaveBeenCalledWith({
+      read: true,
       edit: false,
       execute: true,
       browser: false,

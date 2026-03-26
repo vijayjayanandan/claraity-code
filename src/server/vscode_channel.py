@@ -60,7 +60,7 @@ class VSCodeChannel:
         return self._connected
 
     def set_connected(self, connected: bool) -> None:
-        """Called by WebSocket when client connects/disconnects."""
+        """Called by stdio_server when client connects/disconnects."""
         self._connected = connected
         if not connected:
             logger.info("[VSCode] Extension disconnected, clearing pending terminals")
@@ -73,10 +73,10 @@ class VSCodeChannel:
             logger.info("[VSCode] Extension connected")
 
     def set_send_callback(self, callback: Callable[[dict], None]) -> None:
-        """Set callback to send messages to WebSocket.
+        """Set callback to send messages to the VS Code extension.
 
         Args:
-            callback: Function that takes {type, command, ...} dict and sends via WebSocket
+            callback: Function that takes {type, command, ...} dict and sends via TCP
         """
         self._send_callback = callback
 

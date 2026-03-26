@@ -258,19 +258,20 @@ class TestEvaluate:
 
 class TestAutoApproveCategories:
 
-    def test_default_categories_all_false(self, gating):
+    def test_default_categories(self, gating):
         cats = gating.get_auto_approve_categories()
-        assert cats == {"browser": False, "edit": False, "execute": False}
+        assert cats == {"browser": False, "edit": False, "execute": False, "read": True}
 
     def test_set_and_get_categories(self, gating):
         result = gating.set_auto_approve_categories({"edit": True})
         assert result["edit"] is True
         assert result["execute"] is False
         assert result["browser"] is False
+        assert result["read"] is True
 
     def test_unknown_category_ignored(self, gating):
         result = gating.set_auto_approve_categories({"edit": True, "unknown_cat": True})
-        assert result == {"browser": False, "edit": True, "execute": False}
+        assert result == {"browser": False, "edit": True, "execute": False, "read": True}
 
     def test_is_category_auto_approved_edit(self, gating):
         gating.set_auto_approve_categories({"edit": True})
@@ -291,6 +292,15 @@ class TestAutoApproveCategories:
 
     def test_uncategorized_tool_not_auto_approved(self, gating):
         gating.set_auto_approve_categories({"edit": True, "execute": True, "browser": True})
+        assert gating.is_category_auto_approved("some_unknown_tool") is False
+
+    def test_read_category_auto_approved_by_default(self, gating):
+        assert gating.is_category_auto_approved("read_file") is True
+        assert gating.is_category_auto_approved("list_directory") is True
+        assert gating.is_category_auto_approved("search_code") is True
+
+    def test_read_category_can_be_disabled(self, gating):
+        gating.set_auto_approve_categories({"read": False})
         assert gating.is_category_auto_approved("read_file") is False
 
 

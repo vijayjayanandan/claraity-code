@@ -86,12 +86,20 @@ class BeadStore:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn: Optional[sqlite3.Connection] = None
+        # Auto-import: if DB missing but JSONL exists, rebuild
+        if not self.db_path.exists():
+            jsonl_path = self.db_path.with_suffix(".jsonl")
+            if jsonl_path.exists():
+                rebuilt = BeadStore.import_jsonl(str(jsonl_path), str(self.db_path))
+                self.conn = rebuilt.conn
+                rebuilt.conn = None
+                return
         self._ensure_schema()
 
     @contextmanager
     def _cursor(self):
         if self.conn is None:
-            self.conn = sqlite3.connect(str(self.db_path))
+            self.conn = sqlite3.connect(str(self.db_path), timeout=5.0)
             self.conn.row_factory = sqlite3.Row
             self.conn.execute("PRAGMA foreign_keys = ON")
             self.conn.execute("PRAGMA journal_mode = WAL")
@@ -145,8 +153,17 @@ class BeadStore:
                    (id, title, description, status, priority, parent_id,
                     assignee, tags, created_at, updated_at)
                    VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?)""",
-                (bid, title, description, priority, parent_id,
-                 assignee, json.dumps(tags or []), now, now),
+                (
+                    bid,
+                    title,
+                    description,
+                    priority,
+                    parent_id,
+                    assignee,
+                    json.dumps(tags or []),
+                    now,
+                    now,
+                ),
             )
         return bid
 
@@ -199,6 +216,7 @@ class BeadStore:
     def add_note(self, bead_id: str, content: str, author: str = "agent") -> str:
         """Add a note to a bead."""
         import uuid
+
         nid = f"note-{uuid.uuid4().hex[:8]}"
         now = self._now()
         with self._cursor() as cur:
@@ -235,6 +253,25 @@ class BeadStore:
                 (parent_id,),
             )
             return [dict(r) for r in cur.fetchall()]
+
+    def get_all_blockers(self) -> dict[str, list[dict]]:
+        """Bulk-fetch all blocker relationships. Returns {bead_id: [blocker_beads]}."""
+        with self._cursor() as cur:
+            cur.execute(
+                """SELECT d.to_id AS bead_id, b.id, b.title, b.status
+                   FROM dependencies d
+                   JOIN beads b ON b.id = d.from_id
+                   WHERE d.dep_type = 'blocks'"""
+            )
+            result: dict[str, list[dict]] = {}
+            for row in cur.fetchall():
+                bead_id = row["bead_id"]
+                if bead_id not in result:
+                    result[bead_id] = []
+                result[bead_id].append(
+                    {"id": row["id"], "title": row["title"], "status": row["status"]}
+                )
+        return result
 
     def get_dependencies(self, bead_id: str) -> dict:
         """Get blockers (what blocks this) and blocking (what this blocks)."""
@@ -298,10 +335,135 @@ class BeadStore:
             deps = cur.fetchone()["c"]
         return {"total": total, "by_status": by_status, "dependencies": deps}
 
+    # -- JSONL Export/Import ---------------------------------------------------
+
+    def export_jsonl(self, path: str = ".clarity/claraity_beads.jsonl") -> int:
+        """Export entire DB to JSONL for git tracking. Returns line count.
+
+        Order: beads first, then dependencies, refs, notes (for FK-safe import).
+        """
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        count = 0
+        with open(out, "w", encoding="utf-8") as f:
+            # Beads
+            for b in self.get_all_beads():
+                rec = dict(b)
+                rec["_t"] = "bead"
+                f.write(json.dumps(rec, default=str) + "\n")
+                count += 1
+            # Dependencies
+            with self._cursor() as cur:
+                cur.execute("SELECT * FROM dependencies ORDER BY created_at")
+                for row in cur.fetchall():
+                    rec = dict(row)
+                    rec["_t"] = "dep"
+                    f.write(json.dumps(rec, default=str) + "\n")
+                    count += 1
+            # Refs
+            with self._cursor() as cur:
+                cur.execute("SELECT * FROM bead_refs")
+                for row in cur.fetchall():
+                    rec = dict(row)
+                    rec["_t"] = "ref"
+                    f.write(json.dumps(rec, default=str) + "\n")
+                    count += 1
+            # Notes
+            with self._cursor() as cur:
+                cur.execute("SELECT * FROM notes ORDER BY created_at")
+                for row in cur.fetchall():
+                    rec = dict(row)
+                    rec["_t"] = "note"
+                    f.write(json.dumps(rec, default=str) + "\n")
+                    count += 1
+        return count
+
+    @classmethod
+    def import_jsonl(
+        cls, jsonl_path: str, db_path: str = ".clarity/claraity_beads.db"
+    ) -> "BeadStore":
+        """Rebuild SQLite DB from JSONL file. Deletes existing DB first."""
+        db = Path(db_path)
+        if db.exists():
+            db.unlink()
+        store = cls(db_path)
+        with open(jsonl_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                rec = json.loads(line)
+                t = rec.pop("_t")
+                if t == "bead":
+                    with store._cursor() as cur:
+                        cur.execute(
+                            """INSERT OR IGNORE INTO beads
+                               (id, title, description, status, priority, parent_id,
+                                assignee, tags, created_at, updated_at, closed_at, summary)
+                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                            (
+                                rec["id"],
+                                rec["title"],
+                                rec.get("description"),
+                                rec.get("status", "open"),
+                                rec.get("priority", 5),
+                                rec.get("parent_id"),
+                                rec.get("assignee"),
+                                rec.get("tags"),
+                                rec.get("created_at"),
+                                rec.get("updated_at"),
+                                rec.get("closed_at"),
+                                rec.get("summary"),
+                            ),
+                        )
+                elif t == "dep":
+                    with store._cursor() as cur:
+                        cur.execute(
+                            """INSERT OR IGNORE INTO dependencies
+                               (id, from_id, to_id, dep_type, created_at)
+                               VALUES (?, ?, ?, ?, ?)""",
+                            (
+                                rec["id"],
+                                rec["from_id"],
+                                rec["to_id"],
+                                rec.get("dep_type", "blocks"),
+                                rec.get("created_at"),
+                            ),
+                        )
+                elif t == "ref":
+                    with store._cursor() as cur:
+                        cur.execute(
+                            """INSERT OR IGNORE INTO bead_refs
+                               (id, bead_id, component_id, ref_type)
+                               VALUES (?, ?, ?, ?)""",
+                            (
+                                rec["id"],
+                                rec["bead_id"],
+                                rec["component_id"],
+                                rec.get("ref_type", "modifies"),
+                            ),
+                        )
+                elif t == "note":
+                    with store._cursor() as cur:
+                        cur.execute(
+                            """INSERT OR IGNORE INTO notes
+                               (id, bead_id, content, author, created_at)
+                               VALUES (?, ?, ?, ?, ?)""",
+                            (
+                                rec["id"],
+                                rec["bead_id"],
+                                rec.get("content", ""),
+                                rec.get("author", "agent"),
+                                rec.get("created_at"),
+                            ),
+                        )
+        return store
+
 
 # ---------------------------------------------------------------------------
 # Render: tasks -> Markdown for LLM consumption
 # ---------------------------------------------------------------------------
+
 
 def render_tasks_md(store: BeadStore) -> str:
     """Render all tasks as markdown for LLM consumption."""
@@ -320,7 +482,9 @@ def render_tasks_md(store: BeadStore) -> str:
     open_c = by_status.get("open", 0)
     ip_c = by_status.get("in_progress", 0)
     closed_c = by_status.get("closed", 0)
-    lines.append(f"**{stats['total']} tasks**: {open_c} open, {ip_c} in progress, {closed_c} closed")
+    lines.append(
+        f"**{stats['total']} tasks**: {open_c} open, {ip_c} in progress, {closed_c} closed"
+    )
     lines.append("")
 
     # Ready tasks (most important)
@@ -356,7 +520,9 @@ def render_tasks_md(store: BeadStore) -> str:
         lines.append("")
         for b in blocked:
             deps = store.get_dependencies(b["id"])
-            blocker_names = [f"`{bl['id']}` {bl['title']}" for bl in deps["blockers"] if bl["status"] != "closed"]
+            blocker_names = [
+                f"`{bl['id']}` {bl['title']}" for bl in deps["blockers"] if bl["status"] != "closed"
+            ]
             lines.append(f"- `{b['id']}` {b['title']}")
             if blocker_names:
                 lines.append(f"  - Blocked by: {', '.join(blocker_names)}")
@@ -381,6 +547,7 @@ def render_tasks_md(store: BeadStore) -> str:
 # Populate: create ClarAIty DB feature tasks
 # ---------------------------------------------------------------------------
 
+
 def populate_claraity_tasks(store: BeadStore):
     """Create the task graph for building out ClarAIty DB features."""
 
@@ -388,53 +555,68 @@ def populate_claraity_tasks(store: BeadStore):
     epic = store.add_bead(
         title="ClarAIty Knowledge System",
         description="Complete implementation of codebase knowledge DB with scan, query, visualize, and task management capabilities.",
-        priority=0, tags=["epic"],
+        priority=0,
+        tags=["epic"],
     )
 
     # --- Phase 1: Knowledge enrichment ---
     t_files = store.add_bead(
         title="Add file nodes (layer 4) to knowledge DB",
         description="Scan all ~224 Python files and add as type='file' nodes with role descriptions. Link to parent modules via 'contains' edges and to components via 'defines' edges.",
-        priority=1, parent_id=epic, tags=["knowledge", "scan"],
+        priority=1,
+        parent_id=epic,
+        tags=["knowledge", "scan"],
     )
 
     t_brief = store.add_bead(
         title="Split briefing into compact + detailed",
         description="Compact overview (~1500 tokens) for system prompt auto-injection. Detailed module/component info available via query tools.",
-        priority=1, parent_id=epic, tags=["knowledge", "retrieval"],
+        priority=1,
+        parent_id=epic,
+        tags=["knowledge", "retrieval"],
     )
 
     # --- Phase 2: Agent query tools ---
     t_search = store.add_bead(
         title="Build search_knowledge tool",
         description="LIKE search across nodes name/description/properties. Returns matches + one-hop neighbors as markdown.",
-        priority=2, parent_id=epic, tags=["tools", "retrieval"],
+        priority=2,
+        parent_id=epic,
+        tags=["tools", "retrieval"],
     )
 
     t_qmod = store.add_bead(
         title="Build query_module tool",
         description="Given a module ID, returns all components and files within it as markdown.",
-        priority=2, parent_id=epic, tags=["tools", "retrieval"],
+        priority=2,
+        parent_id=epic,
+        tags=["tools", "retrieval"],
     )
 
     t_qfile = store.add_bead(
         title="Build query_file tool",
         description="Given a file path, returns its role, parent component, and related decisions as markdown.",
-        priority=2, parent_id=epic, tags=["tools", "retrieval"],
+        priority=2,
+        parent_id=epic,
+        tags=["tools", "retrieval"],
     )
     store.add_dependency(t_files, t_qfile)
 
     t_impact = store.add_bead(
         title="Build query_impact tool",
         description="Given a component ID, follows dependency edges to show what would be affected by changes. Returns blast radius as markdown.",
-        priority=2, parent_id=epic, tags=["tools", "retrieval"],
+        priority=2,
+        parent_id=epic,
+        tags=["tools", "retrieval"],
     )
 
     # --- Phase 3: Reverse flow test ---
     t_revtest = store.add_bead(
         title="Test reverse flow: agent queries DB for task",
         description="Start fresh agent session, give it a coding task, verify it uses knowledge DB (compact briefing + query tools) instead of re-reading files.",
-        priority=3, parent_id=epic, tags=["testing", "validation"],
+        priority=3,
+        parent_id=epic,
+        tags=["testing", "validation"],
     )
     store.add_dependency(t_brief, t_revtest)
     store.add_dependency(t_search, t_revtest)
@@ -444,7 +626,9 @@ def populate_claraity_tasks(store: BeadStore):
     t_analogy = store.add_bead(
         title="Add non-technical analogy descriptions",
         description="Generate plain-language explanations with analogies for each module/component. Store as 'analogy' property in node. Render as separate .clarity/OVERVIEW.md.",
-        priority=4, parent_id=epic, tags=["knowledge", "ux"],
+        priority=4,
+        parent_id=epic,
+        tags=["knowledge", "ux"],
     )
     store.add_dependency(t_revtest, t_analogy)
 
@@ -452,14 +636,18 @@ def populate_claraity_tasks(store: BeadStore):
     t_jsonl = store.add_bead(
         title="Add JSONL git export for both DBs",
         description="Export claraity_knowledge.db and claraity_beads.db to .jsonl files for git tracking. Rebuild DBs from JSONL on clone/branch-switch.",
-        priority=4, parent_id=epic, tags=["persistence", "git"],
+        priority=4,
+        parent_id=epic,
+        tags=["persistence", "git"],
     )
 
     # --- Phase 6: VS Code integration ---
     t_vscode = store.add_bead(
         title="Integrate architecture view into VS Code webview",
         description="Port the D3.js architecture diagram from standalone HTML into the VS Code extension sidebar as a new panel. Data served via Python backend over existing stdio+TCP protocol.",
-        priority=5, parent_id=epic, tags=["ui", "vscode"],
+        priority=5,
+        parent_id=epic,
+        tags=["ui", "vscode"],
     )
     store.add_dependency(t_revtest, t_vscode)
 
@@ -467,7 +655,9 @@ def populate_claraity_tasks(store: BeadStore):
     t_incr = store.add_bead(
         title="Incremental re-scan on code changes",
         description="Detect changed files since last scan, update only affected nodes in knowledge DB. Avoid full re-populate.",
-        priority=5, parent_id=epic, tags=["knowledge", "scan"],
+        priority=5,
+        parent_id=epic,
+        tags=["knowledge", "scan"],
     )
     store.add_dependency(t_files, t_incr)
 
@@ -482,14 +672,27 @@ def populate_claraity_tasks(store: BeadStore):
     store.add_ref(t_vscode, "mod-server", "modifies")
     store.add_ref(t_vscode, "mod-ui", "modifies")
 
-    all_tasks = [epic, t_files, t_brief, t_search, t_qmod, t_qfile,
-                 t_impact, t_revtest, t_analogy, t_jsonl, t_vscode, t_incr]
+    all_tasks = [
+        epic,
+        t_files,
+        t_brief,
+        t_search,
+        t_qmod,
+        t_qfile,
+        t_impact,
+        t_revtest,
+        t_analogy,
+        t_jsonl,
+        t_vscode,
+        t_incr,
+    ]
     print(f"[OK] Created {len(all_tasks)} tasks with dependencies")
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main():
     if len(sys.argv) < 2:
@@ -505,7 +708,9 @@ Commands:
   start <id>                     Mark task as in_progress
   close <id> [--summary "..."]   Mark task as closed
   block <blocker_id> <blocked_id>  Add blocking dependency
-  init                           Populate initial ClarAIty feature tasks""")
+  init                           Populate initial ClarAIty feature tasks
+  export-jsonl                   Export DB to JSONL for git tracking
+  import-jsonl [path]            Rebuild DB from JSONL file""")
         sys.exit(1)
 
     cmd = sys.argv[1]
@@ -530,7 +735,9 @@ Commands:
         elif cmd == "list":
             beads = store.get_all_beads()
             for b in beads:
-                status_icon = {"open": "[ ]", "in_progress": "[>]", "closed": "[x]"}.get(b["status"], "[?]")
+                status_icon = {"open": "[ ]", "in_progress": "[>]", "closed": "[x]"}.get(
+                    b["status"], "[?]"
+                )
                 print(f"  {status_icon} P{b['priority']} [{b['id']}] {b['title']}")
 
         elif cmd == "brief":
@@ -582,7 +789,9 @@ Commands:
 
         elif cmd == "create":
             if len(sys.argv) < 3:
-                print("Usage: create <title> [--priority N] [--desc \"...\"] [--parent <id>] [--tags t1,t2]")
+                print(
+                    'Usage: create <title> [--priority N] [--desc "..."] [--parent <id>] [--tags t1,t2]'
+                )
                 sys.exit(1)
             title = sys.argv[2]
             # Parse optional args
@@ -608,8 +817,11 @@ Commands:
                     i += 1
 
             bid = store.add_bead(
-                title=title, description=description,
-                priority=priority, parent_id=parent_id, tags=tags,
+                title=title,
+                description=description,
+                priority=priority,
+                parent_id=parent_id,
+                tags=tags,
             )
             print(f"[OK] Created task: {bid} - {title}")
 
@@ -622,7 +834,7 @@ Commands:
 
         elif cmd == "close":
             if len(sys.argv) < 3:
-                print("Usage: close <bead_id> [--summary \"...\"]")
+                print('Usage: close <bead_id> [--summary "..."]')
                 sys.exit(1)
             summary = None
             if len(sys.argv) >= 5 and sys.argv[3] == "--summary":
@@ -643,6 +855,19 @@ Commands:
                 sys.exit(1)
             store.add_note(sys.argv[2], " ".join(sys.argv[3:]))
             print(f"[OK] Note added to {sys.argv[2]}")
+
+        elif cmd == "export-jsonl":
+            count = store.export_jsonl()
+            print(f"[OK] Exported {count} records to .clarity/claraity_beads.jsonl")
+
+        elif cmd == "import-jsonl":
+            jsonl_path = sys.argv[2] if len(sys.argv) > 2 else ".clarity/claraity_beads.jsonl"
+            store.close()
+            store = BeadStore.import_jsonl(jsonl_path)
+            stats = store.get_stats()
+            print(
+                f"[OK] Rebuilt DB from JSONL: {stats['total']} beads, {stats['dependencies']} dependencies"
+            )
 
         else:
             print(f"Unknown command: {cmd}")

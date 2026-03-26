@@ -218,32 +218,13 @@ class ErrorRecoveryTracker:
         """
         Check if retry should be allowed for this tool+error_type.
 
-        Called AFTER recording a failure. Uses separate budgets per error type
-        so "command not found" errors don't consume the budget for "test failed"
-        errors.
+        Always returns True — the iteration limit is now the sole mechanism
+        for pausing the agent on repeated failures. The error budget pause
+        flow is disabled.
 
-        Args:
-            tool_name: Name of the tool that failed
-            error_type: Classification of the error
-
-        Returns:
-            tuple of (allowed, reason)
-            - allowed: True if retry should be allowed
-            - reason: Human-readable explanation (for both allow and deny)
+        The method signature is preserved so callers don't need changes.
         """
-        if self._total_failures >= self.max_total_failures:
-            return False, f"Maximum total failures ({self.max_total_failures}) reached"
-
-        # Key by (tool, error_type) - "command not found" != "test failed"
-        key = (tool_name, error_type)
-        count = self._failed_tool_error_counts.get(key, 0)
-        if count >= self.max_same_tool_error_failures:
-            return False, (
-                f"Tool '{tool_name}' with error type '{error_type}' "
-                f"failed {self.max_same_tool_error_failures} time(s)"
-            )
-
-        return True, "Retry allowed with different approach"
+        return True, "Retry allowed"
 
     def record_failure(
         self,

@@ -74,7 +74,7 @@ def _create_tool_executor(tools_allowlist=None):
     """Create a ToolExecutor with standard tool instances.
 
     Registers parameterless tool constructors only. Tools requiring
-    state (TaskState, PlanModeState, etc.) are excluded.
+    state (PlanModeState, etc.) are excluded.
 
     Args:
         tools_allowlist: Optional list of tool names to register.

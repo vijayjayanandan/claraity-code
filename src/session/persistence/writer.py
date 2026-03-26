@@ -255,27 +255,28 @@ class SessionWriter:
     async def write_agent_state(
         self,
         session_id: str,
-        todos: list,
+        todos: list | None = None,
         current_todo_id: str | None = None,
         last_stop_reason: str | None = None,
         seq: int | None = None,
     ) -> WriteResult:
         """
-        Write agent state to the JSONL file as a system event.
+        Write agent pause/resume metadata to the JSONL file as a system event.
 
         Creates a system message with:
         - role="system"
         - meta.event_type="agent_state"
         - meta.include_in_llm_context=False
-        - meta.extra={ todos, current_todo_id, last_stop_reason }
+        - meta.extra={ current_todo_id, last_stop_reason }
 
-        This is used for session resume to restore agent runtime state.
+        Tasks are no longer persisted here -- BeadStore (SQLite) is the source of truth.
+        The todos param is kept for backward compatibility with older callers.
 
         Args:
             session_id: Current session ID
-            todos: List of todo dicts
-            current_todo_id: ID of currently active todo
-            last_stop_reason: Last stop reason for context
+            todos: Legacy param, no longer written (kept for backward compat)
+            current_todo_id: ID of the currently active bead
+            last_stop_reason: Why the agent last paused
             seq: Optional sequence number (auto-generated if not provided)
 
         Returns:

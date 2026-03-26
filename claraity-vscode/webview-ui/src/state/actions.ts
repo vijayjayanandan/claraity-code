@@ -4,7 +4,7 @@
  * Each action represents a user interaction or server event
  * that triggers a state transition.
  */
-import type { ToolStateData, SessionSummary, ReplayMessage, FileAttachment, ImageAttachment, JiraProfile, McpServerInfo, McpMarketplaceEntry, BeadsResponse, ArchitectureResponse } from "../types";
+import type { ToolStateData, SessionSummary, ReplayMessage, FileAttachment, ImageAttachment, JiraProfile, McpServerInfo, McpMarketplaceEntry, BeadsResponse, ArchitectureResponse, SubAgentInfo, LimitsData } from "../types";
 import type { AppState, SubagentInfo } from "./state";
 
 export type Action =
@@ -43,7 +43,7 @@ export type Action =
   | { type: "PLAN_APPROVAL_DISMISS" }
   | { type: "PERMISSION_MODE_CHANGED"; mode: string }
   // Context
-  | { type: "CONTEXT_UPDATED"; used: number; limit: number }
+  | { type: "CONTEXT_UPDATED"; used: number; limit: number; iteration?: number }
   // Panels
   | { type: "SET_ACTIVE_PANEL"; panel: AppState["activePanel"] }
   | { type: "SET_SESSIONS"; sessions: SessionSummary[] }
@@ -77,5 +77,12 @@ export type Action =
   // ClarAIty Knowledge & Beads
   | { type: "BEADS_LOADED"; data: BeadsResponse }
   | { type: "ARCHITECTURE_LOADED"; data: ArchitectureResponse }
+  // Subagents panel
+  | { type: "SUBAGENTS_LIST"; subagents: SubAgentInfo[]; availableTools: string[] }
+  | { type: "SUBAGENT_NOTIFICATION"; success: boolean; message: string }
+  | { type: "CLEAR_SUBAGENT_NOTIFICATION" }
+  // Limits
+  | { type: "LIMITS_LOADED"; limits: LimitsData }
+  | { type: "LIMITS_SAVED"; success: boolean; message: string; limits?: LimitsData }
   // Error
   | { type: "ERROR"; errorType: string; message: string };

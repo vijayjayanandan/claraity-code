@@ -793,14 +793,14 @@ CLARAITY_IMPACT_TOOL = ToolDefinition(
     },
 )
 
-CLARAITY_READY_TOOL = ToolDefinition(
-    name="claraity_ready",
+TASK_LIST_TOOL = ToolDefinition(
+    name="task_list",
     description="Get tasks that are unblocked and ready to start, sorted by priority. Use to find what to work on next.",
     parameters={"type": "object", "properties": {}, "required": []},
 )
 
-CLARAITY_CREATE_TASK_TOOL = ToolDefinition(
-    name="claraity_create_task",
+TASK_CREATE_TOOL = ToolDefinition(
+    name="task_create",
     description="Create a new task with title, description, priority, and optional tags.",
     parameters={
         "type": "object",
@@ -815,8 +815,8 @@ CLARAITY_CREATE_TASK_TOOL = ToolDefinition(
     },
 )
 
-CLARAITY_UPDATE_TASK_TOOL = ToolDefinition(
-    name="claraity_update_task",
+TASK_UPDATE_TOOL = ToolDefinition(
+    name="task_update",
     description="Update a task's status (start/close) or add a note.",
     parameters={
         "type": "object",
@@ -829,8 +829,8 @@ CLARAITY_UPDATE_TASK_TOOL = ToolDefinition(
     },
 )
 
-CLARAITY_BLOCK_TASK_TOOL = ToolDefinition(
-    name="claraity_block_task",
+TASK_BLOCK_TOOL = ToolDefinition(
+    name="task_block",
     description="Add a blocking dependency: blocker must complete before blocked can start.",
     parameters={
         "type": "object",
@@ -839,6 +839,26 @@ CLARAITY_BLOCK_TASK_TOOL = ToolDefinition(
             "blocked_id": {"type": "string", "description": "Task that cannot start until blocker completes"},
         },
         "required": ["blocker_id", "blocked_id"],
+    },
+)
+
+CLARAITY_AUTO_LAYOUT_TOOL = ToolDefinition(
+    name="claraity_auto_layout",
+    description="Compute flow_rank/flow_col layout for all modules based on dependency graph. Call after populating modules and edges.",
+    parameters={
+        "type": "object",
+        "properties": {},
+        "required": [],
+    },
+)
+
+CLARAITY_EXPORT_TOOL = ToolDefinition(
+    name="claraity_export",
+    description="Export knowledge DB and beads DB to JSONL files for git tracking. Call after finishing modifications to the knowledge base.",
+    parameters={
+        "type": "object",
+        "properties": {},
+        "required": [],
     },
 )
 
@@ -852,10 +872,12 @@ CLARAITY_TOOLS = [
     CLARAITY_FILE_TOOL,
     CLARAITY_SEARCH_TOOL,
     CLARAITY_IMPACT_TOOL,
-    CLARAITY_READY_TOOL,
-    CLARAITY_CREATE_TASK_TOOL,
-    CLARAITY_UPDATE_TASK_TOOL,
-    CLARAITY_BLOCK_TASK_TOOL,
+    TASK_LIST_TOOL,
+    TASK_CREATE_TOOL,
+    TASK_UPDATE_TOOL,
+    TASK_BLOCK_TOOL,
+    CLARAITY_AUTO_LAYOUT_TOOL,
+    CLARAITY_EXPORT_TOOL,
 ]
 
 
@@ -873,8 +895,8 @@ ALL_TOOLS = [
     GET_FILE_OUTLINE_TOOL,
     GET_SYMBOL_CONTEXT_TOOL,
     DELEGATE_TO_SUBAGENT_TOOL,
-    # TODO_WRITE_TOOL removed - replaced by task_create/task_update/task_list/task_get
-    # (registered dynamically via tool_executor, not listed here)
+    # Task tools (task_create/task_update/task_list/task_block) are backed by BeadStore
+    # and registered dynamically via tool_executor, not listed here
     CREATE_CHECKPOINT_TOOL,
     RUN_TESTS_TOOL,
     DETECT_TEST_FRAMEWORK_TOOL,

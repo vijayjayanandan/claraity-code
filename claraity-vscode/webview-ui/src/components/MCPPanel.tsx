@@ -243,9 +243,16 @@ export function MCPPanel({
 
           <div className="mcp-marketplace-list">
             {marketplace.map((entry) => {
-              const installed = servers.some(
-                (s) => s.name === entry.id || s.name === entry.id.replace("/", "-"),
-              );
+              // Check if already installed by matching name, id, or display name
+              const nameLower = entry.name.toLowerCase();
+              const idLower = entry.id.toLowerCase();
+              const installed = servers.some((s) => {
+                const sLower = s.name.toLowerCase();
+                return sLower === nameLower
+                  || sLower === idLower
+                  || sLower === idLower.replace("/", "-")
+                  || sLower === nameLower.replace("/", "-");
+              });
               return (
                 <MarketplaceCard
                   key={entry.id}
@@ -459,6 +466,18 @@ function MarketplaceCard({
   installed: boolean;
   onInstall: (scope: "project" | "global") => void;
 }) {
+  const [installing, setInstalling] = useState(false);
+
+  // Clear installing state when installed status changes
+  useEffect(() => {
+    if (installed) setInstalling(false);
+  }, [installed]);
+
+  const handleInstall = (scope: "project" | "global") => {
+    setInstalling(true);
+    onInstall(scope);
+  };
+
   return (
     <div className="mcp-marketplace-card">
       <div className="mcp-marketplace-header">
@@ -474,18 +493,22 @@ function MarketplaceCard({
         </div>
         {installed ? (
           <span className="mcp-install-btn installed">Installed</span>
+        ) : installing ? (
+          <span className="mcp-install-btn installing">
+            <i className="codicon codicon-loading codicon-modifier-spin" /> Installing...
+          </span>
         ) : (
           <div className="mcp-install-scope">
             <button
               className="mcp-install-btn"
-              onClick={() => onInstall("project")}
+              onClick={() => handleInstall("project")}
               title="Install for this project"
             >
               Project
             </button>
             <button
               className="mcp-install-btn mcp-install-global"
-              onClick={() => onInstall("global")}
+              onClick={() => handleInstall("global")}
               title="Install globally (all projects)"
             >
               Global

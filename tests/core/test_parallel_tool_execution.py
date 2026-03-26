@@ -256,6 +256,9 @@ def make_agent(agent_parts):
         agent.director_adapter = MagicMock()
         agent.director_adapter.is_active = False
         agent._awaiting_approval = False
+        agent._error_budget_resume_count = 0
+        agent._successful_tools_since_resume = 0
+        agent.last_stop_reason = None
         return agent
     return _factory
 

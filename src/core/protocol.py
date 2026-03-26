@@ -626,9 +626,15 @@ class UIProtocol:
                 self._on_todos_updated(todos)
             except Exception:
                 # Don't let UI callback errors break agent execution
-                import logging
+                logger.exception("Error in todos callback")
 
-                logging.exception("Error in todos callback")
+    def notify_beads_updated(self) -> None:
+        """Push a fresh beads snapshot to the client (e.g. VS Code sidebar).
+
+        Base implementation is a no-op. Overridden by server transports
+        (stdio_server) to send a beads_data push message.
+        The TUI has no beads panel so it leaves this as a no-op.
+        """
 
 
 # Export all types

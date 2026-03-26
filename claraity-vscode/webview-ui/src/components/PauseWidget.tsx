@@ -58,14 +58,14 @@ export function PauseWidget({
         )}
 
         {/* Pending todos */}
-        {pendingTodos && pendingTodos.length > 0 && (
+        {Array.isArray(pendingTodos) && pendingTodos.length > 0 && (
           <>
             <div style={{ fontSize: 11, color: "var(--vscode-descriptionForeground)" }}>
               Pending tasks:
             </div>
             <ol className="pending-list">
               {pendingTodos.map((todo, i) => (
-                <li key={i}>{todo}</li>
+                <li key={i}>{String(todo)}</li>
               ))}
             </ol>
           </>

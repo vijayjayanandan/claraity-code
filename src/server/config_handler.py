@@ -250,3 +250,65 @@ def _int_or_none(val):
         return int(val)
     except (TypeError, ValueError):
         return None
+
+
+# =============================================================================
+# Limits configuration
+# =============================================================================
+
+
+def get_limits_response(config_path: str) -> dict:
+    """Load limits from disk and return them.
+
+    Returns:
+        ``{"type": "limits_loaded", "limits": {...}}``
+    """
+    from src.llm.config_loader import load_llm_config
+
+    cfg = load_llm_config(config_path)
+    lc = cfg.limits
+    return {
+        "type": "limits_loaded",
+        "limits": {
+            "iteration_limit_enabled": lc.iteration_limit_enabled,
+            "max_iterations": lc.max_iterations,
+        },
+    }
+
+
+def save_limits_from_request(data: dict, config_path: str) -> dict:
+    """Validate and persist limits to config.yaml.
+
+    Returns:
+        ``{"type": "limits_saved", "success": bool, "message": str, "limits": {...}}``
+    """
+    from src.llm.config_loader import load_llm_config, save_llm_config
+
+    raw = data.get("limits", {})
+
+    try:
+        cfg = load_llm_config(config_path)
+        lc = cfg.limits
+
+        if "iteration_limit_enabled" in raw:
+            lc.iteration_limit_enabled = bool(raw["iteration_limit_enabled"])
+        if "max_iterations" in raw:
+            lc.max_iterations = max(1, _int_or(raw["max_iterations"], lc.max_iterations))
+
+        ok = save_llm_config(cfg, config_path)
+        if ok:
+            return {
+                "type": "limits_saved",
+                "success": True,
+                "message": "Settings saved.",
+                "limits": {
+                    "iteration_limit_enabled": lc.iteration_limit_enabled,
+                    "max_iterations": lc.max_iterations,
+                },
+            }
+        else:
+            return {"type": "limits_saved", "success": False, "message": "Failed to write config file."}
+
+    except Exception as exc:
+        logger.error(f"[CONFIG] Save limits error: {exc}")
+        return {"type": "limits_saved", "success": False, "message": str(exc)}

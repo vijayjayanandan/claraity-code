@@ -167,6 +167,30 @@ export interface ArchitectureResponse {
 }
 
 // ============================================================================
+// Subagent data shapes
+// ============================================================================
+
+export interface SubAgentInfo {
+  name: string;
+  description: string;
+  system_prompt: string;
+  tools: string[] | null;
+  /** Where the config came from. */
+  source: "builtin" | "project" | "user";
+  /** Absolute path to the .md file; null for built-ins (Python constants). */
+  config_path: string | null;
+}
+
+// ============================================================================
+// Limits data shapes
+// ============================================================================
+
+export interface LimitsData {
+  iteration_limit_enabled: boolean;
+  max_iterations: number;
+}
+
+// ============================================================================
 // MCP data shapes
 // ============================================================================
 
@@ -226,7 +250,7 @@ export type ServerMessage =
   | { type: "thinking_delta"; content: string }
   | { type: "thinking_end" }
   | { type: "file_read"; file_path: string; content?: string }
-  | { type: "context_updated"; used: number; limit: number }
+  | { type: "context_updated"; used: number; limit: number; iteration?: number }
   | { type: "context_compacting" }
   | { type: "context_compacted"; old_tokens: number; new_tokens: number }
   // Interactive
@@ -248,6 +272,8 @@ export type ServerMessage =
   | { type: "models_list"; [key: string]: unknown }
   | { type: "config_saved"; [key: string]: unknown }
   | { type: "auto_approve_changed"; categories: Record<string, boolean> }
+  | { type: "limits_loaded"; limits: LimitsData }
+  | { type: "limits_saved"; success: boolean; message: string; limits?: LimitsData }
   | { type: "sessions_list"; sessions: SessionSummary[] }
   | { type: "session_history"; messages: ReplayMessage[] }
   | { type: "jira_profiles"; profiles: JiraProfile[]; connected_profile: string | null; error?: string }
@@ -263,4 +289,8 @@ export type ServerMessage =
   // ClarAIty Knowledge & Beads
   | { type: "beads_data"; data: BeadsResponse }
   | { type: "architecture_data"; data: ArchitectureResponse }
-  | { type: "knowledge_approved"; data: KnowledgeApproval };
+  | { type: "knowledge_approved"; data: KnowledgeApproval }
+  // Subagent management
+  | { type: "subagents_list"; subagents: SubAgentInfo[]; available_tools: string[] }
+  | { type: "subagent_saved"; success: boolean; name: string; message: string }
+  | { type: "subagent_deleted"; success: boolean; name: string; message: string };

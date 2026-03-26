@@ -879,6 +879,24 @@ button, .toolbar-icon, .session-card, .mention-item, .tool-badge {
   cursor: pointer;
 }
 
+.aa-section-label {
+  color: var(--app-fg-muted);
+  font-size: 11px;
+  padding: 2px var(--space-sm);
+}
+
+.aa-iter-input {
+  width: 48px;
+  margin-left: var(--space-sm);
+  padding: 1px 4px;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border);
+  border-radius: 2px;
+  font-size: var(--font-size-sm);
+  text-align: right;
+}
+
 /* ── Input Container ── */
 
 .input-container {
@@ -1545,6 +1563,139 @@ button, .toolbar-icon, .session-card, .mention-item, .tool-badge {
   padding: var(--space-sm);
   overflow-y: auto;
   flex: 1;
+}
+
+/* Fieldset wrapper that disables all inputs while a save is in flight */
+.settings-fieldset {
+  border: none;
+  padding: 0;
+  margin: 0;
+  min-width: 0; /* prevent fieldset from forcing min-width on flex children */
+}
+
+.settings-fieldset:disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+/* Section divider with label (Web Search, Subagent Models) */
+.settings-section {
+  border-top: 1px solid var(--app-border);
+  margin-top: var(--space-xs);
+  padding-top: var(--space-sm);
+  margin-bottom: var(--space-md);
+}
+
+.settings-section-label {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--app-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: var(--space-sm);
+  display: block;
+}
+
+/* Settings header: Save + Cancel button group on the right */
+.settings-header-actions {
+  display: flex;
+  gap: var(--space-xs);
+  align-items: center;
+}
+
+.settings-header-btn {
+  padding: 3px 10px;
+  font-size: var(--font-size-sm);
+  transition: opacity 0.15s ease;
+}
+
+.settings-header-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+  pointer-events: none;
+}
+
+/* Spinner shown inside Save button during round-trip */
+.save-spinner {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border: 2px solid color-mix(in srgb, var(--vscode-button-foreground) 35%, transparent);
+  border-top-color: var(--vscode-button-foreground);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  vertical-align: middle;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Accordion trigger row for Subagent Models */
+.disclosure-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+  margin-bottom: var(--space-sm);
+  text-align: left;
+}
+
+.disclosure-row:hover {
+  color: var(--app-accent);
+}
+
+.disclosure-row .codicon {
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+/* Model input with inline clear button */
+.model-input-wrap {
+  position: relative;
+  flex: 1;
+}
+
+.model-input-wrap .form-input {
+  padding-right: 24px; /* room for clear button */
+}
+
+.model-clear-btn {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  padding: 2px;
+  cursor: pointer;
+  color: var(--app-fg-muted);
+  line-height: 1;
+  display: flex;
+  align-items: center;
+}
+
+.model-clear-btn:hover {
+  color: var(--vscode-input-foreground);
+}
+
+.model-clear-btn .codicon {
+  font-size: 12px;
+}
+
+/* Slider range labels (0 / 1 / 2 under temperature slider) */
+.slider-range-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--font-size-xs);
+  color: var(--app-fg-muted);
+  margin-top: 2px;
+  padding: 0 2px;
 }
 
 .form-field {
@@ -3033,6 +3184,14 @@ button, .toolbar-icon, .session-card, .mention-item, .tool-badge {
   cursor: default;
   opacity: 0.6;
 }
+.mcp-install-btn.installing {
+  background: var(--app-accent);
+  cursor: default;
+  opacity: 0.8;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
 .mcp-install-scope {
   display: flex;
   gap: 2px;
@@ -3570,6 +3729,257 @@ button, .toolbar-icon, .session-card, .mention-item, .tool-badge {
   font-size: 10px;
 }
 
+/* ── View toggle active state ── */
+
+.panel-action.active {
+  color: var(--app-accent);
+  background: color-mix(in srgb, var(--app-accent) 15%, transparent);
+}
+
+/* ── Filter bar ── */
+
+.beads-filter-bar {
+  padding: var(--space-xs) var(--space-sm);
+  border-bottom: 1px solid var(--app-border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  flex-shrink: 0;
+}
+
+.beads-search {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, transparent);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-xs);
+  transition: border-color 0.15s;
+}
+.beads-search:focus-within {
+  border-color: var(--app-accent);
+}
+.beads-search .codicon {
+  color: var(--app-fg-muted);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.beads-search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--vscode-input-foreground);
+  font-size: var(--font-size-xs);
+  outline: none;
+  min-width: 0;
+}
+
+.beads-search-clear {
+  background: none;
+  border: none;
+  color: var(--app-fg-muted);
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  font-size: 10px;
+}
+.beads-search-clear:hover {
+  color: var(--app-fg);
+}
+
+.beads-priority-filters {
+  display: flex;
+  gap: 4px;
+}
+
+.beads-priority-chip {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 8px;
+  border: 1px solid var(--app-border);
+  background: none;
+  color: var(--app-fg-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+  opacity: 0.5;
+}
+.beads-priority-chip.active {
+  opacity: 1;
+  border-color: transparent;
+}
+.beads-priority-chip.priority-0.active { color: var(--app-fg); background: var(--app-hover); }
+.beads-priority-chip.priority-1.active { color: var(--app-error); background: color-mix(in srgb, var(--app-error) 15%, transparent); }
+.beads-priority-chip.priority-2.active { color: #e89b00; background: color-mix(in srgb, #e89b00 15%, transparent); }
+.beads-priority-chip.priority-3.active { color: var(--app-accent); background: color-mix(in srgb, var(--app-accent) 15%, transparent); }
+
+/* ── Queue view enhancements ── */
+
+.bead-meta-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-top: 2px;
+  font-size: 10px;
+  flex-wrap: wrap;
+}
+
+.bead-epic-crumb {
+  color: var(--app-fg-muted);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-style: italic;
+}
+.bead-epic-crumb .codicon {
+  font-size: 10px;
+}
+
+.bead-section-status-icon {
+  font-size: 12px;
+  color: var(--app-accent);
+}
+
+.beads-closed-toggle {
+  padding: var(--space-xs) var(--space-sm);
+  text-align: center;
+}
+
+.beads-closed-link {
+  background: none;
+  border: none;
+  color: var(--app-fg-muted);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.beads-closed-link:hover {
+  color: var(--app-accent);
+}
+
+/* ── Epics view ── */
+
+.epic-card {
+  border-bottom: 1px solid var(--app-border);
+}
+.epic-card.epic-complete {
+  opacity: 0.6;
+}
+
+.epic-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  width: 100%;
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--app-surface);
+  border: none;
+  color: var(--app-fg);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  text-align: left;
+}
+.epic-header:hover {
+  background: var(--app-hover);
+}
+
+.epic-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.epic-progress-label {
+  color: var(--app-fg-muted);
+  font-weight: 400;
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.epic-progress-bar-track {
+  height: 2px;
+  background: var(--app-border);
+  margin: 0 var(--space-sm);
+}
+
+.epic-progress-bar-fill {
+  height: 100%;
+  background: var(--app-accent);
+  transition: width 0.3s ease;
+  border-radius: 1px;
+}
+.epic-progress-bar-fill.complete {
+  background: var(--app-success, #3fb950);
+}
+
+.epic-status-dots {
+  display: flex;
+  gap: var(--space-xs);
+  padding: 2px var(--space-sm) var(--space-xs);
+  font-size: 10px;
+}
+
+.epic-dot {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-weight: 600;
+}
+.epic-dot::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.epic-dot.status-in-progress::before { background: var(--app-accent); }
+.epic-dot.status-ready::before { background: var(--app-fg-muted); }
+.epic-dot.status-blocked::before { background: var(--app-error, #f85149); }
+.epic-dot.status-closed::before { background: var(--app-success, #3fb950); }
+
+.epic-children {
+  padding: 0 var(--space-xs) var(--space-xs);
+}
+
+.epic-child {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: 3px var(--space-sm) 3px calc(var(--space-sm) + 12px);
+  font-size: var(--font-size-xs);
+  border-radius: var(--radius-sm);
+}
+.epic-child:hover {
+  background: var(--app-hover);
+}
+
+.epic-child .codicon {
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.epic-child .status-in-progress { color: var(--app-accent); }
+.epic-child .status-ready { color: var(--app-fg-muted); }
+.epic-child .status-blocked { color: var(--app-error, #f85149); }
+.epic-child .status-closed { color: var(--app-success, #3fb950); opacity: 0.6; }
+
+.epic-child-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.epic-ungrouped-header {
+  cursor: default;
+  color: var(--app-fg-muted);
+}
+
 /* ============================================================================
    Architecture Panel
    ============================================================================ */
@@ -4021,5 +4431,256 @@ button, .toolbar-icon, .session-card, .mention-item, .tool-badge {
 .arch-special-type.type-flow { color: var(--app-accent); background: color-mix(in srgb, var(--app-accent) 15%, transparent); }
 
 .arch-special-name {
+  color: var(--app-fg);
+}
+
+/* ============================================================================
+   Subagents Panel
+   ============================================================================ */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: 6px var(--space-sm);
+  border-bottom: 1px solid var(--app-border);
+  flex-shrink: 0;
+}
+
+.panel-title {
+  font-weight: 600;
+  font-size: var(--font-size-sm);
+  flex: 1;
+}
+
+.back-btn {
+  background: none;
+  border: none;
+  color: var(--app-fg);
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  opacity: 0.7;
+}
+.back-btn:hover {
+  opacity: 1;
+  background: var(--vscode-toolbar-hoverBackground);
+}
+
+.panel-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-sm);
+}
+
+/* Notification banner inside panels */
+.notification {
+  padding: 6px 10px;
+  margin-bottom: var(--space-sm);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  animation: fadeIn 0.3s ease-in-out;
+}
+.notification.success {
+  color: var(--vscode-testing-iconPassed);
+  border: 1px solid var(--vscode-testing-iconPassed);
+  background: color-mix(in srgb, var(--vscode-testing-iconPassed) 8%, transparent);
+}
+.notification.error {
+  color: var(--vscode-testing-iconFailed);
+  border: 1px solid var(--vscode-testing-iconFailed);
+  background: color-mix(in srgb, var(--vscode-testing-iconFailed) 8%, transparent);
+}
+
+/* Section headings within the list */
+.section-heading {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--app-fg-muted);
+  margin: var(--space-sm) 0 var(--space-xs);
+  padding-left: 2px;
+}
+
+.subagents-section {
+  margin-bottom: var(--space-md);
+}
+
+/* Empty state */
+.empty-text {
+  font-size: var(--font-size-sm);
+  color: var(--app-fg-muted);
+  padding: var(--space-sm) 0;
+  text-align: center;
+}
+
+/* Subagent list row */
+.subagent-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid var(--app-border);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-xs);
+  background: var(--app-surface);
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.subagent-row:hover {
+  border-color: color-mix(in srgb, var(--app-accent) 40%, var(--app-border));
+  box-shadow: var(--shadow-sm);
+}
+
+.subagent-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.subagent-name {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--app-fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-desc {
+  font-size: var(--font-size-xs);
+  color: var(--app-fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-tools {
+  font-size: var(--font-size-xs);
+  color: var(--app-fg-muted);
+  font-family: var(--font-mono);
+  opacity: 0.7;
+}
+
+.subagent-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+/* Form elements inside panels (textarea variant) */
+.form-group {
+  margin-bottom: var(--space-md);
+}
+
+.form-textarea {
+  width: 100%;
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, transparent);
+  border-radius: var(--radius-sm);
+  font-size: inherit;
+  font-family: var(--font-mono);
+  resize: vertical;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.form-textarea:focus {
+  border-color: var(--app-accent);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--app-accent) 30%, transparent);
+  outline: none;
+}
+
+.form-hint {
+  display: block;
+  font-size: var(--font-size-xs);
+  color: var(--app-fg-muted);
+  margin-top: 3px;
+}
+
+.form-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Delete confirmation modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.15s ease-in-out;
+}
+
+.modal {
+  background: var(--app-surface);
+  border: 1px solid var(--app-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+  min-width: 240px;
+  max-width: 320px;
+  box-shadow: var(--shadow-lg);
+}
+
+.modal p {
+  font-size: var(--font-size-sm);
+  margin-bottom: var(--space-md);
+  line-height: 1.5;
+}
+
+/* Tools checklist in subagent editor */
+.tools-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: var(--space-sm);
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--app-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm);
+  background: var(--app-bg);
+}
+
+.tool-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  user-select: none;
+}
+
+.tool-checkbox-row:hover {
+  background: var(--app-hover);
+}
+
+.tool-checkbox-row input[type="checkbox"] {
+  flex-shrink: 0;
+  accent-color: var(--app-accent);
+  cursor: pointer;
+}
+
+.tool-name {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-xs);
   color: var(--app-fg);
 }

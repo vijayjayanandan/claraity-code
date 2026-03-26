@@ -253,6 +253,8 @@ class StdioProtocol(UIProtocol):
         "set_mode": "_handle_set_mode",
         "set_auto_approve": "_handle_set_auto_approve",
         "get_auto_approve": "_handle_get_auto_approve",
+        "get_limits": "_handle_get_limits",
+        "save_limits": "_handle_save_limits",
         "new_session": "_handle_new_session",
         "list_sessions": "_handle_list_sessions",
         "resume_session": "_handle_resume_session",
@@ -274,6 +276,12 @@ class StdioProtocol(UIProtocol):
         "get_beads": "_handle_get_beads",
         "get_architecture": "_handle_get_architecture",
         "approve_knowledge": "_handle_approve_knowledge",
+        "export_knowledge": "_handle_export_knowledge",
+        # Subagent management
+        "list_subagents": "_handle_list_subagents",
+        "save_subagent": "_handle_save_subagent",
+        "delete_subagent": "_handle_delete_subagent",
+        "reload_subagents": "_handle_reload_subagents",
     }
 
     def __init__(
@@ -481,6 +489,16 @@ class StdioProtocol(UIProtocol):
         )
         self._loop.call_soon_threadsafe(asyncio.ensure_future, coro)
 
+    def notify_beads_updated(self) -> None:
+        """Push a fresh beads snapshot to the VS Code client.
+
+        Called after task_create/update/block so the beads panel auto-refreshes
+        without the user having to click the refresh button.
+        May be called from a thread-pool executor.
+        """
+        coro = self._safe_background_send(self._handle_get_beads({}))
+        self._loop.call_soon_threadsafe(asyncio.ensure_future, coro)
+
     # -- Interactive overrides (pause, clarify) -----------------------------
 
     async def request_pause(
@@ -684,12 +702,28 @@ class StdioProtocol(UIProtocol):
         categories = data.get("categories", {})
         if self._agent:
             confirmed = self._agent.set_auto_approve_categories(categories)
+            # Persist to config.yaml so settings survive restart
+            self._persist_auto_approve(confirmed)
             await self._send_json(
                 {
                     "type": "auto_approve_changed",
                     "categories": confirmed,
                 }
             )
+
+    def _persist_auto_approve(self, categories: dict[str, bool]) -> None:
+        """Save auto-approve categories to config.yaml."""
+        try:
+            from src.llm.config_loader import load_llm_config, save_llm_config
+
+            cfg = load_llm_config(self._config_path)
+            cfg.auto_approve.read = categories.get("read", cfg.auto_approve.read)
+            cfg.auto_approve.edit = categories.get("edit", cfg.auto_approve.edit)
+            cfg.auto_approve.execute = categories.get("execute", cfg.auto_approve.execute)
+            cfg.auto_approve.browser = categories.get("browser", cfg.auto_approve.browser)
+            save_llm_config(cfg, self._config_path)
+        except Exception as e:
+            logger.warning("auto_approve_persist_error", error=str(e))
 
     async def _handle_get_auto_approve(self, data: dict) -> None:
         if self._agent:
@@ -699,6 +733,29 @@ class StdioProtocol(UIProtocol):
                     "categories": self._agent.get_auto_approve_categories(),
                 }
             )
+
+    # -----------------------------------------------------------------
+    # Limits handlers
+    # -----------------------------------------------------------------
+
+    async def _handle_get_limits(self, data: dict) -> None:
+        from src.server.config_handler import get_limits_response
+
+        response = get_limits_response(self._config_path)
+        # Overlay runtime state from agent if available
+        if self._agent:
+            response["limits"] = self._agent.get_limits()
+        await self._send_json(response)
+
+    async def _handle_save_limits(self, data: dict) -> None:
+        from src.server.config_handler import save_limits_from_request
+
+        response = save_limits_from_request(data, self._config_path)
+        # Apply to running agent immediately (hot-swap)
+        if response.get("success") and self._agent and response.get("limits"):
+            confirmed = self._agent.set_limits(response["limits"])
+            response["limits"] = confirmed
+        await self._send_json(response)
 
     # -----------------------------------------------------------------
     # Session management handlers
@@ -1110,14 +1167,24 @@ class StdioProtocol(UIProtocol):
                 conn = self._agent._mcp_manager.get_connection(name) if self._agent else None
 
                 # Get ALL tool descriptions from registry (includes disabled tools)
-                tool_descriptions = conn.registry._all_tool_descriptions if conn and conn.registry else {}
+                tool_descriptions = (
+                    conn.registry._all_tool_descriptions if conn and conn.registry else {}
+                )
 
                 tools = [
-                    {"name": tool_name, "enabled": override.enabled, "description": tool_descriptions.get(tool_name, "")}
+                    {
+                        "name": tool_name,
+                        "enabled": override.enabled,
+                        "description": tool_descriptions.get(tool_name, ""),
+                    }
                     for tool_name, override in server.tools.items()
                 ]
                 # Get connection error if not connected
-                error = self._agent._mcp_manager.get_connection_error(name) if self._agent and conn is None else None
+                error = (
+                    self._agent._mcp_manager.get_connection_error(name)
+                    if self._agent and conn is None
+                    else None
+                )
 
                 # Generate docs URL from package name or server URL
                 docs_url = ""
@@ -1317,7 +1384,9 @@ class StdioProtocol(UIProtocol):
                     from src.integrations.mcp.registry import McpToolRegistry
 
                     runtime_config = server_settings.to_runtime_config()
-                    transport = SseTransport() if server_settings.transport == "sse" else StdioTransport()
+                    transport = (
+                        SseTransport() if server_settings.transport == "sse" else StdioTransport()
+                    )
                     client = McpClient(runtime_config, transport)
                     registry = McpToolRegistry(runtime_config, McpPolicyGate())
 
@@ -1368,7 +1437,9 @@ class StdioProtocol(UIProtocol):
                 from src.integrations.mcp.registry import McpToolRegistry
 
                 runtime_config = server_settings.to_runtime_config()
-                transport = SseTransport() if server_settings.transport == "sse" else StdioTransport()
+                transport = (
+                    SseTransport() if server_settings.transport == "sse" else StdioTransport()
+                )
                 client = McpClient(runtime_config, transport)
                 registry = McpToolRegistry(runtime_config, McpPolicyGate())
 
@@ -1432,11 +1503,13 @@ class StdioProtocol(UIProtocol):
             await self._handle_mcp_servers({})
         except Exception as e:
             logger.warning("stdio_mcp_reload_error", error=str(e))
-            await self._send_json({
-                "type": "mcp_servers_list",
-                "servers": [],
-                "notification": {"message": f"Reload failed: {e}", "success": False},
-            })
+            await self._send_json(
+                {
+                    "type": "mcp_servers_list",
+                    "servers": [],
+                    "notification": {"message": f"Reload failed: {e}", "success": False},
+                }
+            )
 
     # -----------------------------------------------------------------
     # ClarAIty Knowledge & Beads handlers
@@ -1474,6 +1547,7 @@ class StdioProtocol(UIProtocol):
                 all_beads = store.get_all_beads()
                 ready_ids = {b["id"] for b in store.get_ready()}
                 stats = store.get_stats()
+                all_blockers = store.get_all_blockers()
 
                 ready, in_progress, blocked, closed = [], [], [], []
                 for bead in all_beads:
@@ -1486,12 +1560,7 @@ class StdioProtocol(UIProtocol):
                         except (ValueError, TypeError):
                             pass
 
-                    # Get blockers for this bead
-                    deps = store.get_dependencies(bead["id"])
-                    blockers = [
-                        {"id": b["id"], "title": b["title"], "status": b["status"]}
-                        for b in deps.get("blockers", [])
-                    ]
+                    blockers = all_blockers.get(bead["id"], [])
 
                     item = {
                         "id": bead["id"],
@@ -1682,6 +1751,284 @@ class StdioProtocol(UIProtocol):
         except Exception as e:
             logger.warning("stdio_approve_knowledge_error", error=str(e))
             await self._send_error("approve_error", f"Failed to approve: {e}")
+
+    # -----------------------------------------------------------------
+    # Subagent management handlers
+    # -----------------------------------------------------------------
+
+    def _reload_subagents_and_refresh_tool(self) -> None:
+        """Reload subagent configs on the running agent and refresh the delegation tool.
+
+        Called after any save or delete so the LLM immediately sees the change
+        on the next API call without requiring a server restart.
+        """
+        if not (self._agent and hasattr(self._agent, "subagent_manager")):
+            return
+
+        self._agent.subagent_manager.reload_subagents()
+
+        tool_exec = getattr(self._agent, "tool_executor", None)
+        if not tool_exec:
+            return
+
+        delegation_tool = tool_exec.get_tool("delegate_to_subagent")
+        if delegation_tool and hasattr(delegation_tool, "refresh_description"):
+            delegation_tool.refresh_description()
+
+    # Static tool names available to subagents (matches runner.py all_tools list)
+    _SUBAGENT_STATIC_TOOLS = [
+        "read_file",
+        "write_file",
+        "edit_file",
+        "append_to_file",
+        "list_directory",
+        "grep",
+        "glob",
+        "run_command",
+        "get_file_outline",
+        "get_symbol_context",
+        "kb_detect_changes",
+        "kb_update_manifest",
+        "clarify",
+    ]
+
+    async def _handle_list_subagents(self, data: dict) -> None:
+        """Return all discovered subagents with source metadata and available tools."""
+        try:
+            from src.subagents.config import SubAgentConfigLoader
+
+            working_dir = Path(self._working_directory) if self._working_directory else Path.cwd()
+            loader = SubAgentConfigLoader(working_directory=working_dir)
+            configs = loader.discover_all()
+
+            subagents = sorted(
+                [
+                    {
+                        "name": config.name,
+                        "description": config.description,
+                        "system_prompt": config.system_prompt,
+                        "tools": config.tools,
+                        "source": config.metadata.get("source", "builtin"),
+                        "config_path": str(config.config_path) if config.config_path else None,
+                    }
+                    for config in configs.values()
+                ],
+                key=lambda a: (a["source"] != "project", a["name"]),
+            )
+
+            await self._send_json({
+                "type": "subagents_list",
+                "subagents": subagents,
+                "available_tools": self._SUBAGENT_STATIC_TOOLS,
+            })
+        except Exception as e:
+            logger.warning("stdio_list_subagents_error", error=str(e))
+            await self._send_json({
+                "type": "subagents_list",
+                "subagents": [],
+                "available_tools": self._SUBAGENT_STATIC_TOOLS,
+            })
+
+    async def _handle_save_subagent(self, data: dict) -> None:
+        """Save or update a custom subagent config to .clarity/agents/<name>.md."""
+        import re as _re
+
+        name = str(data.get("name", "")).strip()
+        description = str(data.get("description", "")).strip()
+        system_prompt = str(data.get("system_prompt", "")).strip()
+        tools = data.get("tools")  # list[str] | None
+
+        # Validate name
+        if not _re.match(r"^[a-z0-9]+(?:-[a-z0-9]+)*$", name):
+            await self._send_json(
+                {
+                    "type": "subagent_saved",
+                    "success": False,
+                    "name": name,
+                    "message": "Invalid name: use lowercase letters, numbers, and hyphens only.",
+                }
+            )
+            return
+
+        if not description:
+            await self._send_json(
+                {
+                    "type": "subagent_saved",
+                    "success": False,
+                    "name": name,
+                    "message": "Description is required.",
+                }
+            )
+            return
+
+        if not system_prompt:
+            await self._send_json(
+                {
+                    "type": "subagent_saved",
+                    "success": False,
+                    "name": name,
+                    "message": "System prompt is required.",
+                }
+            )
+            return
+
+        try:
+            working_dir = Path(self._working_directory) if self._working_directory else Path.cwd()
+            agents_dir = working_dir / ".clarity" / "agents"
+            agents_dir.mkdir(parents=True, exist_ok=True)
+
+            # Build .md content with properly escaped YAML frontmatter
+            import yaml as _yaml
+            frontmatter: dict = {"name": name, "description": description}
+            if tools:
+                frontmatter["tools"] = tools  # written as a proper YAML list
+            md_content = f"---\n{_yaml.safe_dump(frontmatter, default_flow_style=False, allow_unicode=True)}---\n\n{system_prompt}\n"
+
+            target = agents_dir / f"{name}.md"
+            target.write_text(md_content, encoding="utf-8")
+
+            self._reload_subagents_and_refresh_tool()
+
+            await self._send_json(
+                {
+                    "type": "subagent_saved",
+                    "success": True,
+                    "name": name,
+                    "message": f"Subagent '{name}' saved.",
+                }
+            )
+        except Exception as e:
+            logger.warning("stdio_save_subagent_error", error=str(e))
+            await self._send_json(
+                {
+                    "type": "subagent_saved",
+                    "success": False,
+                    "name": name,
+                    "message": f"Failed to save subagent: {e}",
+                }
+            )
+
+    async def _handle_delete_subagent(self, data: dict) -> None:
+        """Delete a project-level subagent .md file. Built-ins cannot be deleted."""
+        import re as _re
+
+        name = str(data.get("name", "")).strip()
+
+        if not name or not _re.match(r"^[a-z0-9]+(?:-[a-z0-9]+)*$", name):
+            await self._send_json(
+                {
+                    "type": "subagent_deleted",
+                    "success": False,
+                    "name": name,
+                    "message": "Invalid subagent name.",
+                }
+            )
+            return
+
+        try:
+            working_dir = Path(self._working_directory) if self._working_directory else Path.cwd()
+            agents_dir = working_dir / ".clarity" / "agents"
+            target = agents_dir / f"{name}.md"
+
+            if not target.exists():
+                await self._send_json(
+                    {
+                        "type": "subagent_deleted",
+                        "success": False,
+                        "name": name,
+                        "message": f"No project-level config found for '{name}'. Built-in subagents cannot be deleted.",
+                    }
+                )
+                return
+
+            # Resolve symlinks and verify the real path stays inside agents_dir
+            try:
+                resolved = target.resolve()
+                if not resolved.is_relative_to(agents_dir.resolve()):
+                    raise ValueError("Path escapes agents directory")
+            except (OSError, ValueError):
+                await self._send_json(
+                    {
+                        "type": "subagent_deleted",
+                        "success": False,
+                        "name": name,
+                        "message": "Cannot delete: file path is outside the agents directory.",
+                    }
+                )
+                return
+
+            target.unlink()
+
+            self._reload_subagents_and_refresh_tool()
+
+            await self._send_json(
+                {
+                    "type": "subagent_deleted",
+                    "success": True,
+                    "name": name,
+                    "message": f"Subagent '{name}' deleted.",
+                }
+            )
+        except Exception as e:
+            logger.warning("stdio_delete_subagent_error", error=str(e))
+            await self._send_json(
+                {
+                    "type": "subagent_deleted",
+                    "success": False,
+                    "name": name,
+                    "message": f"Failed to delete subagent: {e}",
+                }
+            )
+
+    async def _handle_reload_subagents(self, data: dict) -> None:
+        """Force reload all subagent configs and refresh the delegation tool."""
+        try:
+            self._reload_subagents_and_refresh_tool()
+            await self._handle_list_subagents(data)
+        except Exception as e:
+            logger.warning("stdio_reload_subagents_error", error=str(e))
+            await self._send_json({"type": "subagents_list", "subagents": []})
+
+    async def _handle_export_knowledge(self, data: dict) -> None:
+        """Export both knowledge and beads DBs to JSONL."""
+        try:
+            from src.claraity.claraity_db import ClarityStore
+            from src.claraity.claraity_beads import BeadStore
+
+            results = []
+            kb_path = os.path.join(self._working_directory, ".clarity", "claraity_knowledge.db")
+            if os.path.exists(kb_path):
+                store = ClarityStore(kb_path)
+                try:
+                    count = store.export_jsonl(
+                        os.path.join(
+                            self._working_directory, ".clarity", "claraity_knowledge.jsonl"
+                        )
+                    )
+                    results.append(f"Knowledge: {count} records")
+                finally:
+                    store.close()
+
+            bd_path = os.path.join(self._working_directory, ".clarity", "claraity_beads.db")
+            if os.path.exists(bd_path):
+                store = BeadStore(bd_path)
+                try:
+                    count = store.export_jsonl(
+                        os.path.join(self._working_directory, ".clarity", "claraity_beads.jsonl")
+                    )
+                    results.append(f"Beads: {count} records")
+                finally:
+                    store.close()
+
+            await self._send_json(
+                {
+                    "type": "export_complete",
+                    "data": {"message": "Exported: " + ", ".join(results)},
+                }
+            )
+        except Exception as e:
+            logger.warning("stdio_export_knowledge_error", error=str(e))
+            await self._send_error("export_error", f"Failed to export: {e}")
 
     # -----------------------------------------------------------------
     # Streaming

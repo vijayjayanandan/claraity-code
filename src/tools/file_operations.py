@@ -25,6 +25,7 @@ from src.tools.command_safety import check_command_safety, clamp_timeout
 from src.tools.powershell_sanitize import sanitize_for_powershell
 
 from .base import Tool, ToolResult, ToolStatus
+from .clarityignore import check_command, filter_paths, is_blocked
 from .search_tools import validate_path_security
 
 logger = get_logger("tools.file_operations")
@@ -70,6 +71,11 @@ class FileOperationTool(Tool):
             workspace_root=workspace,
             allow_files_outside_workspace=allow_outside_workspace,
         )
+
+        # Check .clarityignore
+        blocked, _pattern = is_blocked(validated_path)
+        if blocked:
+            raise ValueError("Access denied: file is blocked by user policy")
 
         # Check existence if required
         if must_exist and not validated_path.exists():
@@ -366,7 +372,14 @@ class ListDirectoryTool(FileOperationTool):
                 )
 
             entries = []
+            # Filter out .clarityignore-blocked files (silent omit)
+            all_entries = list(path.iterdir())
+            allowed_entries = filter_paths(all_entries)
+            allowed_set = set(allowed_entries)
+
             for entry in path.iterdir():
+                if entry not in allowed_set:
+                    continue
                 stat = entry.stat()
                 mtime_iso = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
                 entry_info = {
@@ -644,6 +657,16 @@ class RunCommandTool(Tool):
                 error="Command cannot be empty",
             )
 
+        # --- CLARITYIGNORE CHECK ---
+        cmd_blocked, cmd_reason = check_command(command)
+        if cmd_blocked:
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.ERROR,
+                output=None,
+                error=cmd_reason,
+            )
+
         # Validate working directory (same checks as sync path)
         work_dir = None
         if working_directory:
@@ -718,6 +741,16 @@ class RunCommandTool(Tool):
                         "or data exfiltration. If this command is legitimately needed, the user "
                         "must run it manually in their terminal."
                     ),
+                )
+
+            # --- CLARITYIGNORE CHECK ---
+            cmd_blocked, cmd_reason = check_command(command)
+            if cmd_blocked:
+                return ToolResult(
+                    tool_name=self.name,
+                    status=ToolStatus.ERROR,
+                    output=None,
+                    error=cmd_reason,
                 )
 
             # --- CLAMP TIMEOUT ---

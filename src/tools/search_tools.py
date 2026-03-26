@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .base import Tool, ToolResult, ToolStatus
+from .clarityignore import filter_paths
 
 
 class OutputMode(Enum):
@@ -413,8 +414,9 @@ class GrepTool(Tool):
             # All files (exclude common non-text patterns)
             files = [f for f in search_path.rglob("*") if f.is_file() and not self._should_skip(f)]
 
-        # Remove duplicates and sort
+        # Remove duplicates, filter .clarityignore, and sort
         unique_files = sorted(set(files))
+        unique_files = filter_paths(unique_files)
         return unique_files
 
     def _should_skip(self, file_path: Path) -> bool:
@@ -653,6 +655,9 @@ class GlobTool(Tool):
                 # Filter out directories and unwanted files
                 files = [f for f in matches if f.is_file() and not self._should_skip(f)]
                 all_files.update(files)
+
+            # Filter .clarityignore-blocked files
+            all_files = set(filter_paths(list(all_files)))
 
             if not all_files:
                 return ToolResult(

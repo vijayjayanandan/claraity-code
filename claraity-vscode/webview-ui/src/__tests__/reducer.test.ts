@@ -50,7 +50,7 @@ describe("appReducer — Connection", () => {
       model: "gpt-4o",
       permissionMode: "plan",
       workingDirectory: "/work",
-      autoApprove: { edit: true, execute: false, browser: true },
+      autoApprove: { read: true, edit: true, execute: false, browser: true },
     });
     expect(s.sessionId).toBe("sess-1");
     expect(s.modelName).toBe("gpt-4o");
@@ -69,7 +69,7 @@ describe("appReducer — Connection", () => {
   });
 
   test("SET_SESSION_INFO preserves existing autoApprove when not provided", () => {
-    const base = { ...initialState, autoApprove: { edit: true, execute: true, browser: false } };
+    const base = { ...initialState, autoApprove: { read: true, edit: true, execute: true, browser: false } };
     const s = reduce(
       { type: "SET_SESSION_INFO", sessionId: "s", model: "m", permissionMode: "n" },
       base,
@@ -792,9 +792,9 @@ describe("appReducer — Auto-approve", () => {
   test("AUTO_APPROVE_CHANGED updates categories", () => {
     const s = reduce({
       type: "AUTO_APPROVE_CHANGED",
-      categories: { edit: true, execute: false, browser: true },
+      categories: { read: true, edit: true, execute: false, browser: true },
     });
-    expect(s.autoApprove).toEqual({ edit: true, execute: false, browser: true });
+    expect(s.autoApprove).toEqual({ read: true, edit: true, execute: false, browser: true });
   });
 
   test("AUTO_APPROVE_CHANGED coerces falsy values to false", () => {
@@ -802,7 +802,7 @@ describe("appReducer — Auto-approve", () => {
       type: "AUTO_APPROVE_CHANGED",
       categories: {},
     });
-    expect(s.autoApprove).toEqual({ edit: false, execute: false, browser: false });
+    expect(s.autoApprove).toEqual({ read: false, edit: false, execute: false, browser: false });
   });
 });
 

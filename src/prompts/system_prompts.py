@@ -427,15 +427,16 @@ delegate_to_subagent(
 # Task Management
 # ---------------------------------------------------------------------------
 
-TASK_MANAGEMENT = """# Task Management (CRUD tools)
+TASK_MANAGEMENT = """# Task Management (Bead tools)
 
-Use `task_create`, `task_update`, `task_list`, and `task_get` to track progress.
+Use `task_create`, `task_update`, `task_list`, and `task_block` to track progress.
+These are backed by the ClarAIty Beads system (persistent SQLite, cross-session).
 
 ## Tools
-- **task_create** - Add a new task (subject, description, activeForm). Returns an ID.
-- **task_update** - Update one task by ID (status, subject, description, activeForm).
-- **task_list** - List all tasks with IDs and statuses (read-only).
-- **task_get** - Get full details of one task by ID (read-only).
+- **task_create** - Create a new task with title, description, priority, and optional tags. Returns a bead ID (e.g. bd-a1b2).
+- **task_update** - Update a task's status or add a note. Actions: 'start' (begin work), 'close' (mark done with summary), 'note' (add comment).
+- **task_list** - List unblocked tasks ready to start, sorted by priority.
+- **task_block** - Add a blocking dependency: blocker_id must complete before blocked_id can start.
 
 ## When to Use
 - Task needs 3+ distinct steps
@@ -448,16 +449,17 @@ Use `task_create`, `task_update`, `task_list`, and `task_get` to track progress.
 - Tasks completable in under 3 steps
 
 ## Task States
-- **pending**: Not yet started
+- **open**: Not yet started (shown as pending in UI)
 - **in_progress**: Currently working on (ONLY ONE at a time)
-- **completed**: Finished and verified
+- **closed**: Finished and verified
 
 ## Discipline Rules
-1. Use task_create for each step, then task_update to change status
+1. Use task_create for each step, then task_update action='start' when beginning
 2. Keep EXACTLY ONE task as in_progress at any time
-3. Mark tasks completed IMMEDIATELY when done (not in batches)
-4. Only mark completed when FULLY accomplished (tests passing, no errors)
-5. If blocked, keep as in_progress and create new task for the blocker
+3. Call task_update action='close' IMMEDIATELY when done (not in batches)
+4. Only close when FULLY accomplished (tests passing, no errors)
+5. Include a summary when closing: what was accomplished
+6. If blocked, keep as in_progress and create new task for the blocker
 """
 
 # ---------------------------------------------------------------------------
@@ -663,7 +665,7 @@ When continuing a session with existing tasks:
 
 ## 1) CONTINUATION (auto-resume)
 - Trigger: "continue", "resume", "go on", "next", short acknowledgements
-- Action: Use `task_list` to see current tasks, then `task_update` to resume the in_progress task (or first pending)
+- Action: Use `task_list` to see unblocked tasks, then `task_update` action='start' to resume the first open task
 - Do not create new tasks or ask clarifying questions
 
 ## 2) NEW REQUEST

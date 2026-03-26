@@ -78,6 +78,9 @@ class ToolGatingService:
 
     # Tool -> category mapping for granular auto-approve
     TOOL_CATEGORIES = {
+        "read_file": "read",
+        "list_directory": "read",
+        "search_code": "read",
         "write_file": "edit",
         "edit_file": "edit",
         "append_to_file": "edit",
@@ -89,7 +92,7 @@ class ToolGatingService:
     }
 
     # Valid category names (for input validation)
-    VALID_CATEGORIES = frozenset({"edit", "execute", "browser"})
+    VALID_CATEGORIES = frozenset({"read", "edit", "execute", "browser"})
 
     def __init__(
         self,
@@ -104,7 +107,7 @@ class ToolGatingService:
         self._permission_manager = permission_manager
         self._error_tracker = error_tracker
         self._mcp_manager = mcp_manager
-        self._auto_approve_categories: set = set()  # e.g. {"edit", "browser"}
+        self._auto_approve_categories: set = {"read"}  # read is safe by default
 
     # ------------------------------------------------------------------
     # Category auto-approve
@@ -278,9 +281,14 @@ class ToolGatingService:
         if self._mcp_manager.is_mcp_tool(tool_name):
             return self._mcp_manager.requires_approval(tool_name)
 
-        # NORMAL mode: check category auto-approve first, then risky tools
+        # NORMAL mode: check category auto-approve
+        # A tool needs approval if it has a category and that category is not auto-approved,
+        # OR if it's in RISKY_TOOLS (legacy fallback for uncategorized risky tools).
+        cat = self.TOOL_CATEGORIES.get(tool_name)
+        if cat is not None:
+            return cat not in self._auto_approve_categories
         if tool_name in self.RISKY_TOOLS:
-            return not self.is_category_auto_approved(tool_name)
+            return True
         return False
 
     # ------------------------------------------------------------------

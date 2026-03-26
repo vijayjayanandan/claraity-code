@@ -25,6 +25,7 @@ from typing import Any, Optional
 # ClarityStore - thin wrapper around SQLite
 # ---------------------------------------------------------------------------
 
+
 class ClarityStore:
     """Read/write interface to claraity_knowledge.db (nodes + edges property graph)."""
 
@@ -71,6 +72,12 @@ class ClarityStore:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn: Optional[sqlite3.Connection] = None
+        # Auto-import: if DB missing but JSONL exists, rebuild
+        if not self.db_path.exists():
+            jsonl_path = self.db_path.with_suffix(".jsonl")
+            if jsonl_path.exists():
+                self._rebuild_from_jsonl(jsonl_path)
+                return
         self._ensure_schema()
 
     @contextmanager
@@ -133,8 +140,17 @@ class ClarityStore:
                     risk_level, properties, created_at, updated_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    id, type, layer, name, description, file_path, line_count,
-                    risk_level, json.dumps(properties or {}), now, now,
+                    id,
+                    type,
+                    layer,
+                    name,
+                    description,
+                    file_path,
+                    line_count,
+                    risk_level,
+                    json.dumps(properties or {}),
+                    now,
+                    now,
                 ),
             )
         return id
@@ -154,8 +170,7 @@ class ClarityStore:
                 """INSERT OR REPLACE INTO edges
                    (id, from_id, to_id, type, weight, label, properties)
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (eid, from_id, to_id, type, weight, label,
-                 json.dumps(properties or {})),
+                (eid, from_id, to_id, type, weight, label, json.dumps(properties or {})),
             )
         return eid
 
@@ -209,6 +224,309 @@ class ClarityStore:
             "edge_types": edge_types,
         }
 
+    def auto_layout(self) -> dict:
+        """Compute flow_rank/flow_col for all modules based on dependency graph.
+
+        Algorithm:
+        1. Build directed graph from module-level edges
+        2. Find strongly connected components (handles cycles)
+        3. Topological sort the SCC DAG
+        4. Assign flow_rank = topological depth
+        5. Within each rank, sort by edge count (most connected = center)
+        6. Update module node properties
+
+        Returns: {"modules_updated": N, "ranks": {rank: [module_ids]}}
+        """
+        from collections import defaultdict, deque
+
+        nodes = self.get_all_nodes()
+        edges = self.get_all_edges()
+
+        modules = {n["id"]: n for n in nodes if n["type"] == "module"}
+        if not modules:
+            return {"modules_updated": 0, "ranks": {}}
+
+        # Also position system nodes at rank 0
+        systems = {n["id"]: n for n in nodes if n["type"] == "system"}
+
+        # Build adjacency list from module-to-module edges (not contains/constrains)
+        # Also consider component-level edges that cross module boundaries
+        child_to_module = {}
+        for e in edges:
+            if e["type"] == "contains" and e["from_id"] in modules:
+                child_to_module[e["to_id"]] = e["from_id"]
+
+        graph: dict[str, set[str]] = defaultdict(set)  # from -> set(to)
+        reverse: dict[str, set[str]] = defaultdict(set)
+        for e in edges:
+            if e["type"] in ("contains", "constrains"):
+                continue
+            # Resolve to module level
+            from_mod = modules.get(e["from_id"]) and e["from_id"]
+            if not from_mod:
+                from_mod = child_to_module.get(e["from_id"])
+            to_mod = modules.get(e["to_id"]) and e["to_id"]
+            if not to_mod:
+                to_mod = child_to_module.get(e["to_id"])
+            if from_mod and to_mod and from_mod != to_mod:
+                graph[from_mod].add(to_mod)
+                reverse[to_mod].add(from_mod)
+
+        # Tarjan's SCC algorithm
+        mod_ids = list(modules.keys())
+        index_counter = [0]
+        stack: list[str] = []
+        lowlink: dict[str, int] = {}
+        index: dict[str, int] = {}
+        on_stack: set[str] = set()
+        sccs: list[list[str]] = []
+
+        def strongconnect(v: str):
+            index[v] = index_counter[0]
+            lowlink[v] = index_counter[0]
+            index_counter[0] += 1
+            stack.append(v)
+            on_stack.add(v)
+
+            for w in graph.get(v, set()):
+                if w not in modules:
+                    continue
+                if w not in index:
+                    strongconnect(w)
+                    lowlink[v] = min(lowlink[v], lowlink[w])
+                elif w in on_stack:
+                    lowlink[v] = min(lowlink[v], index[w])
+
+            if lowlink[v] == index[v]:
+                scc = []
+                while True:
+                    w = stack.pop()
+                    on_stack.discard(w)
+                    scc.append(w)
+                    if w == v:
+                        break
+                sccs.append(scc)
+
+        for v in mod_ids:
+            if v not in index:
+                strongconnect(v)
+
+        # Map each module to its SCC index
+        mod_to_scc: dict[str, int] = {}
+        for i, scc in enumerate(sccs):
+            for m in scc:
+                mod_to_scc[m] = i
+
+        # Build SCC-level DAG
+        scc_graph: dict[int, set[int]] = defaultdict(set)
+        scc_in_degree: dict[int, int] = defaultdict(int)
+        for i in range(len(sccs)):
+            scc_in_degree[i] = 0
+
+        for from_mod, to_mods in graph.items():
+            if from_mod not in mod_to_scc:
+                continue
+            from_scc = mod_to_scc[from_mod]
+            for to_mod in to_mods:
+                if to_mod not in mod_to_scc:
+                    continue
+                to_scc = mod_to_scc[to_mod]
+                if from_scc != to_scc and to_scc not in scc_graph[from_scc]:
+                    scc_graph[from_scc].add(to_scc)
+                    scc_in_degree[to_scc] += 1
+
+        # Topological sort via Kahn's algorithm (BFS)
+        queue = deque([i for i in range(len(sccs)) if scc_in_degree[i] == 0])
+        scc_rank: dict[int, int] = {}
+        while queue:
+            scc_idx = queue.popleft()
+            if scc_idx not in scc_rank:
+                scc_rank[scc_idx] = 0
+            for dep_scc in scc_graph.get(scc_idx, set()):
+                new_rank = scc_rank[scc_idx] + 1
+                scc_rank[dep_scc] = max(scc_rank.get(dep_scc, 0), new_rank)
+                scc_in_degree[dep_scc] -= 1
+                if scc_in_degree[dep_scc] == 0:
+                    queue.append(dep_scc)
+
+        # Handle any SCCs not reached (isolated modules)
+        for i in range(len(sccs)):
+            if i not in scc_rank:
+                scc_rank[i] = 0
+
+        # Assign flow_rank to modules (offset by 1 to leave room for system nodes at rank 0)
+        # Isolated modules (no edges at all) go to the bottom, not the top
+        max_rank = max(scc_rank.values()) if scc_rank else 0
+        mod_rank: dict[str, int] = {}
+        for mod_id in mod_ids:
+            has_any_edge = mod_id in graph or mod_id in reverse
+            if mod_id in mod_to_scc and has_any_edge:
+                mod_rank[mod_id] = scc_rank[mod_to_scc[mod_id]] + 1  # +1 for system row
+            else:
+                mod_rank[mod_id] = max_rank + 2  # isolated modules go to bottom
+
+        # Within each rank, sort by total edge count (most connected first, center)
+        ranks: dict[int, list[str]] = defaultdict(list)
+        for mod_id, rank in mod_rank.items():
+            ranks[rank].append(mod_id)
+
+        mod_edge_count: dict[str, int] = defaultdict(int)
+        for from_mod, to_mods in graph.items():
+            mod_edge_count[from_mod] += len(to_mods)
+        for to_mod, from_mods in reverse.items():
+            mod_edge_count[to_mod] += len(from_mods)
+
+        for rank in ranks:
+            ranks[rank].sort(key=lambda m: -mod_edge_count.get(m, 0))
+
+        # Assign flow_col within each rank
+        mod_col: dict[str, int] = {}
+        for rank, mods in ranks.items():
+            for i, mod_id in enumerate(mods):
+                mod_col[mod_id] = i
+
+        # Update module node properties
+        def _parse_props(raw) -> dict:
+            """Parse properties, handling double-encoded JSON strings."""
+            if isinstance(raw, dict):
+                return raw
+            if isinstance(raw, str):
+                try:
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, dict):
+                        return parsed
+                    if isinstance(parsed, str):
+                        return json.loads(parsed)
+                except (ValueError, TypeError):
+                    pass
+            return {}
+
+        updated = 0
+        for mod_id in mod_ids:
+            node = modules[mod_id]
+            props = _parse_props(node.get("properties", "{}"))
+            props["flow_rank"] = mod_rank.get(mod_id, 99)
+            props["flow_col"] = mod_col.get(mod_id, 0)
+            with self._cursor() as cur:
+                cur.execute(
+                    "UPDATE nodes SET properties = ? WHERE id = ?",
+                    (json.dumps(props), mod_id),
+                )
+            updated += 1
+
+        # Update system nodes: rank 0, sorted by flow_col
+        sys_col = 0
+        for sys_id in sorted(systems.keys()):
+            node = systems[sys_id]
+            props = _parse_props(node.get("properties", "{}"))
+            props["flow_rank"] = 0
+            props["flow_col"] = sys_col
+            with self._cursor() as cur:
+                cur.execute(
+                    "UPDATE nodes SET properties = ? WHERE id = ?",
+                    (json.dumps(props), sys_id),
+                )
+            sys_col += 1
+            updated += 1
+
+        return {
+            "modules_updated": updated,
+            "ranks": {r: mods for r, mods in sorted(ranks.items())},
+        }
+
+    def _rebuild_from_jsonl(self, jsonl_path: Path):
+        """Rebuild this store's DB from a JSONL file (called from __init__)."""
+        rebuilt = ClarityStore.import_jsonl(str(jsonl_path), str(self.db_path))
+        self.conn = rebuilt.conn
+        rebuilt.conn = None  # Transfer ownership, prevent double-close
+
+    # -- JSONL Export/Import ---------------------------------------------------
+
+    def export_jsonl(self, path: str = ".clarity/claraity_knowledge.jsonl") -> int:
+        """Export entire DB to JSONL for git tracking. Returns line count.
+
+        Order: metadata first, then nodes, then edges (for FK-safe import).
+        """
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        count = 0
+        with open(out, "w", encoding="utf-8") as f:
+            # Metadata
+            for key, value in sorted(self.get_metadata().items()):
+                f.write(json.dumps({"_t": "meta", "key": key, "value": value}, default=str) + "\n")
+                count += 1
+            # Nodes
+            for n in self.get_all_nodes():
+                rec = dict(n)
+                rec["_t"] = "node"
+                # Parse properties JSON string to dict for cleaner JSONL
+                if isinstance(rec.get("properties"), str):
+                    try:
+                        rec["properties"] = json.loads(rec["properties"])
+                    except (ValueError, TypeError):
+                        pass
+                f.write(json.dumps(rec, default=str) + "\n")
+                count += 1
+            # Edges
+            for e in self.get_all_edges():
+                rec = dict(e)
+                rec["_t"] = "edge"
+                if isinstance(rec.get("properties"), str):
+                    try:
+                        rec["properties"] = json.loads(rec["properties"])
+                    except (ValueError, TypeError):
+                        pass
+                f.write(json.dumps(rec, default=str) + "\n")
+                count += 1
+        return count
+
+    @classmethod
+    def import_jsonl(
+        cls, jsonl_path: str, db_path: str = ".clarity/claraity_knowledge.db"
+    ) -> "ClarityStore":
+        """Rebuild SQLite DB from JSONL file. Deletes existing DB first."""
+        db = Path(db_path)
+        if db.exists():
+            db.unlink()
+        store = cls(db_path)
+        with open(jsonl_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                rec = json.loads(line)
+                t = rec.pop("_t")
+                if t == "meta":
+                    store.set_metadata(rec["key"], rec["value"])
+                elif t == "node":
+                    props = rec.get("properties")
+                    if isinstance(props, dict):
+                        props = json.dumps(props)
+                    store.add_node(
+                        id=rec["id"],
+                        type=rec["type"],
+                        layer=rec.get("layer", 0),
+                        name=rec["name"],
+                        description=rec.get("description", ""),
+                        file_path=rec.get("file_path"),
+                        line_count=rec.get("line_count"),
+                        risk_level=rec.get("risk_level", "low"),
+                        properties=props,
+                    )
+                elif t == "edge":
+                    props = rec.get("properties")
+                    if isinstance(props, dict):
+                        props = json.dumps(props)
+                    store.add_edge(
+                        from_id=rec["from_id"],
+                        to_id=rec["to_id"],
+                        type=rec["type"],
+                        label=rec.get("label"),
+                        weight=rec.get("weight", 1.0),
+                        properties=props,
+                    )
+        return store
+
     # -- Export ----------------------------------------------------------------
 
     def export_graph_json(self, path: str = ".clarity/graph.json"):
@@ -252,6 +570,7 @@ class ClarityStore:
 # Populate - encode ClarAIty codebase knowledge
 # ---------------------------------------------------------------------------
 
+
 def populate(store: ClarityStore):
     """Populate the DB with ClarAIty codebase architectural knowledge."""
 
@@ -270,37 +589,62 @@ def populate(store: ClarityStore):
     # Flow: User -> VS Code -> Server -> Core -> Tools/Memory/LLM -> Session -> Persistence
 
     store.add_node(
-        id="sys-user", type="system", layer=1, name="User",
+        id="sys-user",
+        type="system",
+        layer=1,
+        name="User",
         description="Human developer interacting via TUI or VS Code sidebar",
         properties={"actor_type": "human", "flow_rank": 0, "flow_col": 0},
     )
     store.add_node(
-        id="sys-vscode", type="system", layer=1, name="VS Code Extension",
+        id="sys-vscode",
+        type="system",
+        layer=1,
+        name="VS Code Extension",
         description="ClarAIty sidebar panel communicating via stdio+TCP protocol",
         properties={"protocol": "stdio+tcp", "framework": "react", "flow_rank": 0, "flow_col": 1},
     )
     store.add_node(
-        id="sys-llm-api", type="system", layer=1, name="LLM Providers",
+        id="sys-llm-api",
+        type="system",
+        layer=1,
+        name="LLM Providers",
         description="OpenAI, Anthropic, Ollama APIs for language model inference",
-        properties={"providers": ["openai", "anthropic", "ollama", "vllm"], "flow_rank": 0, "flow_col": 4},
+        properties={
+            "providers": ["openai", "anthropic", "ollama", "vllm"],
+            "flow_rank": 0,
+            "flow_col": 4,
+        },
     )
     store.add_node(
-        id="sys-filesystem", type="system", layer=1, name="Local Filesystem",
+        id="sys-filesystem",
+        type="system",
+        layer=1,
+        name="Local Filesystem",
         description="Workspace files, project code, configuration, session data",
         properties={"flow_rank": 0, "flow_col": 5},
     )
     store.add_node(
-        id="sys-lsp", type="system", layer=1, name="Language Server (LSP)",
+        id="sys-lsp",
+        type="system",
+        layer=1,
+        name="Language Server (LSP)",
         description="jedi-language-server for Python code intelligence",
         properties={"server": "jedi-language-server", "flow_rank": 0, "flow_col": 6},
     )
     store.add_node(
-        id="sys-mcp", type="system", layer=1, name="MCP Servers",
+        id="sys-mcp",
+        type="system",
+        layer=1,
+        name="MCP Servers",
         description="Model Context Protocol servers providing external tools",
         properties={"flow_rank": 0, "flow_col": 7},
     )
     store.add_node(
-        id="sys-web", type="system", layer=1, name="Web / APIs",
+        id="sys-web",
+        type="system",
+        layer=1,
+        name="Web / APIs",
         description="Web search, web fetch, Jira, GitHub integrations",
         properties={"flow_rank": 0, "flow_col": 8},
     )
@@ -317,87 +661,236 @@ def populate(store: ClarityStore):
     # Row 5: observability, code_intelligence, integrations, platform (infrastructure)
 
     modules = [
-        ("mod-ui", "module", "src/ui/", "Textual TUI: app shell, widgets, formatters",
-         20, 12000, "high",
-         {"key_files": ["app.py", "widgets/tool_card.py", "widgets/message.py", "store_adapter.py"],
-          "flow_rank": 1, "flow_col": 0}),
-
-        ("mod-server", "module", "src/server/", "VS Code communication: stdio+TCP transport, serialization",
-         4, 3500, "medium",
-         {"key_files": ["stdio_server.py", "ws_protocol.py", "serializers.py"],
-          "flow_rank": 1, "flow_col": 1}),
-
-        ("mod-core", "core", "src/core/", "Agent control loop, streaming, events, protocol",
-         31, 8500, "high",
-         {"key_files": ["agent.py", "events.py", "protocol.py", "streaming/pipeline.py"],
-          "flow_rank": 2, "flow_col": 0}),
-
-        ("mod-director", "module", "src/director/", "Disciplined workflow: UNDERSTAND > PLAN > EXECUTE > COMPLETE",
-         6, 1500, "medium",
-         {"key_files": ["adapter.py", "protocol.py", "tools.py"],
-          "flow_rank": 2, "flow_col": 1}),
-
-        ("mod-tools", "module", "src/tools/", "Tool definitions, execution, file ops, search, web, delegation",
-         11, 6300, "medium",
-         {"key_files": ["file_operations.py", "tool_schemas.py", "delegation.py", "web_tools.py"],
-          "flow_rank": 3, "flow_col": 0}),
-
-        ("mod-memory", "module", "src/memory/", "Multi-layer memory: working, episodic, file-based, observation store",
-         6, 3700, "high",
-         {"key_files": ["memory_manager.py", "working_memory.py", "observation_store.py"],
-          "flow_rank": 3, "flow_col": 1}),
-
-        ("mod-llm", "module", "src/llm/", "LLM provider abstraction: OpenAI, Anthropic, Ollama backends",
-         11, 6000, "medium",
-         {"key_files": ["openai_backend.py", "anthropic_backend.py", "base.py", "failure_handler.py"],
-          "flow_rank": 3, "flow_col": 2}),
-
-        ("mod-subagents", "module", "src/subagents/", "Isolated lightweight agents for task delegation",
-         5, 2900, "medium",
-         {"key_files": ["subagent.py", "manager.py", "config.py"],
-          "flow_rank": 3, "flow_col": 3}),
-
-        ("mod-session", "module", "src/session/", "Unified persistence: JSONL ledger + in-memory MessageStore projection",
-         15, 3500, "medium",
-         {"key_files": ["store/memory_store.py", "models/message.py", "persistence/writer.py"],
-          "flow_rank": 4, "flow_col": 0}),
-
-        ("mod-hooks", "module", "src/hooks/", "User-defined hook extensibility",
-         4, 700, "low",
-         {"key_files": ["manager.py"],
-          "flow_rank": 4, "flow_col": 1}),
-
-        ("mod-prompts", "module", "src/prompts/", "System prompts, subagent prompts, templates",
-         5, 4100, "low",
-         {"key_files": ["system_prompts.py", "enhanced_prompts.py", "subagents/__init__.py"],
-          "flow_rank": 4, "flow_col": 2}),
-
-        ("mod-observability", "module", "src/observability/", "Structured logging, error tracking, metrics",
-         10, 4500, "low",
-         {"key_files": ["logging_config.py", "log_query.py", "error_store.py"],
-          "flow_rank": 5, "flow_col": 0}),
-
-        ("mod-code-intel", "module", "src/code_intelligence/", "LSP-based code analysis and symbol context",
-         5, 2000, "low",
-         {"key_files": ["lsp_client_manager.py", "lsp_runtime.py"],
-          "flow_rank": 5, "flow_col": 1}),
-
-        ("mod-integrations", "module", "src/integrations/", "MCP, Jira, secrets management",
-         10, 2500, "low",
-         {"key_files": ["mcp/manager.py", "mcp/client.py", "mcp/registry.py"],
-          "flow_rank": 5, "flow_col": 2}),
-
-        ("mod-platform", "module", "src/platform/", "Cross-platform compatibility (Windows console encoding)",
-         2, 620, "low",
-         {"key_files": ["windows.py"],
-          "flow_rank": 5, "flow_col": 3}),
+        (
+            "mod-ui",
+            "module",
+            "src/ui/",
+            "Textual TUI: app shell, widgets, formatters",
+            20,
+            12000,
+            "high",
+            {
+                "key_files": [
+                    "app.py",
+                    "widgets/tool_card.py",
+                    "widgets/message.py",
+                    "store_adapter.py",
+                ],
+                "flow_rank": 1,
+                "flow_col": 0,
+            },
+        ),
+        (
+            "mod-server",
+            "module",
+            "src/server/",
+            "VS Code communication: stdio+TCP transport, serialization",
+            4,
+            3500,
+            "medium",
+            {
+                "key_files": ["stdio_server.py", "serializers.py"],
+                "flow_rank": 1,
+                "flow_col": 1,
+            },
+        ),
+        (
+            "mod-core",
+            "core",
+            "src/core/",
+            "Agent control loop, streaming, events, protocol",
+            31,
+            8500,
+            "high",
+            {
+                "key_files": ["agent.py", "events.py", "protocol.py", "streaming/pipeline.py"],
+                "flow_rank": 2,
+                "flow_col": 0,
+            },
+        ),
+        (
+            "mod-director",
+            "module",
+            "src/director/",
+            "Disciplined workflow: UNDERSTAND > PLAN > EXECUTE > COMPLETE",
+            6,
+            1500,
+            "medium",
+            {"key_files": ["adapter.py", "protocol.py", "tools.py"], "flow_rank": 2, "flow_col": 1},
+        ),
+        (
+            "mod-tools",
+            "module",
+            "src/tools/",
+            "Tool definitions, execution, file ops, search, web, delegation",
+            11,
+            6300,
+            "medium",
+            {
+                "key_files": [
+                    "file_operations.py",
+                    "tool_schemas.py",
+                    "delegation.py",
+                    "web_tools.py",
+                ],
+                "flow_rank": 3,
+                "flow_col": 0,
+            },
+        ),
+        (
+            "mod-memory",
+            "module",
+            "src/memory/",
+            "Multi-layer memory: working, episodic, file-based, observation store",
+            6,
+            3700,
+            "high",
+            {
+                "key_files": ["memory_manager.py", "working_memory.py", "observation_store.py"],
+                "flow_rank": 3,
+                "flow_col": 1,
+            },
+        ),
+        (
+            "mod-llm",
+            "module",
+            "src/llm/",
+            "LLM provider abstraction: OpenAI, Anthropic, Ollama backends",
+            11,
+            6000,
+            "medium",
+            {
+                "key_files": [
+                    "openai_backend.py",
+                    "anthropic_backend.py",
+                    "base.py",
+                    "failure_handler.py",
+                ],
+                "flow_rank": 3,
+                "flow_col": 2,
+            },
+        ),
+        (
+            "mod-subagents",
+            "module",
+            "src/subagents/",
+            "Isolated lightweight agents for task delegation",
+            5,
+            2900,
+            "medium",
+            {
+                "key_files": ["subagent.py", "manager.py", "config.py"],
+                "flow_rank": 3,
+                "flow_col": 3,
+            },
+        ),
+        (
+            "mod-session",
+            "module",
+            "src/session/",
+            "Unified persistence: JSONL ledger + in-memory MessageStore projection",
+            15,
+            3500,
+            "medium",
+            {
+                "key_files": [
+                    "store/memory_store.py",
+                    "models/message.py",
+                    "persistence/writer.py",
+                ],
+                "flow_rank": 4,
+                "flow_col": 0,
+            },
+        ),
+        (
+            "mod-hooks",
+            "module",
+            "src/hooks/",
+            "User-defined hook extensibility",
+            4,
+            700,
+            "low",
+            {"key_files": ["manager.py"], "flow_rank": 4, "flow_col": 1},
+        ),
+        (
+            "mod-prompts",
+            "module",
+            "src/prompts/",
+            "System prompts, subagent prompts, templates",
+            5,
+            4100,
+            "low",
+            {
+                "key_files": ["system_prompts.py", "enhanced_prompts.py", "subagents/__init__.py"],
+                "flow_rank": 4,
+                "flow_col": 2,
+            },
+        ),
+        (
+            "mod-observability",
+            "module",
+            "src/observability/",
+            "Structured logging, error tracking, metrics",
+            10,
+            4500,
+            "low",
+            {
+                "key_files": ["logging_config.py", "log_query.py", "error_store.py"],
+                "flow_rank": 5,
+                "flow_col": 0,
+            },
+        ),
+        (
+            "mod-code-intel",
+            "module",
+            "src/code_intelligence/",
+            "LSP-based code analysis and symbol context",
+            5,
+            2000,
+            "low",
+            {
+                "key_files": ["lsp_client_manager.py", "lsp_runtime.py"],
+                "flow_rank": 5,
+                "flow_col": 1,
+            },
+        ),
+        (
+            "mod-integrations",
+            "module",
+            "src/integrations/",
+            "MCP, Jira, secrets management",
+            10,
+            2500,
+            "low",
+            {
+                "key_files": ["mcp/manager.py", "mcp/client.py", "mcp/registry.py"],
+                "flow_rank": 5,
+                "flow_col": 2,
+            },
+        ),
+        (
+            "mod-platform",
+            "module",
+            "src/platform/",
+            "Cross-platform compatibility (Windows console encoding)",
+            2,
+            620,
+            "low",
+            {"key_files": ["windows.py"], "flow_rank": 5, "flow_col": 3},
+        ),
     ]
 
     for mid, mtype, fpath, desc, files, lines, risk, props in modules:
         store.add_node(
-            id=mid, type="module", layer=2, name=fpath,
-            description=desc, file_path=fpath,
-            line_count=lines, risk_level=risk, properties=props,
+            id=mid,
+            type="module",
+            layer=2,
+            name=fpath,
+            description=desc,
+            file_path=fpath,
+            line_count=lines,
+            risk_level=risk,
+            properties=props,
         )
 
     # Module inter-dependencies
@@ -454,241 +947,498 @@ def populate(store: ClarityStore):
 
     components = [
         # -- Core --
-        ("comp-coding-agent", "component", "CodingAgent",
-         "Main agent facade: orchestrates LLM calls, tool execution, streaming, memory",
-         "src/core/agent.py", 3307, "high",
-         {"key_methods": ["stream_response()", "execute_tool()", "call_llm()", "from_config()"],
-          "pattern": "async generator yields UIEvents"}),
-
-        ("comp-tool-gating", "component", "ToolGatingService",
-         "4-check pipeline: repeat/plan/director/approval gating before tool execution",
-         "src/core/tool_gating.py", 289, "medium",
-         {"checks": ["repeat", "plan_mode", "director", "approval"]}),
-
-        ("comp-special-handlers", "component", "SpecialToolHandlers",
-         "Async handlers that pause for UI interaction: clarify, plan approval, director",
-         "src/core/special_tool_handlers.py", 417, "medium",
-         {"handlers": ["handle_clarify", "handle_plan_approval", "handle_director_approval"]}),
-
-        ("comp-streaming-pipeline", "component", "StreamingPipeline",
-         "Canonical parser: LLM provider deltas to structured Message segments",
-         "src/core/streaming/pipeline.py", 515, "high",
-         {"input": "ProviderDelta", "output": "Message with segments",
-          "segments": ["TextSegment", "CodeBlockSegment", "ThinkingSegment", "ToolCallRefSegment"]}),
-
-        ("comp-ui-protocol", "component", "UIProtocol",
-         "Bidirectional communication contract between agent and UI layer",
-         "src/core/protocol.py", 645, "medium",
-         {"actions": ["ApprovalResult", "InterruptSignal", "PauseResult", "ClarifyResult"]}),
-
-        ("comp-context-builder", "component", "ContextBuilder",
-         "Builds LLM context from memory layers, constraints, and system prompts",
-         "src/core/context_builder.py", 490, "medium",
-         {}),
-
-        ("comp-plan-mode", "component", "PlanMode",
-         "Claude Code-style planning workflow: generate plan, approve, execute",
-         "src/core/plan_mode.py", 410, "medium",
-         {}),
-
-        ("comp-permission-mgr", "component", "PermissionManager",
-         "Controls tool approval policy: plan mode, normal mode, auto-approve mode",
-         "src/core/permission_mode.py", None, "low",
-         {"modes": ["plan", "normal", "auto"]}),
-
-        ("comp-session-mgr", "component", "SessionManager",
-         "Session lifecycle: create, resume, persist, list sessions",
-         "src/core/session_manager.py", 475, "medium",
-         {}),
-
+        (
+            "comp-coding-agent",
+            "component",
+            "CodingAgent",
+            "Main agent facade: orchestrates LLM calls, tool execution, streaming, memory",
+            "src/core/agent.py",
+            3307,
+            "high",
+            {
+                "key_methods": [
+                    "stream_response()",
+                    "execute_tool()",
+                    "call_llm()",
+                    "from_config()",
+                ],
+                "pattern": "async generator yields UIEvents",
+            },
+        ),
+        (
+            "comp-tool-gating",
+            "component",
+            "ToolGatingService",
+            "4-check pipeline: repeat/plan/director/approval gating before tool execution",
+            "src/core/tool_gating.py",
+            289,
+            "medium",
+            {"checks": ["repeat", "plan_mode", "director", "approval"]},
+        ),
+        (
+            "comp-special-handlers",
+            "component",
+            "SpecialToolHandlers",
+            "Async handlers that pause for UI interaction: clarify, plan approval, director",
+            "src/core/special_tool_handlers.py",
+            417,
+            "medium",
+            {"handlers": ["handle_clarify", "handle_plan_approval", "handle_director_approval"]},
+        ),
+        (
+            "comp-streaming-pipeline",
+            "component",
+            "StreamingPipeline",
+            "Canonical parser: LLM provider deltas to structured Message segments",
+            "src/core/streaming/pipeline.py",
+            515,
+            "high",
+            {
+                "input": "ProviderDelta",
+                "output": "Message with segments",
+                "segments": [
+                    "TextSegment",
+                    "CodeBlockSegment",
+                    "ThinkingSegment",
+                    "ToolCallRefSegment",
+                ],
+            },
+        ),
+        (
+            "comp-ui-protocol",
+            "component",
+            "UIProtocol",
+            "Bidirectional communication contract between agent and UI layer",
+            "src/core/protocol.py",
+            645,
+            "medium",
+            {"actions": ["ApprovalResult", "InterruptSignal", "PauseResult", "ClarifyResult"]},
+        ),
+        (
+            "comp-context-builder",
+            "component",
+            "ContextBuilder",
+            "Builds LLM context from memory layers, constraints, and system prompts",
+            "src/core/context_builder.py",
+            490,
+            "medium",
+            {},
+        ),
+        (
+            "comp-plan-mode",
+            "component",
+            "PlanMode",
+            "Claude Code-style planning workflow: generate plan, approve, execute",
+            "src/core/plan_mode.py",
+            410,
+            "medium",
+            {},
+        ),
+        (
+            "comp-permission-mgr",
+            "component",
+            "PermissionManager",
+            "Controls tool approval policy: plan mode, normal mode, auto-approve mode",
+            "src/core/permission_mode.py",
+            None,
+            "low",
+            {"modes": ["plan", "normal", "auto"]},
+        ),
+        (
+            "comp-session-mgr",
+            "component",
+            "SessionManager",
+            "Session lifecycle: create, resume, persist, list sessions",
+            "src/core/session_manager.py",
+            475,
+            "medium",
+            {},
+        ),
         # -- Memory --
-        ("comp-memory-mgr", "component", "MemoryManager",
-         "Orchestrates all memory layers; SINGLE WRITER to MessageStore",
-         "src/memory/memory_manager.py", 1450, "high",
-         {"layers": ["working", "episodic", "file_based", "observation"],
-          "constraint": "Only component that writes to MessageStore"}),
-
-        ("comp-working-memory", "component", "WorkingMemory",
-         "Token-tracked recent conversation turns for LLM context window",
-         "src/memory/working_memory.py", 419, "medium",
-         {}),
-
-        ("comp-episodic-memory", "component", "EpisodicMemory",
-         "Compressed event summaries for long-term context retention",
-         "src/memory/episodic_memory.py", None, "low",
-         {}),
-
-        ("comp-observation-store", "component", "ObservationStore",
-         "Reversible tool output masking to manage context window pressure",
-         "src/memory/observation_store.py", 591, "medium",
-         {}),
-
-        ("comp-compaction", "component", "Summarizer",
-         "LLM-based compression of conversation history to reduce token usage",
-         "src/memory/compaction/summarizer.py", 797, "medium",
-         {}),
-
+        (
+            "comp-memory-mgr",
+            "component",
+            "MemoryManager",
+            "Orchestrates all memory layers; SINGLE WRITER to MessageStore",
+            "src/memory/memory_manager.py",
+            1450,
+            "high",
+            {
+                "layers": ["working", "episodic", "file_based", "observation"],
+                "constraint": "Only component that writes to MessageStore",
+            },
+        ),
+        (
+            "comp-working-memory",
+            "component",
+            "WorkingMemory",
+            "Token-tracked recent conversation turns for LLM context window",
+            "src/memory/working_memory.py",
+            419,
+            "medium",
+            {},
+        ),
+        (
+            "comp-episodic-memory",
+            "component",
+            "EpisodicMemory",
+            "Compressed event summaries for long-term context retention",
+            "src/memory/episodic_memory.py",
+            None,
+            "low",
+            {},
+        ),
+        (
+            "comp-observation-store",
+            "component",
+            "ObservationStore",
+            "Reversible tool output masking to manage context window pressure",
+            "src/memory/observation_store.py",
+            591,
+            "medium",
+            {},
+        ),
+        (
+            "comp-compaction",
+            "component",
+            "Summarizer",
+            "LLM-based compression of conversation history to reduce token usage",
+            "src/memory/compaction/summarizer.py",
+            797,
+            "medium",
+            {},
+        ),
         # -- Session --
-        ("comp-message-store", "component", "MessageStore",
-         "Thread-safe in-memory message projection with reactive subscriptions",
-         "src/session/store/memory_store.py", 1009, "high",
-         {"features": ["O(1) lookup", "stream_id collapse", "tool linkage", "subscriptions"],
-          "notifications": ["MESSAGE_ADDED", "MESSAGE_UPDATED", "MESSAGE_FINALIZED",
-                            "TOOL_STATE_UPDATED", "BULK_LOAD_COMPLETE"]}),
-
-        ("comp-message-model", "component", "Message",
-         "Unified message class with segments: text, code, thinking, tool refs",
-         "src/session/models/message.py", 993, "medium",
-         {"segments": ["TextSegment", "CodeBlockSegment", "ThinkingSegment", "ToolCallRefSegment"]}),
-
-        ("comp-session-writer", "component", "SessionWriter",
-         "Append-only JSONL file writer for session persistence",
-         "src/session/persistence/writer.py", 423, "low",
-         {}),
-
-        ("comp-hydrator", "component", "SessionHydrator",
-         "Replays JSONL session files into MessageStore for session resume",
-         "src/session/manager/hydrator.py", None, "low",
-         {}),
-
+        (
+            "comp-message-store",
+            "component",
+            "MessageStore",
+            "Thread-safe in-memory message projection with reactive subscriptions",
+            "src/session/store/memory_store.py",
+            1009,
+            "high",
+            {
+                "features": ["O(1) lookup", "stream_id collapse", "tool linkage", "subscriptions"],
+                "notifications": [
+                    "MESSAGE_ADDED",
+                    "MESSAGE_UPDATED",
+                    "MESSAGE_FINALIZED",
+                    "TOOL_STATE_UPDATED",
+                    "BULK_LOAD_COMPLETE",
+                ],
+            },
+        ),
+        (
+            "comp-message-model",
+            "component",
+            "Message",
+            "Unified message class with segments: text, code, thinking, tool refs",
+            "src/session/models/message.py",
+            993,
+            "medium",
+            {
+                "segments": [
+                    "TextSegment",
+                    "CodeBlockSegment",
+                    "ThinkingSegment",
+                    "ToolCallRefSegment",
+                ]
+            },
+        ),
+        (
+            "comp-session-writer",
+            "component",
+            "SessionWriter",
+            "Append-only JSONL file writer for session persistence",
+            "src/session/persistence/writer.py",
+            423,
+            "low",
+            {},
+        ),
+        (
+            "comp-hydrator",
+            "component",
+            "SessionHydrator",
+            "Replays JSONL session files into MessageStore for session resume",
+            "src/session/manager/hydrator.py",
+            None,
+            "low",
+            {},
+        ),
         # -- UI --
-        ("comp-tui-app", "component", "CodingAgentApp",
-         "Main Textual TUI application: widget composition, event dispatch, store binding",
-         "src/ui/app.py", 3555, "high",
-         {"key_methods": ["compose()", "_stream_response()", "_handle_event()", "replay_session()"],
-          "pattern": "Textual App with async event loop"}),
-
-        ("comp-store-adapter", "component", "StoreAdapter",
-         "READ-ONLY bridge from MessageStore to TUI widgets (never writes)",
-         "src/ui/store_adapter.py", 550, "low",
-         {"constraint": "READ-ONLY - no write methods allowed"}),
-
-        ("comp-tool-card", "component", "ToolCard",
-         "Widget displaying tool execution status, arguments, results, diffs",
-         "src/ui/widgets/tool_card.py", 1083, "medium",
-         {}),
-
-        ("comp-assistant-msg", "component", "AssistantMessage",
-         "Widget rendering streamed assistant responses with segments",
-         "src/ui/widgets/message.py", 1165, "medium",
-         {}),
-
-        ("comp-status-bar", "component", "StatusBar",
-         "Displays model name, token usage, context pressure indicator",
-         "src/ui/widgets/status_bar.py", 660, "low",
-         {}),
-
-        ("comp-clarify-widget", "component", "ClarifyWidget",
-         "Interactive clarification form widget for agent questions",
-         "src/ui/widgets/clarify_widget.py", 639, "low",
-         {}),
-
-        ("comp-subagent-card", "component", "SubAgentCard",
-         "Nested card displaying delegated subagent execution progress",
-         "src/ui/widgets/subagent_card.py", 725, "low",
-         {}),
-
+        (
+            "comp-tui-app",
+            "component",
+            "CodingAgentApp",
+            "Main Textual TUI application: widget composition, event dispatch, store binding",
+            "src/ui/app.py",
+            3555,
+            "high",
+            {
+                "key_methods": [
+                    "compose()",
+                    "_stream_response()",
+                    "_handle_event()",
+                    "replay_session()",
+                ],
+                "pattern": "Textual App with async event loop",
+            },
+        ),
+        (
+            "comp-store-adapter",
+            "component",
+            "StoreAdapter",
+            "READ-ONLY bridge from MessageStore to TUI widgets (never writes)",
+            "src/ui/store_adapter.py",
+            550,
+            "low",
+            {"constraint": "READ-ONLY - no write methods allowed"},
+        ),
+        (
+            "comp-tool-card",
+            "component",
+            "ToolCard",
+            "Widget displaying tool execution status, arguments, results, diffs",
+            "src/ui/widgets/tool_card.py",
+            1083,
+            "medium",
+            {},
+        ),
+        (
+            "comp-assistant-msg",
+            "component",
+            "AssistantMessage",
+            "Widget rendering streamed assistant responses with segments",
+            "src/ui/widgets/message.py",
+            1165,
+            "medium",
+            {},
+        ),
+        (
+            "comp-status-bar",
+            "component",
+            "StatusBar",
+            "Displays model name, token usage, context pressure indicator",
+            "src/ui/widgets/status_bar.py",
+            660,
+            "low",
+            {},
+        ),
+        (
+            "comp-clarify-widget",
+            "component",
+            "ClarifyWidget",
+            "Interactive clarification form widget for agent questions",
+            "src/ui/widgets/clarify_widget.py",
+            639,
+            "low",
+            {},
+        ),
+        (
+            "comp-subagent-card",
+            "component",
+            "SubAgentCard",
+            "Nested card displaying delegated subagent execution progress",
+            "src/ui/widgets/subagent_card.py",
+            725,
+            "low",
+            {},
+        ),
         # -- Tools --
-        ("comp-tool-executor", "component", "ToolExecutor",
-         "Tool registry and thread-pool execution engine",
-         "src/tools/base.py", None, "medium",
-         {}),
-
-        ("comp-file-ops", "component", "FileOperations",
-         "File system tools: read_file, write_file, edit_file, glob, directory_tree",
-         "src/tools/file_operations.py", 865, "medium",
-         {"tools": ["read_file", "write_file", "edit_file", "glob_files", "directory_tree"]}),
-
-        ("comp-delegation", "component", "DelegateToSubagent",
-         "Tool for spawning isolated subagents to handle delegated tasks",
-         "src/tools/delegation.py", 651, "medium",
-         {}),
-
-        ("comp-search-tools", "component", "SearchTools",
-         "Code search tools: grep, ripgrep, semantic search",
-         "src/tools/search_tools.py", 772, "low",
-         {}),
-
-        ("comp-web-tools", "component", "WebTools",
-         "Web interaction tools: web_search, web_fetch",
-         "src/tools/web_tools.py", 1157, "low",
-         {}),
-
-        ("comp-lsp-tools", "component", "LSPTools",
-         "Code intelligence tools: get_file_outline, get_symbol_context",
-         "src/tools/lsp_tools.py", 650, "low",
-         {}),
-
+        (
+            "comp-tool-executor",
+            "component",
+            "ToolExecutor",
+            "Tool registry and thread-pool execution engine",
+            "src/tools/base.py",
+            None,
+            "medium",
+            {},
+        ),
+        (
+            "comp-file-ops",
+            "component",
+            "FileOperations",
+            "File system tools: read_file, write_file, edit_file, glob, directory_tree",
+            "src/tools/file_operations.py",
+            865,
+            "medium",
+            {"tools": ["read_file", "write_file", "edit_file", "glob_files", "directory_tree"]},
+        ),
+        (
+            "comp-delegation",
+            "component",
+            "DelegateToSubagent",
+            "Tool for spawning isolated subagents to handle delegated tasks",
+            "src/tools/delegation.py",
+            651,
+            "medium",
+            {},
+        ),
+        (
+            "comp-search-tools",
+            "component",
+            "SearchTools",
+            "Code search tools: grep, ripgrep, semantic search",
+            "src/tools/search_tools.py",
+            772,
+            "low",
+            {},
+        ),
+        (
+            "comp-web-tools",
+            "component",
+            "WebTools",
+            "Web interaction tools: web_search, web_fetch",
+            "src/tools/web_tools.py",
+            1157,
+            "low",
+            {},
+        ),
+        (
+            "comp-lsp-tools",
+            "component",
+            "LSPTools",
+            "Code intelligence tools: get_file_outline, get_symbol_context",
+            "src/tools/lsp_tools.py",
+            650,
+            "low",
+            {},
+        ),
         # -- LLM --
-        ("comp-openai-backend", "component", "OpenAIBackend",
-         "OpenAI-compatible API client with streaming, tool calling, vision",
-         "src/llm/openai_backend.py", 1678, "medium",
-         {}),
-
-        ("comp-anthropic-backend", "component", "AnthropicBackend",
-         "Anthropic API client with extended thinking, tool use, caching",
-         "src/llm/anthropic_backend.py", 1510, "medium",
-         {}),
-
-        ("comp-failure-handler", "component", "FailureHandler",
-         "Retry logic with exponential backoff and error classification",
-         "src/llm/failure_handler.py", 812, "medium",
-         {}),
-
+        (
+            "comp-openai-backend",
+            "component",
+            "OpenAIBackend",
+            "OpenAI-compatible API client with streaming, tool calling, vision",
+            "src/llm/openai_backend.py",
+            1678,
+            "medium",
+            {},
+        ),
+        (
+            "comp-anthropic-backend",
+            "component",
+            "AnthropicBackend",
+            "Anthropic API client with extended thinking, tool use, caching",
+            "src/llm/anthropic_backend.py",
+            1510,
+            "medium",
+            {},
+        ),
+        (
+            "comp-failure-handler",
+            "component",
+            "FailureHandler",
+            "Retry logic with exponential backoff and error classification",
+            "src/llm/failure_handler.py",
+            812,
+            "medium",
+            {},
+        ),
         # -- Server --
-        ("comp-stdio-server", "component", "StdioServer",
-         "stdio+TCP server for VS Code extension communication",
-         "src/server/stdio_server.py", 1445, "high",
-         {"inbound": ["chat_message", "approval_result", "pause_result"],
-          "outbound": ["UIEvents", "StoreNotifications"]}),
-
+        (
+            "comp-stdio-server",
+            "component",
+            "StdioServer",
+            "stdio+TCP server for VS Code extension communication",
+            "src/server/stdio_server.py",
+            1445,
+            "high",
+            {
+                "inbound": ["chat_message", "approval_result", "pause_result"],
+                "outbound": ["UIEvents", "StoreNotifications"],
+            },
+        ),
         # -- Subagents --
-        ("comp-subagent", "component", "SubAgent",
-         "Isolated lightweight agent with own MessageStore, LLM backend, tools",
-         "src/subagents/subagent.py", 1174, "medium",
-         {}),
-
-        ("comp-subagent-mgr", "component", "SubAgentManager",
-         "Discovery and lifecycle management of subagent configurations",
-         "src/subagents/manager.py", 495, "low",
-         {}),
-
+        (
+            "comp-subagent",
+            "component",
+            "SubAgent",
+            "Isolated lightweight agent with own MessageStore, LLM backend, tools",
+            "src/subagents/subagent.py",
+            1174,
+            "medium",
+            {},
+        ),
+        (
+            "comp-subagent-mgr",
+            "component",
+            "SubAgentManager",
+            "Discovery and lifecycle management of subagent configurations",
+            "src/subagents/manager.py",
+            495,
+            "low",
+            {},
+        ),
         # -- Director --
-        ("comp-director-adapter", "component", "DirectorAdapter",
-         "State machine enforcing disciplined workflow phases",
-         "src/director/adapter.py", None, "medium",
-         {"phases": ["IDLE", "UNDERSTAND", "PLAN", "EXECUTE", "COMPLETE"]}),
-
+        (
+            "comp-director-adapter",
+            "component",
+            "DirectorAdapter",
+            "State machine enforcing disciplined workflow phases",
+            "src/director/adapter.py",
+            None,
+            "medium",
+            {"phases": ["IDLE", "UNDERSTAND", "PLAN", "EXECUTE", "COMPLETE"]},
+        ),
         # -- Observability --
-        ("comp-logging", "component", "LoggingSystem",
-         "structlog + stdlib integration: async-safe, JSONL, redaction, context vars",
-         "src/observability/logging_config.py", 1049, "low",
-         {"features": ["QueueHandler", "JSONL rotation", "redaction", "context_vars"]}),
-
+        (
+            "comp-logging",
+            "component",
+            "LoggingSystem",
+            "structlog + stdlib integration: async-safe, JSONL, redaction, context vars",
+            "src/observability/logging_config.py",
+            1049,
+            "low",
+            {"features": ["QueueHandler", "JSONL rotation", "redaction", "context_vars"]},
+        ),
         # -- Code Intelligence --
-        ("comp-lsp-client", "component", "LSPClientManager",
-         "Manages jedi-language-server lifecycle and request/response",
-         "src/code_intelligence/lsp_client_manager.py", 964, "low",
-         {}),
-
+        (
+            "comp-lsp-client",
+            "component",
+            "LSPClientManager",
+            "Manages jedi-language-server lifecycle and request/response",
+            "src/code_intelligence/lsp_client_manager.py",
+            964,
+            "low",
+            {},
+        ),
         # -- Hooks --
-        ("comp-hook-mgr", "component", "HookManager",
-         "Loads and executes user-defined hooks from .clarity/hooks.py",
-         "src/hooks/manager.py", 536, "low",
-         {"events": ["PreToolUse", "PostToolUse", "SessionStart"]}),
-
+        (
+            "comp-hook-mgr",
+            "component",
+            "HookManager",
+            "Loads and executes user-defined hooks from .clarity/hooks.py",
+            "src/hooks/manager.py",
+            536,
+            "low",
+            {"events": ["PreToolUse", "PostToolUse", "SessionStart"]},
+        ),
         # -- MCP --
-        ("comp-mcp-mgr", "component", "McpConnectionManager",
-         "MCP server connection lifecycle and tool discovery",
-         "src/integrations/mcp/manager.py", None, "low",
-         {}),
+        (
+            "comp-mcp-mgr",
+            "component",
+            "McpConnectionManager",
+            "MCP server connection lifecycle and tool discovery",
+            "src/integrations/mcp/manager.py",
+            None,
+            "low",
+            {},
+        ),
     ]
 
     for cid, ctype, name, desc, fpath, lines, risk, props in components:
         store.add_node(
-            id=cid, type=ctype, layer=3, name=name,
-            description=desc, file_path=fpath,
-            line_count=lines, risk_level=risk, properties=props,
+            id=cid,
+            type=ctype,
+            layer=3,
+            name=name,
+            description=desc,
+            file_path=fpath,
+            line_count=lines,
+            risk_level=risk,
+            properties=props,
         )
 
     # Component containment (module -> component)
@@ -755,18 +1505,15 @@ def populate(store: ClarityStore):
         ("comp-coding-agent", "comp-session-mgr", "uses", "Session lifecycle"),
         ("comp-coding-agent", "comp-plan-mode", "uses", "Planning workflow"),
         ("comp-coding-agent", "comp-permission-mgr", "uses", "Approval policy"),
-
         # Memory layer
         ("comp-memory-mgr", "comp-working-memory", "uses", "Recent turns"),
         ("comp-memory-mgr", "comp-episodic-memory", "uses", "Compressed history"),
         ("comp-memory-mgr", "comp-observation-store", "uses", "Tool output masking"),
         ("comp-memory-mgr", "comp-message-store", "writes", "SINGLE WRITER to store"),
         ("comp-memory-mgr", "comp-compaction", "uses", "Context compression"),
-
         # Session layer
         ("comp-message-store", "comp-session-writer", "uses", "Appends to JSONL"),
         ("comp-hydrator", "comp-message-store", "writes", "Replays JSONL into store"),
-
         # UI layer
         ("comp-tui-app", "comp-store-adapter", "uses", "Reads messages for display"),
         ("comp-store-adapter", "comp-message-store", "reads", "READ-ONLY bridge"),
@@ -776,37 +1523,29 @@ def populate(store: ClarityStore):
         ("comp-tui-app", "comp-clarify-widget", "renders", "Clarification forms"),
         ("comp-tui-app", "comp-subagent-card", "renders", "Subagent display"),
         ("comp-tui-app", "comp-ui-protocol", "uses", "Sends user actions"),
-
         # Tool dispatch
         ("comp-tool-executor", "comp-file-ops", "dispatches", "File operations"),
         ("comp-tool-executor", "comp-search-tools", "dispatches", "Search operations"),
         ("comp-tool-executor", "comp-web-tools", "dispatches", "Web operations"),
         ("comp-tool-executor", "comp-lsp-tools", "dispatches", "Code intelligence"),
         ("comp-tool-executor", "comp-delegation", "dispatches", "Subagent delegation"),
-
         # Subagent
         ("comp-delegation", "comp-subagent", "spawns", "Creates isolated agent"),
         ("comp-subagent", "comp-subagent-mgr", "uses", "Gets configuration"),
-
         # Director
         ("comp-director-adapter", "comp-coding-agent", "controls", "Phase-based gating"),
         ("comp-director-adapter", "comp-tool-gating", "configures", "Director gate"),
-
         # Server
         ("comp-stdio-server", "comp-coding-agent", "drives", "Routes user messages"),
         ("comp-stdio-server", "comp-message-store", "reads", "Store notifications"),
         ("comp-stdio-server", "comp-ui-protocol", "bridges", "VS Code <-> agent"),
-
         # Code Intelligence
         ("comp-lsp-tools", "comp-lsp-client", "uses", "LSP requests"),
-
         # LLM
         ("comp-failure-handler", "comp-openai-backend", "wraps", "Retry logic"),
         ("comp-failure-handler", "comp-anthropic-backend", "wraps", "Retry logic"),
-
         # Hooks
         ("comp-coding-agent", "comp-hook-mgr", "calls", "Pre/post tool hooks"),
-
         # MCP
         ("comp-tool-executor", "comp-mcp-mgr", "uses", "Dynamic MCP tools"),
     ]
@@ -819,51 +1558,100 @@ def populate(store: ClarityStore):
     # ======================================================================
 
     decisions = [
-        ("dec-single-writer", "decision", "Single Writer Pattern",
-         "Only MemoryManager writes to MessageStore. StoreAdapter is READ-ONLY. Prevents race conditions in persistence.",
-         {"affects": ["comp-memory-mgr", "comp-store-adapter", "comp-message-store"],
-          "rationale": "Prevents race conditions in multi-consumer persistence"}),
-
-        ("dec-async-only", "decision", "Async-Only Execution",
-         "All agent logic flows through stream_response() async generator. No sync paths. Removed CLI sync mode in v3.0.",
-         {"affects": ["comp-coding-agent", "comp-tui-app"],
-          "rationale": "Single code path, simpler to maintain and test"}),
-
-        ("dec-canonical-delta", "decision", "Canonical ProviderDelta Contract",
-         "All LLM providers emit ProviderDelta. StreamingPipeline is the ONLY structural parser. No other component parses raw LLM output.",
-         {"affects": ["comp-streaming-pipeline", "comp-openai-backend", "comp-anthropic-backend"],
-          "rationale": "Single parsing point eliminates duplicate logic across providers"}),
-
-        ("dec-jsonl-ledger", "decision", "JSONL Ledger + In-Memory Projection",
-         "JSONL file is immutable ledger. MessageStore is in-memory projection with stream_id collapse. Hydrator replays on resume.",
-         {"affects": ["comp-session-writer", "comp-message-store", "comp-hydrator"],
-          "rationale": "Append-only is crash-safe; in-memory gives fast queries"}),
-
-        ("dec-tool-gating", "decision", "4-Check Tool Gating Pipeline",
-         "Every tool call passes through repeat/plan/director/approval checks before execution.",
-         {"affects": ["comp-tool-gating", "comp-coding-agent", "comp-permission-mgr"],
-          "rationale": "Defense in depth: multiple independent safety checks"}),
-
-        ("dec-structlog", "decision", "structlog for Observability",
-         "All logging via get_logger() factory. JSONL output only, no console. Context vars for request tracing.",
-         {"affects": ["comp-logging"],
-          "rationale": "Structured logs enable automated analysis; no console avoids TUI corruption"}),
-
-        ("dec-no-emojis", "decision", "No Emojis in Python Code",
-         "Windows console cp1252 encoding crashes on emoji characters. All Python output must use ASCII-safe markers.",
-         {"affects": ["all"],
-          "rationale": "Windows cp1252 encoding crashes on emoji codepoints"}),
-
-        ("dec-stdin-devnull", "decision", "subprocess.run stdin=DEVNULL",
-         "Every subprocess.run() call must use stdin=DEVNULL. Background stdin reader thread + child inheriting stdin = Windows deadlock.",
-         {"affects": ["comp-tool-executor", "comp-file-ops"],
-          "rationale": "Prevents Windows handle deadlock in stdio mode"}),
+        (
+            "dec-single-writer",
+            "decision",
+            "Single Writer Pattern",
+            "Only MemoryManager writes to MessageStore. StoreAdapter is READ-ONLY. Prevents race conditions in persistence.",
+            {
+                "affects": ["comp-memory-mgr", "comp-store-adapter", "comp-message-store"],
+                "rationale": "Prevents race conditions in multi-consumer persistence",
+            },
+        ),
+        (
+            "dec-async-only",
+            "decision",
+            "Async-Only Execution",
+            "All agent logic flows through stream_response() async generator. No sync paths. Removed CLI sync mode in v3.0.",
+            {
+                "affects": ["comp-coding-agent", "comp-tui-app"],
+                "rationale": "Single code path, simpler to maintain and test",
+            },
+        ),
+        (
+            "dec-canonical-delta",
+            "decision",
+            "Canonical ProviderDelta Contract",
+            "All LLM providers emit ProviderDelta. StreamingPipeline is the ONLY structural parser. No other component parses raw LLM output.",
+            {
+                "affects": [
+                    "comp-streaming-pipeline",
+                    "comp-openai-backend",
+                    "comp-anthropic-backend",
+                ],
+                "rationale": "Single parsing point eliminates duplicate logic across providers",
+            },
+        ),
+        (
+            "dec-jsonl-ledger",
+            "decision",
+            "JSONL Ledger + In-Memory Projection",
+            "JSONL file is immutable ledger. MessageStore is in-memory projection with stream_id collapse. Hydrator replays on resume.",
+            {
+                "affects": ["comp-session-writer", "comp-message-store", "comp-hydrator"],
+                "rationale": "Append-only is crash-safe; in-memory gives fast queries",
+            },
+        ),
+        (
+            "dec-tool-gating",
+            "decision",
+            "4-Check Tool Gating Pipeline",
+            "Every tool call passes through repeat/plan/director/approval checks before execution.",
+            {
+                "affects": ["comp-tool-gating", "comp-coding-agent", "comp-permission-mgr"],
+                "rationale": "Defense in depth: multiple independent safety checks",
+            },
+        ),
+        (
+            "dec-structlog",
+            "decision",
+            "structlog for Observability",
+            "All logging via get_logger() factory. JSONL output only, no console. Context vars for request tracing.",
+            {
+                "affects": ["comp-logging"],
+                "rationale": "Structured logs enable automated analysis; no console avoids TUI corruption",
+            },
+        ),
+        (
+            "dec-no-emojis",
+            "decision",
+            "No Emojis in Python Code",
+            "Windows console cp1252 encoding crashes on emoji characters. All Python output must use ASCII-safe markers.",
+            {
+                "affects": ["all"],
+                "rationale": "Windows cp1252 encoding crashes on emoji codepoints",
+            },
+        ),
+        (
+            "dec-stdin-devnull",
+            "decision",
+            "subprocess.run stdin=DEVNULL",
+            "Every subprocess.run() call must use stdin=DEVNULL. Background stdin reader thread + child inheriting stdin = Windows deadlock.",
+            {
+                "affects": ["comp-tool-executor", "comp-file-ops"],
+                "rationale": "Prevents Windows handle deadlock in stdio mode",
+            },
+        ),
     ]
 
     for did, dtype, name, desc, props in decisions:
         store.add_node(
-            id=did, type="decision", layer=0, name=name,
-            description=desc, properties=props,
+            id=did,
+            type="decision",
+            layer=0,
+            name=name,
+            description=desc,
+            properties=props,
         )
 
     # Decision constraint edges
@@ -877,31 +1665,51 @@ def populate(store: ClarityStore):
     # ======================================================================
 
     invariants = [
-        ("inv-tool-order", "invariant", "Tool Results Must Match Call Order",
-         "Tool results must appear in same order as tool calls in the requesting message, or the LLM API rejects them.",
-         {"severity": "critical", "affects": ["comp-coding-agent"]}),
-
-        ("inv-orphan-detection", "invariant", "No Orphaned Tool Results",
-         "A tool_result with no matching tool_call in context causes LLM API rejection. Agent has _fix_orphaned_tool_calls().",
-         {"severity": "critical", "affects": ["comp-coding-agent"]}),
-
-        ("inv-interrupt-clear", "invariant", "Clear Interrupt After Continue",
-         "_interrupted flag must be cleared after Continue on a pause prompt via clear_interrupt(). Forgetting causes infinite pause loop.",
-         {"severity": "high", "affects": ["comp-ui-protocol", "comp-coding-agent"]}),
-
-        ("inv-agent-subagent-parity", "invariant", "Agent/Subagent Metadata Parity",
-         "Both agent.py and subagent.py must use build_tool_metadata() from tool_metadata.py. VS Code expects identical keys.",
-         {"severity": "high", "affects": ["comp-coding-agent", "comp-subagent"]}),
-
-        ("inv-finalize-before-complete", "invariant", "Finalize Before Complete",
-         "Assistant messages start as streaming placeholders. Must call finalize_message() before marking complete.",
-         {"severity": "medium", "affects": ["comp-tui-app", "comp-message-store"]}),
+        (
+            "inv-tool-order",
+            "invariant",
+            "Tool Results Must Match Call Order",
+            "Tool results must appear in same order as tool calls in the requesting message, or the LLM API rejects them.",
+            {"severity": "critical", "affects": ["comp-coding-agent"]},
+        ),
+        (
+            "inv-orphan-detection",
+            "invariant",
+            "No Orphaned Tool Results",
+            "A tool_result with no matching tool_call in context causes LLM API rejection. Agent has _fix_orphaned_tool_calls().",
+            {"severity": "critical", "affects": ["comp-coding-agent"]},
+        ),
+        (
+            "inv-interrupt-clear",
+            "invariant",
+            "Clear Interrupt After Continue",
+            "_interrupted flag must be cleared after Continue on a pause prompt via clear_interrupt(). Forgetting causes infinite pause loop.",
+            {"severity": "high", "affects": ["comp-ui-protocol", "comp-coding-agent"]},
+        ),
+        (
+            "inv-agent-subagent-parity",
+            "invariant",
+            "Agent/Subagent Metadata Parity",
+            "Both agent.py and subagent.py must use build_tool_metadata() from tool_metadata.py. VS Code expects identical keys.",
+            {"severity": "high", "affects": ["comp-coding-agent", "comp-subagent"]},
+        ),
+        (
+            "inv-finalize-before-complete",
+            "invariant",
+            "Finalize Before Complete",
+            "Assistant messages start as streaming placeholders. Must call finalize_message() before marking complete.",
+            {"severity": "medium", "affects": ["comp-tui-app", "comp-message-store"]},
+        ),
     ]
 
     for iid, itype, name, desc, props in invariants:
         store.add_node(
-            id=iid, type="invariant", layer=0, name=name,
-            description=desc, properties=props,
+            id=iid,
+            type="invariant",
+            layer=0,
+            name=name,
+            description=desc,
+            properties=props,
         )
         for comp_id in props.get("affects", []):
             store.add_edge(iid, comp_id, "constrains", label="invariant")
@@ -911,88 +1719,120 @@ def populate(store: ClarityStore):
     # ======================================================================
 
     flows = [
-        ("flow-user-msg", "flow", "User Message Flow",
-         "User input -> TUI -> CodingAgent.stream_response() -> LLM -> Tool loop -> UIEvents -> TUI render",
-         {"trigger": "User presses Enter in ChatInput",
-          "steps": [
-              "ChatInput -> InputSubmittedMessage",
-              "CodingAgentApp._stream_response()",
-              "CodingAgent.stream_response() [async generator]",
-              "ContextBuilder.build_context()",
-              "LLMBackend.stream() -> ProviderDelta",
-              "StreamingPipeline.process_delta() -> Segments",
-              "ToolGatingService.evaluate() -> gate decision",
-              "ToolExecutor.execute_tool() -> ToolResult",
-              "yield UIEvents (TextDelta, ToolCallStatus, etc.)",
-              "CodingAgentApp._handle_event() -> widget updates",
-              "MemoryManager.add_message() -> MessageStore",
-          ],
-          "complexity": "high"}),
-
-        ("flow-tool-exec", "flow", "Tool Execution Flow",
-         "Tool call from LLM -> gating -> approval -> execution -> result back to LLM",
-         {"trigger": "LLM response contains tool_calls",
-          "steps": [
-              "Parse tool_calls from LLM response",
-              "ToolGatingService.evaluate() (4 checks)",
-              "UIProtocol.wait_for_approval() if needed",
-              "ToolExecutor.execute_tool()",
-              "update_tool_state() -> MessageStore notification",
-              "Tool result appended to messages",
-              "Next LLM call with tool results",
-          ],
-          "complexity": "medium"}),
-
-        ("flow-session-resume", "flow", "Session Resume Flow",
-         "Load JSONL -> Hydrate MessageStore -> Replay UI -> Ready for input",
-         {"trigger": "User selects existing session or app starts with session_id",
-          "steps": [
-              "SessionManager.resume_session(session_id)",
-              "SessionHydrator.hydrate(jsonl_path)",
-              "Parse JSONL lines -> Message objects",
-              "MessageStore.add_message() for each",
-              "CodingAgentApp.replay_session()",
-              "Render messages in TUI",
-          ],
-          "complexity": "low"}),
-
-        ("flow-vscode-comm", "flow", "VS Code Communication Flow",
-         "VS Code sidebar -> stdio -> StdioServer -> CodingAgent -> events -> TCP -> sidebar",
-         {"trigger": "User sends message in VS Code sidebar",
-          "steps": [
-              "Sidebar posts chat_message via stdin JSON",
-              "StdioServer reads stdin, dispatches to handler",
-              "CodingAgent.stream_response() starts",
-              "UIEvents serialized via serializers.py",
-              "Events sent over TCP data channel",
-              "Extension forwards to webview via postMessage",
-              "React components update",
-          ],
-          "complexity": "medium"}),
-
-        ("flow-subagent", "flow", "Subagent Delegation Flow",
-         "Main agent -> delegate_to_subagent -> SubAgent process -> IPC results -> main agent",
-         {"trigger": "Agent calls delegate_to_subagent tool",
-          "steps": [
-              "DelegateToSubagent.execute()",
-              "SubAgentManager creates SubAgent config",
-              "Subprocess spawned with IPC channel",
-              "SubAgent.execute() in isolated process",
-              "Own MessageStore, own LLM backend",
-              "Results communicated via IPC",
-              "Main agent receives result, continues",
-          ],
-          "complexity": "medium"}),
+        (
+            "flow-user-msg",
+            "flow",
+            "User Message Flow",
+            "User input -> TUI -> CodingAgent.stream_response() -> LLM -> Tool loop -> UIEvents -> TUI render",
+            {
+                "trigger": "User presses Enter in ChatInput",
+                "steps": [
+                    "ChatInput -> InputSubmittedMessage",
+                    "CodingAgentApp._stream_response()",
+                    "CodingAgent.stream_response() [async generator]",
+                    "ContextBuilder.build_context()",
+                    "LLMBackend.stream() -> ProviderDelta",
+                    "StreamingPipeline.process_delta() -> Segments",
+                    "ToolGatingService.evaluate() -> gate decision",
+                    "ToolExecutor.execute_tool() -> ToolResult",
+                    "yield UIEvents (TextDelta, ToolCallStatus, etc.)",
+                    "CodingAgentApp._handle_event() -> widget updates",
+                    "MemoryManager.add_message() -> MessageStore",
+                ],
+                "complexity": "high",
+            },
+        ),
+        (
+            "flow-tool-exec",
+            "flow",
+            "Tool Execution Flow",
+            "Tool call from LLM -> gating -> approval -> execution -> result back to LLM",
+            {
+                "trigger": "LLM response contains tool_calls",
+                "steps": [
+                    "Parse tool_calls from LLM response",
+                    "ToolGatingService.evaluate() (4 checks)",
+                    "UIProtocol.wait_for_approval() if needed",
+                    "ToolExecutor.execute_tool()",
+                    "update_tool_state() -> MessageStore notification",
+                    "Tool result appended to messages",
+                    "Next LLM call with tool results",
+                ],
+                "complexity": "medium",
+            },
+        ),
+        (
+            "flow-session-resume",
+            "flow",
+            "Session Resume Flow",
+            "Load JSONL -> Hydrate MessageStore -> Replay UI -> Ready for input",
+            {
+                "trigger": "User selects existing session or app starts with session_id",
+                "steps": [
+                    "SessionManager.resume_session(session_id)",
+                    "SessionHydrator.hydrate(jsonl_path)",
+                    "Parse JSONL lines -> Message objects",
+                    "MessageStore.add_message() for each",
+                    "CodingAgentApp.replay_session()",
+                    "Render messages in TUI",
+                ],
+                "complexity": "low",
+            },
+        ),
+        (
+            "flow-vscode-comm",
+            "flow",
+            "VS Code Communication Flow",
+            "VS Code sidebar -> stdio -> StdioServer -> CodingAgent -> events -> TCP -> sidebar",
+            {
+                "trigger": "User sends message in VS Code sidebar",
+                "steps": [
+                    "Sidebar posts chat_message via stdin JSON",
+                    "StdioServer reads stdin, dispatches to handler",
+                    "CodingAgent.stream_response() starts",
+                    "UIEvents serialized via serializers.py",
+                    "Events sent over TCP data channel",
+                    "Extension forwards to webview via postMessage",
+                    "React components update",
+                ],
+                "complexity": "medium",
+            },
+        ),
+        (
+            "flow-subagent",
+            "flow",
+            "Subagent Delegation Flow",
+            "Main agent -> delegate_to_subagent -> SubAgent process -> IPC results -> main agent",
+            {
+                "trigger": "Agent calls delegate_to_subagent tool",
+                "steps": [
+                    "DelegateToSubagent.execute()",
+                    "SubAgentManager creates SubAgent config",
+                    "Subprocess spawned with IPC channel",
+                    "SubAgent.execute() in isolated process",
+                    "Own MessageStore, own LLM backend",
+                    "Results communicated via IPC",
+                    "Main agent receives result, continues",
+                ],
+                "complexity": "medium",
+            },
+        ),
     ]
 
     for fid, ftype, name, desc, props in flows:
         store.add_node(
-            id=fid, type="flow", layer=0, name=name,
-            description=desc, properties=props,
+            id=fid,
+            type="flow",
+            layer=0,
+            name=name,
+            description=desc,
+            properties=props,
         )
 
-    print(f"[OK] Populated {len(components)} components, {len(modules)} modules, "
-          f"{len(decisions)} decisions, {len(invariants)} invariants, {len(flows)} flows")
+    print(
+        f"[OK] Populated {len(components)} components, {len(modules)} modules, "
+        f"{len(decisions)} decisions, {len(invariants)} invariants, {len(flows)} flows"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1002,8 +1842,18 @@ def populate(store: ClarityStore):
 DEFAULT_EXTENSIONS = {".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".java", ".rs", ".rb", ".cs"}
 
 
-def scan_files(store: ClarityStore, root: str = "src", extensions: list[str] = None):
-    """Scan source files and add as layer 4 nodes. Language-agnostic."""
+def scan_files(store: ClarityStore, root: str = "src", extensions: list[str] = None) -> dict:
+    """Scan source files and add as layer 4 nodes. Language-agnostic.
+
+    Returns a drift report:
+    {
+        "new": ["path1", "path2"],        # files on disk but not in DB
+        "modified": ["path3"],            # files modified since last scan
+        "deleted": ["path4"],             # files in DB but not on disk
+        "unchanged": ["path5", ...],      # files unchanged since last scan
+        "total_scanned": 228,
+    }
+    """
     import ast
 
     root_path = Path(root)
@@ -1071,7 +1921,12 @@ def scan_files(store: ClarityStore, root: str = "src", extensions: list[str] = N
                 for prefix in comment_prefixes:
                     if stripped.startswith(prefix) and not stripped.startswith("#!"):
                         desc = stripped.lstrip("/#* ").strip()
-                        if desc and len(desc) > 5 and not desc.startswith("eslint") and not desc.startswith("@"):
+                        if (
+                            desc
+                            and len(desc) > 5
+                            and not desc.startswith("eslint")
+                            and not desc.startswith("@")
+                        ):
                             if len(desc) > 120:
                                 desc = desc[:117] + "..."
                             return desc, line_count
@@ -1087,9 +1942,13 @@ def scan_files(store: ClarityStore, root: str = "src", extensions: list[str] = N
         if mod_id not in existing_nodes:
             label = prefix.replace("src/", "").rstrip("/")
             store.add_node(
-                id=mod_id, type="module", layer=2, name=prefix,
+                id=mod_id,
+                type="module",
+                layer=2,
+                name=prefix,
                 description=f"{label} module",
-                file_path=prefix, risk_level="low",
+                file_path=prefix,
+                risk_level="low",
                 properties={"flow_rank": 99, "flow_col": 0},
             )
 
@@ -1098,7 +1957,100 @@ def scan_files(store: ClarityStore, root: str = "src", extensions: list[str] = N
     # Normalize: ensure dot prefix
     scan_exts = {e if e.startswith(".") else f".{e}" for e in scan_exts}
 
-    skip_dirs = {"__pycache__", "node_modules", ".git", ".venv", "dist", "build", ".tox", ".mypy_cache"}
+    skip_dirs = {
+        "__pycache__",
+        "node_modules",
+        ".git",
+        ".venv",
+        "dist",
+        "build",
+        ".tox",
+        ".mypy_cache",
+    }
+
+    # Build indexes from existing DB for drift detection and enrichment
+    all_nodes = store.get_all_nodes()
+    all_edges = store.get_all_edges()
+
+    existing_file_nodes = {}
+    for n in all_nodes:
+        if n["type"] == "file" and n.get("file_path"):
+            existing_file_nodes[n["file_path"]] = n
+
+    # Index: file_path -> component node (components have file_path pointing to their source)
+    file_to_component = {}
+    for n in all_nodes:
+        if n["type"] == "component" and n.get("file_path"):
+            file_to_component[n["file_path"]] = n
+
+    # Index: node_id -> list of connected edges (non-contains, non-constrains)
+    node_edges = {}
+    for e in all_edges:
+        if e["type"] in ("contains", "constrains"):
+            continue
+        for nid in (e["from_id"], e["to_id"]):
+            if nid not in node_edges:
+                node_edges[nid] = []
+            node_edges[nid].append(e)
+
+    # Index: node_id -> list of constraining decisions/invariants
+    node_constraints = {}
+    for e in all_edges:
+        if e["type"] == "constrains":
+            tid = e["to_id"]
+            if tid not in node_constraints:
+                node_constraints[tid] = []
+            # Find the decision/invariant node
+            src_node = next((n for n in all_nodes if n["id"] == e["from_id"]), None)
+            if src_node:
+                node_constraints[tid].append(src_node)
+
+    # Index: node_id -> node for name lookups
+    node_map = {n["id"]: n for n in all_nodes}
+
+    def enrich_file_entry(file_path: str, module_id: Optional[str]) -> dict:
+        """Build enriched drift entry with component, edges, and constraints."""
+        entry: dict = {"path": file_path, "module": module_id}
+
+        comp = file_to_component.get(file_path)
+        if comp:
+            entry["component"] = {"id": comp["id"], "name": comp["name"]}
+            # Connected edges for this component
+            edges = node_edges.get(comp["id"], [])
+            entry["edges"] = [
+                {
+                    "type": e["type"],
+                    "from": node_map.get(e["from_id"], {}).get("name", e["from_id"]),
+                    "to": node_map.get(e["to_id"], {}).get("name", e["to_id"]),
+                    "label": e.get("label"),
+                }
+                for e in edges
+            ]
+            # Affected constraints
+            constraints = node_constraints.get(comp["id"], [])
+            entry["constraints"] = [{"name": c["name"], "type": c["type"]} for c in constraints]
+        else:
+            entry["component"] = None
+            entry["edges"] = []
+            entry["constraints"] = []
+
+        return entry
+
+    # Get last scan timestamp for mtime comparison
+    metadata = store.get_metadata()
+    scanned_at_str = metadata.get("scanned_at")
+    scanned_at_ts = None
+    if scanned_at_str:
+        try:
+            from datetime import datetime, timezone
+
+            dt = datetime.fromisoformat(scanned_at_str)
+            scanned_at_ts = dt.timestamp()
+        except (ValueError, TypeError):
+            pass
+
+    drift: dict = {"new": [], "modified": [], "deleted": [], "unchanged": 0, "total_scanned": 0}
+    seen_paths = set()
 
     file_count = 0
     for src_file in sorted(root_path.rglob("*")):
@@ -1109,9 +2061,32 @@ def scan_files(store: ClarityStore, root: str = "src", extensions: list[str] = N
         if any(skip in src_file.parts for skip in skip_dirs):
             continue
 
+        # Skip files blocked by .clarityignore
+        from src.tools.clarityignore import is_blocked
+
+        if is_blocked(src_file)[0]:
+            continue
+
         rel_path = str(src_file).replace("\\", "/")
+        seen_paths.add(rel_path)
         file_name = src_file.name
         module_id = get_module_id(rel_path)
+
+        # Drift detection: new vs modified vs unchanged
+        existing = existing_file_nodes.get(rel_path)
+        if existing is None:
+            drift["new"].append(enrich_file_entry(rel_path, module_id))
+        elif scanned_at_ts:
+            try:
+                file_mtime = src_file.stat().st_mtime
+                if file_mtime > scanned_at_ts:
+                    drift["modified"].append(enrich_file_entry(rel_path, module_id))
+                else:
+                    drift["unchanged"] += 1
+            except OSError:
+                drift["unchanged"] += 1
+        else:
+            drift["unchanged"] += 1
 
         description, line_count = extract_description(src_file)
 
@@ -1121,7 +2096,12 @@ def scan_files(store: ClarityStore, root: str = "src", extensions: list[str] = N
             role = "package init"
         elif file_name in ("__main__.py", "main.go", "main.rs"):
             role = "entry point"
-        elif file_name.startswith("test_") or file_name.endswith("_test.go") or file_name.endswith(".test.ts") or file_name.endswith(".spec.ts"):
+        elif (
+            file_name.startswith("test_")
+            or file_name.endswith("_test.go")
+            or file_name.endswith(".test.ts")
+            or file_name.endswith(".spec.ts")
+        ):
             role = "test"
 
         file_id = store._make_id("file", rel_path)
@@ -1144,12 +2124,31 @@ def scan_files(store: ClarityStore, root: str = "src", extensions: list[str] = N
 
         file_count += 1
 
-    print(f"[OK] Scanned {file_count} files as layer 4 nodes")
+    # Detect deleted files: in DB but not on disk
+    for path, node in existing_file_nodes.items():
+        if path not in seen_paths:
+            mod_id = get_module_id(path)
+            drift["deleted"].append(enrich_file_entry(path, mod_id))
+
+    drift["total_scanned"] = file_count
+
+    # Update scanned_at timestamp
+    store.set_metadata("scanned_at", ClarityStore._now())
+
+    summary = (
+        f"[OK] Scanned {file_count} files: "
+        f"{len(drift['new'])} new, {len(drift['modified'])} modified, "
+        f"{len(drift['deleted'])} deleted, {drift['unchanged']} unchanged"
+    )
+    print(summary)
+
+    return drift
 
 
 # ---------------------------------------------------------------------------
 # Render: DB -> Markdown for LLM consumption
 # ---------------------------------------------------------------------------
+
 
 def _load_graph(store: ClarityStore) -> dict:
     """Load and index all nodes/edges from the DB."""
@@ -1173,9 +2172,13 @@ def _load_graph(store: ClarityStore) -> dict:
     dep_edges = [e for e in edges if e["type"] not in ("contains", "constrains")]
 
     return {
-        "nodes": nodes, "edges": edges, "metadata": metadata,
-        "node_map": node_map, "mod_children": mod_children,
-        "child_to_mod": child_to_mod, "dep_edges": dep_edges,
+        "nodes": nodes,
+        "edges": edges,
+        "metadata": metadata,
+        "node_map": node_map,
+        "mod_children": mod_children,
+        "child_to_mod": child_to_mod,
+        "dep_edges": dep_edges,
     }
 
 
@@ -1185,8 +2188,12 @@ def render_compact_briefing(store: ClarityStore) -> str:
     g = _load_graph(store)
     node_map, mod_children = g["node_map"], g["mod_children"]
 
-    modules = [n for n in g["nodes"] if n["type"] == "module" and n["properties"].get("flow_rank", 99) < 99]
-    modules.sort(key=lambda m: (m["properties"].get("flow_rank", 99), m["properties"].get("flow_col", 99)))
+    modules = [
+        n for n in g["nodes"] if n["type"] == "module" and n["properties"].get("flow_rank", 99) < 99
+    ]
+    modules.sort(
+        key=lambda m: (m["properties"].get("flow_rank", 99), m["properties"].get("flow_col", 99))
+    )
     decisions = [n for n in g["nodes"] if n["type"] == "decision"]
     invariants = [n for n in g["nodes"] if n["type"] == "invariant"]
 
@@ -1205,14 +2212,22 @@ def render_compact_briefing(store: ClarityStore) -> str:
     lines.append("| Module | Purpose | Components | Risk |")
     lines.append("|--------|---------|------------|------|")
     for m in modules:
-        child_ids = [cid for cid in mod_children.get(m["id"], []) if node_map.get(cid, {}).get("type") == "component"]
+        child_ids = [
+            cid
+            for cid in mod_children.get(m["id"], [])
+            if node_map.get(cid, {}).get("type") == "component"
+        ]
         label = m["name"].replace("src/", "").rstrip("/")
         desc = m["description"][:60] + ("..." if len(m["description"]) > 60 else "")
         lines.append(f"| {label} | {desc} | {len(child_ids)} | {m['risk_level']} |")
     lines.append("")
 
     # Cross-module dependencies
-    mod_dep_edges = [e for e in g["dep_edges"] if e["from_id"].startswith("mod-") and e["to_id"].startswith("mod-")]
+    mod_dep_edges = [
+        e
+        for e in g["dep_edges"]
+        if e["from_id"].startswith("mod-") and e["to_id"].startswith("mod-")
+    ]
     if mod_dep_edges:
         lines.append("## Key Dependencies")
         lines.append("")
@@ -1253,14 +2268,18 @@ def render_module_detail(store: ClarityStore, module_id: str) -> str:
         return f"Module '{module_id}' not found."
 
     child_ids = mod_children.get(module_id, [])
-    components = [node_map[cid] for cid in child_ids if node_map.get(cid, {}).get("type") == "component"]
+    components = [
+        node_map[cid] for cid in child_ids if node_map.get(cid, {}).get("type") == "component"
+    ]
     files = [node_map[cid] for cid in child_ids if node_map.get(cid, {}).get("type") == "file"]
     label = mod["name"].replace("src/", "").rstrip("/")
 
     lines = []
     lines.append(f"# Module: {label}")
     lines.append(f"> {mod['description']}")
-    lines.append(f"> Risk: {mod['risk_level']} | Files: {len(files)} | Components: {len(components)}")
+    lines.append(
+        f"> Risk: {mod['risk_level']} | Files: {len(files)} | Components: {len(components)}"
+    )
     lines.append("")
 
     # Components
@@ -1277,12 +2296,16 @@ def render_module_detail(store: ClarityStore, module_id: str) -> str:
             # Outgoing edges
             out = [e for e in g["dep_edges"] if e["from_id"] == c["id"]]
             if out:
-                lines.append(f"- **Depends on**: {', '.join(node_map.get(e['to_id'], {}).get('name', e['to_id']) for e in out)}")
+                lines.append(
+                    f"- **Depends on**: {', '.join(node_map.get(e['to_id'], {}).get('name', e['to_id']) for e in out)}"
+                )
 
             # Incoming edges
             inc = [e for e in g["dep_edges"] if e["to_id"] == c["id"]]
             if inc:
-                lines.append(f"- **Used by**: {', '.join(node_map.get(e['from_id'], {}).get('name', e['from_id']) for e in inc)}")
+                lines.append(
+                    f"- **Used by**: {', '.join(node_map.get(e['from_id'], {}).get('name', e['from_id']) for e in inc)}"
+                )
 
             # Properties
             props = c.get("properties", {})
@@ -1306,7 +2329,9 @@ def render_module_detail(store: ClarityStore, module_id: str) -> str:
             if len(f.get("description") or "") > 50:
                 desc += "..."
             role = f.get("properties", {}).get("role", "")
-            lines.append(f"| {f.get('file_path', '')} | {f.get('line_count', '')} | {role} | {desc} |")
+            lines.append(
+                f"| {f.get('file_path', '')} | {f.get('line_count', '')} | {role} | {desc} |"
+            )
         lines.append("")
 
     return "\n".join(lines)
@@ -1373,7 +2398,9 @@ def render_file_detail(store: ClarityStore, file_path: str) -> str:
             lines.append("")
 
         # Related decisions
-        constraints = [e for e in g["edges"] if e["type"] == "constrains" and e["to_id"] == component["id"]]
+        constraints = [
+            e for e in g["edges"] if e["type"] == "constrains" and e["to_id"] == component["id"]
+        ]
         if constraints:
             lines.append("### Applicable Decisions/Invariants")
             for e in constraints:
@@ -1406,7 +2433,7 @@ def render_search(store: ClarityStore, keyword: str) -> str:
         return f"No results for '{keyword}'."
 
     lines = []
-    lines.append(f"## Search: \"{keyword}\" ({len(matches)} matches)")
+    lines.append(f'## Search: "{keyword}" ({len(matches)} matches)')
     lines.append("")
 
     for m in matches[:15]:  # limit to 15 results
@@ -1426,7 +2453,9 @@ def render_search(store: ClarityStore, keyword: str) -> str:
             targets = [f"{node_map.get(e['to_id'], {}).get('name', e['to_id'])}" for e in out[:5]]
             lines.append(f"- **Depends on**: {', '.join(targets)}")
         if inc:
-            sources = [f"{node_map.get(e['from_id'], {}).get('name', e['from_id'])}" for e in inc[:5]]
+            sources = [
+                f"{node_map.get(e['from_id'], {}).get('name', e['from_id'])}" for e in inc[:5]
+            ]
             lines.append(f"- **Used by**: {', '.join(sources)}")
 
         lines.append("")
@@ -1503,6 +2532,7 @@ render_briefing = render_compact_briefing
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main():
     if len(sys.argv) < 2:
         print("""Usage: python -m src.claraity.claraity_db <command> [args]
@@ -1511,6 +2541,8 @@ Commands:
   populate          Populate DB with architecture knowledge
   scan              Scan Python files and add as layer 4 nodes
   export            Export graph.json for visualization
+  export-jsonl      Export DB to JSONL for git tracking
+  import-jsonl      Rebuild DB from JSONL file
   all               populate + scan + export
   brief             Compact architecture overview (for system prompt)
   module <id>       Module detail (e.g., mod-core, mod-memory)
@@ -1537,7 +2569,22 @@ Commands:
 
         if cmd in ("export", "all"):
             graph = store.export_graph_json()
-            print(f"[OK] Exported graph.json: {len(graph['nodes'])} nodes, {len(graph['edges'])} edges")
+            print(
+                f"[OK] Exported graph.json: {len(graph['nodes'])} nodes, {len(graph['edges'])} edges"
+            )
+
+        if cmd in ("export-jsonl", "all"):
+            count = store.export_jsonl()
+            print(f"[OK] Exported {count} records to .clarity/claraity_knowledge.jsonl")
+
+        if cmd == "import-jsonl":
+            jsonl_path = sys.argv[2] if len(sys.argv) > 2 else ".clarity/claraity_knowledge.jsonl"
+            store.close()
+            store = ClarityStore.import_jsonl(jsonl_path)
+            stats = store.get_stats()
+            print(
+                f"[OK] Rebuilt DB from JSONL: {stats['total_nodes']} nodes, {stats['total_edges']} edges"
+            )
 
         if cmd == "brief":
             print(render_compact_briefing(store))
@@ -1566,7 +2613,7 @@ Commands:
                 sys.exit(1)
             print(render_impact(store, sys.argv[2]))
 
-        elif cmd not in ("populate", "scan", "export", "all"):
+        elif cmd not in ("populate", "scan", "export", "export-jsonl", "import-jsonl", "all"):
             print(f"Unknown command: {cmd}")
             sys.exit(1)
 

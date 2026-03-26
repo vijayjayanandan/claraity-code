@@ -956,3 +956,280 @@ describe('ClarAItySidebarProvider', () => {
         });
     });
 });
+
+
+// ---------------------------------------------------------------------------
+// Subagent management: handleWebviewMessage routing
+// ---------------------------------------------------------------------------
+
+describe('handleWebviewMessage subagent routing', () => {
+    let connection: MockConnection;
+    let provider: ClarAItySidebarProvider;
+
+    beforeEach(() => {
+        connection = createMockConnection();
+        const extensionUri = vscode.Uri.file('/test/extension');
+        const log = vscode.window.createOutputChannel('test-log');
+        provider = new ClarAItySidebarProvider(extensionUri, connection as any, log);
+    });
+
+    afterEach(() => {
+        connection.dispose();
+    });
+
+    function resolveView() {
+        const mockView = createMockWebviewView();
+        provider.resolveWebviewView(
+            mockView as any,
+            {} as vscode.WebviewViewResolveContext,
+            { isCancellationRequested: false, onCancellationRequested: jest.fn() } as any,
+        );
+        return {
+            webview: mockView.webview,
+            sendMessage: (msg: WebViewMessage) => mockView._messageEmitter.fire(msg),
+        };
+    }
+
+    test('listSubagents sends list_subagents to server', () => {
+        const { sendMessage } = resolveView();
+
+        sendMessage({ type: 'listSubagents' });
+
+        expect(connection.send).toHaveBeenCalledWith({ type: 'list_subagents' });
+    });
+
+    test('saveSubagent sends save_subagent with correct field mapping', () => {
+        const { sendMessage } = resolveView();
+
+        sendMessage({
+            type: 'saveSubagent',
+            name: 'my-agent',
+            description: 'My custom agent',
+            systemPrompt: 'You are my custom agent.',
+            tools: ['read_file', 'write_file'],
+        });
+
+        expect(connection.send).toHaveBeenCalledWith({
+            type: 'save_subagent',
+            name: 'my-agent',
+            description: 'My custom agent',
+            system_prompt: 'You are my custom agent.',
+            tools: ['read_file', 'write_file'],
+            is_fork: false,
+        });
+    });
+
+    test('saveSubagent defaults tools to null and is_fork to false', () => {
+        const { sendMessage } = resolveView();
+
+        sendMessage({
+            type: 'saveSubagent',
+            name: 'bare-agent',
+            description: 'Bare agent',
+            systemPrompt: 'You are bare.',
+        });
+
+        expect(connection.send).toHaveBeenCalledWith({
+            type: 'save_subagent',
+            name: 'bare-agent',
+            description: 'Bare agent',
+            system_prompt: 'You are bare.',
+            tools: null,
+            is_fork: false,
+        });
+    });
+
+    test('deleteSubagent sends delete_subagent to server', () => {
+        const { sendMessage } = resolveView();
+
+        sendMessage({ type: 'deleteSubagent', name: 'my-agent' });
+
+        expect(connection.send).toHaveBeenCalledWith({
+            type: 'delete_subagent',
+            name: 'my-agent',
+        });
+    });
+
+    test('forkSubagent sends save_subagent with is_fork=true', () => {
+        const { sendMessage } = resolveView();
+
+        sendMessage({
+            type: 'forkSubagent',
+            name: 'code-reviewer',
+            baseDescription: 'Expert code reviewer',
+            basePrompt: 'You are an expert code reviewer.',
+            baseTools: null,
+        });
+
+        expect(connection.send).toHaveBeenCalledWith({
+            type: 'save_subagent',
+            name: 'code-reviewer',
+            description: 'Expert code reviewer',
+            system_prompt: 'You are an expert code reviewer.',
+            tools: null,
+            is_fork: true,
+        });
+    });
+
+    test('forkSubagent forwards tools when provided', () => {
+        const { sendMessage } = resolveView();
+
+        sendMessage({
+            type: 'forkSubagent',
+            name: 'explore',
+            baseDescription: 'Explorer',
+            basePrompt: 'You explore.',
+            baseTools: ['read_file', 'grep'],
+        });
+
+        expect(connection.send).toHaveBeenCalledWith({
+            type: 'save_subagent',
+            name: 'explore',
+            description: 'Explorer',
+            system_prompt: 'You explore.',
+            tools: ['read_file', 'grep'],
+            is_fork: true,
+        });
+    });
+
+    test('openSubagentFile shows warning when file does not exist', () => {
+        // The mock workspace root exists but .clarity/agents/code-reviewer.md does not
+        const { sendMessage } = resolveView();
+
+        sendMessage({ type: 'openSubagentFile', name: 'code-reviewer' });
+
+        expect(vscode.window.showWarningMessage).toHaveBeenCalled();
+        expect(connection.send).not.toHaveBeenCalled();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Subagent management: handleServerMessage routing
+// ---------------------------------------------------------------------------
+
+describe('handleServerMessage subagent routing', () => {
+    let connection: MockConnection;
+    let provider: ClarAItySidebarProvider;
+
+    beforeEach(() => {
+        connection = createMockConnection();
+        const extensionUri = vscode.Uri.file('/test/extension');
+        const log = vscode.window.createOutputChannel('test-log');
+        provider = new ClarAItySidebarProvider(extensionUri, connection as any, log);
+    });
+
+    afterEach(() => {
+        connection.dispose();
+    });
+
+    function resolveView() {
+        const mockView = createMockWebviewView();
+        provider.resolveWebviewView(
+            mockView as any,
+            {} as vscode.WebviewViewResolveContext,
+            { isCancellationRequested: false, onCancellationRequested: jest.fn() } as any,
+        );
+        return {
+            webview: mockView.webview,
+        };
+    }
+
+    test('subagents_list is forwarded to webview as serverMessage', () => {
+        const { webview } = resolveView();
+
+        const subagents = [
+            {
+                name: 'code-reviewer',
+                description: 'Expert code reviewer',
+                system_prompt: 'You review code.',
+                tools: null,
+                source: 'builtin' as const,
+                config_path: null,
+            },
+            {
+                name: 'my-agent',
+                description: 'My custom agent',
+                system_prompt: 'You are custom.',
+                tools: ['read_file'],
+                source: 'project' as const,
+                config_path: '/workspace/.clarity/agents/my-agent.md',
+            },
+        ];
+
+        const msg: ServerMessage = { type: 'subagents_list', subagents, available_tools: ['read_file', 'write_file'] };
+        connection._onMessageEmitter.fire(msg);
+
+        expect(webview.postMessage).toHaveBeenCalledWith({
+            type: 'serverMessage',
+            payload: msg,
+        });
+    });
+
+    test('subagent_saved success is forwarded to webview', () => {
+        const { webview } = resolveView();
+
+        const msg: ServerMessage = {
+            type: 'subagent_saved',
+            success: true,
+            name: 'my-agent',
+            message: "Subagent 'my-agent' saved.",
+        };
+        connection._onMessageEmitter.fire(msg);
+
+        expect(webview.postMessage).toHaveBeenCalledWith({
+            type: 'serverMessage',
+            payload: msg,
+        });
+    });
+
+    test('subagent_saved failure is forwarded to webview', () => {
+        const { webview } = resolveView();
+
+        const msg: ServerMessage = {
+            type: 'subagent_saved',
+            success: false,
+            name: 'bad name!',
+            message: 'Invalid name: use lowercase letters, numbers, and hyphens only.',
+        };
+        connection._onMessageEmitter.fire(msg);
+
+        expect(webview.postMessage).toHaveBeenCalledWith({
+            type: 'serverMessage',
+            payload: msg,
+        });
+    });
+
+    test('subagent_deleted success is forwarded to webview', () => {
+        const { webview } = resolveView();
+
+        const msg: ServerMessage = {
+            type: 'subagent_deleted',
+            success: true,
+            name: 'my-agent',
+            message: "Subagent 'my-agent' deleted.",
+        };
+        connection._onMessageEmitter.fire(msg);
+
+        expect(webview.postMessage).toHaveBeenCalledWith({
+            type: 'serverMessage',
+            payload: msg,
+        });
+    });
+
+    test('subagent_deleted failure (built-in) is forwarded to webview', () => {
+        const { webview } = resolveView();
+
+        const msg: ServerMessage = {
+            type: 'subagent_deleted',
+            success: false,
+            name: 'code-reviewer',
+            message: "No project-level config found for 'code-reviewer'. Built-in subagents cannot be deleted.",
+        };
+        connection._onMessageEmitter.fire(msg);
+
+        expect(webview.postMessage).toHaveBeenCalledWith({
+            type: 'serverMessage',
+            payload: msg,
+        });
+    });
+});

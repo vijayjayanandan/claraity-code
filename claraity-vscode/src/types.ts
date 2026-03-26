@@ -18,6 +18,7 @@ export type {
   FileAttachment,
   ImageAttachment,
   ServerMessage,
+  SubAgentInfo,
 } from '../shared/protocol';
 
 // Import for use in local type definitions
@@ -184,7 +185,16 @@ export type ClientMessage =
     // ClarAIty Knowledge & Beads
     | { type: 'get_beads' }
     | { type: 'get_architecture' }
-    | { type: 'approve_knowledge'; approved_by: string; status: string; comments: string };
+    | { type: 'approve_knowledge'; approved_by: string; status: string; comments: string }
+    | { type: 'export_knowledge' }
+    // Subagent management
+    | { type: 'list_subagents' }
+    | { type: 'save_subagent'; name: string; description: string; system_prompt: string; tools?: string[] | null; is_fork?: boolean }
+    | { type: 'delete_subagent'; name: string }
+    | { type: 'reload_subagents' }
+    // Limits
+    | { type: 'get_limits' }
+    | { type: 'save_limits'; limits: import('../shared/protocol').LimitsData };
 
 // ============================================================================
 // Extension <-> WebView postMessage types
@@ -246,7 +256,17 @@ export type WebViewMessage =
     // ClarAIty Knowledge & Beads
     | { type: 'getBeads' }
     | { type: 'getArchitecture' }
-    | { type: 'approveKnowledge'; approvedBy: string };
+    | { type: 'approveKnowledge'; approvedBy: string }
+    | { type: 'exportKnowledge' }
+    // Subagent management
+    | { type: 'listSubagents' }
+    | { type: 'saveSubagent'; name: string; description: string; systemPrompt: string; tools?: string[] | null; isFork?: boolean }
+    | { type: 'deleteSubagent'; name: string }
+    | { type: 'forkSubagent'; name: string; basePrompt: string; baseDescription: string; baseTools?: string[] | null }
+    | { type: 'openSubagentFile'; name: string }
+    // Limits
+    | { type: 'getLimits' }
+    | { type: 'saveLimits'; limits: import('../shared/protocol').LimitsData };
 
 // ============================================================================
 // Exhaustive check helper

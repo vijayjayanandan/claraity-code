@@ -73,6 +73,16 @@ class DelegateToSubagentTool(Tool):
         self._ui_protocol = protocol
         logger.info("DelegateToSubagentTool: UIProtocol wired")
 
+    def refresh_description(self) -> None:
+        """Regenerate and apply the tool description from current subagent configs.
+
+        Call this after subagents are added, removed, or reloaded so the LLM
+        sees the up-to-date list on the next API call. The LLM backends read
+        tool.description fresh on every request, so assigning here is sufficient.
+        """
+        self.description = self._generate_description()
+        logger.info("DelegateToSubagentTool: description refreshed")
+
     def _generate_description(self) -> str:
         """Generate dynamic tool description listing available subagents."""
         available = self.subagent_manager.get_available_subagents()
@@ -470,7 +480,7 @@ Use this tool proactively when appropriate!"""
         clarify_result = {"cancelled": True}
 
         if self._ui_protocol:
-            # Send clarify form to client (WebSocket only -- TUI uses SubAgentCard)
+            # Send clarify form to client (stdio server only -- TUI uses SubAgentCard)
             if hasattr(self._ui_protocol, "send_clarify_request"):
                 await self._ui_protocol.send_clarify_request(
                     call_id=request.tool_call_id,

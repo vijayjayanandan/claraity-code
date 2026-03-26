@@ -17,19 +17,31 @@ interface ArchitecturePanelProps {
   onDiscuss: (message: string) => void;
   onReview: (reviewedBy: string, status: string, comments: string) => void;
   onOpenFile: (path: string) => void;
+  onExport: () => void;
 }
 
 // ============================================================================
 // Config
 // ============================================================================
 
-const MODULE_COLORS: Record<string, string> = {
-  "mod-core": "#58a6ff", "mod-memory": "#3fb950", "mod-session": "#3fb950",
-  "mod-ui": "#bc8cff", "mod-tools": "#79c0ff", "mod-llm": "#d29922",
-  "mod-server": "#f778ba", "mod-observability": "#8b949e", "mod-prompts": "#8b949e",
-  "mod-subagents": "#79c0ff", "mod-director": "#f778ba", "mod-code-intel": "#8b949e",
-  "mod-integrations": "#8b949e", "mod-platform": "#8b949e", "mod-hooks": "#8b949e",
-};
+/** Generate a deterministic hex color from a string ID. Produces vibrant, distinct hues. */
+function moduleColor(id: string): string {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) {
+    hash = ((hash << 5) - hash + id.charCodeAt(i)) | 0;
+  }
+  const hue = ((hash >>> 0) % 360);
+  // HSL to hex: s=65%, l=60%
+  const s = 0.65, l = 0.6;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n: number) => {
+    const k = (n + hue / 30) % 12;
+    const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+    return Math.round(255 * color).toString(16).padStart(2, "0");
+  };
+  return `#${f(0)}${f(8)}${f(4)}`;
+}
+const moduleColorCache: Record<string, string> = {};
 const EDGE_COLORS: Record<string, string> = {
   uses: "#58a6ff", calls: "#3fb950", writes: "#f85149", reads: "#79c0ff",
   spawns: "#bc8cff", drives: "#f778ba", renders: "#3fb950", dispatches: "#79c0ff",
@@ -236,7 +248,7 @@ function calculateLayout(
       }));
       moduleLayouts.push({
         id: mod.id, node: mod as unknown as Record<string, unknown>, label, expanded: true,
-        w, h, children: childLayouts, color: MODULE_COLORS[mod.id] || DEFAULT_COLOR,
+        w, h, children: childLayouts, color: (moduleColorCache[mod.id] ??= moduleColor(mod.id)),
         flow_rank: (props as Record<string, unknown>).flow_rank as number ?? 99,
         flow_col: (props as Record<string, unknown>).flow_col as number ?? 0,
         x: 0, y: 0,
@@ -249,7 +261,7 @@ function calculateLayout(
         id: mod.id, node: mod as unknown as Record<string, unknown>, label, expanded: false,
         w: COLLAPSED_W, h: COLLAPSED_H, children: [],
         count: compCount > 0 ? compCount : fileCount,
-        color: MODULE_COLORS[mod.id] || DEFAULT_COLOR,
+        color: (moduleColorCache[mod.id] ??= moduleColor(mod.id)),
         flow_rank: (props as Record<string, unknown>).flow_rank as number ?? 99,
         flow_col: (props as Record<string, unknown>).flow_col as number ?? 0,
         x: 0, y: 0,
@@ -974,7 +986,7 @@ function EdgeDrawer({ detail, onClose }: { detail: EdgeDetail; onClose: () => vo
 // React component
 // ============================================================================
 
-export const ArchitecturePanel = memo(function ArchitecturePanel({ data, onBack, onRefresh, onDiscuss, onReview, onOpenFile }: ArchitecturePanelProps) {
+export const ArchitecturePanel = memo(function ArchitecturePanel({ data, onBack, onRefresh, onDiscuss, onReview, onOpenFile, onExport }: ArchitecturePanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const expandedRef = useRef(new Set<string>());
   const dragPosRef = useRef<Record<string, { x: number; y: number }>>({});
@@ -1116,7 +1128,9 @@ export const ArchitecturePanel = memo(function ArchitecturePanel({ data, onBack,
         <button className="panel-action" onClick={onRefresh} title="Refresh" aria-label="Refresh architecture">
           <i className="codicon codicon-refresh" />
         </button>
-        {/* Discuss button removed — input always visible below drawer */}
+        <button className="panel-action" onClick={onExport} title="Export to JSONL" aria-label="Export to JSONL">
+          <i className="codicon codicon-cloud-download" />
+        </button>
       </div>
 
       {!data ? (

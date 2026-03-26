@@ -46,7 +46,7 @@ logger = get_logger("ui.widgets.subagent_card")
 
 
 # Tools that should not be rendered (same as app.py SILENT_TOOLS)
-SILENT_TOOLS = {"task_create", "task_update", "task_list", "task_get", "enter_plan_mode"}
+SILENT_TOOLS = {"task_create", "task_update", "task_list", "task_block", "enter_plan_mode"}
 
 # Status badge config for the header
 HEADER_ICONS: dict[str, tuple[str, str, str]] = {

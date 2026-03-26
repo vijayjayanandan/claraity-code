@@ -23,6 +23,7 @@ from src.code_intelligence.lsp_client_manager import LSPClientManager
 from src.code_intelligence.lsp_runtime import get_manager_async, lsp_run
 
 from .base import Tool, ToolResult, ToolStatus
+from .clarityignore import is_blocked
 from .search_tools import validate_path_security
 
 
@@ -92,6 +93,16 @@ class GetFileOutlineTool(Tool):
     async def _execute_async(self, file_path: str) -> ToolResult:
         """Async implementation of execute."""
         try:
+            # Check .clarityignore
+            blocked, _pattern = is_blocked(file_path)
+            if blocked:
+                return ToolResult(
+                    tool_name=self.name,
+                    status=ToolStatus.ERROR,
+                    output=None,
+                    error="Access denied: file is blocked by user policy",
+                )
+
             # Validate file exists
             path = Path(file_path)
             if not path.exists():
@@ -399,6 +410,22 @@ class GetSymbolContextTool(Tool):
             # Step 2: Filter by file hint if provided
             if file_hint:
                 workspace_symbols = self._filter_by_file(workspace_symbols, file_hint)
+
+            # Step 2b: Filter out .clarityignore-blocked files
+            workspace_symbols = [
+                s for s in workspace_symbols
+                if not is_blocked(
+                    s.get("location", {}).get("uri", "").replace("file:///", "").replace("file://", "")
+                )[0]
+            ]
+
+            if not workspace_symbols:
+                return ToolResult(
+                    tool_name=self.name,
+                    status=ToolStatus.SUCCESS,
+                    output=f"No symbol found matching '{symbol_name}'",
+                    metadata={"symbol": symbol_name, "matches": 0, "suggestions": []},
+                )
 
             # Step 3: Load context for each match
             matches = []

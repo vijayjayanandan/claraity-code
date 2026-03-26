@@ -163,6 +163,7 @@ export function appReducer(state: AppState, action: Action): AppState {
         sessionNonce: isNewSession ? base.sessionNonce + 1 : base.sessionNonce,
         autoApprove: action.autoApprove
           ? {
+              read: !!action.autoApprove.read,
               edit: !!action.autoApprove.edit,
               execute: !!action.autoApprove.execute,
               browser: !!action.autoApprove.browser,
@@ -483,7 +484,12 @@ export function appReducer(state: AppState, action: Action): AppState {
 
     // ── Context ──
     case "CONTEXT_UPDATED":
-      return { ...state, contextUsed: action.used, contextLimit: action.limit };
+      return {
+        ...state,
+        contextUsed: action.used,
+        contextLimit: action.limit,
+        ...(action.iteration != null ? { lastIterations: action.iteration } : {}),
+      };
 
     // ── Panels ──
     case "SET_ACTIVE_PANEL":
@@ -557,7 +563,7 @@ export function appReducer(state: AppState, action: Action): AppState {
 
     // ── Simple state updates ──
     case "AUTO_APPROVE_CHANGED":
-      return { ...state, autoApprove: { edit: !!action.categories.edit, execute: !!action.categories.execute, browser: !!action.categories.browser } };
+      return { ...state, autoApprove: { read: !!action.categories.read, edit: !!action.categories.edit, execute: !!action.categories.execute, browser: !!action.categories.browser } };
     case "TODOS_UPDATED":
       return { ...state, todos: action.todos };
     case "ADD_ATTACHMENT":
@@ -608,6 +614,20 @@ export function appReducer(state: AppState, action: Action): AppState {
       return { ...state, beadsData: action.data };
     case "ARCHITECTURE_LOADED":
       return { ...state, architectureData: action.data };
+
+    // ── Subagents panel ──
+    case "SUBAGENTS_LIST":
+      return { ...state, subagentsList: action.subagents, subagentsAvailableTools: action.availableTools };
+    case "SUBAGENT_NOTIFICATION":
+      return { ...state, subagentNotification: { message: action.message, success: action.success } };
+    case "CLEAR_SUBAGENT_NOTIFICATION":
+      return { ...state, subagentNotification: null };
+
+    // ── Limits ──
+    case "LIMITS_LOADED":
+      return { ...state, limits: action.limits };
+    case "LIMITS_SAVED":
+      return { ...state, ...(action.limits ? { limits: action.limits } : {}) };
 
     // ── Error ──
     case "ERROR": {

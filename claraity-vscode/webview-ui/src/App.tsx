@@ -28,6 +28,7 @@ import { JiraPanel } from "./components/JiraPanel";
 import { MCPPanel } from "./components/MCPPanel";
 import { BeadsPanel } from "./components/BeadsPanel";
 import { ArchitecturePanel } from "./components/ArchitecturePanel";
+import { SubagentsPanel } from "./components/SubagentsPanel";
 
 export function App() {
   const [state, dispatch] = useReducer(appReducer, initialState);
@@ -235,6 +236,23 @@ export function App() {
             setTimeout(() => postMessage({ type: "getArchitecture" }), 500);
           }}
           onOpenFile={(path) => postMessage({ type: "openFile", path })}
+          onExport={() => postMessage({ type: "exportKnowledge" })}
+        />
+      </div>
+    );
+  }
+
+  // Subagents panel view
+  if (state.activePanel === "subagents") {
+    return (
+      <div className="app">
+        <SubagentsPanel
+          postMessage={postMessage}
+          onBack={() => dispatch({ type: "SET_ACTIVE_PANEL", panel: "chat" })}
+          subagents={state.subagentsList}
+          availableTools={state.subagentsAvailableTools}
+          notification={state.subagentNotification}
+          onClearNotification={() => dispatch({ type: "CLEAR_SUBAGENT_NOTIFICATION" })}
         />
       </div>
     );
@@ -265,6 +283,10 @@ export function App() {
         onShowConfig={() => dispatch({ type: "SET_ACTIVE_PANEL", panel: "config" })}
         onShowJira={() => dispatch({ type: "SET_ACTIVE_PANEL", panel: "jira" })}
         onShowMcp={() => dispatch({ type: "SET_ACTIVE_PANEL", panel: "mcp" })}
+        onShowSubagents={() => {
+          postMessage({ type: "listSubagents" });
+          dispatch({ type: "SET_ACTIVE_PANEL", panel: "subagents" });
+        }}
       />
 
       {state.contextLimit > 0 && (
@@ -302,6 +324,10 @@ export function App() {
         onChange={(categories) =>
           postMessage({ type: "setAutoApprove", categories })
         }
+        limits={state.limits}
+        onSaveLimits={(limits) => postMessage({ type: "saveLimits", limits })}
+        onLoadLimits={() => postMessage({ type: "getLimits" })}
+        lastIterations={state.lastIterations}
       />
 
       {state.todos.length > 0 && (

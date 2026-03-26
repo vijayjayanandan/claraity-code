@@ -14,9 +14,7 @@ from .file_operations import (
 )
 from .lsp_tools import GetFileOutlineTool, GetSymbolContextTool
 from .plan_mode_tools import EnterPlanModeTool, RequestPlanApprovalTool
-from .planning_tool import TaskCreateTool, TaskGetTool, TaskListTool, TaskUpdateTool
 from .search_tools import GlobTool, GrepTool
-from .task_state import TaskState
 from .tool_schemas import (
     ALL_TOOLS,
     CODE_TOOLS,
@@ -57,11 +55,6 @@ __all__ = [
     "GetFileOutlineTool",
     "GetSymbolContextTool",
     "DelegateToSubagentTool",
-    "TaskState",
-    "TaskCreateTool",
-    "TaskUpdateTool",
-    "TaskListTool",
-    "TaskGetTool",
     "CreateCheckpointTool",
     "ClarifyTool",
     # Plan mode tools

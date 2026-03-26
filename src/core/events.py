@@ -234,6 +234,7 @@ class ContextUpdated:
     used: int
     limit: int
     pressure_level: str = "green"
+    iteration: int | None = None
 
 
 @dataclass(frozen=True)
