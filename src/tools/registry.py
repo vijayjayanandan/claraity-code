@@ -15,26 +15,22 @@ def get_stateless_tools() -> list:
     Lazy import to avoid circular dependencies at module load time.
     Each tool opens/closes its own resources per execute() call.
     """
-    from src.testing.validation_tool import DetectTestFrameworkTool, RunTestsTool
-    from src.tools.claraity_tools import (
+    from src.tools.knowledge_tools import (
         BeadBlockTool,
         BeadCreateTool,
         BeadReadyTool,
         BeadUpdateTool,
-        ClaraityAddEdgeTool,
-        ClaraityAddNodeTool,
-        ClaraitySetMetadataTool,
-        ClaraityAutoLayoutTool,
-        ClaraityExportTool,
-        ClaraityQueryTool,
-        ClaraityRemoveEdgeTool,
-        ClaraityRemoveNodeTool,
-        ClaraityScanFilesTool,
-        QueryFileTool,
-        QueryImpactTool,
-        QueryKnowledgeBriefTool,
-        QueryModuleTool,
-        SearchKnowledgeTool,
+        KnowledgeAutoLayoutTool,
+        KnowledgeBriefTool,
+        KnowledgeExportTool,
+        KnowledgeFileTool,
+        KnowledgeImpactTool,
+        KnowledgeModuleTool,
+        KnowledgeQueryTool,
+        KnowledgeScanFilesTool,
+        KnowledgeSearchTool,
+        KnowledgeSetMetadataTool,
+        KnowledgeUpdateTool,
     )
     from src.tools.clarify_tool import ClarifyTool
     from src.tools.file_operations import (
@@ -45,7 +41,6 @@ def get_stateless_tools() -> list:
         RunCommandTool,
         WriteFileTool,
     )
-    from src.tools.knowledge_tools import KBDetectChangesTool, KBUpdateManifestTool
     from src.tools.lsp_tools import GetFileOutlineTool, GetSymbolContextTool
     from src.tools.search_tools import GlobTool, GrepTool
     from src.tools.web_tools import WebFetchTool, WebSearchTool
@@ -64,26 +59,20 @@ def get_stateless_tools() -> list:
         # LSP
         GetFileOutlineTool(),
         GetSymbolContextTool(),
-        # Legacy knowledge tools
-        KBDetectChangesTool(),
-        KBUpdateManifestTool(),
         # Interactive
         ClarifyTool(),
         # ClarAIty Knowledge DB
-        ClaraityScanFilesTool(),
-        ClaraityAddNodeTool(),
-        ClaraityAddEdgeTool(),
-        ClaraityRemoveNodeTool(),
-        ClaraityRemoveEdgeTool(),
-        ClaraityQueryTool(),
-        QueryKnowledgeBriefTool(),
-        QueryModuleTool(),
-        QueryFileTool(),
-        SearchKnowledgeTool(),
-        QueryImpactTool(),
-        ClaraitySetMetadataTool(),
-        ClaraityAutoLayoutTool(),
-        ClaraityExportTool(),
+        KnowledgeScanFilesTool(),
+        KnowledgeUpdateTool(),
+        KnowledgeQueryTool(),
+        KnowledgeBriefTool(),
+        KnowledgeModuleTool(),
+        KnowledgeFileTool(),
+        KnowledgeSearchTool(),
+        KnowledgeImpactTool(),
+        KnowledgeSetMetadataTool(),
+        KnowledgeAutoLayoutTool(),
+        KnowledgeExportTool(),
         # ClarAIty Beads
         BeadReadyTool(),
         BeadCreateTool(),
@@ -92,7 +81,4 @@ def get_stateless_tools() -> list:
         # Web tools (basic, no rate limiting — agent overrides with budgeted versions)
         WebSearchTool(),
         WebFetchTool(),
-        # Testing
-        RunTestsTool(),
-        DetectTestFrameworkTool(),
     ]

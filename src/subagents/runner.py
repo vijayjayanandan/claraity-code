@@ -84,37 +84,12 @@ def _create_tool_executor(tools_allowlist=None):
         ToolExecutor instance with registered tools
     """
     from src.tools.base import ToolExecutor
-    from src.tools.clarify_tool import ClarifyTool
-    from src.tools.file_operations import (
-        AppendToFileTool,
-        EditFileTool,
-        ListDirectoryTool,
-        ReadFileTool,
-        RunCommandTool,
-        WriteFileTool,
-    )
-    from src.tools.knowledge_tools import KBDetectChangesTool, KBUpdateManifestTool
-    from src.tools.lsp_tools import GetFileOutlineTool, GetSymbolContextTool
-    from src.tools.search_tools import GlobTool, GrepTool
+    from src.tools.registry import get_stateless_tools
 
     executor = ToolExecutor(hook_manager=None)
 
-    # All standard parameterless tools
-    all_tools = [
-        ReadFileTool(),
-        WriteFileTool(),
-        EditFileTool(),
-        AppendToFileTool(),
-        ListDirectoryTool(),
-        GrepTool(),
-        GlobTool(),
-        RunCommandTool(),
-        GetFileOutlineTool(),
-        GetSymbolContextTool(),
-        KBDetectChangesTool(),
-        KBUpdateManifestTool(),
-        ClarifyTool(),
-    ]
+    # All standard parameterless tools (from central registry)
+    all_tools = get_stateless_tools()
 
     # Apply allowlist filter if specified
     if tools_allowlist:
@@ -292,10 +267,12 @@ def main():
         if permission_mode != "auto":
             approval_cb = _create_ipc_approval_callback(config.name, auto_approve_set)
 
-        # Pause callback is ALWAYS created regardless of permission mode.
-        # It asks the user whether to continue when iteration/wall-clock
-        # limits are hit — this is not a tool approval concern.
-        pause_cb = _create_ipc_pause_callback(config.name)
+        # Only create pause callback when iteration limit is enabled.
+        # When disabled, subagent runs to completion (pause_callback=None
+        # triggers auto-summarize in SubAgent as a safety fallback).
+        pause_cb = None
+        if input_data.iteration_limit_enabled:
+            pause_cb = _create_ipc_pause_callback(config.name)
 
         # Resolve max_wall_time from input (None disables wall-clock limit)
         max_wall_time = input_data.max_wall_time

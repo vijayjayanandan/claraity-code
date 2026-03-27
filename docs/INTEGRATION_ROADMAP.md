@@ -963,8 +963,6 @@ class PermissionManager:
         "WriteFileTool",
         "edit_file",
         "EditFileTool",
-        "git_commit",
-        "GitCommitTool",
     }
 
     # Dangerous tools (always require approval, even in Auto mode)

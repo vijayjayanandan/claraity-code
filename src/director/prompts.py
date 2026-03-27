@@ -217,7 +217,6 @@ _EXECUTE_TOOLS = READ_ONLY_TOOLS | frozenset(
         "edit_file",
         "append_to_file",
         "run_command",
-        "git_commit",
         "git_status",
         "git_diff",
         "delegate_to_subagent",
@@ -233,7 +232,6 @@ _INTEGRATE_TOOLS = (
         {
             "run_command",
             "list_directory",
-            "git_commit",
         }
     )
     | DIRECTOR_TOOLS

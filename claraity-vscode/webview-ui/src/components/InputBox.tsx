@@ -6,6 +6,7 @@ import type { FileAttachment, ImageAttachment, WebViewMessage } from "../types";
 
 interface InputBoxProps {
   isStreaming: boolean;
+  connected: boolean;
   attachments: FileAttachment[];
   images: ImageAttachment[];
   mentionResults: Array<{ path: string; name: string; relativePath: string }>;
@@ -17,6 +18,13 @@ interface InputBoxProps {
   onRemoveImage: (index: number) => void;
   onSearchFiles: (query: string) => void;
   postMessage: (msg: WebViewMessage) => void;
+  // Prompt Enrichment
+  enrichmentEnabled: boolean;
+  enrichmentLoading: boolean;
+  enrichedPreview: string | null;
+  onToggleEnrichment: (enabled: boolean) => void;
+  onRequestEnrichment: (content: string) => void;
+  onClearEnrichment: () => void;
 }
 
 const MAX_IMAGES = 5;
@@ -36,6 +44,7 @@ function isTextFile(file: File): boolean {
 
 export function InputBox({
   isStreaming,
+  connected,
   attachments,
   images,
   mentionResults,
@@ -47,6 +56,12 @@ export function InputBox({
   onRemoveImage,
   onSearchFiles,
   postMessage,
+  enrichmentEnabled,
+  enrichmentLoading,
+  enrichedPreview,
+  onToggleEnrichment,
+  onRequestEnrichment,
+  onClearEnrichment,
 }: InputBoxProps) {
   const [text, setText] = useState("");
   const [showMentions, setShowMentions] = useState(false);
@@ -131,7 +146,13 @@ export function InputBox({
     [text],
   );
 
-  // Handle send
+  // Local state for editing the enriched preview
+  const [editedPreview, setEditedPreview] = useState<string | null>(null);
+  useEffect(() => {
+    if (enrichedPreview !== null) setEditedPreview(enrichedPreview);
+  }, [enrichedPreview]);
+
+  // Handle send — intercept for enrichment when enabled
   const handleSend = useCallback(() => {
     if (isStreaming) {
       onInterrupt();
@@ -139,9 +160,32 @@ export function InputBox({
     }
     const trimmed = text.trim();
     if (!trimmed && images.length === 0 && attachments.length === 0) return;
+
+    // If enrichment is ON and no preview yet, request enrichment instead of sending
+    if (enrichmentEnabled && !enrichedPreview && !enrichmentLoading) {
+      onRequestEnrichment(trimmed);
+      return;
+    }
+
     onSend(trimmed, attachments.length > 0 ? attachments : undefined, images.length > 0 ? images : undefined);
     setText("");
-  }, [text, isStreaming, onSend, onInterrupt, attachments, images]);
+  }, [text, isStreaming, onSend, onInterrupt, attachments, images, enrichmentEnabled, enrichedPreview, enrichmentLoading, onRequestEnrichment]);
+
+  // Send the enriched (possibly edited) prompt
+  const handleSendEnriched = useCallback(() => {
+    const content = editedPreview ?? enrichedPreview ?? "";
+    if (!content.trim()) return;
+    onSend(content, attachments.length > 0 ? attachments : undefined, images.length > 0 ? images : undefined);
+    setText("");
+    onClearEnrichment();
+  }, [editedPreview, enrichedPreview, onSend, attachments, images, onClearEnrichment]);
+
+  // Cancel enrichment preview
+  const handleCancelEnrichment = useCallback(() => {
+    onClearEnrichment();
+    setEditedPreview(null);
+    textareaRef.current?.focus();
+  }, [onClearEnrichment]);
 
   // Keyboard shortcuts
   const handleKeyDown = useCallback(
@@ -388,6 +432,40 @@ export function InputBox({
         </div>
       )}
 
+      {/* Enrichment loading indicator */}
+      {enrichmentLoading && (
+        <div className="enrichment-loading">
+          <i className="codicon codicon-loading codicon-modifier-spin" />
+          <span>Enriching prompt...</span>
+        </div>
+      )}
+
+      {/* Enrichment preview area */}
+      {enrichedPreview && !enrichmentLoading && (
+        <div className="enrichment-preview">
+          <div className="enrichment-preview-header">
+            <span className="enrichment-preview-label">
+              <i className="codicon codicon-sparkle" />
+              Enriched Prompt
+            </span>
+          </div>
+          <textarea
+            className="enrichment-preview-textarea"
+            value={editedPreview ?? enrichedPreview}
+            onChange={(e) => setEditedPreview(e.target.value)}
+            rows={6}
+          />
+          <div className="enrichment-preview-actions">
+            <button className="enrichment-btn enrichment-btn-send" onClick={handleSendEnriched}>
+              Send
+            </button>
+            <button className="enrichment-btn enrichment-btn-cancel" onClick={handleCancelEnrichment}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Input area */}
       <div className="input-area">
         <textarea
@@ -396,8 +474,9 @@ export function InputBox({
           onChange={(e) => handleChange(e.target.value)}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
-          placeholder="Ask ClarAIty..."
+          placeholder={connected ? "Ask ClarAIty..." : "Disconnected from server..."}
           rows={1}
+          disabled={!connected}
           aria-label="Message input"
           aria-autocomplete="list"
           aria-controls={showMentions ? "mention-listbox" : undefined}
@@ -405,6 +484,14 @@ export function InputBox({
         />
       </div>
       <div className="input-toolbar">
+        <button
+          className={`input-icon-btn${enrichmentEnabled ? " enrichment-active" : ""}`}
+          title={enrichmentEnabled ? "Prompt Enrichment ON" : "Prompt Enrichment OFF"}
+          onClick={() => onToggleEnrichment(!enrichmentEnabled)}
+          disabled={isStreaming}
+        >
+          <i className="codicon codicon-sparkle" />
+        </button>
         <div className="attach-wrapper" ref={attachMenuRef}>
           <button
             className="input-icon-btn"
@@ -430,7 +517,8 @@ export function InputBox({
         <button
           className={`send-icon-btn ${isStreaming ? "streaming" : ""}`}
           onClick={handleSend}
-          title={isStreaming ? "Stop" : "Send"}
+          title={isStreaming ? "Stop" : connected ? "Send" : "Disconnected"}
+          disabled={!connected && !isStreaming}
         >
           <i className={`codicon ${isStreaming ? "codicon-debug-stop" : "codicon-arrow-up"}`} />
         </button>

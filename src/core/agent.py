@@ -454,12 +454,16 @@ class CodingAgent(AgentInterface):
         # Special tool handlers (clarify, plan approval, director plan approval)
         from src.core.special_tool_handlers import SpecialToolHandlers
 
+        # Callback initially None; set after _on_auto_approve_changed is initialized.
+        # The special handler calls this when plan approval enables categories.
+        self._on_auto_approve_changed: Any = None
         self._special_handlers = SpecialToolHandlers(
             memory=self.memory,
             plan_mode_state=self.plan_mode_state,
             director_adapter=self.director_adapter,
             tool_executor=self.tool_executor,
             permission_manager=self.permission_manager,
+            set_auto_approve_fn=self.set_auto_approve_categories,
         )
 
         # Initialize subagent manager (lazy import to avoid circular dependency)
@@ -593,6 +597,8 @@ class CodingAgent(AgentInterface):
             "edit": aa.edit,
             "execute": aa.execute,
             "browser": aa.browser,
+            "knowledge_update": aa.knowledge_update,
+            "subagent": aa.subagent,
         })
 
         # 7. Apply subagent LLM overrides from config
@@ -882,12 +888,6 @@ class CodingAgent(AgentInterface):
         # Checkpoint tool (controller will be set later by CLI)
         self.tool_executor.register_tool(CreateCheckpointTool(controller=None))
 
-        # Testing & Validation tools
-        from src.testing.validation_tool import DetectTestFrameworkTool, RunTestsTool
-
-        self.tool_executor.register_tool(RunTestsTool())
-        self.tool_executor.register_tool(DetectTestFrameworkTool())
-
         # Web tools (search and fetch)
         from src.tools.web_tools import RunBudget, WebFetchTool, WebSearchTool
 
@@ -910,39 +910,39 @@ class CodingAgent(AgentInterface):
         self.tool_executor.register_tool(ClarifyTool())
 
         # ClarAIty Knowledge & Task tools
-        from src.tools.claraity_tools import (
-            ClaraityScanFilesTool,
-            ClaraityAddNodeTool,
-            ClaraityAddEdgeTool,
-            ClaraityRemoveNodeTool,
-            QueryKnowledgeBriefTool,
-            QueryModuleTool,
-            QueryFileTool,
-            SearchKnowledgeTool,
-            QueryImpactTool,
+        from src.tools.knowledge_tools import (
+            KnowledgeScanFilesTool,
+            KnowledgeUpdateTool,
+            KnowledgeQueryTool,
+            KnowledgeBriefTool,
+            KnowledgeModuleTool,
+            KnowledgeFileTool,
+            KnowledgeSearchTool,
+            KnowledgeImpactTool,
+            KnowledgeSetMetadataTool,
             BeadReadyTool,
             BeadCreateTool,
             BeadUpdateTool,
             BeadBlockTool,
-            ClaraityAutoLayoutTool,
-            ClaraityExportTool,
+            KnowledgeAutoLayoutTool,
+            KnowledgeExportTool,
         )
 
-        self.tool_executor.register_tool(ClaraityScanFilesTool())
-        self.tool_executor.register_tool(ClaraityAddNodeTool())
-        self.tool_executor.register_tool(ClaraityAddEdgeTool())
-        self.tool_executor.register_tool(ClaraityRemoveNodeTool())
-        self.tool_executor.register_tool(QueryKnowledgeBriefTool())
-        self.tool_executor.register_tool(QueryModuleTool())
-        self.tool_executor.register_tool(QueryFileTool())
-        self.tool_executor.register_tool(SearchKnowledgeTool())
-        self.tool_executor.register_tool(QueryImpactTool())
+        self.tool_executor.register_tool(KnowledgeScanFilesTool())
+        self.tool_executor.register_tool(KnowledgeUpdateTool())
+        self.tool_executor.register_tool(KnowledgeQueryTool())
+        self.tool_executor.register_tool(KnowledgeBriefTool())
+        self.tool_executor.register_tool(KnowledgeModuleTool())
+        self.tool_executor.register_tool(KnowledgeFileTool())
+        self.tool_executor.register_tool(KnowledgeSearchTool())
+        self.tool_executor.register_tool(KnowledgeImpactTool())
+        self.tool_executor.register_tool(KnowledgeSetMetadataTool())
         self.tool_executor.register_tool(BeadReadyTool())
         self.tool_executor.register_tool(BeadCreateTool())
         self.tool_executor.register_tool(BeadUpdateTool())
         self.tool_executor.register_tool(BeadBlockTool())
-        self.tool_executor.register_tool(ClaraityAutoLayoutTool())
-        self.tool_executor.register_tool(ClaraityExportTool())
+        self.tool_executor.register_tool(KnowledgeAutoLayoutTool())
+        self.tool_executor.register_tool(KnowledgeExportTool())
 
         # Plan mode tools (Claude Code-style planning workflow)
         # Note: These tools need plan_mode_state and session_id set
@@ -2231,6 +2231,7 @@ class CodingAgent(AgentInterface):
                         continue
 
                     requires_approval = gate_result.action == GateAction.NEEDS_APPROVAL
+                    is_safety_approval = gate_result.safety_reason is not None
 
                     # Freeze approval policy in render meta
                     mode = (
@@ -2243,6 +2244,7 @@ class CodingAgent(AgentInterface):
                         ToolApprovalMeta(
                             requires_approval=requires_approval,
                             permission_mode=mode.value if hasattr(mode, "value") else str(mode),
+                            safety_reason=gate_result.safety_reason,
                         ),
                     )
 
@@ -2256,6 +2258,7 @@ class CodingAgent(AgentInterface):
                                 tc.function.name,
                                 tool_args,
                                 requires_approval=requires_approval,
+                                safety_reason=gate_result.safety_reason,
                             ),
                         )
 
@@ -2268,7 +2271,10 @@ class CodingAgent(AgentInterface):
                             )
                         try:
                             approval_result = await ui.wait_for_approval(
-                                call_id, tc.function.name, timeout=None
+                                call_id,
+                                tc.function.name,
+                                timeout=None,
+                                force_approval=is_safety_approval,
                             )
 
                             if not approval_result.approved:
@@ -3057,8 +3063,15 @@ class CodingAgent(AgentInterface):
         return self.permission_manager.get_mode().value
 
     def set_auto_approve_categories(self, categories: dict[str, bool]) -> dict[str, bool]:
-        """Set granular auto-approve categories. Returns confirmed state."""
-        return self._gating.set_auto_approve_categories(categories)
+        """Set granular auto-approve categories. Returns confirmed state.
+
+        Notifies any registered listener (e.g. stdio server) via
+        ``on_auto_approve_changed`` callback so VS Code panel stays in sync.
+        """
+        confirmed = self._gating.set_auto_approve_categories(categories)
+        if self._on_auto_approve_changed:
+            self._on_auto_approve_changed(confirmed)
+        return confirmed
 
     def get_auto_approve_categories(self) -> dict[str, bool]:
         """Get current auto-approve category state."""
@@ -3301,7 +3314,9 @@ class CodingAgent(AgentInterface):
         # --- Error path ---
         if self.memory.message_store:
             self.memory.message_store.update_tool_state(
-                call_id, CoreToolStatus.ERROR, error=result.error, duration_ms=duration_ms
+                call_id, CoreToolStatus.ERROR,
+                result=result.output, error=result.error,
+                duration_ms=duration_ms,
             )
         error_type = self._classify_tool_error(result.error or "Unknown error")
         error_context = self._error_tracker.record_failure(

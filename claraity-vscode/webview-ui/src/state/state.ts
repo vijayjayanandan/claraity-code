@@ -57,6 +57,11 @@ export interface CodeBlock {
   complete: boolean;
 }
 
+/** Ordered entry inside a subagent card — mirrors the main TimelineEntry concept. */
+export type SubagentTimelineEntry =
+  | { type: "text"; index: number }
+  | { type: "tool"; callId: string };
+
 export interface SubagentInfo {
   subagentId: string;
   parentToolCallId: string;
@@ -67,6 +72,8 @@ export interface SubagentInfo {
   active: boolean;
   finalElapsedMs?: number;
   messages: string[];
+  /** Chronological ordering of text messages and tool cards within the card. */
+  timeline: SubagentTimelineEntry[];
 }
 
 // ============================================================================
@@ -125,7 +132,7 @@ export interface AppState {
   sessionTurnCount: number;
 
   // Auto-approve
-  autoApprove: { read: boolean; edit: boolean; execute: boolean; browser: boolean };
+  autoApprove: { read: boolean; edit: boolean; execute: boolean; browser: boolean; knowledge_update: boolean; subagent: boolean };
 
   // Todos
   todos: unknown[];
@@ -171,6 +178,12 @@ export interface AppState {
   // Limits
   limits: LimitsData;
   lastIterations: number | null;
+
+  // Prompt Enrichment
+  promptEnrichmentEnabled: boolean;
+  enrichmentLoading: boolean;
+  enrichedPromptPreview: string | null;
+  enrichedPromptOriginal: string | null;
 }
 
 // ============================================================================
@@ -216,7 +229,7 @@ export const initialState: AppState = {
   sessionTotalTokens: 0,
   sessionTurnCount: 0,
 
-  autoApprove: { read: true, edit: false, execute: false, browser: false },
+  autoApprove: { read: true, edit: false, execute: false, browser: false, knowledge_update: false, subagent: false },
   todos: [],
 
   attachments: [],
@@ -253,4 +266,9 @@ export const initialState: AppState = {
     max_iterations: 50,
   },
   lastIterations: null,
+
+  promptEnrichmentEnabled: false,
+  enrichmentLoading: false,
+  enrichedPromptPreview: null,
+  enrichedPromptOriginal: null,
 };

@@ -16,7 +16,7 @@ import type { AppState, TimelineEntry, ChatMessage } from "./state";
 import type { Action } from "./actions";
 
 // Re-export everything so existing imports from "./state/reducer" still work
-export { type TimelineEntry, type ChatMessage, type ThinkingBlock, type CodeBlock, type SubagentInfo, type AppState, initialState } from "./state";
+export { type TimelineEntry, type ChatMessage, type ThinkingBlock, type CodeBlock, type SubagentInfo, type SubagentTimelineEntry, type AppState, initialState } from "./state";
 export { type Action } from "./actions";
 export { dispatchServerMessage } from "./dispatch";
 
@@ -167,8 +167,11 @@ export function appReducer(state: AppState, action: Action): AppState {
               edit: !!action.autoApprove.edit,
               execute: !!action.autoApprove.execute,
               browser: !!action.autoApprove.browser,
+              knowledge_update: !!action.autoApprove.knowledge_update,
+              subagent: !!action.autoApprove.subagent,
             }
           : base.autoApprove,
+        limits: action.limits ?? base.limits,
       };
     }
 
@@ -313,7 +316,11 @@ export function appReducer(state: AppState, action: Action): AppState {
             ...state,
             subagents: {
               ...state.subagents,
-              [action.subagentId]: { ...sa, messages: [...sa.messages, action.data.content] },
+              [action.subagentId]: {
+                ...sa,
+                messages: [...sa.messages, action.data.content],
+                timeline: [...sa.timeline, { type: "text" as const, index: sa.messages.length }],
+              },
             },
           };
         }
@@ -392,9 +399,14 @@ export function appReducer(state: AppState, action: Action): AppState {
 
       let subagents = state.subagents;
       if (subagentId && isNew && subagents[subagentId]) {
+        const sa = subagents[subagentId];
         subagents = {
           ...subagents,
-          [subagentId]: { ...subagents[subagentId], toolCount: subagents[subagentId].toolCount + 1 },
+          [subagentId]: {
+            ...sa,
+            toolCount: sa.toolCount + 1,
+            timeline: [...sa.timeline, { type: "tool" as const, callId }],
+          },
         };
       }
 
@@ -437,7 +449,7 @@ export function appReducer(state: AppState, action: Action): AppState {
         ...saState,
         subagents: {
           ...saState.subagents,
-          [action.data.subagentId]: { ...action.data, messages: action.data.messages ?? [] },
+          [action.data.subagentId]: { ...action.data, messages: action.data.messages ?? [], timeline: action.data.timeline ?? [] },
         },
         timeline: [
           ...saState.timeline,
@@ -563,7 +575,7 @@ export function appReducer(state: AppState, action: Action): AppState {
 
     // ── Simple state updates ──
     case "AUTO_APPROVE_CHANGED":
-      return { ...state, autoApprove: { read: !!action.categories.read, edit: !!action.categories.edit, execute: !!action.categories.execute, browser: !!action.categories.browser } };
+      return { ...state, autoApprove: { read: !!action.categories.read, edit: !!action.categories.edit, execute: !!action.categories.execute, browser: !!action.categories.browser, knowledge_update: !!action.categories.knowledge_update, subagent: !!action.categories.subagent } };
     case "TODOS_UPDATED":
       return { ...state, todos: action.todos };
     case "ADD_ATTACHMENT":
@@ -628,6 +640,16 @@ export function appReducer(state: AppState, action: Action): AppState {
       return { ...state, limits: action.limits };
     case "LIMITS_SAVED":
       return { ...state, ...(action.limits ? { limits: action.limits } : {}) };
+
+    // ── Prompt Enrichment ──
+    case "SET_ENRICHMENT_ENABLED":
+      return { ...state, promptEnrichmentEnabled: action.enabled, enrichedPromptPreview: null, enrichedPromptOriginal: null, enrichmentLoading: false };
+    case "SET_ENRICHMENT_LOADING":
+      return { ...state, enrichmentLoading: action.loading };
+    case "SET_ENRICHED_PREVIEW":
+      return { ...state, enrichedPromptPreview: action.enriched, enrichedPromptOriginal: action.original, enrichmentLoading: false };
+    case "CLEAR_ENRICHED_PREVIEW":
+      return { ...state, enrichedPromptPreview: null, enrichedPromptOriginal: null, enrichmentLoading: false };
 
     // ── Error ──
     case "ERROR": {

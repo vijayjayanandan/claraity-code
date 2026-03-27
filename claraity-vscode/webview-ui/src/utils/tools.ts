@@ -19,6 +19,27 @@ export const TOOL_ICONS: Record<string, string> = {
 };
 
 /**
+ * Return the key used as the primary argument for display.
+ * Returns null if no primary arg can be determined.
+ */
+export function getPrimaryArgKey(
+  toolName: string,
+  args?: Record<string, unknown>,
+): string | null {
+  if (!args) return null;
+  if (toolName === "run_command") return args.command ? "command" : null;
+  if (args.path) return "path";
+  if (args.file_path) return "file_path";
+  if (args.query) return "query";
+  if (args.directory) return "directory";
+  // Fallback: first short string key
+  for (const [k, v] of Object.entries(args)) {
+    if (typeof v === "string" && v.length < 200) return k;
+  }
+  return null;
+}
+
+/**
  * Extract the most relevant argument from a tool call for display.
  */
 export function getPrimaryArg(
@@ -26,15 +47,8 @@ export function getPrimaryArg(
   args?: Record<string, unknown>,
 ): string {
   if (!args) return "";
-  if (toolName === "run_command") return String(args.command || "");
-  if (args.path) return String(args.path);
-  if (args.file_path) return String(args.file_path);
-  if (args.query) return String(args.query);
-  if (args.directory) return String(args.directory);
-  // Fallback: first short string value
-  for (const v of Object.values(args)) {
-    if (typeof v === "string" && v.length < 200) return v;
-  }
+  const key = getPrimaryArgKey(toolName, args);
+  if (key && args[key] != null) return String(args[key]);
   return "";
 }
 

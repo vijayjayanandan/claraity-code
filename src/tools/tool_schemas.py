@@ -327,40 +327,6 @@ CREATE_CHECKPOINT_TOOL = ToolDefinition(
 )
 
 
-# Testing & Validation Tools
-
-RUN_TESTS_TOOL = ToolDefinition(
-    name="run_tests",
-    description="Run tests autonomously and get feedback on failures. Auto-detects test framework (pytest, jest, vitest, cargo) and generates LLM-powered fix suggestions for failures.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "framework": {
-                "type": "string",
-                "description": "Optional: Override framework detection (pytest, jest, vitest, cargo)",
-                "enum": ["pytest", "jest", "vitest", "cargo"],
-            },
-            "file_pattern": {
-                "type": "string",
-                "description": "Optional: Test file pattern to filter tests (e.g., 'tests/test_auth.py')",
-            },
-            "files_changed": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Optional: list of changed files for validation context",
-            },
-        },
-        "required": [],
-    },
-)
-
-DETECT_TEST_FRAMEWORK_TOOL = ToolDefinition(
-    name="detect_test_framework",
-    description="Detect test framework from project files (pytest.ini, package.json, Cargo.toml, etc.). Returns framework name or None if not detected.",
-    parameters={"type": "object", "properties": {}, "required": []},
-)
-
-
 # Web Tools
 
 WEB_SEARCH_TOOL = ToolDefinition(
@@ -667,8 +633,8 @@ BACKGROUND_TOOLS = [
 
 # ClarAIty Knowledge & Task Tools
 
-CLARAITY_SCAN_FILES_TOOL = ToolDefinition(
-    name="claraity_scan_files",
+KNOWLEDGE_SCAN_FILES_TOOL = ToolDefinition(
+    name="knowledge_scan_files",
     description="Auto-discover source files and add as layer 4 nodes. Language-agnostic. Run as first step when building knowledge for a new repo.",
     parameters={
         "type": "object",
@@ -680,61 +646,86 @@ CLARAITY_SCAN_FILES_TOOL = ToolDefinition(
     },
 )
 
-CLARAITY_ADD_NODE_TOOL = ToolDefinition(
-    name="claraity_add_node",
-    description="Add a node to the knowledge graph: system (L1), module (L2), component (L3), decision, invariant, or flow (L0).",
+KNOWLEDGE_UPDATE_TOOL = ToolDefinition(
+    name="knowledge_update",
+    description=(
+        "Execute multiple knowledge DB write operations in one call. "
+        "Accepts a JSON array of operations (add_node, update_node, add_edge, remove_node, remove_edge). "
+        "All operations run in a single DB transaction."
+    ),
     parameters={
         "type": "object",
         "properties": {
-            "node_id": {"type": "string", "description": "Unique ID. Convention: sys-<name>, mod-<name>, comp-<name>, dec-<name>, inv-<name>, flow-<name>"},
-            "node_type": {"type": "string", "enum": ["system", "module", "component", "decision", "invariant", "flow"], "description": "Node type"},
-            "name": {"type": "string", "description": "Human-readable name"},
-            "description": {"type": "string", "description": "What this entity does"},
-            "layer": {"type": "integer", "description": "Zoom level: 0=cross-cutting, 1=system, 2=module, 3=component"},
-            "file_path": {"type": "string", "description": "Source file path"},
-            "line_count": {"type": "integer", "description": "Lines of code"},
-            "risk_level": {"type": "string", "enum": ["low", "medium", "high"]},
-            "properties": {"type": "string", "description": "JSON string of additional properties"},
+            "summary": {
+                "type": "string",
+                "description": (
+                    "Human-readable summary of what this batch does "
+                    "(e.g., 'Add mod-core module with 5 components and dependency edges'). "
+                    "Shown in the UI tool card for quick understanding."
+                ),
+            },
+            "operations": {
+                "type": "string",
+                "description": (
+                    'JSON array of operations. Each object needs an "op" field. '
+                    "Ops: add_node (node_id, node_type, name, layer, description, file_path, line_count, risk_level, properties), "
+                    "update_node (node_id, description, risk_level, line_count, properties), "
+                    "add_edge (from_id, to_id, edge_type, label, weight), "
+                    "remove_node (node_id), "
+                    "remove_edge (from_id, to_id, edge_type)"
+                ),
+            },
         },
-        "required": ["node_id", "node_type", "name"],
+        "required": ["summary", "operations"],
     },
 )
 
-CLARAITY_ADD_EDGE_TOOL = ToolDefinition(
-    name="claraity_add_edge",
-    description="Add a relationship edge between two nodes. Types: uses, calls, contains, writes, reads, emits, constrains, dispatches, renders, spawns, controls, bridges.",
+KNOWLEDGE_QUERY_TOOL = ToolDefinition(
+    name="knowledge_query",
+    description=(
+        "Query the knowledge DB flexibly. Inspect nodes, edges, constraints, metadata, "
+        "or search by keyword. All parameters optional."
+    ),
     parameters={
         "type": "object",
         "properties": {
-            "from_id": {"type": "string", "description": "Source node ID"},
-            "to_id": {"type": "string", "description": "Target node ID"},
-            "edge_type": {"type": "string", "description": "Relationship type"},
-            "label": {"type": "string", "description": "Description of the relationship"},
+            "node_id": {"type": "string", "description": "Detail for a specific node"},
+            "node_type": {
+                "type": "string",
+                "description": "List all nodes of type: module, component, system, decision, invariant, flow, file",
+            },
+            "related_to": {"type": "string", "description": "Show edges for this node ID"},
+            "show": {
+                "type": "string",
+                "description": "What to return: detail, edges, constraints, overview, metadata",
+            },
+            "keyword": {"type": "string", "description": "Search by name/description keyword"},
         },
-        "required": ["from_id", "to_id", "edge_type"],
+        "required": [],
     },
 )
 
-CLARAITY_REMOVE_NODE_TOOL = ToolDefinition(
-    name="claraity_remove_node",
-    description="Remove a node and all connected edges from the knowledge graph. Use for corrections.",
+KNOWLEDGE_SET_METADATA_TOOL = ToolDefinition(
+    name="knowledge_set_metadata",
+    description="Store a key-value pair in the knowledge DB metadata (architecture overview, scan info, repo name).",
     parameters={
         "type": "object",
         "properties": {
-            "node_id": {"type": "string", "description": "ID of the node to remove"},
+            "key": {"type": "string", "description": "Metadata key (architecture_overview, repo_name, repo_language, scanned_by, total_files, total_lines)"},
+            "value": {"type": "string", "description": "Metadata value"},
         },
-        "required": ["node_id"],
+        "required": ["key", "value"],
     },
 )
 
-CLARAITY_BRIEF_TOOL = ToolDefinition(
-    name="claraity_brief",
+KNOWLEDGE_BRIEF_TOOL = ToolDefinition(
+    name="knowledge_brief",
     description="Get a compact architecture overview of the codebase: modules, dependencies, design decisions, and invariants. Use at session start or when you need to understand the overall structure.",
     parameters={"type": "object", "properties": {}, "required": []},
 )
 
-CLARAITY_MODULE_TOOL = ToolDefinition(
-    name="claraity_module",
+KNOWLEDGE_MODULE_TOOL = ToolDefinition(
+    name="knowledge_module",
     description="Get detailed information about a module: its components, files, dependencies, and relationships. Use when you need to understand or modify a specific module.",
     parameters={
         "type": "object",
@@ -748,8 +739,8 @@ CLARAITY_MODULE_TOOL = ToolDefinition(
     },
 )
 
-CLARAITY_FILE_TOOL = ToolDefinition(
-    name="claraity_file",
+KNOWLEDGE_FILE_TOOL = ToolDefinition(
+    name="knowledge_file",
     description="Get a file's role, parent module, component it defines, dependencies, and applicable design decisions. Use BEFORE reading a file to understand its context.",
     parameters={
         "type": "object",
@@ -763,8 +754,8 @@ CLARAITY_FILE_TOOL = ToolDefinition(
     },
 )
 
-CLARAITY_SEARCH_TOOL = ToolDefinition(
-    name="claraity_search",
+KNOWLEDGE_SEARCH_TOOL = ToolDefinition(
+    name="knowledge_search",
     description="Search the codebase knowledge base by keyword. Returns matching components, modules, files, decisions, and their relationships.",
     parameters={
         "type": "object",
@@ -778,8 +769,8 @@ CLARAITY_SEARCH_TOOL = ToolDefinition(
     },
 )
 
-CLARAITY_IMPACT_TOOL = ToolDefinition(
-    name="claraity_impact",
+KNOWLEDGE_IMPACT_TOOL = ToolDefinition(
+    name="knowledge_impact",
     description="Show what would be affected by changing a component. Returns direct and indirect dependents (blast radius). Use BEFORE modifying a component to understand risk.",
     parameters={
         "type": "object",
@@ -842,8 +833,8 @@ TASK_BLOCK_TOOL = ToolDefinition(
     },
 )
 
-CLARAITY_AUTO_LAYOUT_TOOL = ToolDefinition(
-    name="claraity_auto_layout",
+KNOWLEDGE_AUTO_LAYOUT_TOOL = ToolDefinition(
+    name="knowledge_auto_layout",
     description="Compute flow_rank/flow_col layout for all modules based on dependency graph. Call after populating modules and edges.",
     parameters={
         "type": "object",
@@ -852,8 +843,8 @@ CLARAITY_AUTO_LAYOUT_TOOL = ToolDefinition(
     },
 )
 
-CLARAITY_EXPORT_TOOL = ToolDefinition(
-    name="claraity_export",
+KNOWLEDGE_EXPORT_TOOL = ToolDefinition(
+    name="knowledge_export",
     description="Export knowledge DB and beads DB to JSONL files for git tracking. Call after finishing modifications to the knowledge base.",
     parameters={
         "type": "object",
@@ -862,22 +853,22 @@ CLARAITY_EXPORT_TOOL = ToolDefinition(
     },
 )
 
-CLARAITY_TOOLS = [
-    CLARAITY_SCAN_FILES_TOOL,
-    CLARAITY_ADD_NODE_TOOL,
-    CLARAITY_ADD_EDGE_TOOL,
-    CLARAITY_REMOVE_NODE_TOOL,
-    CLARAITY_BRIEF_TOOL,
-    CLARAITY_MODULE_TOOL,
-    CLARAITY_FILE_TOOL,
-    CLARAITY_SEARCH_TOOL,
-    CLARAITY_IMPACT_TOOL,
+KNOWLEDGE_TOOLS = [
+    KNOWLEDGE_SCAN_FILES_TOOL,
+    KNOWLEDGE_UPDATE_TOOL,
+    KNOWLEDGE_QUERY_TOOL,
+    KNOWLEDGE_BRIEF_TOOL,
+    KNOWLEDGE_MODULE_TOOL,
+    KNOWLEDGE_FILE_TOOL,
+    KNOWLEDGE_SEARCH_TOOL,
+    KNOWLEDGE_IMPACT_TOOL,
+    KNOWLEDGE_SET_METADATA_TOOL,
     TASK_LIST_TOOL,
     TASK_CREATE_TOOL,
     TASK_UPDATE_TOOL,
     TASK_BLOCK_TOOL,
-    CLARAITY_AUTO_LAYOUT_TOOL,
-    CLARAITY_EXPORT_TOOL,
+    KNOWLEDGE_AUTO_LAYOUT_TOOL,
+    KNOWLEDGE_EXPORT_TOOL,
 ]
 
 
@@ -898,8 +889,6 @@ ALL_TOOLS = [
     # Task tools (task_create/task_update/task_list/task_block) are backed by BeadStore
     # and registered dynamically via tool_executor, not listed here
     CREATE_CHECKPOINT_TOOL,
-    RUN_TESTS_TOOL,
-    DETECT_TEST_FRAMEWORK_TOOL,
     WEB_SEARCH_TOOL,
     WEB_FETCH_TOOL,
     CLARIFY_TOOL,
@@ -910,7 +899,7 @@ ALL_TOOLS = [
     DIRECTOR_COMPLETE_SLICE_TOOL,
     DIRECTOR_COMPLETE_INTEGRATION_TOOL,
     # ClarAIty Knowledge & Task tools
-    *CLARAITY_TOOLS,
+    *KNOWLEDGE_TOOLS,
 ]
 
 PLAN_MODE_TOOLS = [
@@ -941,12 +930,6 @@ CODE_TOOLS = [
 EXECUTION_TOOLS = [
     RUN_COMMAND_TOOL,
 ]
-
-TESTING_TOOLS = [
-    RUN_TESTS_TOOL,
-    DETECT_TEST_FRAMEWORK_TOOL,
-]
-
 
 def get_tools_for_task(task_type: str) -> list[ToolDefinition]:
     """

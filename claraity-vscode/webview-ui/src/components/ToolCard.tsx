@@ -1,9 +1,17 @@
 /**
  * Tool execution card with status badge, arguments, result, and approval buttons.
+ *
+ * Features:
+ * - Summary prominence: if args contain a `summary` field, show it above params
+ * - Collapsible parameters: long values collapsed by default, short values inline
+ * - Error details: error results shown in red-tinted collapsible section
  */
 import { useState, useCallback, useEffect, useRef, memo } from "react";
 import type { ToolStateData, WebViewMessage } from "../types";
-import { TOOL_ICONS, getPrimaryArg, formatDuration } from "../utils/tools";
+import { TOOL_ICONS, getPrimaryArg, getPrimaryArgKey, formatDuration } from "../utils/tools";
+
+/** Params to hide from the collapsible params list (already shown elsewhere). */
+const HIDDEN_PARAMS = new Set(["summary"]);
 
 interface ToolCardProps {
   data: ToolStateData;
@@ -19,6 +27,9 @@ export const ToolCard = memo(function ToolCard({ data, postMessage }: ToolCardPr
   const primaryArg = toolName === "delegate_to_subagent"
     ? ""
     : getPrimaryArg(toolName, data.arguments);
+
+  const summary = data.arguments?.summary;
+  const hasSummary = typeof summary === "string" && summary.length > 0;
 
   const handleApprove = useCallback(() => {
     postMessage({ type: "approvalResult", callId: data.call_id, approved: true });
@@ -62,6 +73,27 @@ export const ToolCard = memo(function ToolCard({ data, postMessage }: ToolCardPr
     }
   }, [data.status, toolName, data.arguments, handleShowDiff]);
 
+  // Build visible params: exclude summary, primary arg key (already shown inline),
+  // and skip entirely for delegate_to_subagent (SubagentCard handles its own display).
+  const isSubagent = toolName === "delegate_to_subagent";
+  const primaryArgKey = getPrimaryArgKey(toolName, data.arguments);
+  const hiddenKeys = new Set([...HIDDEN_PARAMS]);
+  if (!hasSummary && primaryArgKey) hiddenKeys.add(primaryArgKey);
+
+  const visibleParams = !isSubagent && data.arguments
+    ? Object.entries(data.arguments).filter(([key]) => !hiddenKeys.has(key))
+    : [];
+  const hasParams = visibleParams.length > 0;
+
+  // Unified result content: prefer data.result (actual output), fall back to
+  // data.error string. For run_command errors, result contains the actual
+  // stderr/stdout while error only has "Command failed with exit code N".
+  const isError = data.status === "error";
+  const resultContent = data.result != null
+    ? String(data.result)
+    : (isError && data.error ? data.error : null);
+  const hasResult = resultContent != null;
+
   return (
     <div className="tool-card">
       {/* Header */}
@@ -74,11 +106,36 @@ export const ToolCard = memo(function ToolCard({ data, postMessage }: ToolCardPr
         <span className={`tool-badge ${data.status}`}>{data.status}</span>
       </div>
 
-      {/* Arguments summary */}
-      {primaryArg && (
+      {/* Summary — shown prominently when present */}
+      {hasSummary && (
+        <div className="tool-summary">{summary}</div>
+      )}
+
+      {/* Primary arg (file path, command, etc.) — only if no summary */}
+      {!hasSummary && primaryArg && (
         <div className="tool-args" title={primaryArg}>
           {primaryArg}
         </div>
+      )}
+
+      {/* Collapsible parameters */}
+      {hasParams && (
+        <details className="tool-params-details">
+          <summary>
+            Parameters ({visibleParams.length})
+          </summary>
+          <div className="tool-params-body">
+            {visibleParams.map(([key, value]) => {
+              const strValue = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+              return (
+                <div key={key} className="tool-param-row">
+                  <span className="tool-param-key">{key}</span>
+                  <span className="tool-param-value">{strValue}</span>
+                </div>
+              );
+            })}
+          </div>
+        </details>
       )}
 
       {/* Approval buttons */}
@@ -102,17 +159,18 @@ export const ToolCard = memo(function ToolCard({ data, postMessage }: ToolCardPr
         </div>
       )}
 
-      {/* Expandable result */}
-      {data.result != null && (
+      {/* Expandable result — same section for success and error */}
+      {hasResult && (
         <details
           className="tool-result-details"
           open={showResult}
           onToggle={(e) => setShowResult((e.target as HTMLDetailsElement).open)}
         >
           <summary>Result</summary>
-          <div className="result-body">{String(data.result)}</div>
+          <div className="result-body">{resultContent}</div>
         </details>
       )}
     </div>
   );
 });
+

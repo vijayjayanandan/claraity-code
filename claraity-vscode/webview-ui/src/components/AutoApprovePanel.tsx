@@ -5,8 +5,8 @@ import { useState, useEffect } from "react";
 import type { LimitsData } from "../types";
 
 interface AutoApprovePanelProps {
-  autoApprove: { read: boolean; edit: boolean; execute: boolean; browser: boolean };
-  onChange: (categories: { read?: boolean; edit?: boolean; execute?: boolean; browser?: boolean }) => void;
+  autoApprove: { read: boolean; edit: boolean; execute: boolean; browser: boolean; knowledge_update: boolean; subagent: boolean };
+  onChange: (categories: { read?: boolean; edit?: boolean; execute?: boolean; browser?: boolean; knowledge_update?: boolean; subagent?: boolean }) => void;
   limits: LimitsData;
   onSaveLimits: (limits: LimitsData) => void;
   onLoadLimits: () => void;
@@ -27,6 +27,8 @@ export function AutoApprovePanel({
   if (autoApprove.edit) activeCategories.push("Edit");
   if (autoApprove.execute) activeCategories.push("Commands");
   if (autoApprove.browser) activeCategories.push("Browser");
+  if (autoApprove.knowledge_update) activeCategories.push("Knowledge");
+  if (autoApprove.subagent) activeCategories.push("Sub-agent");
 
   // Build collapsed summary
   const categoryText = activeCategories.length > 0
@@ -84,6 +86,22 @@ export function AutoApprovePanel({
               onChange={(e) => onChange({ ...autoApprove, browser: e.target.checked })}
             />
             Browser tools
+          </label>
+          <label className="aa-row">
+            <input
+              type="checkbox"
+              checked={autoApprove.knowledge_update}
+              onChange={(e) => onChange({ ...autoApprove, knowledge_update: e.target.checked })}
+            />
+            Knowledge updates
+          </label>
+          <label className="aa-row">
+            <input
+              type="checkbox"
+              checked={autoApprove.subagent}
+              onChange={(e) => onChange({ ...autoApprove, subagent: e.target.checked })}
+            />
+            Sub-agent
           </label>
 
           <div className="aa-section-label" style={{ marginTop: "6px" }}>

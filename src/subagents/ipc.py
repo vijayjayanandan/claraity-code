@@ -55,6 +55,9 @@ class SubprocessInput:
     permission_mode: str = "normal"
     auto_approve_tools: list[str] = field(default_factory=list)
     delegation_depth: int = 0
+    web_search_limit: int = 2
+    web_fetch_limit: int = 3
+    iteration_limit_enabled: bool = True
 
     def __repr__(self) -> str:
         """Redact api_key from repr to prevent leakage in tracebacks/logs."""

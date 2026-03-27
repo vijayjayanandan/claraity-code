@@ -165,6 +165,7 @@ export function dispatchServerMessage(
             toolCount: 0,
             active: true,
             messages: [],
+            timeline: [],
           },
         });
       } else if (msg.event === "unregistered") {

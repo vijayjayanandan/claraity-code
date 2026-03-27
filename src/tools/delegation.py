@@ -211,18 +211,39 @@ Use this tool proactively when appropriate!"""
         # Don't forward parent's auto-approve to subagents (principle of least privilege)
         auto_approve_tools = []  # Subagents start with no auto-approvals
 
+        # Resolve subagent budgets from main agent's limits config.
+        web_search_limit = 2
+        web_fetch_limit = 3
+        iteration_limit_enabled = True
+        max_iterations = 50
+        main_agent = self.subagent_manager.main_agent
+        if hasattr(main_agent, "get_limits"):
+            limits = main_agent.get_limits()
+            web_search_limit = limits.get("web_subagent_search_limit", 2)
+            web_fetch_limit = limits.get("web_subagent_fetch_limit", 3)
+            iteration_limit_enabled = limits.get("iteration_limit_enabled", True)
+            max_iterations = limits.get("max_iterations", 50)
+
+        # When iteration limit is disabled, use a high safety-net value.
+        # SubAgent checks `iteration >= max_iterations` so 0 would trigger
+        # immediately — use 200 (same as MAX_TOOL_CALLS safety cap).
+        effective_max_iterations = max_iterations if iteration_limit_enabled else 200
+
         subprocess_input = SubprocessInput(
             config=asdict(config),
             llm_config=llm_config_dict,
             api_key=api_key,
             task_description=task.strip(),
             working_directory=working_directory,
-            max_iterations=50,
-            max_wall_time=600.0,
+            max_iterations=effective_max_iterations,
+            max_wall_time=None,
             transcript_path=transcript_path,
             permission_mode=permission_mode,
             auto_approve_tools=auto_approve_tools,
             delegation_depth=current_depth + 1,
+            web_search_limit=web_search_limit,
+            web_fetch_limit=web_fetch_limit,
+            iteration_limit_enabled=iteration_limit_enabled,
         )
 
         # Launch subprocess
@@ -520,6 +541,11 @@ Use this tool proactively when appropriate!"""
             )
             continue_work = pause_result.continue_work
             feedback = pause_result.feedback
+            # Always clear the interrupt flag once the pause is resolved.
+            # The flag was set by request_pause() for the subagent's prompt —
+            # leaving it set would cause the parent agent to think *it* was
+            # interrupted on its next iteration.
+            self._ui_protocol.clear_interrupt()
         else:
             logger.warning("No UIProtocol - auto-stopping subagent pause")
 

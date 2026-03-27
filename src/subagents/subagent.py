@@ -116,7 +116,6 @@ class SubAgent:
             "edit_file",
             "append_to_file",
             "run_command",
-            "git_commit",
         }
     )
 

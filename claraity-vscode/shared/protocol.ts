@@ -293,4 +293,7 @@ export type ServerMessage =
   // Subagent management
   | { type: "subagents_list"; subagents: SubAgentInfo[]; available_tools: string[] }
   | { type: "subagent_saved"; success: boolean; name: string; message: string }
-  | { type: "subagent_deleted"; success: boolean; name: string; message: string };
+  | { type: "subagent_deleted"; success: boolean; name: string; message: string }
+  // Prompt Enrichment
+  | { type: "enriched_prompt"; original: string; enriched: string }
+  | { type: "enrichment_error"; message: string };

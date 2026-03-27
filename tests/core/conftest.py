@@ -110,7 +110,7 @@ class MockUIProtocol:
     def has_pause_capability(self) -> bool:
         return True
 
-    async def wait_for_approval(self, call_id, tool_name, timeout=None):
+    async def wait_for_approval(self, call_id, tool_name, timeout=None, force_approval=False):
         from src.core.protocol import ApprovalResult
         self.approval_requests.append((call_id, tool_name))
         approved = self._approval_decisions.get(call_id, self._auto_approve)

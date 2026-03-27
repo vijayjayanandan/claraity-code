@@ -1,8 +1,8 @@
-"""Integration tests for SELF_TESTING_LAYER with real test execution."""
+"""Integration tests for testing layer with real test execution."""
 
 import pytest
 from pathlib import Path
-from src.testing import TestRunner, ValidationEngine, RunTestsTool
+from src.testing import TestRunner, ValidationEngine
 from src.testing.models import TestStatus
 
 
@@ -61,26 +61,8 @@ class TestRealPytestExecution:
         # Feedback should be provided
         assert len(result['feedback']) > 0
 
-    def test_run_tests_tool_integration(self):
-        """Test RunTestsTool can be called and returns proper ToolResult."""
-        tool = RunTestsTool(working_directory=".")
-
-        # Execute tool on specific test file
-        result = tool.execute(file_pattern="tests/test_testing/test_models.py")
-
-        # Verify ToolResult structure
-        assert result.status is not None
-        assert result.output is not None
-        assert 'test_result' in result.metadata
-
-        # Verify test result in metadata
-        test_result_dict = result.metadata['test_result']
-        assert test_result_dict['framework'] == "pytest"
-        assert test_result_dict['total_tests'] > 0
-        assert 'success_rate' in test_result_dict
-
     def test_full_workflow_detect_run_validate(self):
-        """Test complete workflow: detect → run → validate."""
+        """Test complete workflow: detect -> run -> validate."""
         from unittest.mock import patch
 
         # Step 1: Detect framework
@@ -100,26 +82,6 @@ class TestRealPytestExecution:
         # Verify full pipeline executed
         assert validation_result['test_result'].total_tests > 0
         assert validation_result['feedback'] is not None
-
-        # Print results for visibility
-        print(f"\n[INTEGRATION TEST RESULTS]")
-        print(f"Framework: {framework}")
-        print(f"Tests run: {test_result.total_tests}")
-        print(f"Passed: {test_result.passed}")
-        print(f"Failed: {test_result.failed}")
-        print(f"Success rate: {test_result.success_rate:.1f}%")
-        print(f"Duration: {test_result.duration_seconds:.2f}s")
-
-    def test_tool_handles_missing_framework_gracefully(self, tmp_path):
-        """Test tool returns proper error when no framework detected."""
-        tool = RunTestsTool(working_directory=str(tmp_path))
-
-        result = tool.execute()
-
-        # Should return error status
-        from src.tools.base import ToolStatus
-        assert result.status == ToolStatus.ERROR
-        assert "No test framework detected" in result.output
 
 
 class TestLLMIntegration:
@@ -158,25 +120,3 @@ class TestLLMIntegration:
         assert "test_authentication" in feedback
         assert "Expected 200, got 401" in feedback
         assert "[FIX SUGGESTIONS]" in feedback or "[ERROR]" in feedback
-
-    def test_tool_result_metadata_for_llm(self):
-        """Test that tool returns structured metadata for LLM to parse."""
-        tool = RunTestsTool(working_directory=".")
-
-        result = tool.execute(file_pattern="tests/test_testing/test_models.py")
-
-        # Metadata should have structured test results
-        assert 'test_result' in result.metadata
-        test_data = result.metadata['test_result']
-
-        # Verify all fields an LLM would need
-        required_fields = ['framework', 'total_tests', 'passed', 'failed',
-                          'success_rate', 'all_passed', 'test_cases']
-        for field in required_fields:
-            assert field in test_data, f"Missing field: {field}"
-
-        # Test cases should have structured info
-        if test_data['test_cases']:
-            test_case = test_data['test_cases'][0]
-            assert 'name' in test_case
-            assert 'status' in test_case

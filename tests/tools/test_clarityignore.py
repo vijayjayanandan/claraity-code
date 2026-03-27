@@ -327,19 +327,19 @@ class TestLSPToolIntegration:
 
 class TestKnowledgeToolIntegration:
     def test_query_file_blocked(self, workspace):
-        from src.tools.claraity_tools import QueryFileTool
+        from src.tools.knowledge_tools import KnowledgeFileTool
 
         _write_ignore(workspace, "*.env")
-        tool = QueryFileTool()
+        tool = KnowledgeFileTool()
         result = tool.execute(file_path="secrets.env")
         assert result.status.value == "error"
         assert "user policy" in result.error
 
     def test_query_file_allowed(self, workspace):
-        from src.tools.claraity_tools import QueryFileTool
+        from src.tools.knowledge_tools import KnowledgeFileTool
 
         _write_ignore(workspace, "*.env")
-        tool = QueryFileTool()
+        tool = KnowledgeFileTool()
         result = tool.execute(file_path="src/core/agent.py")
         # May fail (no DB) but should NOT be "user policy" error
         assert "user policy" not in (result.error or "")

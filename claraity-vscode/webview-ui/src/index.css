@@ -456,6 +456,14 @@ button, .toolbar-icon, .session-card, .mention-item, .tool-badge {
 .tool-badge.cancelled { color: var(--app-fg-muted); }
 .tool-badge.skipped { color: var(--app-fg-muted); }
 
+.tool-summary {
+  padding: var(--space-xs) 10px;
+  font-size: var(--font-size-sm);
+  border-top: 1px solid var(--app-border);
+  color: var(--vscode-foreground);
+  font-weight: 500;
+}
+
 .tool-args {
   padding: var(--space-xs) 10px;
   font-size: var(--font-size-sm);
@@ -465,6 +473,51 @@ button, .toolbar-icon, .session-card, .mention-item, .tool-badge {
   word-break: break-all;
   color: var(--app-fg-muted);
 }
+
+/* ── Collapsible Parameters ── */
+
+.tool-params-details {
+  border-top: 1px solid var(--app-border);
+}
+
+.tool-params-details summary {
+  padding: var(--space-xs) 10px;
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  color: var(--app-fg-muted);
+}
+
+.tool-params-body {
+  padding: 0 10px var(--space-xs);
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.tool-param-row {
+  display: flex;
+  gap: var(--space-sm);
+  padding: 2px 0;
+  font-size: var(--font-size-sm);
+  font-family: var(--font-mono);
+}
+
+.tool-param-key {
+  color: var(--vscode-symbolIcon-propertyForeground, var(--app-fg-muted));
+  flex-shrink: 0;
+  min-width: 80px;
+}
+
+.tool-param-key::after {
+  content: ":";
+}
+
+.tool-param-value {
+  color: var(--app-fg-muted);
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+/* ── Result / Error Details ── */
 
 .tool-result-details {
   border-top: 1px solid var(--app-border);
@@ -1083,6 +1136,97 @@ button, .toolbar-icon, .session-card, .mention-item, .tool-badge {
   text-align: center;
 }
 
+/* ── Prompt Enrichment ── */
+
+.input-icon-btn.enrichment-active {
+  color: var(--app-accent);
+  background: color-mix(in srgb, var(--app-accent) 15%, transparent);
+  border-radius: var(--radius-sm);
+}
+
+.enrichment-loading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  font-size: var(--font-size-sm);
+  color: var(--app-fg-muted);
+}
+
+.enrichment-preview {
+  border-bottom: 1px solid var(--app-border);
+  padding: var(--space-xs) var(--space-sm);
+}
+
+.enrichment-preview-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: var(--space-xs);
+}
+
+.enrichment-preview-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--app-accent);
+}
+
+.enrichment-preview-textarea {
+  width: 100%;
+  min-height: 80px;
+  max-height: 200px;
+  resize: vertical;
+  background: var(--app-surface);
+  color: var(--app-fg);
+  border: 1px solid var(--app-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-xs) var(--space-sm);
+  font-family: var(--font-base);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+
+.enrichment-preview-textarea:focus {
+  outline: 1px solid var(--app-accent);
+  border-color: var(--app-accent);
+}
+
+.enrichment-preview-actions {
+  display: flex;
+  gap: var(--space-xs);
+  margin-top: var(--space-xs);
+  justify-content: flex-end;
+}
+
+.enrichment-btn {
+  padding: 3px 12px;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.enrichment-btn-send {
+  background: var(--app-accent);
+  color: #fff;
+}
+
+.enrichment-btn-send:hover {
+  opacity: 0.9;
+}
+
+.enrichment-btn-cancel {
+  background: transparent;
+  color: var(--app-fg-muted);
+  border: 1px solid var(--app-border);
+}
+
+.enrichment-btn-cancel:hover {
+  background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.06));
+}
+
 /* ── Inactive chip (no path, no content) ── */
 
 .chip-inactive {
@@ -1367,6 +1511,33 @@ button, .toolbar-icon, .session-card, .mention-item, .tool-badge {
 }
 .connection-status.disconnected {
   color: var(--app-danger);
+}
+
+.connection-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  transition: opacity 0.15s, filter 0.15s;
+  flex-shrink: 0;
+}
+.connection-toggle-btn:hover {
+  filter: brightness(1.2);
+  opacity: 1 !important;
+}
+
+.connection-toggle-on {
+  background: var(--vscode-testing-iconPassed);
+  opacity: 1;
+}
+.connection-toggle-off {
+  background: var(--app-danger);
+  opacity: 0.75;
 }
 
 .model-name {

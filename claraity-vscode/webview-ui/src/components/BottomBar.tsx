@@ -12,6 +12,8 @@ interface BottomBarProps {
   onShowArchitecture: () => void;
   onShowBeads: () => void;
   beadsReadyCount?: number;
+  onDisconnect: () => void;
+  onReconnect: () => void;
 }
 
 export const BottomBar = memo(function BottomBar({
@@ -22,6 +24,8 @@ export const BottomBar = memo(function BottomBar({
   onShowArchitecture,
   onShowBeads,
   beadsReadyCount,
+  onDisconnect,
+  onReconnect,
 }: BottomBarProps) {
   return (
     <div className="bottom-bar" role="status">
@@ -29,6 +33,13 @@ export const BottomBar = memo(function BottomBar({
         <span className={`connection-status ${connected ? "connected" : "disconnected"}`} aria-live="polite">
           {connected ? "Connected" : "Disconnected"}
         </span>
+        <button
+          className={`connection-toggle-btn ${connected ? "connection-toggle-on" : "connection-toggle-off"}`}
+          onClick={connected ? onDisconnect : onReconnect}
+          title={connected ? "Disconnect" : "Reconnect"}
+          aria-label={connected ? "Disconnect from server" : "Reconnect to server"}
+          aria-pressed={connected}
+        />
         {modelName && <span className="model-name">{modelName}</span>}
       </div>
       <div className="bottom-right">

@@ -728,18 +728,21 @@ class RunCommandTool(Tool):
                     error="Command cannot be empty",
                 )
 
-            # --- COMMAND SAFETY CHECK ---
-            is_safe, safety_reason = check_command_safety(command)
-            if not is_safe:
+            # --- COMMAND SAFETY CHECK (defense-in-depth) ---
+            # Primary enforcement is in ToolGatingService.check_command_safety_gate().
+            # This is a second barrier: only hard-blocks here (NEEDS_APPROVAL
+            # was already handled at the gating layer before execute() is called).
+            from src.tools.command_safety import CommandSafety
+
+            safety_result = check_command_safety(command)
+            if safety_result.safety == CommandSafety.BLOCK:
                 return ToolResult(
                     tool_name=self.name,
                     status=ToolStatus.ERROR,
                     output=None,
                     error=(
-                        f"[BLOCKED] Command rejected by safety controls: {safety_reason}\n"
-                        "This command matches a pattern that could cause irreversible damage "
-                        "or data exfiltration. If this command is legitimately needed, the user "
-                        "must run it manually in their terminal."
+                        f"[BLOCKED] Command rejected by safety controls: {safety_result.reason}\n"
+                        "This command cannot be executed."
                     ),
                 )
 

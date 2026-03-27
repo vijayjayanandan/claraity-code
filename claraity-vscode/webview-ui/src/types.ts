@@ -40,7 +40,7 @@ import type { ServerMessage, SessionSummary, ReplayMessage } from "../../shared/
 export type ExtensionMessage =
   | { type: "serverMessage"; payload: ServerMessage }
   | { type: "connectionStatus"; status: "connected" | "disconnected" | "reconnecting" }
-  | { type: "sessionInfo"; sessionId: string; model: string; permissionMode: string; autoApproveCategories?: Record<string, boolean> }
+  | { type: "sessionInfo"; sessionId: string; model: string; permissionMode: string; autoApproveCategories?: Record<string, boolean>; limits?: LimitsData }
   | { type: "sessionsList"; sessions: SessionSummary[] }
   | { type: "sessionHistory"; messages: ReplayMessage[] }
   | { type: "showSessionHistory" }
@@ -48,7 +48,9 @@ export type ExtensionMessage =
   | { type: "undoAvailable"; turnId: string; files: string[] }
   | { type: "undoComplete"; turnId: string; restoredFiles: string[] }
   | { type: "fileSelected"; path: string; name: string }
-  | { type: "insertAndSend"; content: string };
+  | { type: "insertAndSend"; content: string }
+  | { type: "enrichedPrompt"; original: string; enriched: string }
+  | { type: "enrichmentError"; message: string };
 
 // ============================================================================
 // Webview -> Extension (postMessage)
@@ -107,4 +109,9 @@ export type WebViewMessage =
   | { type: "openSubagentFile"; name: string }
   // Limits
   | { type: "getLimits" }
-  | { type: "saveLimits"; limits: LimitsData };
+  | { type: "saveLimits"; limits: LimitsData }
+  // Prompt Enrichment
+  | { type: "enrichPrompt"; content: string }
+  // Server connection control
+  | { type: "disconnectServer" }
+  | { type: "reconnectServer" };

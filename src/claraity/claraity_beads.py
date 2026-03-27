@@ -122,6 +122,12 @@ class BeadStore:
             self.conn.close()
             self.conn = None
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        self.close()
+
     @staticmethod
     def _make_id(name: str) -> str:
         """Deterministic short hash ID: bd- + 8-char hex."""

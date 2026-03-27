@@ -51,12 +51,17 @@ class SpecialToolHandlers:
         director_adapter: "DirectorAdapter",
         tool_executor: "ToolExecutor",
         permission_manager: "PermissionManager",
+        set_auto_approve_fn: Any = None,
     ):
         self._memory = memory
         self._plan_mode_state = plan_mode_state
         self._director_adapter = director_adapter
         self._tool_executor = tool_executor
         self._permission_manager = permission_manager
+        # Callback: set_auto_approve_fn(categories: dict[str, bool]) -> dict[str, bool]
+        # Called when plan approval needs to enable categories (e.g. edit).
+        # Returns confirmed state. Wired by CodingAgent to ToolGatingService.
+        self._set_auto_approve_fn = set_auto_approve_fn
 
     def handles(self, tool_name: str) -> bool:
         """Check if this handler manages the given tool."""
@@ -222,14 +227,20 @@ class SpecialToolHandlers:
                         },
                         include_in_llm_context=False,
                     )
-                    new_mode = "auto" if approval.auto_accept_edits else "normal"
+                    # Always return to NORMAL mode (not AUTO).
+                    # If auto-accept edits was chosen, enable the "edit"
+                    # category via the gating service instead. This keeps
+                    # the VS Code auto-approve panel in sync.
                     self._memory.persist_system_event(
                         event_type="permission_mode_changed",
-                        content=f"Mode: plan -> {new_mode}",
-                        extra={"old_mode": "plan", "new_mode": new_mode},
+                        content="Mode: plan -> normal",
+                        extra={"old_mode": "plan", "new_mode": "normal"},
                         include_in_llm_context=False,
                     )
-                    self._permission_manager.set_mode(PermissionManager.from_string(new_mode))
+                    self._permission_manager.set_mode(PermissionManager.from_string("normal"))
+
+                    if approval.auto_accept_edits and self._set_auto_approve_fn:
+                        self._set_auto_approve_fn({"edit": True})
 
                 result_text = (
                     "User has approved your plan. You can now start coding. "

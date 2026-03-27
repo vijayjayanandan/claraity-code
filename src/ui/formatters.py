@@ -249,7 +249,6 @@ class ToolOutputFormatter:
             "todo_write": "[TODO]",
             "git_status": "[GIT]",
             "git_diff": "[DIFF]",
-            "git_commit": "[COMMIT]",
         }
 
         icon = tool_icons.get(tool_name, "[CALL]")

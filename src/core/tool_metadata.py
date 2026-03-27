@@ -71,6 +71,7 @@ def build_tool_metadata(
     tool_args: dict[str, Any],
     args_summary: str = "",
     requires_approval: bool = False,
+    safety_reason: str | None = None,
     **extra: Any,
 ) -> dict[str, Any]:
     """Build a standard extra_metadata dict for MessageStore.update_tool_state().
@@ -80,6 +81,8 @@ def build_tool_metadata(
         tool_args: Full arguments dict — serialized to VS Code for file path display
         args_summary: Short human-readable summary (used by TUI SubAgentCard)
         requires_approval: Whether the tool call needs user approval
+        safety_reason: If set, approval was triggered by command safety floor.
+            Flows through to VS Code sidebar and TUI for warning display.
         **extra: Additional keys merged into the dict
 
     Returns:
@@ -91,5 +94,7 @@ def build_tool_metadata(
         "args_summary": args_summary,
         "requires_approval": requires_approval,
     }
+    if safety_reason:
+        metadata["safety_reason"] = safety_reason
     metadata.update(extra)
     return metadata

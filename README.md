@@ -40,8 +40,7 @@ Built on [Textual](https://textual.textualize.io/) with streaming responses, syn
 |----------|-------|-------------|
 | **File Operations** | `read_file`, `write_file`, `edit_file`, `append_to_file`, `list_directory` | Stream with line ranges, create, edit, append |
 | **Code Search** | `search_code`, `grep`, `glob`, `analyze_code`, `get_file_outline`, `get_symbol_context` | Regex, glob patterns, AST parsing, LSP-based outlines |
-| **Git** | `git_status`, `git_diff`, `git_commit` | Status, diffs, commits |
-| **Testing** | `run_tests`, `detect_test_framework` | Auto-detect pytest/jest/vitest/cargo, fix suggestions |
+| **Git** | `git_status`, `git_diff` | Status, diffs |
 | **Web** | `web_search`, `web_fetch` | Search the web, fetch and extract URL content |
 | **Execution** | `run_command` | Shell command execution with approval gating |
 | **Planning** | `enter_plan_mode`, `request_plan_approval` | Read-only planning with user sign-off |

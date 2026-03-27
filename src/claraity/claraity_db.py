@@ -106,6 +106,12 @@ class ClarityStore:
             self.conn.close()
             self.conn = None
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        self.close()
+
     # -- Helpers ---------------------------------------------------------------
 
     @staticmethod
@@ -118,7 +124,119 @@ class ClarityStore:
     def _now() -> str:
         return datetime.now(timezone.utc).isoformat()
 
-    # -- Write -----------------------------------------------------------------
+    # -- Internal implementations (take a cursor, no commit) -----------------
+
+    def _add_node_impl(
+        self,
+        cur,
+        node_id: str,
+        node_type: str,
+        layer: int,
+        name: str,
+        description: str = "",
+        file_path: str = None,
+        line_count: int = None,
+        risk_level: str = "low",
+        properties: dict = None,
+    ) -> None:
+        now = self._now()
+        cur.execute(
+            """INSERT OR REPLACE INTO nodes
+               (id, type, layer, name, description, file_path, line_count,
+                risk_level, properties, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                node_id,
+                node_type,
+                layer,
+                name,
+                description,
+                file_path,
+                line_count,
+                risk_level,
+                json.dumps(properties or {}),
+                now,
+                now,
+            ),
+        )
+
+    def _add_edge_impl(
+        self,
+        cur,
+        from_id: str,
+        to_id: str,
+        edge_type: str,
+        weight: float = 1.0,
+        label: str = None,
+        properties: dict = None,
+    ) -> str:
+        eid = self._make_id("e", f"{from_id}:{to_id}:{edge_type}")
+        cur.execute(
+            """INSERT OR REPLACE INTO edges
+               (id, from_id, to_id, type, weight, label, properties)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (eid, from_id, to_id, edge_type, weight, label, json.dumps(properties or {})),
+        )
+        return eid
+
+    def _update_node_impl(
+        self,
+        cur,
+        node_id: str,
+        description: str = None,
+        risk_level: str = None,
+        line_count: int = None,
+        properties: dict = None,
+    ) -> int:
+        """Update specific fields of an existing node. Only non-None fields are changed.
+
+        Returns the number of rows affected (0 if node not found, 1 if updated).
+        """
+        updates = []
+        values = []
+        if description is not None:
+            updates.append("description=?")
+            values.append(description)
+        if risk_level is not None:
+            updates.append("risk_level=?")
+            values.append(risk_level)
+        if line_count is not None:
+            updates.append("line_count=?")
+            values.append(line_count)
+        if properties is not None:
+            updates.append("properties=?")
+            values.append(json.dumps(properties))
+
+        if not updates:
+            # Nothing to update; check existence
+            cur.execute("SELECT id FROM nodes WHERE id=?", (node_id,))
+            return 1 if cur.fetchone() else 0
+
+        updates.append("updated_at=?")
+        values.append(self._now())
+        values.append(node_id)
+
+        cur.execute(
+            f"UPDATE nodes SET {', '.join(updates)} WHERE id=?",
+            tuple(values),
+        )
+        return cur.rowcount
+
+    def _remove_node_impl(self, cur, node_id: str) -> tuple[bool, int]:
+        """Remove a node and all its connected edges. Returns (node_deleted, edges_removed)."""
+        cur.execute("DELETE FROM edges WHERE from_id=? OR to_id=?", (node_id, node_id))
+        edge_count = cur.rowcount
+        cur.execute("DELETE FROM nodes WHERE id=?", (node_id,))
+        node_deleted = cur.rowcount > 0
+        return node_deleted, edge_count
+
+    def _remove_edge_impl(self, cur, from_id: str, to_id: str, edge_type: str) -> bool:
+        """Remove an edge by its from/to/type triple. Returns True if deleted."""
+        eid = self._make_id("e", f"{from_id}:{to_id}:{edge_type}")
+        cur.execute("DELETE FROM edges WHERE id=?", (eid,))
+        return cur.rowcount > 0
+
+    # -- Write (public wrappers) -----------------------------------------------
 
     def add_node(
         self,
@@ -132,26 +250,11 @@ class ClarityStore:
         risk_level: str = "low",
         properties: dict = None,
     ) -> str:
-        now = self._now()
         with self._cursor() as cur:
-            cur.execute(
-                """INSERT OR REPLACE INTO nodes
-                   (id, type, layer, name, description, file_path, line_count,
-                    risk_level, properties, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    id,
-                    type,
-                    layer,
-                    name,
-                    description,
-                    file_path,
-                    line_count,
-                    risk_level,
-                    json.dumps(properties or {}),
-                    now,
-                    now,
-                ),
+            self._add_node_impl(
+                cur, node_id=id, node_type=type, layer=layer, name=name,
+                description=description, file_path=file_path, line_count=line_count,
+                risk_level=risk_level, properties=properties,
             )
         return id
 
@@ -164,13 +267,10 @@ class ClarityStore:
         label: str = None,
         properties: dict = None,
     ) -> str:
-        eid = self._make_id("e", f"{from_id}:{to_id}:{type}")
         with self._cursor() as cur:
-            cur.execute(
-                """INSERT OR REPLACE INTO edges
-                   (id, from_id, to_id, type, weight, label, properties)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (eid, from_id, to_id, type, weight, label, json.dumps(properties or {})),
+            eid = self._add_edge_impl(
+                cur, from_id=from_id, to_id=to_id, edge_type=type,
+                weight=weight, label=label, properties=properties,
             )
         return eid
 
@@ -181,14 +281,119 @@ class ClarityStore:
                 (key, value),
             )
 
+    def update_node(
+        self,
+        node_id: str,
+        description: str = None,
+        risk_level: str = None,
+        line_count: int = None,
+        properties: dict = None,
+    ) -> bool:
+        """Update specific fields of an existing node. Only non-None fields are changed.
+
+        Returns True if the node was found and updated.
+        """
+        with self._cursor() as cur:
+            rowcount = self._update_node_impl(
+                cur, node_id=node_id, description=description,
+                risk_level=risk_level, line_count=line_count, properties=properties,
+            )
+            return rowcount > 0
+
     def remove_node(self, node_id: str) -> tuple[bool, int]:
         """Remove a node and all its connected edges. Returns (node_deleted, edges_removed)."""
         with self._cursor() as cur:
-            cur.execute("DELETE FROM edges WHERE from_id=? OR to_id=?", (node_id, node_id))
-            edge_count = cur.rowcount
-            cur.execute("DELETE FROM nodes WHERE id=?", (node_id,))
-            node_deleted = cur.rowcount > 0
-        return node_deleted, edge_count
+            return self._remove_node_impl(cur, node_id)
+
+    def remove_edge(self, from_id: str, to_id: str, edge_type: str) -> bool:
+        """Remove an edge by its from/to/type triple. Returns True if deleted."""
+        with self._cursor() as cur:
+            return self._remove_edge_impl(cur, from_id, to_id, edge_type)
+
+    # -- Batch -----------------------------------------------------------------
+
+    def batch_operations(self, operations: list[dict]) -> dict:
+        """Execute multiple add/update/remove operations in one batch.
+
+        Individual failures are caught and reported without stopping the batch.
+        Successfully completed operations ARE committed even if later operations
+        fail (partial success model).
+
+        Each operation is a dict with an "op" key and the relevant parameters.
+        Returns summary: {"succeeded": N, "failed": N, "errors": [...]}
+        """
+        succeeded = 0
+        failed = 0
+        errors = []
+
+        with self._cursor() as cur:
+            for i, op_dict in enumerate(operations):
+                op = op_dict.get("op", "")
+                try:
+                    if op == "add_node":
+                        self._add_node_impl(
+                            cur,
+                            node_id=op_dict["node_id"],
+                            node_type=op_dict["node_type"],
+                            layer=op_dict.get("layer", 3),
+                            name=op_dict["name"],
+                            description=op_dict.get("description", ""),
+                            file_path=op_dict.get("file_path"),
+                            line_count=op_dict.get("line_count"),
+                            risk_level=op_dict.get("risk_level", "low"),
+                            properties=op_dict.get("properties"),
+                        )
+                        succeeded += 1
+
+                    elif op == "update_node":
+                        rowcount = self._update_node_impl(
+                            cur,
+                            node_id=op_dict["node_id"],
+                            description=op_dict.get("description"),
+                            risk_level=op_dict.get("risk_level"),
+                            line_count=op_dict.get("line_count"),
+                            properties=op_dict.get("properties"),
+                        )
+                        if rowcount == 0:
+                            failed += 1
+                            errors.append(f"[{i}] update_node: node '{op_dict['node_id']}' not found")
+                            continue
+                        succeeded += 1
+
+                    elif op == "add_edge":
+                        self._add_edge_impl(
+                            cur,
+                            from_id=op_dict["from_id"],
+                            to_id=op_dict["to_id"],
+                            edge_type=op_dict["edge_type"],
+                            weight=op_dict.get("weight", 1.0),
+                            label=op_dict.get("label"),
+                            properties=op_dict.get("properties"),
+                        )
+                        succeeded += 1
+
+                    elif op == "remove_node":
+                        self._remove_node_impl(cur, op_dict["node_id"])
+                        succeeded += 1
+
+                    elif op == "remove_edge":
+                        self._remove_edge_impl(
+                            cur,
+                            from_id=op_dict["from_id"],
+                            to_id=op_dict["to_id"],
+                            edge_type=op_dict["edge_type"],
+                        )
+                        succeeded += 1
+
+                    else:
+                        failed += 1
+                        errors.append(f"[{i}] Unknown op: {op}")
+
+                except Exception as e:
+                    failed += 1
+                    errors.append(f"[{i}] {op} failed: {e}")
+
+        return {"succeeded": succeeded, "failed": failed, "errors": errors}
 
     # -- Read ------------------------------------------------------------------
 
@@ -223,6 +428,185 @@ class ClarityStore:
             "node_types": node_types,
             "edge_types": edge_types,
         }
+
+    @staticmethod
+    def parse_properties(node: dict) -> dict:
+        """Parse the properties field of a node, handling double-encoded JSON strings."""
+        p = node.get("properties", "{}")
+        if isinstance(p, str):
+            try:
+                parsed = json.loads(p)
+                if isinstance(parsed, str):
+                    return json.loads(parsed)
+                return parsed
+            except (json.JSONDecodeError, TypeError):
+                return {}
+        return p if isinstance(p, dict) else {}
+
+    def query(
+        self,
+        node_id: str = None,
+        node_type: str = None,
+        related_to: str = None,
+        show: str = "detail",
+        keyword: str = None,
+    ) -> str:
+        """Flexible query that returns markdown. All parameters optional.
+
+        Combinations:
+          node_id="comp-x"                 -> detail for that node + its edges
+          node_type="invariant"            -> list all nodes of that type
+          related_to="mod-core"            -> all edges involving that node
+          related_to="mod-core", show="constraints" -> decisions/invariants for that node
+          keyword="memory"                 -> search by name/description
+          show="overview"                  -> architecture overview from metadata
+          show="metadata"                  -> all scan_metadata key-value pairs
+          (no params)                      -> stats summary
+        """
+        if show == "overview":
+            return self._query_overview()
+        if show == "metadata":
+            return self._query_metadata()
+
+        # All remaining branches need the full graph
+        all_nodes = self.get_all_nodes()
+        all_edges = self.get_all_edges()
+        node_map = {n["id"]: n for n in all_nodes}
+
+        if keyword:
+            return self._query_keyword(keyword, all_nodes)
+        if node_id:
+            return self._query_node(node_id, node_map, all_edges)
+        if node_type:
+            return self._query_type(node_type, all_nodes)
+        if related_to:
+            return self._query_related(related_to, node_map, all_edges, show)
+        return self._query_stats()
+
+    def _query_overview(self) -> str:
+        meta = self.get_metadata()
+        overview = meta.get("architecture_overview", "No architecture overview stored yet.")
+        return f"# Architecture Overview\n\n{overview}"
+
+    def _query_metadata(self) -> str:
+        meta = self.get_metadata()
+        if not meta:
+            return "No metadata stored."
+        lines = ["# Knowledge DB Metadata", ""]
+        for k, v in sorted(meta.items()):
+            preview = v[:200] + "..." if len(v) > 200 else v
+            lines.append(f"- **{k}**: {preview}")
+        return "\n".join(lines)
+
+    def _query_keyword(self, keyword: str, all_nodes: list[dict]) -> str:
+        kw = keyword.lower()
+        matches = []
+        for n in all_nodes:
+            if n["type"] == "file" and self.parse_properties(n).get("role") == "package init":
+                continue
+            name_match = kw in (n.get("name") or "").lower()
+            desc_match = kw in (n.get("description") or "").lower()
+            if name_match or desc_match:
+                matches.append(n)
+        if not matches:
+            return f"No results for '{keyword}'."
+        lines = [f'## Search: "{keyword}" ({len(matches)} matches)', ""]
+        for m in matches[:15]:
+            lines.append(f"### {m['name']} ({m['type']})")
+            if m.get("file_path"):
+                lines.append(f"- **File**: {m['file_path']}")
+            if m.get("description"):
+                lines.append(f"- **Description**: {m['description']}")
+            lines.append("")
+        return "\n".join(lines)
+
+    def _query_node(self, node_id: str, node_map: dict, all_edges: list[dict]) -> str:
+        node = node_map.get(node_id)
+        if not node:
+            return f"Node '{node_id}' not found."
+        lines = [
+            f"## {node['name']} ({node['type']})",
+            f"- **ID**: {node['id']}",
+            f"- **Layer**: {node['layer']}",
+        ]
+        if node.get("description"):
+            lines.append(f"- **Description**: {node['description']}")
+        if node.get("file_path"):
+            lines.append(f"- **File**: {node['file_path']}")
+        if node.get("line_count"):
+            lines.append(f"- **Lines**: {node['line_count']}")
+        lines.append(f"- **Risk**: {node.get('risk_level', 'low')}")
+        props = self.parse_properties(node)
+        for k, v in props.items():
+            if k in ("flow_rank", "flow_col"):
+                continue
+            lines.append(f"- **{k}**: {v}")
+        lines.append("")
+        # Edges
+        out_edges = [e for e in all_edges if e["from_id"] == node_id]
+        in_edges = [e for e in all_edges if e["to_id"] == node_id]
+        if out_edges:
+            lines.append("### Outgoing Edges")
+            for e in out_edges:
+                target = node_map.get(e["to_id"], {}).get("name", e["to_id"])
+                lbl = f' - "{e["label"]}"' if e.get("label") else ""
+                lines.append(f"- --{e['type']}--> {target}{lbl}")
+            lines.append("")
+        if in_edges:
+            lines.append("### Incoming Edges")
+            for e in in_edges:
+                source = node_map.get(e["from_id"], {}).get("name", e["from_id"])
+                lbl = f' - "{e["label"]}"' if e.get("label") else ""
+                lines.append(f"- {source} --{e['type']}-->{lbl}")
+            lines.append("")
+        return "\n".join(lines)
+
+    def _query_type(self, node_type: str, all_nodes: list[dict]) -> str:
+        matches = [n for n in all_nodes if n["type"] == node_type]
+        if not matches:
+            return f"No nodes of type '{node_type}'."
+        lines = [f"## {node_type.title()} Nodes ({len(matches)})", ""]
+        for n in matches:
+            desc = (n.get("description") or "")[:80]
+            lines.append(f"- **{n['name']}** (`{n['id']}`): {desc}")
+        return "\n".join(lines)
+
+    def _query_related(self, related_to: str, node_map: dict, all_edges: list[dict], show: str) -> str:
+        if show == "constraints":
+            constraint_edges = [
+                e for e in all_edges
+                if e["type"] == "constrains" and e["to_id"] == related_to
+            ]
+            if not constraint_edges:
+                return f"No constraints found for '{related_to}'."
+            lines = [f"## Constraints for {related_to}", ""]
+            for e in constraint_edges:
+                src = node_map.get(e["from_id"])
+                if src:
+                    lines.append(f"- **{src['name']}** ({src['type']}): {src.get('description', '')}")
+            return "\n".join(lines)
+        else:
+            edges = [e for e in all_edges if e["from_id"] == related_to or e["to_id"] == related_to]
+            if not edges:
+                return f"No edges found for '{related_to}'."
+            lines = [f"## Edges for {related_to}", ""]
+            for e in edges:
+                src = node_map.get(e["from_id"], {}).get("name", e["from_id"])
+                tgt = node_map.get(e["to_id"], {}).get("name", e["to_id"])
+                lbl = f' "{e["label"]}"' if e.get("label") else ""
+                lines.append(f"- {src} --{e['type']}--> {tgt}{lbl}")
+            return "\n".join(lines)
+
+    def _query_stats(self) -> str:
+        stats = self.get_stats()
+        lines = ["## Knowledge DB Stats"]
+        lines.append(f"- **Nodes**: {stats['total_nodes']}")
+        lines.append(f"- **Edges**: {stats['total_edges']}")
+        if stats["node_types"]:
+            lines.append(f"- **Node types**: {', '.join(f'{t}={c}' for t, c in stats['node_types'].items())}")
+        if stats["edge_types"]:
+            lines.append(f"- **Edge types**: {', '.join(f'{t}={c}' for t, c in stats['edge_types'].items())}")
+        return "\n".join(lines)
 
     def auto_layout(self) -> dict:
         """Compute flow_rank/flow_col for all modules based on dependency graph.
@@ -488,6 +872,9 @@ class ClarityStore:
         db = Path(db_path)
         if db.exists():
             db.unlink()
+        # Touch the DB file so __init__ sees it exists and skips auto-rebuild
+        db.parent.mkdir(parents=True, exist_ok=True)
+        db.touch()
         store = cls(db_path)
         with open(jsonl_path, "r", encoding="utf-8") as f:
             for line in f:
@@ -500,8 +887,8 @@ class ClarityStore:
                     store.set_metadata(rec["key"], rec["value"])
                 elif t == "node":
                     props = rec.get("properties")
-                    if isinstance(props, dict):
-                        props = json.dumps(props)
+                    if isinstance(props, str):
+                        props = json.loads(props)
                     store.add_node(
                         id=rec["id"],
                         type=rec["type"],
@@ -511,19 +898,19 @@ class ClarityStore:
                         file_path=rec.get("file_path"),
                         line_count=rec.get("line_count"),
                         risk_level=rec.get("risk_level", "low"),
-                        properties=props,
+                        properties=props if isinstance(props, dict) else {},
                     )
                 elif t == "edge":
                     props = rec.get("properties")
-                    if isinstance(props, dict):
-                        props = json.dumps(props)
+                    if isinstance(props, str):
+                        props = json.loads(props)
                     store.add_edge(
                         from_id=rec["from_id"],
                         to_id=rec["to_id"],
                         type=rec["type"],
                         label=rec.get("label"),
                         weight=rec.get("weight", 1.0),
-                        properties=props,
+                        properties=props if isinstance(props, dict) else {},
                     )
         return store
 
@@ -1946,7 +2333,7 @@ def scan_files(store: ClarityStore, root: str = "src", extensions: list[str] = N
                 type="module",
                 layer=2,
                 name=prefix,
-                description=f"{label} module",
+                description="[needs description]",
                 file_path=prefix,
                 risk_level="low",
                 properties={"flow_rank": 99, "flow_col": 0},

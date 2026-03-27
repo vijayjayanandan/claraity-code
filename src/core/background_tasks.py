@@ -106,9 +106,18 @@ class BackgroundTaskRegistry:
             (task_id, None) on success, (None, error_message) on failure.
         """
         # Safety check (same as run_command)
-        is_safe, reason = check_command_safety(command)
-        if not is_safe:
-            return None, f"[BLOCKED] {reason}"
+        # Background tasks have no approval UI, so both BLOCK and NEEDS_APPROVAL
+        # are treated as hard blocks here.
+        from src.tools.command_safety import CommandSafety
+
+        safety_result = check_command_safety(command)
+        if safety_result.safety == CommandSafety.BLOCK:
+            return None, f"[BLOCKED] {safety_result.reason}"
+        if safety_result.safety == CommandSafety.NEEDS_APPROVAL:
+            return None, (
+                f"[BLOCKED] {safety_result.reason} "
+                "(background tasks cannot request user approval)"
+            )
 
         # Capacity check
         active = self._active_count()

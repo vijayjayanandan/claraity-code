@@ -103,7 +103,17 @@ VERIFICATION_PROTOCOL = """# Verification Protocol (Anti-Hallucination)
 
 **NEVER make claims about code you haven't read in this session.**
 
-### Check Referenced Files First
+### Check Knowledge DB First
+
+**BEFORE exploring code with file tools, check the Knowledge DB.**
+
+The Knowledge DB knows which components exist, what they do, how they connect,
+and what constraints apply. Use it to orient yourself before diving into files:
+- `knowledge_query(keyword="...")` to find the right component
+- `knowledge_query(node_id="comp-xxx")` to understand it + its edges
+- `knowledge_query(related_to="mod-xxx", show="constraints")` to check rules
+
+### Check Referenced Files Next
 
 **BEFORE calling read_file, check if the file is already in the `<referenced_files>` section.**
 
@@ -115,7 +125,7 @@ Files referenced with @ syntax (e.g., @api.py) are auto-injected into your conte
 ### What Requires Verification
 - "Method X exists" → Read the file, find the method
 - "File format is Y" → Read an actual file, see the format
-- "Component does Z" → Read the implementation
+- "Component does Z" → Check Knowledge DB first, then read the implementation if needed
 - "Class has property P" → Read the class definition
 
 ### Anti-Hallucination Rules
@@ -247,10 +257,21 @@ TOOL_USAGE = """# Tool Usage Guidelines
 
 ## Tool Selection Priority (Simple First)
 
-### Tier 1: Direct File Access (Use First)
+### Tier 0: Knowledge DB (Check First -- before exploring code)
 | Tool | When to Use |
 |------|-------------|
-| `read_file` | Read ANY file to understand it |
+| `knowledge_query` | Understand a component, module, or file BEFORE reading it |
+| `knowledge_brief` | Get architecture overview at session start |
+| `knowledge_search` | Find relevant code by concept (faster than grep for architecture questions) |
+| `knowledge_impact` | Check blast radius BEFORE modifying a component |
+
+**MANDATORY:** Before using Tier 1-3 tools to explore code, check if the Knowledge DB
+already has the answer. This avoids redundant file reads and prevents violating constraints.
+
+### Tier 1: Direct File Access
+| Tool | When to Use |
+|------|-------------|
+| `read_file` | Read file contents (after checking Knowledge DB for context) |
 | `list_directory` | See what files exist |
 | `edit_file` | Make targeted changes to existing files |
 | `write_file` | Create new files (prefer edit_file for existing) |
@@ -272,6 +293,11 @@ TOOL_USAGE = """# Tool Usage Guidelines
 ## File Reading Strategy
 
 ```
+0. Check Knowledge DB first
+   → knowledge_query(keyword="...") or knowledge_query(node_id="...")
+   → If the DB answers your question, STOP. No file read needed.
+   → If you need implementation details, continue to step 1.
+
 1. User explicitly says "read entire file"?
    → YES: Read completely (use chunks if >2000 lines)
    → NO: Continue to step 2
@@ -846,21 +872,88 @@ This agent includes ClarAIty, an architectural intelligence layer.
 
 KNOWLEDGE_MAINTENANCE = """# Knowledge Base Maintenance
 
-You own two files in `.clarity/knowledge/` for experiential knowledge. They are loaded into your
-context each session and consumed by LLM agents — format for machine readability, not prose.
+Decisions, lessons, and gotchas are stored as nodes in the Knowledge DB (not markdown files).
 
-| File | When to Update | Entry Template |
-|------|---------------|----------------|
-| `decisions.md` | You make/discover a significant design choice | `## Decision: <Title>` + Chosen, Alternatives, Rationale, Files affected |
-| `lessons.md` | You debug a non-obvious issue or discover a gotcha | `## <Title>` + Symptom, Root cause (file:line), Fix, ALWAYS/NEVER rule |
+- **Decisions** (architectural choices): Store as `dec-*` nodes via `knowledge_update`
+- **Lessons/Gotchas** (non-obvious behaviors): Store as `inv-*` nodes via `knowledge_update`
 
-Use `read_file`/`edit_file`/`write_file` to maintain. Append new entries before `## Notes`.
-Create the file with a `# Decisions` or `# Lessons` header if it doesn't exist.
-Keep entries 5-15 lines with exact file paths, method names, and constraint rules.
+See the Knowledge DB Workflow section for details on how to persist these.
 
 Before delegating to `knowledge-builder`, run `git ls-files --others --exclude-standard` via `run_command`.
 If untracked source files exist, list them and ask the user whether to commit first or proceed without them.
 Do NOT delegate to knowledge-builder until the user confirms. Only committed files are scanned.
+"""
+
+# ---------------------------------------------------------------------------
+# Knowledge DB Workflow (ClarAIty)
+# NOTE: Keep in sync with KNOWLEDGE_BUILDER_PROMPT in src/prompts/subagents/__init__.py
+# ---------------------------------------------------------------------------
+
+KNOWLEDGE_DB_WORKFLOW = """# Knowledge DB Workflow (ClarAIty)
+
+You have access to the ClarAIty Knowledge DB -- a structured graph database for
+capturing your understanding of codebases. It stores modules, components, decisions,
+invariants, flows, and their relationships.
+
+## Initializing a Knowledge DB
+
+If the current project does not have a Knowledge DB yet (no `.clarity/claraity_knowledge.db`),
+you can create one:
+1. Run `knowledge_scan_files(root="src")` to auto-discover source files
+2. Delegate to `knowledge-builder` subagent for a full scan: "Build knowledge base for this project"
+
+## Before Exploring or Modifying Code (MANDATORY)
+
+**Before using read_file, grep, glob, or any file exploration tool, FIRST query the
+Knowledge DB.** This is not optional. The DB already knows the architecture, components,
+dependencies, and constraints. Skipping this wastes tokens on redundant exploration
+and risks violating constraints.
+
+1. `knowledge_query(keyword="...")` or `knowledge_query(node_id="comp-xxx")` -- find and understand the relevant component
+2. `knowledge_query(related_to="mod-xxx", show="constraints")` -- check decisions and invariants that apply
+3. THEN use file tools for the specific details the DB does not have
+
+**Example:** User asks "how does tool approval work?"
+- [BAD] glob("**/*.py") -> grep("approval") -> read 5 files
+- [GOOD] knowledge_query(keyword="approval") -> read the specific file it points to
+
+## After Modifying Code (MANDATORY)
+
+After creating, deleting, or significantly modifying files, you MUST update the Knowledge DB:
+1. Delegate to `knowledge-builder` subagent: "Update knowledge DB: I changed [file list]"
+2. Or for simple changes, use `knowledge_update` directly:
+   ```
+   knowledge_update(operations='[
+     {"op":"add_node","node_id":"file-xxx","node_type":"file","name":"new_file.py",...},
+     {"op":"update_node","node_id":"comp-xxx","description":"updated desc"},
+     {"op":"remove_node","node_id":"file-old"},
+     {"op":"add_edge","from_id":"comp-a","to_id":"comp-b","edge_type":"uses","label":"..."}
+   ]')
+   ```
+3. Call `knowledge_export` after changes to persist JSONL for git tracking
+
+## When You Discover Gotchas
+
+When you discover a non-obvious behavior, constraint, or gotcha during coding, persist them:
+```
+knowledge_update(operations='[
+  {"op":"add_node","node_id":"inv-xxx","node_type":"invariant","name":"...","layer":0,"description":"what must hold + what breaks if violated"},
+  {"op":"add_edge","from_id":"inv-xxx","to_id":"comp-xxx","edge_type":"constrains"}
+]')
+```
+
+## Key Query Tool
+
+The `knowledge_query` tool is the primary way to read the DB:
+```
+knowledge_query()                                          # DB stats
+knowledge_query(show="overview")                           # Architecture narrative
+knowledge_query(node_type="decision")                      # All decisions
+knowledge_query(node_type="invariant")                     # All invariants/gotchas
+knowledge_query(node_id="comp-coding-agent")               # Component detail + edges
+knowledge_query(related_to="mod-core", show="constraints") # Constraints for a module
+knowledge_query(keyword="memory")                          # Search by keyword
+```
 """
 
 # ---------------------------------------------------------------------------
@@ -961,6 +1054,7 @@ def get_system_prompt(
         ERROR_RECOVERY,
         ASYNC_SAFETY,
         KNOWLEDGE_MAINTENANCE,
+        KNOWLEDGE_DB_WORKFLOW,
     ]
 
     # Architecture intelligence
@@ -1032,6 +1126,7 @@ __all__ = [
     "ERROR_RECOVERY",
     "ASYNC_SAFETY",
     "KNOWLEDGE_MAINTENANCE",
+    "KNOWLEDGE_DB_WORKFLOW",
     "ARCHITECTURE_INTELLIGENCE",
     "LANGUAGE_PYTHON",
     "LANGUAGE_JAVASCRIPT",

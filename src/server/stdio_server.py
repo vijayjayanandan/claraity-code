@@ -55,7 +55,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from src.core.events import PausePromptStart, StreamEnd, UIEvent
+from src.core.events import PausePromptEnd, PausePromptStart, StreamEnd, UIEvent
 from src.core.protocol import InterruptSignal, UIProtocol, UserAction
 from src.observability import get_logger
 from src.server.jsonrpc import is_jsonrpc, unwrap, wrap_notification
@@ -282,6 +282,8 @@ class StdioProtocol(UIProtocol):
         "save_subagent": "_handle_save_subagent",
         "delete_subagent": "_handle_delete_subagent",
         "reload_subagents": "_handle_reload_subagents",
+        # Prompt Enrichment
+        "enrich_prompt": "_handle_enrich_prompt",
     }
 
     def __init__(
@@ -431,6 +433,7 @@ class StdioProtocol(UIProtocol):
         permission_mode: str,
         working_directory: str,
         auto_approve_categories: dict[str, bool] | None = None,
+        limits: dict | None = None,
     ) -> None:
         """Send session_info message (also serves as ready signal)."""
         payload = {
@@ -442,6 +445,8 @@ class StdioProtocol(UIProtocol):
         }
         if auto_approve_categories is not None:
             payload["auto_approve_categories"] = auto_approve_categories
+        if limits is not None:
+            payload["limits"] = limits
         await self._send_json(payload)
 
     # -- Store subscription -------------------------------------------------
@@ -515,7 +520,15 @@ class StdioProtocol(UIProtocol):
             stats=stats,
         )
         await self.send_event(event)
-        return await self.wait_for_pause_response()
+        result = await self.wait_for_pause_response()
+        # Dismiss the pause widget — main agent does this by yielding
+        # PausePromptEnd in stream_response(), but the delegation tool
+        # calls request_pause() outside the streaming pipeline.
+        await self.send_event(PausePromptEnd(
+            continue_work=result.continue_work,
+            feedback=result.feedback,
+        ))
+        return result
 
     async def send_clarify_request(self, call_id, questions, context):
         await self._send_json(
@@ -779,12 +792,14 @@ class StdioProtocol(UIProtocol):
         model_name = getattr(self._agent, "model_name", "unknown")
         permission_mode = self._agent.get_permission_mode()
         auto_approve = self._agent.get_auto_approve_categories()
+        limits = self._agent.get_limits() if hasattr(self._agent, "get_limits") else None
         await self.send_session_info(
             session_id=session_id,
             model_name=model_name,
             permission_mode=permission_mode,
             working_directory=self._working_directory,
             auto_approve_categories=auto_approve,
+            limits=limits,
         )
 
     async def _handle_new_session(self, data: dict) -> None:
@@ -1787,8 +1802,6 @@ class StdioProtocol(UIProtocol):
         "run_command",
         "get_file_outline",
         "get_symbol_context",
-        "kb_detect_changes",
-        "kb_update_manifest",
         "clarify",
     ]
 
@@ -2031,6 +2044,97 @@ class StdioProtocol(UIProtocol):
             await self._send_error("export_error", f"Failed to export: {e}")
 
     # -----------------------------------------------------------------
+    # Prompt Enrichment
+    # -----------------------------------------------------------------
+
+    _ENRICHMENT_SYSTEM_PROMPT = (
+        "You are a prompt enrichment assistant for a coding agent called ClarAIty. "
+        "Given a short user request and codebase context, expand it into a detailed, "
+        "structured prompt that will help the coding agent understand exactly what to do.\n\n"
+        "Output format:\n"
+        "## Context\n[relevant area of codebase]\n\n"
+        "## Requirements\n[numbered specific requirements]\n\n"
+        "## Key Files\n[files to examine/modify with their purpose]\n\n"
+        "## Constraints\n[rules to follow]\n\n"
+        "Be concise. Do not add requirements the user did not ask for."
+    )
+
+    async def _handle_enrich_prompt(self, data: dict) -> None:
+        """Enrich a short user prompt using knowledge DB context + LLM."""
+        content = data.get("content", "").strip()
+        if not content:
+            await self._send_json(
+                {"type": "enrichment_error", "message": "Empty prompt"}
+            )
+            return
+
+        try:
+            import asyncio
+
+            # 1. Gather codebase context from knowledge DB
+            context_parts = []
+            kb_path = os.path.join(
+                self._working_directory, ".clarity", "claraity_knowledge.db"
+            )
+            if os.path.exists(kb_path):
+                from src.claraity.claraity_db import ClarityStore, render_compact_briefing, render_search
+
+                store = ClarityStore(kb_path)
+                try:
+                    briefing = render_compact_briefing(store)
+                    if briefing:
+                        context_parts.append(briefing)
+                    # Extract keywords for search (simple: split, filter short words)
+                    keywords = [w for w in content.split() if len(w) > 2]
+                    for kw in keywords[:3]:
+                        search_result = render_search(store, kw)
+                        if search_result and "No results" not in search_result:
+                            context_parts.append(search_result)
+                            break  # One good search result is enough
+                finally:
+                    store.close()
+
+            codebase_context = "\n\n".join(context_parts) if context_parts else "No codebase knowledge available."
+
+            # 2. Make a lightweight LLM call using the agent's backend
+            backend = self._agent.llm_backend
+            messages = [
+                {"role": "system", "content": self._ENRICHMENT_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": (
+                        f"User's request: {content}\n\n"
+                        f"Codebase context:\n{codebase_context}"
+                    ),
+                },
+            ]
+
+            # Run sync generate() in a thread to avoid blocking the event loop
+            response = await asyncio.to_thread(
+                backend.generate, messages, max_tokens=1000
+            )
+
+            enriched = response.content or content
+            await self._send_json(
+                {
+                    "type": "enriched_prompt",
+                    "original": content,
+                    "enriched": enriched,
+                }
+            )
+            logger.info(
+                "enrich_prompt_success",
+                original_len=len(content),
+                enriched_len=len(enriched),
+            )
+
+        except Exception as e:
+            logger.warning("enrich_prompt_error", error=str(e))
+            await self._send_json(
+                {"type": "enrichment_error", "message": str(e)}
+            )
+
+    # -----------------------------------------------------------------
     # Streaming
     # -----------------------------------------------------------------
 
@@ -2134,14 +2238,25 @@ async def run_stdio_server(
     # Wire subagent delegation tool
     protocol.wire_delegation_tool()
 
+    # Register auto-approve change callback so VS Code panel stays in sync
+    # when plan approval enables categories (e.g. "edit" on auto-accept edits).
+    def _on_auto_approve_changed(categories: dict) -> None:
+        asyncio.ensure_future(
+            protocol._send_json({"type": "auto_approve_changed", "categories": categories})
+        )
+
+    agent._on_auto_approve_changed = _on_auto_approve_changed
+
     # Send session_info as first message = ready signal
     model_name = getattr(agent, "model_name", "unknown")
+    limits = agent.get_limits() if hasattr(agent, "get_limits") else None
     await protocol.send_session_info(
         session_id=session_id,
         model_name=model_name,
         permission_mode=agent.get_permission_mode(),
         working_directory=working_directory,
         auto_approve_categories=agent.get_auto_approve_categories(),
+        limits=limits,
     )
     logger.info("stdio_server_ready", session_id=session_id)
 

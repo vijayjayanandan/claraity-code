@@ -275,8 +275,13 @@ class ToolCard(Static):
                     )
                 else:
                     logger.info(f"[WATCH_STATUS] {self.call_id}: Creating approval widget")
+                    # Look up safety_reason from render meta registry
+                    safety_reason = self._lookup_safety_reason()
                     self._approval_widget = ToolApprovalOptions(
-                        call_id=self.call_id, tool_name=self.tool_name, args=self.args
+                        call_id=self.call_id,
+                        tool_name=self.tool_name,
+                        args=self.args,
+                        safety_reason=safety_reason,
                     )
                 # Diff already mounted above; mount approval widget after it
                 self.mount(self._approval_widget)
@@ -337,8 +342,12 @@ class ToolCard(Static):
                     context=self.args.get("context"),
                 )
             else:
+                safety_reason = self._lookup_safety_reason()
                 self._approval_widget = ToolApprovalOptions(
-                    call_id=self.call_id, tool_name=self.tool_name, args=self.args
+                    call_id=self.call_id,
+                    tool_name=self.tool_name,
+                    args=self.args,
+                    safety_reason=safety_reason,
                 )
             # Approval should appear AFTER diff - defer if diff mount was deferred
             if self._defer_diff_mount and not self._diff_mounted:
@@ -848,6 +857,21 @@ class ToolCard(Static):
                 preview += "..."
             return preview
 
+    def _lookup_safety_reason(self) -> str | None:
+        """Look up safety_reason from the render meta registry via the app.
+
+        Returns None if not found (normal approval, replay, or no registry).
+        """
+        try:
+            registry = getattr(self.app, "_render_meta", None)
+            if registry:
+                meta = registry.get_approval_meta(self.call_id)
+                if meta:
+                    return meta.safety_reason
+        except Exception:
+            pass
+        return None
+
     def approve(self) -> None:
         """Programmatically approve this tool call."""
         self.status = ToolStatus.APPROVED
@@ -921,7 +945,14 @@ class ToolApprovalOptions(Static, can_focus=True):
     }
     """
 
-    def __init__(self, call_id: str, tool_name: str = "", args: dict | None = None, **kwargs):
+    def __init__(
+        self,
+        call_id: str,
+        tool_name: str = "",
+        args: dict | None = None,
+        safety_reason: str | None = None,
+        **kwargs,
+    ):
         """
         Initialize approval options.
 
@@ -929,12 +960,15 @@ class ToolApprovalOptions(Static, can_focus=True):
             call_id: Tool call ID to include in response
             tool_name: Name of the tool being approved
             args: Tool arguments dictionary
+            safety_reason: If set, this is a safety-floor approval.
+                Shows a warning banner and hides "allow all" option.
             **kwargs: Additional arguments for Static
         """
         super().__init__(**kwargs)
         self.call_id = call_id
         self.tool_name = tool_name
         self.args = args or {}
+        self.safety_reason = safety_reason
 
     def on_mount(self) -> None:
         """Focus on mount to capture key events."""
@@ -946,10 +980,21 @@ class ToolApprovalOptions(Static, can_focus=True):
             self.focus()
             self.scroll_visible()
 
+    @property
+    def _feedback_index(self) -> int:
+        """Index of the feedback option (2 normally, 1 when 'allow all' is hidden)."""
+        return 1 if self.safety_reason else 2
+
+    @property
+    def _max_index(self) -> int:
+        """Maximum selectable option index."""
+        return self._feedback_index
+
     def on_key(self, event) -> None:
         """Handle key presses for text input and shortcuts."""
+        fb_idx = self._feedback_index
         # Check if we're in feedback mode (typing text)
-        in_feedback_mode = self.selected_index == 2 or self.feedback_text
+        in_feedback_mode = self.selected_index == fb_idx or self.feedback_text
 
         if event.is_printable and event.character:
             if not in_feedback_mode:
@@ -960,7 +1005,8 @@ class ToolApprovalOptions(Static, can_focus=True):
                     event.prevent_default()
                     event.stop()
                     return
-                elif event.character == "2":
+                elif event.character == "2" and not self.safety_reason:
+                    # "Allow all" shortcut (hidden for safety approvals)
                     self.selected_index = 1
                     self._submit_selection()
                     event.prevent_default()
@@ -978,25 +1024,30 @@ class ToolApprovalOptions(Static, can_focus=True):
                     event.stop()
                     return
                 elif event.character == "j":
-                    self.selected_index = min(2, self.selected_index + 1)
+                    self.selected_index = min(self._max_index, self.selected_index + 1)
                     event.prevent_default()
                     event.stop()
                     return
 
             # Any other printable character (or any char in feedback mode) -> type it
-            self.selected_index = 2
+            self.selected_index = fb_idx
             self.feedback_text += event.character
             event.prevent_default()
             event.stop()
 
     def action_backspace(self) -> None:
         """Handle backspace in feedback mode."""
-        if self.selected_index == 2 and self.feedback_text:
+        if self.selected_index == self._feedback_index and self.feedback_text:
             self.feedback_text = self.feedback_text[:-1]
 
     def render(self) -> RenderableType:
         """Render the approval options with polished styling."""
         lines = []
+
+        # Safety warning banner (if this is a safety-floor approval)
+        if self.safety_reason:
+            lines.append(Text(" [!] ", style="bold #1e1e1e on #f44747"))
+            lines.append(Text(f" {self.safety_reason}\n\n", style="bold #f44747"))
 
         # Question header - badge style
         lines.append(Text(" ? ", style="bold #1e1e1e on #3794ff"))
@@ -1012,22 +1063,26 @@ class ToolApprovalOptions(Static, can_focus=True):
             lines.append(Text("Yes\n", style="#a0a0a0"))
 
         # Option 2: Yes, allow all [tool] during this session
-        tool_display = self.tool_name or "this tool"
-        if self.selected_index == 1:
-            lines.append(Text("  ", style=""))
-            lines.append(Text(" 2 ", style="bold #1e1e1e on #3794ff"))
-            lines.append(Text(" Yes, allow all ", style="bold #3794ff"))
-            lines.append(Text(tool_display, style="bold #9cdcfe"))
-            lines.append(Text(" this session\n", style="bold #3794ff"))
-        else:
-            lines.append(Text("   2  ", style="#6e7681"))
-            lines.append(Text(f"Yes, allow all {tool_display} this session\n", style="#a0a0a0"))
-
-        # Option 3: Feedback input
-        if self.feedback_text or self.selected_index == 2:
-            if self.selected_index == 2:
+        # Hidden for safety-floor approvals (must approve each individually)
+        if not self.safety_reason:
+            tool_display = self.tool_name or "this tool"
+            if self.selected_index == 1:
                 lines.append(Text("  ", style=""))
-                lines.append(Text(" 3 ", style="bold #1e1e1e on #cca700"))
+                lines.append(Text(" 2 ", style="bold #1e1e1e on #3794ff"))
+                lines.append(Text(" Yes, allow all ", style="bold #3794ff"))
+                lines.append(Text(tool_display, style="bold #9cdcfe"))
+                lines.append(Text(" this session\n", style="bold #3794ff"))
+            else:
+                lines.append(Text("   2  ", style="#6e7681"))
+                lines.append(Text(f"Yes, allow all {tool_display} this session\n", style="#a0a0a0"))
+
+        # Feedback input (option 3 normally, option 2 when "allow all" is hidden)
+        fb_idx = self._feedback_index
+        fb_num = str(fb_idx + 1)  # Display number (1-indexed)
+        if self.feedback_text or self.selected_index == fb_idx:
+            if self.selected_index == fb_idx:
+                lines.append(Text("  ", style=""))
+                lines.append(Text(f" {fb_num} ", style="bold #1e1e1e on #cca700"))
                 lines.append(Text(" ", style=""))
                 if self.feedback_text:
                     lines.append(Text(self.feedback_text, style="bold #cca700"))
@@ -1037,13 +1092,13 @@ class ToolApprovalOptions(Static, can_focus=True):
                     lines.append(Text("_", style="blink #cca700"))
                 lines.append(Text("\n"))
             else:
-                lines.append(Text("   3  ", style="#6e7681"))
+                lines.append(Text(f"   {fb_num}  ", style="#6e7681"))
                 lines.append(
                     Text(self.feedback_text or self.FEEDBACK_PLACEHOLDER, style="italic #6e7681")
                 )
                 lines.append(Text("\n"))
         else:
-            lines.append(Text("   3  ", style="#6e7681"))
+            lines.append(Text(f"   {fb_num}  ", style="#6e7681"))
             lines.append(Text(self.FEEDBACK_PLACEHOLDER + "\n", style="italic #505050"))
 
         # Footer with keyboard hints
@@ -1061,7 +1116,7 @@ class ToolApprovalOptions(Static, can_focus=True):
 
     def action_move_down(self) -> None:
         """Move selection down."""
-        self.selected_index = min(2, self.selected_index + 1)  # 3 options (0, 1, 2)
+        self.selected_index = min(self._max_index, self.selected_index + 1)
 
     def action_select(self) -> None:
         """Confirm current selection."""
@@ -1073,11 +1128,11 @@ class ToolApprovalOptions(Static, can_focus=True):
 
     def _submit_selection(self) -> None:
         """Submit the current selection."""
-        if self.selected_index == 2:
+        if self.selected_index == self._feedback_index:
             # Feedback mode - reject with feedback text
             feedback = self.feedback_text.strip() if self.feedback_text else None
             self.post_message(ApprovalResponseMessage(self.call_id, "no", feedback=feedback))
         else:
-            # Regular option
+            # Regular option (0=yes, 1=yes_all when not safety)
             action, _ = self.OPTIONS[self.selected_index]
             self.post_message(ApprovalResponseMessage(self.call_id, action))

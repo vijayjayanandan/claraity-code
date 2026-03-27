@@ -28,9 +28,8 @@ EXPECTED_BUILTINS = {
 
 # Tools that should NEVER appear in read-only subagents
 WRITE_TOOLS = {"write_file", "edit_file", "append_to_file"}
-EXECUTE_TOOLS = {"run_command", "run_tests"}
-GIT_WRITE_TOOLS = {"git_commit"}
-DANGEROUS_TOOLS = WRITE_TOOLS | EXECUTE_TOOLS | GIT_WRITE_TOOLS
+EXECUTE_TOOLS = {"run_command"}
+DANGEROUS_TOOLS = WRITE_TOOLS | EXECUTE_TOOLS
 
 KEBAB_CASE_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
@@ -59,9 +58,9 @@ def mock_tool_definitions():
         "search_code", "analyze_code", "grep", "glob",
         "get_file_outline", "get_symbol_context",
         # Git tools
-        "git_status", "git_diff", "git_commit",
+        "git_status", "git_diff",
         # Execution tools
-        "run_command", "run_tests", "detect_test_framework",
+        "run_command",
         # Web tools
         "web_search", "web_fetch",
         # Task tools

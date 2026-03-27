@@ -50,13 +50,13 @@ describe("appReducer — Connection", () => {
       model: "gpt-4o",
       permissionMode: "plan",
       workingDirectory: "/work",
-      autoApprove: { read: true, edit: true, execute: false, browser: true },
+      autoApprove: { read: true, edit: true, execute: false, browser: true, knowledge_update: false, subagent: false },
     });
     expect(s.sessionId).toBe("sess-1");
     expect(s.modelName).toBe("gpt-4o");
     expect(s.permissionMode).toBe("plan");
     expect(s.workingDirectory).toBe("/work");
-    expect(s.autoApprove).toEqual({ edit: true, execute: false, browser: true });
+    expect(s.autoApprove).toEqual({ read: true, edit: true, execute: false, browser: true, knowledge_update: false, subagent: false });
   });
 
   test("SET_SESSION_INFO preserves existing workingDirectory when not provided", () => {
@@ -69,12 +69,12 @@ describe("appReducer — Connection", () => {
   });
 
   test("SET_SESSION_INFO preserves existing autoApprove when not provided", () => {
-    const base = { ...initialState, autoApprove: { read: true, edit: true, execute: true, browser: false } };
+    const base = { ...initialState, autoApprove: { read: true, edit: true, execute: true, browser: false, knowledge_update: false, subagent: false } };
     const s = reduce(
       { type: "SET_SESSION_INFO", sessionId: "s", model: "m", permissionMode: "n" },
       base,
     );
-    expect(s.autoApprove).toEqual({ edit: true, execute: true, browser: false });
+    expect(s.autoApprove).toEqual({ read: true, edit: true, execute: true, browser: false, knowledge_update: false, subagent: false });
   });
 
   test("SET_SESSION_INFO resets conversation state on session change (GAP 16)", () => {
@@ -348,6 +348,7 @@ describe("appReducer — Messages", () => {
       toolCount: 0,
       active: true,
       messages: [],
+      timeline: [],
     };
     let s = reduce({ type: "SUBAGENT_REGISTERED", data: saInfo });
     s = reduce({
@@ -382,6 +383,7 @@ describe("appReducer — Messages", () => {
       toolCount: 0,
       active: true,
       messages: ["Old text"],
+      timeline: [{ type: "text" as const, index: 0 }],
     };
     let s = reduce({ type: "SUBAGENT_REGISTERED", data: saInfo });
     s = reduce({
@@ -500,6 +502,7 @@ describe("appReducer — Tools", () => {
       toolCount: 0,
       active: true,
       messages: [],
+      timeline: [],
     };
     let s = reduce({ type: "SUBAGENT_REGISTERED", data: saInfo });
     const timelineLen = s.timeline.length;
@@ -527,6 +530,7 @@ describe("appReducer — Subagents", () => {
     toolCount: 0,
     active: true,
     messages: [],
+    timeline: [],
   };
 
   test("SUBAGENT_REGISTERED adds subagent info with messages[] and timeline entry (GAP 6)", () => {
@@ -794,7 +798,7 @@ describe("appReducer — Auto-approve", () => {
       type: "AUTO_APPROVE_CHANGED",
       categories: { read: true, edit: true, execute: false, browser: true },
     });
-    expect(s.autoApprove).toEqual({ read: true, edit: true, execute: false, browser: true });
+    expect(s.autoApprove).toEqual({ read: true, edit: true, execute: false, browser: true, knowledge_update: false, subagent: false });
   });
 
   test("AUTO_APPROVE_CHANGED coerces falsy values to false", () => {
@@ -802,7 +806,7 @@ describe("appReducer — Auto-approve", () => {
       type: "AUTO_APPROVE_CHANGED",
       categories: {},
     });
-    expect(s.autoApprove).toEqual({ read: false, edit: false, execute: false, browser: false });
+    expect(s.autoApprove).toEqual({ read: false, edit: false, execute: false, browser: false, knowledge_update: false, subagent: false });
   });
 });
 

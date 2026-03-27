@@ -1,12 +1,16 @@
 """
 Tool Gating Service - Centralized tool call gating logic.
 
-Consolidates the four gating checks used by stream_response():
+Consolidates the five gating checks used by stream_response():
 
 1. Repeat detection: blocks calls that failed with identical args before
 2. Plan mode gate: restricts writes when plan mode is active
 3. Director gate: restricts writes based on director phase
-4. Approval check: determines if user approval is needed
+4. Command safety gate: blocks/escalates dangerous shell commands
+5. Approval check: determines if user approval is needed
+
+The command safety gate (check 4) is a safety floor that cannot be bypassed
+by auto-approve settings. It runs before the category-based approval check.
 
 Usage:
     gating = ToolGatingService(plan_mode_state, director_adapter,
@@ -50,12 +54,16 @@ class GateResult:
         message: Human-readable explanation (set for DENY/BLOCKED_REPEAT).
         gate_response: Full gated response dict for LLM feedback (set for DENY gates).
         call_summary: Summary of the blocked call (set for BLOCKED_REPEAT).
+        safety_reason: If set, this NEEDS_APPROVAL was triggered by the command
+            safety floor. The approval UI should show a warning and must NOT
+            allow "Yes, allow all" (auto-approve bypass).
     """
 
     action: GateAction
     message: str | None = None
     gate_response: dict[str, Any] | None = None
     call_summary: str | None = None
+    safety_reason: str | None = None
 
 
 class ToolGatingService:
@@ -72,7 +80,6 @@ class ToolGatingService:
             "edit_file",
             "append_to_file",
             "run_command",
-            "git_commit",
         }
     )
 
@@ -81,18 +88,24 @@ class ToolGatingService:
         "read_file": "read",
         "list_directory": "read",
         "search_code": "read",
+        "grep": "read",
+        "glob": "read",
         "write_file": "edit",
         "edit_file": "edit",
         "append_to_file": "edit",
         "run_command": "execute",
-        "git_commit": "execute",
-        "run_tests": "execute",
         "web_search": "browser",
         "web_fetch": "browser",
+        "knowledge_update": "knowledge_update",
+        "knowledge_scan_files": "knowledge_update",
+        "knowledge_set_metadata": "knowledge_update",
+        "knowledge_auto_layout": "knowledge_update",
+        "knowledge_export": "knowledge_update",
+        "delegate_to_subagent": "subagent",
     }
 
     # Valid category names (for input validation)
-    VALID_CATEGORIES = frozenset({"read", "edit", "execute", "browser"})
+    VALID_CATEGORIES = frozenset({"read", "edit", "execute", "browser", "knowledge_update", "subagent"})
 
     def __init__(
         self,
@@ -246,6 +259,55 @@ class ToolGatingService:
 
         return None  # Allowed
 
+    def check_command_safety_gate(
+        self, tool_name: str, tool_args: dict[str, Any]
+    ) -> GateResult | None:
+        """Check command safety for run_command tool calls.
+
+        This is the safety floor that auto-approve cannot bypass.
+        Only applies to run_command (other tools have no shell commands).
+
+        Returns:
+            GateResult with DENY for BLOCK, NEEDS_APPROVAL (with safety_reason)
+            for escalation, or None if safe/not applicable.
+        """
+        if tool_name != "run_command":
+            return None
+
+        command = tool_args.get("command", "")
+        if not command:
+            # Empty/missing command is caught by execute() validation downstream.
+            return None
+
+        from src.tools.command_safety import CommandSafety, check_command_safety
+
+        result = check_command_safety(command)
+
+        if result.safety == CommandSafety.BLOCK:
+            return GateResult(
+                action=GateAction.DENY,
+                message=(
+                    f"[BLOCKED] Command rejected by safety controls: {result.reason}\n"
+                    "This command cannot be overridden."
+                ),
+                gate_response={
+                    "status": "denied",
+                    "error_code": "COMMAND_SAFETY_BLOCK",
+                    "message": result.reason,
+                    "severity": "block",
+                    "pattern": result.pattern_name,
+                },
+            )
+
+        if result.safety == CommandSafety.NEEDS_APPROVAL:
+            return GateResult(
+                action=GateAction.NEEDS_APPROVAL,
+                message=result.reason,
+                safety_reason=result.reason,
+            )
+
+        return None
+
     def needs_approval(self, tool_name: str, tool_args: dict[str, Any] | None = None) -> bool:
         """Determine if a tool call requires user approval.
 
@@ -298,7 +360,10 @@ class ToolGatingService:
     def evaluate(self, tool_name: str, tool_args: dict[str, Any]) -> GateResult:
         """Run all gating checks in priority order.
 
-        Order: repeat -> plan mode -> director -> approval -> allow.
+        Order: repeat -> plan mode -> director -> command safety -> approval -> allow.
+
+        The command safety gate (check 4) is a safety floor that fires even
+        when auto-approve is enabled for the "execute" category.
 
         Returns a GateResult indicating what the caller should do.
         """
@@ -317,11 +382,16 @@ class ToolGatingService:
         if result:
             return result
 
-        # 4. Approval check
+        # 4. Command safety gate (safety floor - cannot be bypassed by auto-approve)
+        result = self.check_command_safety_gate(tool_name, tool_args)
+        if result:
+            return result
+
+        # 5. Category-based approval check
         if self.needs_approval(tool_name, tool_args):
             return GateResult(action=GateAction.NEEDS_APPROVAL)
 
-        # 5. Allowed
+        # 6. Allowed
         return GateResult(action=GateAction.ALLOW)
 
     # ------------------------------------------------------------------

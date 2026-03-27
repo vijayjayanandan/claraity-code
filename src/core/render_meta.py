@@ -23,10 +23,14 @@ class ToolApprovalMeta:
     Attributes:
         requires_approval: Whether this tool call needs user approval
         permission_mode: Mode at creation time (plan/normal/auto)
+        safety_reason: If set, approval was triggered by the command safety
+            floor. The approval UI should show a warning banner and hide
+            the "allow all" option (safety approvals are not auto-approvable).
     """
 
     requires_approval: bool = False
     permission_mode: str = "normal"
+    safety_reason: str | None = None
 
 
 class RenderMetaRegistry:

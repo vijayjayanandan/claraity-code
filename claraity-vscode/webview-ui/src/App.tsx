@@ -61,6 +61,7 @@ export function App() {
           model: msg.model,
           permissionMode: msg.permissionMode,
           autoApprove: msg.autoApproveCategories,
+          limits: msg.limits,
         });
         break;
 
@@ -98,6 +99,14 @@ export function App() {
         // Add to timeline locally first, then send to server (GAP 18)
         dispatch({ type: "ADD_USER_MESSAGE", content: msg.content });
         postMessage({ type: "chatMessage", content: msg.content });
+        break;
+
+      case "enrichedPrompt":
+        dispatch({ type: "SET_ENRICHED_PREVIEW", original: msg.original, enriched: msg.enriched });
+        break;
+
+      case "enrichmentError":
+        dispatch({ type: "CLEAR_ENRICHED_PREVIEW" });
         break;
 
       case "serverMessage":
@@ -281,7 +290,6 @@ export function App() {
           dispatch({ type: "SET_ACTIVE_PANEL", panel: "sessions" });
         }}
         onShowConfig={() => dispatch({ type: "SET_ACTIVE_PANEL", panel: "config" })}
-        onShowJira={() => dispatch({ type: "SET_ACTIVE_PANEL", panel: "jira" })}
         onShowMcp={() => dispatch({ type: "SET_ACTIVE_PANEL", panel: "mcp" })}
         onShowSubagents={() => {
           postMessage({ type: "listSubagents" });
@@ -343,6 +351,7 @@ export function App() {
 
       <InputBox
         isStreaming={state.isStreaming}
+        connected={state.connected}
         attachments={state.attachments}
         images={state.images}
         mentionResults={state.mentionResults}
@@ -354,6 +363,15 @@ export function App() {
         onRemoveImage={(i) => dispatch({ type: "REMOVE_IMAGE", index: i })}
         onSearchFiles={(query) => postMessage({ type: "searchFiles", query })}
         postMessage={postMessage}
+        enrichmentEnabled={state.promptEnrichmentEnabled}
+        enrichmentLoading={state.enrichmentLoading}
+        enrichedPreview={state.enrichedPromptPreview}
+        onToggleEnrichment={(enabled) => dispatch({ type: "SET_ENRICHMENT_ENABLED", enabled })}
+        onRequestEnrichment={(content) => {
+          dispatch({ type: "SET_ENRICHMENT_LOADING", loading: true });
+          postMessage({ type: "enrichPrompt", content });
+        }}
+        onClearEnrichment={() => dispatch({ type: "CLEAR_ENRICHED_PREVIEW" })}
       />
 
       <BottomBar
@@ -370,6 +388,8 @@ export function App() {
           dispatch({ type: "SET_ACTIVE_PANEL", panel: "beads" });
         }}
         beadsReadyCount={state.beadsData?.ready.length}
+        onDisconnect={() => postMessage({ type: "disconnectServer" })}
+        onReconnect={() => postMessage({ type: "reconnectServer" })}
       />
     </div>
   );

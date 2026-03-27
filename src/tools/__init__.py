@@ -21,7 +21,6 @@ from .tool_schemas import (
     EXECUTION_TOOLS,
     FILE_TOOLS,
     PLAN_MODE_TOOLS,
-    TESTING_TOOLS,
     WEB_TOOLS,
     get_tools_for_task,
 )
@@ -33,10 +32,6 @@ from .web_tools import (
     WebSearchProvider,
     WebSearchTool,
 )
-
-# Note: Testing tools (RunTestsTool, DetectTestFrameworkTool) are NOT imported here
-# to avoid circular imports. They live in src/testing/ and can be imported directly
-# from that module. Tool schemas are registered in tool_schemas.py for LLM usage.
 
 __all__ = [
     "Tool",
@@ -72,7 +67,6 @@ __all__ = [
     "FILE_TOOLS",
     "CODE_TOOLS",
     "EXECUTION_TOOLS",
-    "TESTING_TOOLS",
     "WEB_TOOLS",
     "PLAN_MODE_TOOLS",
     "get_tools_for_task",

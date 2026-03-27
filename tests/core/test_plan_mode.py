@@ -240,7 +240,6 @@ class TestPlanModeGating:
 
         assert state.gate_tool("write_file", "/some/path.py") == PlanGateDecision.ALLOW
         assert state.gate_tool("run_command") == PlanGateDecision.ALLOW
-        assert state.gate_tool("git_commit") == PlanGateDecision.ALLOW
 
     def test_read_only_tools_allowed(self, plan_state):
         """Test read-only tools allowed in plan mode."""
@@ -259,7 +258,6 @@ class TestPlanModeGating:
         assert plan_state.gate_tool("write_file", "/other/file.py") == PlanGateDecision.DENY
         assert plan_state.gate_tool("edit_file", "/other/file.py") == PlanGateDecision.DENY
         assert plan_state.gate_tool("run_command") == PlanGateDecision.DENY
-        assert plan_state.gate_tool("git_commit") == PlanGateDecision.DENY
 
     def test_write_to_plan_file_allowed(self, plan_state):
         """Test writing to plan file is allowed."""

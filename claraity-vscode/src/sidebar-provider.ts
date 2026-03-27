@@ -272,6 +272,7 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                 model: msg.model_name,
                 permissionMode: msg.permission_mode,
                 autoApproveCategories: msg.auto_approve_categories,
+                limits: msg.limits,
             });
         }
 
@@ -286,6 +287,14 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
         // Handle VS Code terminal execution
         if (msg.type === 'execute_in_terminal') {
             this.commandExecutor.queueCommand(msg.task_id, msg.command, msg.working_dir, msg.timeout);
+        }
+
+        // Prompt enrichment response — forward directly to webview
+        if (msg.type === 'enriched_prompt') {
+            this.postToWebview({ type: 'enrichedPrompt', original: msg.original, enriched: msg.enriched });
+        }
+        if (msg.type === 'enrichment_error') {
+            this.postToWebview({ type: 'enrichmentError', message: msg.message });
         }
 
         // Stop reconnecting on non-recoverable errors
@@ -429,6 +438,18 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
 
             case 'getAutoApprove':
                 this.connection?.send({ type: 'get_auto_approve' } as ClientMessage);
+                break;
+
+            case 'enrichPrompt':
+                this.connection?.send({ type: 'enrich_prompt', content: msg.content } as ClientMessage);
+                break;
+
+            case 'disconnectServer':
+                this.connection?.disconnect();
+                break;
+
+            case 'reconnectServer':
+                this.connection?.restart();
                 break;
 
             case 'getLimits':

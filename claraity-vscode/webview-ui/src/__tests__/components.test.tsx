@@ -424,7 +424,6 @@ describe("StatusBar", () => {
     onNewChat: vi.fn(),
     onShowHistory: vi.fn(),
     onShowConfig: vi.fn(),
-    onShowJira: vi.fn(),
     onShowMcp: vi.fn(),
     onShowSubagents: vi.fn(),
   };
@@ -433,7 +432,6 @@ describe("StatusBar", () => {
     defaultProps.onNewChat.mockClear();
     defaultProps.onShowHistory.mockClear();
     defaultProps.onShowConfig.mockClear();
-    defaultProps.onShowJira.mockClear();
     defaultProps.onShowMcp.mockClear();
     defaultProps.onShowSubagents.mockClear();
   });
@@ -479,20 +477,11 @@ describe("StatusBar", () => {
     expect(defaultProps.onShowConfig).toHaveBeenCalledOnce();
   });
 
-  test("Jira Integration button triggers onShowJira callback", () => {
-    render(<StatusBar {...defaultProps} />);
-
-    const jiraBtn = screen.getByTitle("Jira Integration");
-    fireEvent.click(jiraBtn);
-
-    expect(defaultProps.onShowJira).toHaveBeenCalledOnce();
-  });
-
-  test("renders six toolbar buttons", () => {
+  test("renders five toolbar buttons", () => {
     const { container } = render(<StatusBar {...defaultProps} />);
 
     const buttons = container.querySelectorAll(".toolbar-icon");
-    expect(buttons).toHaveLength(6);
+    expect(buttons).toHaveLength(5);
   });
 
   test("Subagents button triggers onShowSubagents callback", () => {
@@ -512,7 +501,7 @@ describe("StatusBar", () => {
 describe("BottomBar", () => {
   test("shows 'Connected' when connected is true", () => {
     render(
-      <BottomBar connected={true} modelName="gpt-4o" permissionMode="normal" onSetMode={vi.fn()} onShowArchitecture={vi.fn()} onShowBeads={vi.fn()} />
+      <BottomBar connected={true} modelName="gpt-4o" permissionMode="normal" onSetMode={vi.fn()} onShowArchitecture={vi.fn()} onShowBeads={vi.fn()} onDisconnect={vi.fn()} onReconnect={vi.fn()} />
     );
 
     expect(screen.getByText("Connected")).toBeInTheDocument();
@@ -520,7 +509,7 @@ describe("BottomBar", () => {
 
   test("shows 'Disconnected' when connected is false", () => {
     render(
-      <BottomBar connected={false} modelName="gpt-4o" permissionMode="normal" onSetMode={vi.fn()} onShowArchitecture={vi.fn()} onShowBeads={vi.fn()} />
+      <BottomBar connected={false} modelName="gpt-4o" permissionMode="normal" onSetMode={vi.fn()} onShowArchitecture={vi.fn()} onShowBeads={vi.fn()} onDisconnect={vi.fn()} onReconnect={vi.fn()} />
     );
 
     expect(screen.getByText("Disconnected")).toBeInTheDocument();
@@ -528,7 +517,7 @@ describe("BottomBar", () => {
 
   test("applies 'connected' CSS class when connected", () => {
     const { container } = render(
-      <BottomBar connected={true} modelName="" permissionMode="normal" onSetMode={vi.fn()} onShowArchitecture={vi.fn()} onShowBeads={vi.fn()} />
+      <BottomBar connected={true} modelName="" permissionMode="normal" onSetMode={vi.fn()} onShowArchitecture={vi.fn()} onShowBeads={vi.fn()} onDisconnect={vi.fn()} onReconnect={vi.fn()} />
     );
 
     const statusSpan = container.querySelector(".connection-status.connected");
@@ -537,7 +526,7 @@ describe("BottomBar", () => {
 
   test("applies 'disconnected' CSS class when not connected", () => {
     const { container } = render(
-      <BottomBar connected={false} modelName="" permissionMode="normal" onSetMode={vi.fn()} onShowArchitecture={vi.fn()} onShowBeads={vi.fn()} />
+      <BottomBar connected={false} modelName="" permissionMode="normal" onSetMode={vi.fn()} onShowArchitecture={vi.fn()} onShowBeads={vi.fn()} onDisconnect={vi.fn()} onReconnect={vi.fn()} />
     );
 
     const statusSpan = container.querySelector(".connection-status.disconnected");
@@ -546,7 +535,7 @@ describe("BottomBar", () => {
 
   test("shows model name when provided", () => {
     render(
-      <BottomBar connected={true} modelName="claude-opus-4" permissionMode="normal" onSetMode={vi.fn()} onShowArchitecture={vi.fn()} onShowBeads={vi.fn()} />
+      <BottomBar connected={true} modelName="claude-opus-4" permissionMode="normal" onSetMode={vi.fn()} onShowArchitecture={vi.fn()} onShowBeads={vi.fn()} onDisconnect={vi.fn()} onReconnect={vi.fn()} />
     );
 
     expect(screen.getByText("claude-opus-4")).toBeInTheDocument();
@@ -554,7 +543,7 @@ describe("BottomBar", () => {
 
   test("does not show model name when empty", () => {
     const { container } = render(
-      <BottomBar connected={true} modelName="" permissionMode="normal" onSetMode={vi.fn()} onShowArchitecture={vi.fn()} onShowBeads={vi.fn()} />
+      <BottomBar connected={true} modelName="" permissionMode="normal" onSetMode={vi.fn()} onShowArchitecture={vi.fn()} onShowBeads={vi.fn()} onDisconnect={vi.fn()} onReconnect={vi.fn()} />
     );
 
     const modelSpan = container.querySelector(".model-name");
@@ -564,7 +553,7 @@ describe("BottomBar", () => {
   test("Plan button triggers onSetMode with 'plan'", () => {
     const onSetMode = vi.fn();
     render(
-      <BottomBar connected={true} modelName="" permissionMode="normal" onSetMode={onSetMode} onShowArchitecture={vi.fn()} onShowBeads={vi.fn()} />
+      <BottomBar connected={true} modelName="" permissionMode="normal" onSetMode={onSetMode} onShowArchitecture={vi.fn()} onShowBeads={vi.fn()} onDisconnect={vi.fn()} onReconnect={vi.fn()} />
     );
 
     fireEvent.click(screen.getByText("Plan"));
@@ -575,7 +564,7 @@ describe("BottomBar", () => {
   test("Act button triggers onSetMode with 'normal'", () => {
     const onSetMode = vi.fn();
     render(
-      <BottomBar connected={true} modelName="" permissionMode="plan" onSetMode={onSetMode} onShowArchitecture={vi.fn()} onShowBeads={vi.fn()} />
+      <BottomBar connected={true} modelName="" permissionMode="plan" onSetMode={onSetMode} onShowArchitecture={vi.fn()} onShowBeads={vi.fn()} onDisconnect={vi.fn()} onReconnect={vi.fn()} />
     );
 
     fireEvent.click(screen.getByText("Act"));
@@ -585,7 +574,7 @@ describe("BottomBar", () => {
 
   test("Plan button has 'active' class when mode is 'plan'", () => {
     render(
-      <BottomBar connected={true} modelName="" permissionMode="plan" onSetMode={vi.fn()} onShowArchitecture={vi.fn()} onShowBeads={vi.fn()} />
+      <BottomBar connected={true} modelName="" permissionMode="plan" onSetMode={vi.fn()} onShowArchitecture={vi.fn()} onShowBeads={vi.fn()} onDisconnect={vi.fn()} onReconnect={vi.fn()} />
     );
 
     const planBtn = screen.getByText("Plan");
@@ -594,7 +583,7 @@ describe("BottomBar", () => {
 
   test("Act button has 'active' class when mode is not 'plan'", () => {
     render(
-      <BottomBar connected={true} modelName="" permissionMode="normal" onSetMode={vi.fn()} onShowArchitecture={vi.fn()} onShowBeads={vi.fn()} />
+      <BottomBar connected={true} modelName="" permissionMode="normal" onSetMode={vi.fn()} onShowArchitecture={vi.fn()} onShowBeads={vi.fn()} onDisconnect={vi.fn()} onReconnect={vi.fn()} />
     );
 
     const actBtn = screen.getByText("Act");
@@ -603,7 +592,7 @@ describe("BottomBar", () => {
 
   test("Plan button does not have 'active' class when mode is 'normal'", () => {
     render(
-      <BottomBar connected={true} modelName="" permissionMode="normal" onSetMode={vi.fn()} onShowArchitecture={vi.fn()} onShowBeads={vi.fn()} />
+      <BottomBar connected={true} modelName="" permissionMode="normal" onSetMode={vi.fn()} onShowArchitecture={vi.fn()} onShowBeads={vi.fn()} onDisconnect={vi.fn()} onReconnect={vi.fn()} />
     );
 
     const planBtn = screen.getByText("Plan");
@@ -721,7 +710,7 @@ describe("AutoApprovePanel", () => {
   test("starts collapsed (checkboxes not visible)", () => {
     const { container } = render(
       <AutoApprovePanel
-        autoApprove={{ read: true, edit: false, execute: false, browser: false }}
+        autoApprove={{ read: true, edit: false, execute: false, browser: false, knowledge_update: false, subagent: false }}
         onChange={vi.fn()}
         limits={{ iteration_limit_enabled: true, max_iterations: 50 }}
         onSaveLimits={vi.fn()}
@@ -737,7 +726,7 @@ describe("AutoApprovePanel", () => {
   test("expand/collapse works by clicking header", () => {
     const { container } = render(
       <AutoApprovePanel
-        autoApprove={{ read: true, edit: false, execute: false, browser: false }}
+        autoApprove={{ read: true, edit: false, execute: false, browser: false, knowledge_update: false, subagent: false }}
         onChange={vi.fn()}
         limits={{ iteration_limit_enabled: true, max_iterations: 50 }}
         onSaveLimits={vi.fn()}
@@ -760,7 +749,7 @@ describe("AutoApprovePanel", () => {
   test("shows '+' when collapsed and '-' when expanded", () => {
     const { container } = render(
       <AutoApprovePanel
-        autoApprove={{ read: true, edit: false, execute: false, browser: false }}
+        autoApprove={{ read: true, edit: false, execute: false, browser: false, knowledge_update: false, subagent: false }}
         onChange={vi.fn()}
         limits={{ iteration_limit_enabled: true, max_iterations: 50 }}
         onSaveLimits={vi.fn()}
@@ -779,7 +768,7 @@ describe("AutoApprovePanel", () => {
     const onChange = vi.fn();
     const { container } = render(
       <AutoApprovePanel
-        autoApprove={{ read: true, edit: false, execute: false, browser: false }}
+        autoApprove={{ read: true, edit: false, execute: false, browser: false, knowledge_update: false, subagent: false }}
         onChange={onChange}
         limits={{ iteration_limit_enabled: true, max_iterations: 50 }}
         onSaveLimits={vi.fn()}
@@ -791,9 +780,9 @@ describe("AutoApprovePanel", () => {
     // Expand first
     fireEvent.click(container.querySelector(".auto-approve-header")!);
 
-    // Find checkboxes - 4 for read/edit/execute/browser + 1 for iteration limit
+    // Find checkboxes - 6 for read/edit/execute/browser/knowledge_update/subagent + 1 for iteration limit
     const checkboxes = container.querySelectorAll("input[type='checkbox']");
-    expect(checkboxes).toHaveLength(5);
+    expect(checkboxes).toHaveLength(7);
 
     // Check the "Edit files" checkbox (second one, after read)
     fireEvent.click(checkboxes[1]);
@@ -803,6 +792,8 @@ describe("AutoApprovePanel", () => {
       edit: true,
       execute: false,
       browser: false,
+      knowledge_update: false,
+      subagent: false,
     });
   });
 
@@ -810,7 +801,7 @@ describe("AutoApprovePanel", () => {
     const onChange = vi.fn();
     const { container } = render(
       <AutoApprovePanel
-        autoApprove={{ read: true, edit: false, execute: false, browser: false }}
+        autoApprove={{ read: true, edit: false, execute: false, browser: false, knowledge_update: false, subagent: false }}
         onChange={onChange}
         limits={{ iteration_limit_enabled: true, max_iterations: 50 }}
         onSaveLimits={vi.fn()}
@@ -830,6 +821,8 @@ describe("AutoApprovePanel", () => {
       edit: false,
       execute: true,
       browser: false,
+      knowledge_update: false,
+      subagent: false,
     });
   });
 
@@ -837,7 +830,7 @@ describe("AutoApprovePanel", () => {
     const onChange = vi.fn();
     const { container } = render(
       <AutoApprovePanel
-        autoApprove={{ read: true, edit: false, execute: false, browser: false }}
+        autoApprove={{ read: true, edit: false, execute: false, browser: false, knowledge_update: false, subagent: false }}
         onChange={onChange}
         limits={{ iteration_limit_enabled: true, max_iterations: 50 }}
         onSaveLimits={vi.fn()}
@@ -857,13 +850,15 @@ describe("AutoApprovePanel", () => {
       edit: false,
       execute: false,
       browser: true,
+      knowledge_update: false,
+      subagent: false,
     });
   });
 
   test("summary shows 'None' when no categories active", () => {
     render(
       <AutoApprovePanel
-        autoApprove={{ read: false, edit: false, execute: false, browser: false }}
+        autoApprove={{ read: false, edit: false, execute: false, browser: false, knowledge_update: false, subagent: false }}
         onChange={vi.fn()}
         limits={{ iteration_limit_enabled: false, max_iterations: 50 }}
         onSaveLimits={vi.fn()}
@@ -878,7 +873,7 @@ describe("AutoApprovePanel", () => {
   test("summary shows active categories", () => {
     render(
       <AutoApprovePanel
-        autoApprove={{ read: true, edit: true, execute: false, browser: true }}
+        autoApprove={{ read: true, edit: true, execute: false, browser: true, knowledge_update: false, subagent: false }}
         onChange={vi.fn()}
         limits={{ iteration_limit_enabled: false, max_iterations: 50 }}
         onSaveLimits={vi.fn()}
@@ -893,7 +888,7 @@ describe("AutoApprovePanel", () => {
   test("summary shows all active categories", () => {
     render(
       <AutoApprovePanel
-        autoApprove={{ read: true, edit: true, execute: true, browser: true }}
+        autoApprove={{ read: true, edit: true, execute: true, browser: true, knowledge_update: false, subagent: false }}
         onChange={vi.fn()}
         limits={{ iteration_limit_enabled: true, max_iterations: 50 }}
         onSaveLimits={vi.fn()}
@@ -908,7 +903,7 @@ describe("AutoApprovePanel", () => {
   test("summary has 'has-active' class when categories are active", () => {
     const { container } = render(
       <AutoApprovePanel
-        autoApprove={{ read: true, edit: true, execute: false, browser: false }}
+        autoApprove={{ read: true, edit: true, execute: false, browser: false, knowledge_update: false, subagent: false }}
         onChange={vi.fn()}
         limits={{ iteration_limit_enabled: true, max_iterations: 50 }}
         onSaveLimits={vi.fn()}
@@ -924,7 +919,7 @@ describe("AutoApprovePanel", () => {
   test("summary does not have 'has-active' class when no categories active", () => {
     const { container } = render(
       <AutoApprovePanel
-        autoApprove={{ read: true, edit: false, execute: false, browser: false }}
+        autoApprove={{ read: true, edit: false, execute: false, browser: false, knowledge_update: false, subagent: false }}
         onChange={vi.fn()}
         limits={{ iteration_limit_enabled: true, max_iterations: 50 }}
         onSaveLimits={vi.fn()}
@@ -940,7 +935,7 @@ describe("AutoApprovePanel", () => {
   test("checkboxes reflect current autoApprove state", () => {
     const { container } = render(
       <AutoApprovePanel
-        autoApprove={{ read: true, edit: true, execute: false, browser: true }}
+        autoApprove={{ read: true, edit: true, execute: false, browser: true, knowledge_update: false, subagent: false }}
         onChange={vi.fn()}
         limits={{ iteration_limit_enabled: true, max_iterations: 50 }}
         onSaveLimits={vi.fn()}
@@ -957,13 +952,15 @@ describe("AutoApprovePanel", () => {
     expect(checkboxes[1].checked).toBe(true);   // edit
     expect(checkboxes[2].checked).toBe(false);  // execute
     expect(checkboxes[3].checked).toBe(true);   // browser
+    expect(checkboxes[4].checked).toBe(false);  // knowledge_update
+    expect(checkboxes[5].checked).toBe(false);  // subagent
   });
 
   test("unchecking an active checkbox sends false for that category", () => {
     const onChange = vi.fn();
     const { container } = render(
       <AutoApprovePanel
-        autoApprove={{ read: true, edit: true, execute: true, browser: false }}
+        autoApprove={{ read: true, edit: true, execute: true, browser: false, knowledge_update: false, subagent: false }}
         onChange={onChange}
         limits={{ iteration_limit_enabled: true, max_iterations: 50 }}
         onSaveLimits={vi.fn()}
@@ -1133,3 +1130,4 @@ describe("formatDuration", () => {
     expect(formatDuration(1)).toBe("1ms");
   });
 });
+

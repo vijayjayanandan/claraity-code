@@ -10,7 +10,7 @@ import type { AppState, SubagentInfo } from "./state";
 export type Action =
   // Connection
   | { type: "SET_CONNECTED"; connected: boolean }
-  | { type: "SET_SESSION_INFO"; sessionId: string; model: string; permissionMode: string; workingDirectory?: string; autoApprove?: Record<string, boolean> }
+  | { type: "SET_SESSION_INFO"; sessionId: string; model: string; permissionMode: string; workingDirectory?: string; autoApprove?: Record<string, boolean>; limits?: LimitsData }
   // Streaming
   | { type: "STREAM_START" }
   | { type: "STREAM_END"; tokens?: number; durationMs?: number }
@@ -84,5 +84,10 @@ export type Action =
   // Limits
   | { type: "LIMITS_LOADED"; limits: LimitsData }
   | { type: "LIMITS_SAVED"; success: boolean; message: string; limits?: LimitsData }
+  // Prompt Enrichment
+  | { type: "SET_ENRICHMENT_ENABLED"; enabled: boolean }
+  | { type: "SET_ENRICHMENT_LOADING"; loading: boolean }
+  | { type: "SET_ENRICHED_PREVIEW"; original: string; enriched: string }
+  | { type: "CLEAR_ENRICHED_PREVIEW" }
   // Error
   | { type: "ERROR"; errorType: string; message: string };

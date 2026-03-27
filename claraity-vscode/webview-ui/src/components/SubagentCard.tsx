@@ -7,11 +7,12 @@
  * - Collapsible <details> containing nested tool cards
  * - Auto-expands when any child tool needs approval
  */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import type { SubagentInfo } from "../state/reducer";
 import type { ToolStateData, WebViewMessage } from "../types";
 import { ToolCard } from "./ToolCard";
 import { getPrimaryArg } from "../utils/tools";
+import { renderMarkdown } from "../utils/markdown";
 
 interface SubagentCardProps {
   info: SubagentInfo;
@@ -19,7 +20,7 @@ interface SubagentCardProps {
   postMessage: (msg: WebViewMessage) => void;
 }
 
-export function SubagentCard({ info, toolCards, postMessage }: SubagentCardProps) {
+export function SubagentCard({ info, toolCards: toolCardsList, postMessage }: SubagentCardProps) {
   const [elapsed, setElapsed] = useState(
     info.finalElapsedMs != null
       ? Math.round(info.finalElapsedMs / 1000)
@@ -42,11 +43,18 @@ export function SubagentCard({ info, toolCards, postMessage }: SubagentCardProps
     }
   }, [info.finalElapsedMs]);
 
+  // Build a lookup from callId -> ToolStateData for timeline rendering
+  const toolCardsMap = useMemo(() => {
+    const map: Record<string, ToolStateData> = {};
+    for (const tc of toolCardsList) map[tc.call_id] = tc;
+    return map;
+  }, [toolCardsList]);
+
   // Auto-expand when a child tool is awaiting approval
-  const hasAwaitingApproval = toolCards.some((t) => t.status === "awaiting_approval");
+  const hasAwaitingApproval = toolCardsList.some((t) => t.status === "awaiting_approval");
 
   // Current running tool for status line
-  const currentTool = toolCards.find((t) => t.status === "running" || t.status === "pending");
+  const currentTool = toolCardsList.find((t) => t.status === "running" || t.status === "pending");
   const currentToolName = currentTool?.tool_name ?? "";
   const currentToolArg = currentTool
     ? getPrimaryArg(currentTool.tool_name ?? "", currentTool.arguments)
@@ -75,15 +83,23 @@ export function SubagentCard({ info, toolCards, postMessage }: SubagentCardProps
         </summary>
 
         <div style={{ padding: "0 4px 4px" }}>
-          {/* Subagent text messages (GAP 5) */}
-          {info.messages && info.messages.map((text, i) => (
-            <div key={`sa-msg-${i}`} className="subagent-text" style={{ padding: "4px 8px", opacity: 0.85, fontSize: "0.9em" }}>
-              {text}
-            </div>
-          ))}
-          {toolCards.map((tc) => (
-            <ToolCard key={tc.call_id} data={tc} postMessage={postMessage} />
-          ))}
+          {info.timeline.map((entry, i) => {
+            if (entry.type === "text") {
+              const text = info.messages[entry.index];
+              if (!text) return null;
+              return (
+                <div
+                  key={`sa-msg-${entry.index}`}
+                  className="content subagent-text"
+                  style={{ padding: "4px 8px", opacity: 0.85, fontSize: "0.9em" }}
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }}
+                />
+              );
+            }
+            const tc = toolCardsMap[entry.callId];
+            if (!tc) return null;
+            return <ToolCard key={tc.call_id} data={tc} postMessage={postMessage} />;
+          })}
         </div>
       </details>
 

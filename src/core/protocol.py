@@ -227,7 +227,11 @@ class UIProtocol:
     # -------------------------------------------------------------------------
 
     async def wait_for_approval(
-        self, call_id: str, tool_name: str, timeout: float | None = None
+        self,
+        call_id: str,
+        tool_name: str,
+        timeout: float | None = None,
+        force_approval: bool = False,
     ) -> ApprovalResult:
         """
         Wait for user to approve/reject a tool call.
@@ -236,6 +240,8 @@ class UIProtocol:
             call_id: The tool call ID to wait for
             tool_name: Tool name (for auto-approve lookup)
             timeout: Optional timeout in seconds
+            force_approval: If True, skip auto-approve check. Used for
+                command safety floor approvals that must always prompt.
 
         Returns:
             ApprovalResult with user's decision
@@ -244,8 +250,8 @@ class UIProtocol:
             asyncio.CancelledError: If stream was interrupted
             asyncio.TimeoutError: If timeout exceeded
         """
-        # Check auto-approve first
-        if tool_name in self._auto_approve:
+        # Check auto-approve first (skip for safety-floor approvals)
+        if not force_approval and tool_name in self._auto_approve:
             return ApprovalResult(
                 call_id=call_id,
                 approved=True,

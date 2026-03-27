@@ -1,581 +1,873 @@
-"""Knowledge base manifest tools for change detection and tracking.
+"""
+ClarAIty Knowledge & Task Tools
 
-Provides:
-- KBDetectChangesTool: Reads manifest, compares file stats, reports changes
-- KBUpdateManifestTool: Writes manifest with current file stats and coverage map
-
-These tools are internal to the knowledge-builder subagent and handle
-the bookkeeping that enables incremental knowledge base updates.
+Agent-callable tools for querying the codebase knowledge DB
+and managing tasks via the Beads task tracker.
 """
 
-import json
-import os
-import subprocess
-from datetime import datetime, timezone
-from fnmatch import fnmatch
-from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
-from .base import Tool, ToolResult, ToolStatus
-
-MANIFEST_PATH = ".clarity/knowledge/.manifest.json"
-
-# File extensions to skip (binary/non-source) — applied as post-filter
-_SKIP_EXTENSIONS = {
-    ".pyc",
-    ".pyo",
-    ".so",
-    ".dll",
-    ".dylib",
-    ".exe",
-    ".bin",
-    ".db",
-    ".sqlite",
-    ".sqlite3",
-    ".png",
-    ".jpg",
-    ".jpeg",
-    ".gif",
-    ".ico",
-    ".svg",
-    ".webp",
-    ".woff",
-    ".woff2",
-    ".ttf",
-    ".eot",
-    ".zip",
-    ".tar",
-    ".gz",
-    ".bz2",
-    ".7z",
-    ".pdf",
-    ".doc",
-    ".docx",
-    ".xls",
-    ".xlsx",
-    ".lock",
-}
+from src.tools.base import Tool, ToolResult, ToolStatus
+from src.tools.clarityignore import is_blocked
 
 
-SCAN_CONFIG_PATH = ".clarity/knowledge/scan_config.yaml"
-
-_SCAN_CONFIG_TEMPLATE = """\
-# Controls which source files the knowledge-builder scans.
-# By default all git-tracked files are scanned (minus binary extensions).
-# Only edit the include/exclude lists below. Do NOT add other keys.
-
-# Glob whitelist — if non-empty, ONLY matching source files are scanned.
-include:
-  # - "src/**"
-  # - "app/**"
-
-# Glob blacklist — matching source files are always skipped.
-exclude:
-  # - "tests/fixtures/**"
-  # - "migrations/**"
-"""
-
-
-def _ensure_scan_config(root: Path) -> None:
-    """Create scan_config.yaml template if it doesn't exist."""
-    config_path = root / SCAN_CONFIG_PATH
-    if config_path.exists():
-        return
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    config_path.write_text(_SCAN_CONFIG_TEMPLATE, encoding="utf-8")
-
-
-def _read_kb_config(root: Path) -> dict[str, list[str]]:
-    """Read knowledge include/exclude patterns from scan_config.yaml.
-
-    Returns:
-        dict with 'include' and 'exclude' lists of glob patterns.
-        Defaults to include=[] (all files), exclude=[].
-    """
-    config_path = root / SCAN_CONFIG_PATH
-    result = {"include": [], "exclude": []}
-    if not config_path.exists():
-        return result
-    try:
-        import yaml
-
-        config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-        include = config.get("include")
-        exclude = config.get("exclude")
-        if isinstance(include, list):
-            result["include"] = include
-        if isinstance(exclude, list):
-            result["exclude"] = exclude
-    except Exception:
-        pass
-    return result
-
-
-def _git_ls_files(root: Path) -> list[str] | None:
-    """Get list of git-tracked files. Returns None if not a git repo."""
-    try:
-        result = subprocess.run(
-            ["git", "ls-files"],
-            cwd=str(root),
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if result.returncode == 0:
-            return [f.replace("\\", "/") for f in result.stdout.strip().splitlines() if f.strip()]
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        pass
-    return None
-
-
-def _apply_filters(
-    file_paths: list[str],
-    include: list[str],
-    exclude: list[str],
-) -> list[str]:
-    """Apply include/exclude glob patterns to a file list.
-
-    Args:
-        file_paths: list of relative file paths (forward slashes)
-        include: If non-empty, only files matching at least one pattern are kept
-        exclude: Files matching any pattern are removed
-
-    Returns:
-        Filtered file list
-    """
-    result = file_paths
-
-    # Include filter (whitelist) — if set, only keep matches
-    if include:
-        result = [f for f in result if any(fnmatch(f, p) for p in include)]
-
-    # Exclude filter (blacklist) — always remove matches
-    if exclude:
-        result = [f for f in result if not any(fnmatch(f, p) for p in exclude)]
-
-    return result
-
-
-def _scan_project_files(root: Path) -> dict[str, dict[str, Any]]:
-    """Scan project for source files and collect stats.
-
-    Uses git ls-files when available (filters untracked files automatically).
-    Falls back to os.walk if not in a git repo. Applies binary extension
-    filter and user-configured include/exclude patterns from config.yaml.
-
-    Args:
-        root: Project root directory
-
-    Returns:
-        dict mapping relative file paths (forward slashes) to {size, mtime}
-    """
-    # Read user config for include/exclude patterns
-    kb_config = _read_kb_config(root)
-
-    # Try git ls-files first (filters untracked files automatically)
-    git_files = _git_ls_files(root)
-
-    if git_files is not None:
-        file_paths = git_files
-    else:
-        # Fallback: os.walk (non-git projects)
-        _skip_dirs = {
-            ".git",
-            ".hg",
-            ".svn",
-            ".clarity",
-            "__pycache__",
-            ".pytest_cache",
-            ".mypy_cache",
-            ".ruff_cache",
-            "node_modules",
-            ".next",
-            "dist",
-            "build",
-            "out",
-            ".venv",
-            "venv",
-            ".env",
-            "env",
-            ".tox",
-            ".nox",
-            ".eggs",
-            ".idea",
-            ".vscode",
-            ".benchmarks",
-            ".checkpoints",
-        }
-        file_paths = []
-        for dirpath, dirnames, filenames in os.walk(root):
-            dirnames[:] = [d for d in dirnames if d not in _skip_dirs and not d.startswith(".")]
-            rel_dir = Path(dirpath).relative_to(root)
-            for filename in filenames:
-                if filename.startswith("."):
-                    continue
-                rel_path = str(rel_dir / filename).replace("\\", "/")
-                file_paths.append(rel_path)
-
-    # Filter binary extensions
-    file_paths = [f for f in file_paths if Path(f).suffix.lower() not in _SKIP_EXTENSIONS]
-
-    # Apply user include/exclude patterns
-    file_paths = _apply_filters(file_paths, kb_config["include"], kb_config["exclude"])
-
-    # Stat each file
-    files = {}
-    for rel_path in file_paths:
-        filepath = root / rel_path
-        try:
-            stat = filepath.stat()
-            mtime_iso = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
-            files[rel_path] = {
-                "size": stat.st_size,
-                "mtime": mtime_iso,
-            }
-        except (OSError, PermissionError):
-            continue
-
-    return files
-
-
-def _read_manifest(manifest_path: Path) -> dict | None:
-    """Read manifest file, return None if missing or invalid."""
-    try:
-        if manifest_path.exists():
-            return json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        pass
-    return None
-
-
-def _match_coverage(file_path: str, patterns: list[str]) -> bool:
-    """Check if a file path matches any coverage pattern.
-
-    Supports glob-like patterns via fnmatch:
-    - "src/api/*" matches "src/api/main.py"
-    - "src/**" matches anything under "src/"
-    """
-    for pattern in patterns:
-        if fnmatch(file_path, pattern):
-            return True
-    return False
-
-
-class KBDetectChangesTool(Tool):
-    """Detect changes in source files since last knowledge base update.
-
-    Reads .manifest.json, scans the project for current file stats,
-    compares against stored values, and returns a structured change report.
-    """
+class KnowledgeScanFilesTool(Tool):
+    """Auto-discover source files and add as layer 4 nodes."""
 
     def __init__(self):
         super().__init__(
-            name="kb_detect_changes",
+            name="knowledge_scan_files",
             description=(
-                "Detect source file changes since last knowledge base update. "
-                "Returns FULL mode if no manifest exists, or INCREMENTAL mode "
-                "with a list of changed/new/deleted files and affected knowledge files."
+                "Auto-discover source files in the codebase and add them as layer 4 nodes "
+                "in the knowledge DB. Extracts file descriptions from docstrings/comments. "
+                "Language-agnostic: scans .py, .ts, .tsx, .js, .jsx, .go, .java, .rs files. "
+                "Run this as the first step when building knowledge for a new repo."
             ),
         )
 
-    def _get_parameters(self) -> dict[str, Any]:
-        return {"type": "object", "properties": {}, "required": []}
+    def execute(self, root: str = "src", extensions: str = "", **kwargs: Any) -> ToolResult:
+        from src.claraity.claraity_db import ClarityStore, scan_files
 
-    def execute(self, **kwargs: Any) -> ToolResult:
         try:
-            root = Path.cwd()
-            manifest_path = root / MANIFEST_PATH
+            with ClarityStore() as store:
+                ext_list = (
+                    [e.strip() for e in extensions.split(",") if e.strip()] if extensions else None
+                )
+                drift = scan_files(store, root=root, extensions=ext_list)
+                stats = store.get_stats()
+                file_count = stats["node_types"].get("file", 0)
 
-            # Create scan_config.yaml template if missing (first run)
-            _ensure_scan_config(root)
+                lines = [f"[OK] Scanned {file_count} files from {root}/"]
+                lines.append(f"Total nodes: {stats['total_nodes']}, edges: {stats['total_edges']}")
+                lines.append("")
+                lines.append("Drift report:")
+                lines.append(f"  New files: {len(drift['new'])}")
+                lines.append(f"  Modified since last scan: {len(drift['modified'])}")
+                lines.append(f"  Deleted (in DB but not on disk): {len(drift['deleted'])}")
+                lines.append(f"  Unchanged: {drift['unchanged']}")
 
-            manifest = _read_manifest(manifest_path)
+                def _fmt_entry(entry, prefix):
+                    """Format an enriched drift entry."""
+                    out = [f"  {prefix} {entry['path']}"]
+                    if entry.get("module"):
+                        out[0] += f"  (module: {entry['module']})"
+                    comp = entry.get("component")
+                    if comp:
+                        out.append(f"      Defines: {comp['name']} ({comp['id']})")
+                        edges = entry.get("edges", [])
+                        if edges:
+                            out.append(f"      Edges ({len(edges)}):")
+                            for e in edges[:5]:
+                                lbl = f' "{e["label"]}"' if e.get("label") else ""
+                                out.append(f"        {e['from']} --{e['type']}--> {e['to']}{lbl}")
+                            if len(edges) > 5:
+                                out.append(f"        ... and {len(edges) - 5} more")
+                        constraints = entry.get("constraints", [])
+                        if constraints:
+                            names = ", ".join(c["name"] for c in constraints)
+                            out.append(f"      Affected by: {names}")
+                    return "\n".join(out)
 
-            if manifest is None:
-                current_files = _scan_project_files(root)
-                file_list = sorted(current_files.keys())
-                lines = [
-                    "Mode: FULL (no manifest found)",
-                    f"Scanned {len(file_list)} source files.",
-                    "",
-                    "Files to analyze:",
-                ]
-                for f in file_list:
-                    lines.append(f"  {f}")
+                if drift["new"]:
+                    lines.append("\nNew files:")
+                    for entry in drift["new"][:15]:
+                        lines.append(_fmt_entry(entry, "+"))
+                    if len(drift["new"]) > 15:
+                        lines.append(f"  ... and {len(drift['new']) - 15} more")
+                if drift["modified"]:
+                    lines.append("\nModified files:")
+                    for entry in drift["modified"][:15]:
+                        lines.append(_fmt_entry(entry, "~"))
+                    if len(drift["modified"]) > 15:
+                        lines.append(f"  ... and {len(drift['modified']) - 15} more")
+                if drift["deleted"]:
+                    lines.append("\nDeleted files (nodes to remove):")
+                    for entry in drift["deleted"][:15]:
+                        lines.append(_fmt_entry(entry, "-"))
+                    if len(drift["deleted"]) > 15:
+                        lines.append(f"  ... and {len(drift['deleted']) - 15} more")
+
                 return ToolResult(
                     tool_name=self.name,
                     status=ToolStatus.SUCCESS,
                     output="\n".join(lines),
-                    metadata={
-                        "mode": "full",
-                        "total_files": len(file_list),
-                        "files": file_list,
-                    },
+                    metadata={**stats, "drift": drift},
                 )
-
-            # Read manifest and compare
-            stored_files = manifest.get("source_files", {})
-            knowledge_coverage = manifest.get("knowledge_coverage", {})
-            last_run = manifest.get("last_run", "unknown")
-
-            current_files = _scan_project_files(root)
-
-            changed = []
-            new_files = []
-            deleted = []
-            unchanged = 0
-
-            # Check stored files for changes/deletions
-            for path, stored_stat in stored_files.items():
-                if path not in current_files:
-                    deleted.append(path)
-                else:
-                    current = current_files[path]
-                    if (
-                        current["size"] != stored_stat["size"]
-                        or current["mtime"] != stored_stat["mtime"]
-                    ):
-                        changed.append(
-                            {
-                                "path": path,
-                                "old_size": stored_stat["size"],
-                                "new_size": current["size"],
-                            }
-                        )
-                    else:
-                        unchanged += 1
-
-            # Check for new files (in current but not in manifest)
-            for path in current_files:
-                if path not in stored_files:
-                    new_files.append(
-                        {
-                            "path": path,
-                            "size": current_files[path]["size"],
-                        }
-                    )
-
-            # Determine affected knowledge files
-            affected = set()
-            all_changed_paths = (
-                [c["path"] for c in changed] + [n["path"] for n in new_files] + deleted
-            )
-            for kf_name, patterns in knowledge_coverage.items():
-                for changed_path in all_changed_paths:
-                    if _match_coverage(changed_path, patterns):
-                        affected.add(kf_name)
-                        break
-
-            # No changes
-            if not changed and not new_files and not deleted:
-                return ToolResult(
-                    tool_name=self.name,
-                    status=ToolStatus.SUCCESS,
-                    output=(
-                        f"Mode: INCREMENTAL (no changes detected)\n"
-                        f"Last run: {last_run}\n"
-                        f"All {unchanged} tracked source files are unchanged.\n"
-                        f"Knowledge base is up to date."
-                    ),
-                    metadata={"mode": "incremental", "changes": False},
-                )
-
-            # Build human-readable report
-            lines = [
-                "Mode: INCREMENTAL",
-                f"Last run: {last_run}",
-                "",
-                f"Changes: {len(changed)} changed, {len(new_files)} new, "
-                f"{len(deleted)} deleted, {unchanged} unchanged",
-                "",
-            ]
-
-            if changed:
-                lines.append("Changed files:")
-                for c in changed:
-                    lines.append(f"  {c['path']} (size: {c['old_size']} -> {c['new_size']})")
-                lines.append("")
-
-            if new_files:
-                lines.append("New files:")
-                for n in new_files:
-                    lines.append(f"  {n['path']} (size: {n['size']})")
-                lines.append("")
-
-            if deleted:
-                lines.append("Deleted files:")
-                for d in deleted:
-                    lines.append(f"  {d}")
-                lines.append("")
-
-            if affected:
-                lines.append("Affected knowledge files:")
-                for kf_name in sorted(affected):
-                    patterns = knowledge_coverage.get(kf_name, [])
-                    lines.append(f"  {kf_name} (covers: {', '.join(patterns)})")
-            else:
-                lines.append(
-                    "No existing knowledge files affected (changes may be in uncovered areas)."
-                )
-
-            return ToolResult(
-                tool_name=self.name,
-                status=ToolStatus.SUCCESS,
-                output="\n".join(lines),
-                metadata={
-                    "mode": "incremental",
-                    "changes": True,
-                    "changed_count": len(changed),
-                    "new_count": len(new_files),
-                    "deleted_count": len(deleted),
-                    "unchanged_count": unchanged,
-                    "affected_knowledge_files": sorted(affected),
-                },
-            )
-
         except Exception as e:
             return ToolResult(
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 output=None,
-                error=f"Failed to detect changes: {str(e)}",
+                error=f"File scan failed: {e}",
             )
-
-
-class KBUpdateManifestTool(Tool):
-    """Write or update the knowledge base manifest.
-
-    Records which source files were analyzed and which knowledge files
-    cover which source patterns, enabling incremental updates on next run.
-    The tool stats each file for accurate size/mtime -- the caller only
-    needs to pass file paths, not raw numbers.
-    """
-
-    def __init__(self):
-        super().__init__(
-            name="kb_update_manifest",
-            description=(
-                "Write the knowledge base manifest after documenting files. "
-                "Pass the list of source files you analyzed and which knowledge "
-                "files cover which source patterns. The tool stats each file "
-                "for accurate size/mtime automatically."
-            ),
-        )
 
     def _get_parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
-                "analyzed_files": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": (
-                        "list of source file paths analyzed in this run "
-                        "(relative to project root, e.g. 'src/api/main.py')"
-                    ),
-                },
-                "knowledge_coverage": {
-                    "type": "object",
-                    "additionalProperties": {"type": "array", "items": {"type": "string"}},
-                    "description": (
-                        "Map of knowledge file name to source path patterns "
-                        'it covers, e.g. {"architecture.md": ["src/api/*", "src/chat/*"]}'
-                    ),
-                },
-                "mode": {
+                "root": {
                     "type": "string",
-                    "enum": ["full", "incremental"],
-                    "description": "Whether this was a full or incremental run",
+                    "description": "Root directory to scan (default: 'src')",
+                },
+                "extensions": {
+                    "type": "string",
+                    "description": "Comma-separated file extensions to scan (default: .py,.ts,.tsx,.js,.jsx,.go,.java,.rs)",
                 },
             },
-            "required": ["analyzed_files", "knowledge_coverage", "mode"],
+            "required": [],
         }
 
-    def execute(
-        self,
-        analyzed_files: list[str],
-        knowledge_coverage: dict[str, list[str]],
-        mode: str = "full",
-        **kwargs: Any,
-    ) -> ToolResult:
+
+class KnowledgeUpdateTool(Tool):
+    """Execute multiple knowledge DB write operations in a single call."""
+
+    def __init__(self):
+        super().__init__(
+            name="knowledge_update",
+            description=(
+                "Execute multiple knowledge DB write operations in one call. Accepts a JSON "
+                "array of operations, each with an 'op' field: 'add_node', 'update_node', "
+                "'add_edge', 'remove_node', 'remove_edge'. All operations run in a single "
+                "DB transaction. Use this to batch-create nodes and edges efficiently "
+                "instead of calling individual tools one at a time."
+            ),
+        )
+
+    def execute(self, operations: str, summary: str = "", **kwargs: Any) -> ToolResult:
+        import json
+        from src.claraity.claraity_db import ClarityStore
+
         try:
-            root = Path.cwd()
-            manifest_path = root / MANIFEST_PATH
-            now = datetime.now(timezone.utc).isoformat()
+            ops = json.loads(operations)
+            if not isinstance(ops, list):
+                return ToolResult(
+                    tool_name=self.name,
+                    status=ToolStatus.ERROR,
+                    output=None,
+                    error="'operations' must be a JSON array",
+                )
 
-            # Stat analyzed files for accurate size/mtime
-            source_files = {}
-            stat_errors = []
-            for filepath in analyzed_files:
-                normalized = filepath.replace("\\", "/")
-                full_path = root / normalized
-                try:
-                    stat = full_path.stat()
-                    mtime_iso = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
-                    source_files[normalized] = {
-                        "size": stat.st_size,
-                        "mtime": mtime_iso,
-                    }
-                except (OSError, PermissionError) as e:
-                    stat_errors.append(f"{filepath}: {e}")
+            with ClarityStore() as store:
+                result = store.batch_operations(ops)
 
-            # Merge with existing manifest on incremental runs
-            if mode == "incremental":
-                existing = _read_manifest(manifest_path)
-                if existing:
-                    merged_files = dict(existing.get("source_files", {}))
-                    merged_files.update(source_files)
-                    # Remove entries for files that no longer exist
-                    merged_files = {k: v for k, v in merged_files.items() if (root / k).exists()}
-                    source_files = merged_files
-
-                    merged_coverage = dict(existing.get("knowledge_coverage", {}))
-                    merged_coverage.update(knowledge_coverage)
-                    knowledge_coverage = merged_coverage
-
-            # Build manifest
-            manifest = {
-                "last_run": now,
-                "mode": mode,
-                "source_files": source_files,
-                "knowledge_coverage": knowledge_coverage,
-            }
-
-            # Write
-            manifest_path.parent.mkdir(parents=True, exist_ok=True)
-            manifest_path.write_text(
-                json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"
-            )
-
-            # Confirmation
-            lines = [
-                f"Manifest written to {MANIFEST_PATH}",
-                f"Mode: {mode}",
-                f"Source files tracked: {len(source_files)}",
-                f"Knowledge files mapped: {len(knowledge_coverage)}",
-            ]
-            if stat_errors:
-                lines.append(f"Warnings ({len(stat_errors)} files could not be statted):")
-                for err in stat_errors[:5]:
+            lines = [f"[OK] Batch: {result['succeeded']} succeeded, {result['failed']} failed"]
+            if result["errors"]:
+                lines.append("Errors:")
+                for err in result["errors"]:
                     lines.append(f"  {err}")
 
             return ToolResult(
                 tool_name=self.name,
-                status=ToolStatus.SUCCESS,
+                status=ToolStatus.SUCCESS if result["failed"] == 0 else ToolStatus.PARTIAL,
                 output="\n".join(lines),
-                metadata={
-                    "manifest_path": str(manifest_path),
-                    "source_files_count": len(source_files),
-                    "knowledge_files_count": len(knowledge_coverage),
-                    "stat_errors": len(stat_errors),
-                },
+                metadata=result,
             )
-
+        except json.JSONDecodeError as e:
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.ERROR,
+                output=None,
+                error=f"Invalid JSON: {e}",
+            )
         except Exception as e:
             return ToolResult(
                 tool_name=self.name,
                 status=ToolStatus.ERROR,
                 output=None,
-                error=f"Failed to write manifest: {str(e)}",
+                error=f"Batch failed: {e}",
             )
+
+    def _get_parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "summary": {
+                    "type": "string",
+                    "description": (
+                        "Human-readable summary of what this batch does "
+                        "(e.g., 'Add mod-core module with 5 components and dependency edges'). "
+                        "Shown in the UI tool card for quick understanding."
+                    ),
+                },
+                "operations": {
+                    "type": "string",
+                    "description": (
+                        'JSON array of operations. Each object must have an "op" field. '
+                        "Supported ops and their fields:\n"
+                        '- add_node: node_id, node_type, name, layer, description, file_path, line_count, risk_level, properties\n'
+                        '- update_node: node_id, description, risk_level, line_count, properties\n'
+                        '- add_edge: from_id, to_id, edge_type, label, weight\n'
+                        '- remove_node: node_id\n'
+                        '- remove_edge: from_id, to_id, edge_type\n'
+                        "Example: "
+                        '[{"op":"add_node","node_id":"comp-x","node_type":"component","name":"X","description":"..."},'
+                        '{"op":"add_edge","from_id":"mod-a","to_id":"comp-x","edge_type":"contains"}]'
+                    ),
+                },
+            },
+            "required": ["summary", "operations"],
+        }
+
+
+class KnowledgeQueryTool(Tool):
+    """Flexible query tool for reading the knowledge DB."""
+
+    def __init__(self):
+        super().__init__(
+            name="knowledge_query",
+            description=(
+                "Query the knowledge DB flexibly. Use to inspect nodes, edges, constraints, "
+                "metadata, or search by keyword. All parameters are optional -- combine them "
+                "to express your query. Returns markdown."
+            ),
+        )
+
+    def execute(
+        self,
+        node_id: str = None,
+        node_type: str = None,
+        related_to: str = None,
+        show: str = "detail",
+        keyword: str = None,
+        **kwargs: Any,
+    ) -> ToolResult:
+        from src.claraity.claraity_db import ClarityStore
+
+        try:
+            with ClarityStore() as store:
+                md = store.query(
+                    node_id=node_id,
+                    node_type=node_type,
+                    related_to=related_to,
+                    show=show,
+                    keyword=keyword,
+                )
+                return ToolResult(
+                    tool_name=self.name,
+                    status=ToolStatus.SUCCESS,
+                    output=md,
+                )
+        except Exception as e:
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.ERROR,
+                output=None,
+                error=f"Query failed: {e}",
+            )
+
+    def _get_parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "node_id": {
+                    "type": "string",
+                    "description": "Get detail for a specific node (e.g., 'comp-coding-agent', 'mod-core', 'dec-single-writer')",
+                },
+                "node_type": {
+                    "type": "string",
+                    "description": "List all nodes of this type: 'module', 'component', 'system', 'decision', 'invariant', 'flow', 'file'",
+                },
+                "related_to": {
+                    "type": "string",
+                    "description": "Show all edges involving this node ID. Combine with show='constraints' to see decisions/invariants that apply.",
+                },
+                "show": {
+                    "type": "string",
+                    "description": "What to return: 'detail' (default), 'edges', 'constraints', 'overview' (architecture narrative), 'metadata' (scan info)",
+                },
+                "keyword": {
+                    "type": "string",
+                    "description": "Search nodes by name or description keyword",
+                },
+            },
+            "required": [],
+        }
+
+
+class KnowledgeSetMetadataTool(Tool):
+    """Store metadata in the knowledge DB (overview, scan info, etc.)."""
+
+    def __init__(self):
+        super().__init__(
+            name="knowledge_set_metadata",
+            description=(
+                "Store a key-value pair in the knowledge DB metadata. Use this to save "
+                "the architecture overview narrative, scan info (scanned_by, repo_name), "
+                "or any other metadata about the knowledge base."
+            ),
+        )
+
+    def execute(self, key: str, value: str, **kwargs: Any) -> ToolResult:
+        from src.claraity.claraity_db import ClarityStore
+
+        try:
+            with ClarityStore() as store:
+                store.set_metadata(key, value)
+            preview = value[:100] + "..." if len(value) > 100 else value
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.SUCCESS,
+                output=f"[OK] Set metadata: {key} = {preview}",
+                metadata={"key": key},
+            )
+        except Exception as e:
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.ERROR,
+                output=None,
+                error=f"Failed to set metadata: {e}",
+            )
+
+    def _get_parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string",
+                    "description": (
+                        "Metadata key. Standard keys: "
+                        "'architecture_overview' (1500-2000 char narrative of the system), "
+                        "'repo_name' (project name), "
+                        "'repo_language' (primary language), "
+                        "'scanned_by' (model that performed the scan), "
+                        "'total_files' (number of source files), "
+                        "'total_lines' (approximate line count)"
+                    ),
+                },
+                "value": {
+                    "type": "string",
+                    "description": "Metadata value. For 'architecture_overview', write a narrative covering: what the system is, how it works (data flow), and key subsystems.",
+                },
+            },
+            "required": ["key", "value"],
+        }
+
+
+class KnowledgeBriefTool(Tool):
+    """Get compact architecture overview of the codebase."""
+
+    def __init__(self):
+        super().__init__(
+            name="knowledge_brief",
+            description="Get a compact architecture overview of the codebase: modules, dependencies, design decisions, and invariants. Use at session start or when you need to understand the overall structure.",
+        )
+
+    def execute(self, **kwargs: Any) -> ToolResult:
+        from src.claraity.claraity_db import ClarityStore, render_compact_briefing
+
+        try:
+            with ClarityStore() as store:
+                md = render_compact_briefing(store)
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.SUCCESS,
+                output=md,
+                metadata={"source": "claraity_knowledge.db"},
+            )
+        except Exception as e:
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.ERROR,
+                output=None,
+                error=f"Failed to query knowledge DB: {e}",
+            )
+
+    def _get_parameters(self) -> dict[str, Any]:
+        return {"type": "object", "properties": {}, "required": []}
+
+
+class KnowledgeModuleTool(Tool):
+    """Get detailed information about a specific module."""
+
+    def __init__(self):
+        super().__init__(
+            name="knowledge_module",
+            description="Get detailed information about a module: its components, files, dependencies, and relationships. Use when you need to understand or modify a specific module.",
+        )
+
+    def execute(self, module_id: str, **kwargs: Any) -> ToolResult:
+        from src.claraity.claraity_db import ClarityStore, render_module_detail
+
+        try:
+            with ClarityStore() as store:
+                md = render_module_detail(store, module_id)
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.SUCCESS,
+                output=md,
+                metadata={"module_id": module_id},
+            )
+        except Exception as e:
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.ERROR,
+                output=None,
+                error=f"Failed to query module: {e}",
+            )
+
+    def _get_parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "module_id": {
+                    "type": "string",
+                    "description": "Module ID (e.g., mod-core, mod-memory, mod-ui, mod-tools, mod-llm, mod-server, mod-session, mod-subagents, mod-director, mod-observability, mod-hooks, mod-integrations, mod-code-intel, mod-prompts, mod-platform)",
+                },
+            },
+            "required": ["module_id"],
+        }
+
+
+class KnowledgeFileTool(Tool):
+    """Get information about a specific file's role and context."""
+
+    def __init__(self):
+        super().__init__(
+            name="knowledge_file",
+            description="Get a file's role, parent module, component it defines, dependencies, and applicable design decisions. Use BEFORE reading a file to understand its context.",
+        )
+
+    def execute(self, file_path: str, **kwargs: Any) -> ToolResult:
+        # Check .clarityignore
+        blocked, _pattern = is_blocked(file_path)
+        if blocked:
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.ERROR,
+                output=None,
+                error="Access denied: file is blocked by user policy",
+            )
+
+        from src.claraity.claraity_db import ClarityStore, render_file_detail
+
+        try:
+            with ClarityStore() as store:
+                md = render_file_detail(store, file_path)
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.SUCCESS,
+                output=md,
+                metadata={"file_path": file_path},
+            )
+        except Exception as e:
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.ERROR,
+                output=None,
+                error=f"Failed to query file: {e}",
+            )
+
+    def _get_parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "File path relative to project root (e.g., src/core/agent.py)",
+                },
+            },
+            "required": ["file_path"],
+        }
+
+
+class KnowledgeSearchTool(Tool):
+    """Search the codebase knowledge base by keyword."""
+
+    def __init__(self):
+        super().__init__(
+            name="knowledge_search",
+            description="Search the codebase knowledge base by keyword. Returns matching components, modules, files, decisions, and their relationships. Use when you need to find relevant code for a task.",
+        )
+
+    def execute(self, keyword: str, **kwargs: Any) -> ToolResult:
+        from src.claraity.claraity_db import ClarityStore, render_search
+
+        try:
+            with ClarityStore() as store:
+                md = render_search(store, keyword)
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.SUCCESS,
+                output=md,
+                metadata={"keyword": keyword},
+            )
+        except Exception as e:
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.ERROR,
+                output=None,
+                error=f"Failed to search knowledge: {e}",
+            )
+
+    def _get_parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "keyword": {
+                    "type": "string",
+                    "description": "Search keyword (e.g., 'memory', 'auth', 'streaming', 'retry')",
+                },
+            },
+            "required": ["keyword"],
+        }
+
+
+class KnowledgeImpactTool(Tool):
+    """Analyze the impact of changing a component."""
+
+    def __init__(self):
+        super().__init__(
+            name="knowledge_impact",
+            description="Show what would be affected by changing a component. Returns direct and indirect dependents (blast radius). Use BEFORE modifying a component to understand risk.",
+        )
+
+    def execute(self, component_id: str, **kwargs: Any) -> ToolResult:
+        from src.claraity.claraity_db import ClarityStore, render_impact
+
+        try:
+            with ClarityStore() as store:
+                md = render_impact(store, component_id)
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.SUCCESS,
+                output=md,
+                metadata={"component_id": component_id},
+            )
+        except Exception as e:
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.ERROR,
+                output=None,
+                error=f"Failed to query impact: {e}",
+            )
+
+    def _get_parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "component_id": {
+                    "type": "string",
+                    "description": "Component ID (e.g., comp-coding-agent, comp-memory-mgr, comp-message-store, comp-tui-app)",
+                },
+            },
+            "required": ["component_id"],
+        }
+
+
+class BeadReadyTool(Tool):
+    """Get the next unblocked tasks ready to work on."""
+
+    def __init__(self):
+        super().__init__(
+            name="task_list",
+            description="Get tasks that are unblocked and ready to start, sorted by priority. Use to find what to work on next.",
+        )
+
+    def execute(self, **kwargs: Any) -> ToolResult:
+        from src.claraity.claraity_beads import BeadStore, render_tasks_md
+
+        store = BeadStore()
+        try:
+            md = render_tasks_md(store)
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.SUCCESS,
+                output=md,
+                metadata={"source": "claraity_beads.db"},
+            )
+        except Exception as e:
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.ERROR,
+                output=None,
+                error=f"Failed to query tasks: {e}",
+            )
+        finally:
+            store.close()
+
+    def _get_parameters(self) -> dict[str, Any]:
+        return {"type": "object", "properties": {}, "required": []}
+
+
+class BeadCreateTool(Tool):
+    """Create a new task in the task tracker."""
+
+    def __init__(self):
+        super().__init__(
+            name="task_create",
+            description="Create a new task with title, description, priority, and optional tags. Returns the generated task ID.",
+        )
+
+    def execute(
+        self,
+        title: str,
+        description: str = "",
+        priority: int = 5,
+        parent_id: str = None,
+        tags: str = "",
+        **kwargs: Any,
+    ) -> ToolResult:
+        from src.claraity.claraity_beads import BeadStore
+
+        store = BeadStore()
+        try:
+            tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+            bid = store.add_bead(
+                title=title,
+                description=description,
+                priority=priority,
+                parent_id=parent_id,
+                tags=tag_list,
+            )
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.SUCCESS,
+                output=f"Created task: {bid} - {title}",
+                metadata={"bead_id": bid},
+            )
+        except Exception as e:
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.ERROR,
+                output=None,
+                error=f"Failed to create task: {e}",
+            )
+        finally:
+            store.close()
+
+    def _get_parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Task title"},
+                "description": {"type": "string", "description": "Task description"},
+                "priority": {
+                    "type": "integer",
+                    "description": "Priority (0=highest, 5=default)",
+                },
+                "parent_id": {
+                    "type": "string",
+                    "description": "Parent task ID for subtasks (optional)",
+                },
+                "tags": {
+                    "type": "string",
+                    "description": "Comma-separated tags (e.g., 'bug,urgent')",
+                },
+            },
+            "required": ["title"],
+        }
+
+
+class BeadUpdateTool(Tool):
+    """Update task status: start, close, or add notes."""
+
+    def __init__(self):
+        super().__init__(
+            name="task_update",
+            description="Update a task's status (start/close) or add a note. Use 'start' when beginning work, 'close' when done with a summary of what was accomplished.",
+        )
+
+    def execute(
+        self,
+        bead_id: str,
+        action: str,
+        summary: str = "",
+        **kwargs: Any,
+    ) -> ToolResult:
+        from src.claraity.claraity_beads import BeadStore
+
+        store = BeadStore()
+        try:
+            if action == "start":
+                store.update_status(bead_id, "in_progress")
+                return ToolResult(
+                    tool_name=self.name,
+                    status=ToolStatus.SUCCESS,
+                    output=f"Started: {bead_id}",
+                    metadata={"bead_id": bead_id},
+                )
+            elif action == "close":
+                store.update_status(bead_id, "closed", summary=summary or None)
+                return ToolResult(
+                    tool_name=self.name,
+                    status=ToolStatus.SUCCESS,
+                    output=f"Closed: {bead_id}",
+                    metadata={"bead_id": bead_id},
+                )
+            elif action == "note":
+                store.add_note(bead_id, summary)
+                return ToolResult(
+                    tool_name=self.name,
+                    status=ToolStatus.SUCCESS,
+                    output=f"Note added to: {bead_id}",
+                    metadata={"bead_id": bead_id},
+                )
+            else:
+                return ToolResult(
+                    tool_name=self.name,
+                    status=ToolStatus.ERROR,
+                    output=None,
+                    error=f"Unknown action: {action}. Use 'start', 'close', or 'note'.",
+                )
+        except Exception as e:
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.ERROR,
+                output=None,
+                error=f"Failed to update task: {e}",
+            )
+        finally:
+            store.close()
+
+    def _get_parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "bead_id": {"type": "string", "description": "Task ID (e.g., bd-a1b2)"},
+                "action": {
+                    "type": "string",
+                    "enum": ["start", "close", "note"],
+                    "description": "Action: 'start' (mark in_progress), 'close' (mark done), 'note' (add comment)",
+                },
+                "summary": {
+                    "type": "string",
+                    "description": "For 'close': what was accomplished. For 'note': the note content.",
+                },
+            },
+            "required": ["bead_id", "action"],
+        }
+
+
+class BeadBlockTool(Tool):
+    """Add a blocking dependency between two tasks."""
+
+    def __init__(self):
+        super().__init__(
+            name="task_block",
+            description="Add a blocking dependency: blocker_id must be completed before blocked_id can start.",
+        )
+
+    def execute(self, blocker_id: str, blocked_id: str, **kwargs: Any) -> ToolResult:
+        from src.claraity.claraity_beads import BeadStore
+
+        store = BeadStore()
+        try:
+            store.add_dependency(blocker_id, blocked_id, "blocks")
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.SUCCESS,
+                output=f"{blocker_id} now blocks {blocked_id}",
+                metadata={"blocker_id": blocker_id, "blocked_id": blocked_id},
+            )
+        except Exception as e:
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.ERROR,
+                output=None,
+                error=f"Failed to add dependency: {e}",
+            )
+        finally:
+            store.close()
+
+    def _get_parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "blocker_id": {"type": "string", "description": "Task that must complete first"},
+                "blocked_id": {
+                    "type": "string",
+                    "description": "Task that cannot start until blocker completes",
+                },
+            },
+            "required": ["blocker_id", "blocked_id"],
+        }
+
+
+class KnowledgeAutoLayoutTool(Tool):
+    """Auto-compute architecture diagram layout from dependency graph."""
+
+    def __init__(self):
+        super().__init__(
+            name="knowledge_auto_layout",
+            description=(
+                "Compute flow_rank/flow_col layout positions for all modules based on "
+                "their dependency graph. Uses topological sort so entry points appear at "
+                "the top and infrastructure at the bottom. Call this after populating "
+                "modules and edges to produce a readable architecture diagram."
+            ),
+        )
+
+    def execute(self, **kwargs: Any) -> ToolResult:
+        from src.claraity.claraity_db import ClarityStore
+
+        try:
+            with ClarityStore() as store:
+                result = store.auto_layout()
+            lines = [f"[OK] Updated layout for {result['modules_updated']} nodes"]
+            ranks = result.get("ranks", {})
+            if ranks:
+                lines.append("")
+                lines.append("Layout (top to bottom):")
+                for rank in sorted(ranks.keys()):
+                    mods = ranks[rank]
+                    names = ", ".join(mods)
+                    lines.append(f"  Row {rank}: {names}")
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.SUCCESS,
+                output="\n".join(lines),
+                metadata=result,
+            )
+        except Exception as e:
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.ERROR,
+                output=None,
+                error=f"Auto-layout failed: {e}",
+            )
+
+    def _get_parameters(self) -> dict[str, Any]:
+        return {"type": "object", "properties": {}, "required": []}
+
+
+class KnowledgeExportTool(Tool):
+    """Export knowledge and beads DBs to JSONL for git tracking."""
+
+    def __init__(self):
+        super().__init__(
+            name="knowledge_export",
+            description=(
+                "Export the knowledge DB and beads DB to JSONL files for git tracking. "
+                "Call this after finishing modifications to the knowledge base "
+                "(adding nodes, edges, or completing a scan). The JSONL files are "
+                "the git-tracked source of truth."
+            ),
+        )
+
+    def execute(self, **kwargs: Any) -> ToolResult:
+        from src.claraity.claraity_db import ClarityStore
+        from src.claraity.claraity_beads import BeadStore
+
+        results = []
+        try:
+            with ClarityStore() as store:
+                count = store.export_jsonl()
+                results.append(f"Knowledge: {count} records -> .clarity/claraity_knowledge.jsonl")
+        except Exception as e:
+            results.append(f"Knowledge export failed: {e}")
+
+        try:
+            with BeadStore() as store:
+                count = store.export_jsonl()
+                results.append(f"Beads: {count} records -> .clarity/claraity_beads.jsonl")
+        except Exception as e:
+            results.append(f"Beads export failed: {e}")
+
+        return ToolResult(
+            tool_name=self.name,
+            status=ToolStatus.SUCCESS,
+            output="\n".join(results),
+        )
+
+    def _get_parameters(self) -> dict[str, Any]:
+        return {"type": "object", "properties": {}, "required": []}

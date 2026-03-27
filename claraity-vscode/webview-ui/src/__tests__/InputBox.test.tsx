@@ -29,6 +29,7 @@ import type { FileAttachment, ImageAttachment } from "../types";
 function defaultProps(overrides: Partial<Parameters<typeof InputBox>[0]> = {}) {
   return {
     isStreaming: false,
+    connected: true,
     attachments: [] as FileAttachment[],
     images: [] as ImageAttachment[],
     mentionResults: [] as Array<{ path: string; name: string; relativePath: string }>,
@@ -40,6 +41,12 @@ function defaultProps(overrides: Partial<Parameters<typeof InputBox>[0]> = {}) {
     onRemoveImage: vi.fn(),
     onSearchFiles: vi.fn(),
     postMessage: vi.fn(),
+    enrichmentEnabled: false,
+    enrichmentLoading: false,
+    enrichedPreview: null,
+    onToggleEnrichment: vi.fn(),
+    onRequestEnrichment: vi.fn(),
+    onClearEnrichment: vi.fn(),
     ...overrides,
   };
 }

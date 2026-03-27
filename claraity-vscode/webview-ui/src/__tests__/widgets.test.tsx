@@ -202,6 +202,107 @@ describe("ToolCard", () => {
       feedback: undefined,
     });
   });
+
+  // ── Error details ──
+
+  test("shows error in Result section when status is error", () => {
+    renderToolCard({
+      status: "error",
+      error: "Permission denied: /etc/shadow",
+    });
+
+    // Uses same "Result" header as success
+    expect(screen.getByText("Result")).toBeInTheDocument();
+    // Error message shown in the body
+    expect(screen.getByText("Permission denied: /etc/shadow")).toBeInTheDocument();
+  });
+
+  test("prefers result over error for display content", () => {
+    renderToolCard({
+      status: "error",
+      result: "STDERR:\nModuleNotFoundError: No module named 'foo'",
+      error: "Command failed with exit code 1",
+    });
+
+    // Shows the actual output, not the generic error message
+    expect(screen.getByText(/ModuleNotFoundError/)).toBeInTheDocument();
+  });
+
+  test("does not show result section when status is error but no error or result", () => {
+    const { container } = renderToolCard({ status: "error" });
+    expect(container.querySelector(".tool-result-details")).not.toBeInTheDocument();
+  });
+
+  // ── Summary prominence ──
+
+  test("shows summary prominently when present in arguments", () => {
+    renderToolCard({
+      tool_name: "knowledge_update",
+      arguments: {
+        summary: "Add mod-core with 5 components",
+        operations: '[{"op":"add_node"}]',
+      },
+    });
+
+    // Summary text is visible
+    expect(screen.getByText("Add mod-core with 5 components")).toBeInTheDocument();
+    // Primary arg (from getPrimaryArg fallback) should NOT be shown since summary takes precedence
+    const summaryEl = document.querySelector(".tool-summary");
+    expect(summaryEl).toBeInTheDocument();
+  });
+
+  test("shows primary arg when no summary is present", () => {
+    renderToolCard({
+      tool_name: "read_file",
+      arguments: { file_path: "/src/main.py" },
+    });
+
+    // No summary element
+    expect(document.querySelector(".tool-summary")).not.toBeInTheDocument();
+    // Primary arg is shown
+    expect(screen.getByText("/src/main.py")).toBeInTheDocument();
+  });
+
+  // ── Collapsible parameters ──
+
+  test("shows collapsible params section with remaining parameters", () => {
+    renderToolCard({
+      tool_name: "edit_file",
+      arguments: {
+        file_path: "/src/main.py",
+        old_text: "foo",
+        new_text: "bar",
+      },
+    });
+
+    // file_path is shown as primary arg (inline)
+    expect(screen.getByText("/src/main.py")).toBeInTheDocument();
+    // Collapsible params header (excluding file_path which is primary)
+    expect(screen.getByText("Parameters (2)")).toBeInTheDocument();
+    // Param keys and values visible in the collapsed section
+    expect(screen.getByText("old_text")).toBeInTheDocument();
+    expect(screen.getByText("new_text")).toBeInTheDocument();
+  });
+
+  test("does not show collapsible params for delegate_to_subagent", () => {
+    const { container } = renderToolCard({
+      tool_name: "delegate_to_subagent",
+      arguments: { task: "research something", subagent: "explore" },
+    });
+
+    // No params section rendered
+    expect(container.querySelector(".tool-params-details")).not.toBeInTheDocument();
+  });
+
+  test("does not show collapsible params when only primary arg exists", () => {
+    const { container } = renderToolCard({
+      tool_name: "read_file",
+      arguments: { file_path: "/src/main.py" },
+    });
+
+    // file_path is the primary arg and the only param — nothing left to show
+    expect(container.querySelector(".tool-params-details")).not.toBeInTheDocument();
+  });
 });
 
 // ============================================================================

@@ -93,7 +93,7 @@ export interface ListModelsPayload {
 
 export interface SetAutoApprovePayload {
     type: 'set_auto_approve';
-    categories: { edit?: boolean; execute?: boolean; browser?: boolean };
+    categories: { edit?: boolean; execute?: boolean; browser?: boolean; knowledge_update?: boolean; subagent?: boolean };
 }
 
 export interface GetAutoApprovePayload {
@@ -194,7 +194,9 @@ export type ClientMessage =
     | { type: 'reload_subagents' }
     // Limits
     | { type: 'get_limits' }
-    | { type: 'save_limits'; limits: import('../shared/protocol').LimitsData };
+    | { type: 'save_limits'; limits: import('../shared/protocol').LimitsData }
+    // Prompt Enrichment
+    | { type: 'enrich_prompt'; content: string };
 
 // ============================================================================
 // Extension <-> WebView postMessage types
@@ -212,7 +214,9 @@ export type ExtensionMessage =
     | { type: 'undoAvailable'; turnId: string; files: string[] }
     | { type: 'undoComplete'; turnId: string; restoredFiles: string[] }
     | { type: 'fileSelected'; path: string; name: string }
-    | { type: 'insertAndSend'; content: string };
+    | { type: 'insertAndSend'; content: string }
+    | { type: 'enrichedPrompt'; original: string; enriched: string }
+    | { type: 'enrichmentError'; message: string };
 
 export type WebViewMessage =
     | { type: 'chatMessage'; content: string; attachments?: FileAttachment[]; images?: ImageAttachment[]; systemContext?: string }
@@ -229,7 +233,7 @@ export type WebViewMessage =
     | { type: 'getConfig' }
     | { type: 'saveConfig'; config: Record<string, any> }
     | { type: 'listModels'; backend: string; base_url: string; api_key: string }
-    | { type: 'setAutoApprove'; categories: { edit?: boolean; execute?: boolean; browser?: boolean } }
+    | { type: 'setAutoApprove'; categories: { edit?: boolean; execute?: boolean; browser?: boolean; knowledge_update?: boolean; subagent?: boolean } }
     | { type: 'getAutoApprove' }
     | { type: 'newSession' }
     | { type: 'listSessions' }
@@ -266,7 +270,12 @@ export type WebViewMessage =
     | { type: 'openSubagentFile'; name: string }
     // Limits
     | { type: 'getLimits' }
-    | { type: 'saveLimits'; limits: import('../shared/protocol').LimitsData };
+    | { type: 'saveLimits'; limits: import('../shared/protocol').LimitsData }
+    // Prompt Enrichment
+    | { type: 'enrichPrompt'; content: string }
+    // Server connection control
+    | { type: 'disconnectServer' }
+    | { type: 'reconnectServer' };
 
 // ============================================================================
 // Exhaustive check helper

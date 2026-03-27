@@ -66,6 +66,8 @@ class AutoApproveConfig:
     edit: bool = False
     execute: bool = False
     browser: bool = False
+    knowledge_update: bool = False
+    subagent: bool = False
 
 
 @dataclass
@@ -304,7 +306,7 @@ def load_llm_config(config_path: str = DEFAULT_CONFIG_PATH) -> LLMConfigData:
     aa_data = data.get("auto_approve")
     if isinstance(aa_data, dict):
         ac = config.auto_approve
-        for key in ("read", "edit", "execute", "browser"):
+        for key in ("read", "edit", "execute", "browser", "knowledge_update", "subagent"):
             if key in aa_data:
                 try:
                     setattr(ac, key, bool(aa_data[key]))
@@ -421,6 +423,8 @@ def save_llm_config(
         "edit": config.auto_approve.edit,
         "execute": config.auto_approve.execute,
         "browser": config.auto_approve.browser,
+        "knowledge_update": config.auto_approve.knowledge_update,
+        "subagent": config.auto_approve.subagent,
     }
 
     # Write back
