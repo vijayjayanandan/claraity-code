@@ -2386,7 +2386,6 @@ async def run_stdio_server(
                 f"{output_section}"
                 "</task>"
             )
-            agent._bg_registry.remove_from_completed(completed_task.task_id)
 
         notification = "<task-notification>\n" + "\n".join(task_blocks) + "\n</task-notification>"
 
@@ -2405,8 +2404,11 @@ async def run_stdio_server(
         if completed_task is None:
             return  # Launch event, not a completion
 
-        # Accumulate and (re)start debounce timer
+        # Accumulate and remove from completed queue immediately (not in
+        # flush) so drain_completed() in the tool loop can't re-deliver
+        # during the debounce window.
         _bg_pending.append(completed_task)
+        agent._bg_registry.remove_from_completed(completed_task.task_id)
         if _bg_debounce_handle[0] is not None:
             _bg_debounce_handle[0].cancel()
         try:
