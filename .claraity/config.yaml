@@ -1,0 +1,88 @@
+logging:
+  level: INFO
+  handlers:
+    jsonl: INFO
+    logs_db: DEBUG
+    errors_db: ERROR
+  retention:
+    logs_db_days: 7
+    errors_db_days: 30
+    jsonl_max_bytes: 52428800
+    jsonl_backup_count: 5
+llm:
+  backend_type: openai
+  base_url: https://api.fuelix.ai/v1
+  model: claude-sonnet-4-6
+  context_window: 200000
+  temperature: 0.2
+  max_tokens: 16384
+  top_p: 0.95
+  subagents:
+    code-reviewer:
+      model: gpt-5.4-2026-03-05
+    doc-writer:
+      model: gpt-5.4-2026-03-05
+    explore:
+      model: claude-haiku-4-5-20251001
+limits:
+  iteration_limit_enabled: true
+  max_iterations: 50
+auto_approve:
+  read: true
+  edit: false
+  execute: true
+  browser: false
+  knowledge_update: false
+  subagent: false
+prompt_enrichment:
+  model: claude-haiku-4-5-20251001
+  system_prompt: 'You are a prompt enricher for a coding agent.
+
+
+    Rewrite the user''s latest message into a clearer, more actionable prompt for
+    a software engineering LLM.
+
+
+    Use recent chat history only when needed to resolve references and preserve relevant
+    technical context.
+
+
+    Rules:
+
+    - Preserve the user''s intent
+
+    - Do not answer the request
+
+    - Do not solve the task
+
+    - Do not invent requirements
+
+    - Do not add unnecessary scope
+
+    - Prefer the latest user message over older history if they conflict
+
+    - If the request is already clear, keep changes minimal
+
+    - Use plain text for simple requests
+
+    - Use compact markdown with short sections only when structure will improve execution
+
+
+    When using markdown, use only relevant sections such as:
+
+    ## Task
+
+    ## Context
+
+    ## Constraints
+
+    ## Expected Output
+
+
+    Output only the rewritten prompt text.
+
+    No explanations.
+
+    No code fences.
+
+    No labels outside the rewritten prompt.'

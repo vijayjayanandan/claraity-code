@@ -117,9 +117,19 @@ test-*-workspace/
 # Checkpoints (session data)
 .checkpoints/
 
-# ClarAIty agent workspace (runtime data - match in any subdirectory)
-**/.claraity/
+# ClarAIty agent workspace - ignore runtime data, track config/knowledge
+.claraity/*
+!.claraity/agents/
+.claraity/agents/*
+!.claraity/agents/*.md
+!.claraity/config.yaml
+!.claraity/claraity_beads.jsonl
+!.claraity/claraity_knowledge.jsonl
+
+# Legacy and subdirectory .clarity/.claraity (fully ignored)
 **/.clarity/
+examples/.claraity/
+claraity-vscode/.claraity/
 
 # Test output files
 claraity-vscode/ts_ext_test_out.txt
