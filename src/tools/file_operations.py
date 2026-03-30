@@ -25,7 +25,7 @@ from src.tools.command_safety import check_command_safety, clamp_timeout
 from src.tools.powershell_sanitize import sanitize_for_powershell
 
 from .base import Tool, ToolResult, ToolStatus
-from .clarityignore import check_command, filter_paths, is_blocked
+from .claraityignore import check_command, filter_paths, is_blocked
 from .search_tools import validate_path_security
 
 logger = get_logger("tools.file_operations")
@@ -72,7 +72,7 @@ class FileOperationTool(Tool):
             allow_files_outside_workspace=allow_outside_workspace,
         )
 
-        # Check .clarityignore
+        # Check .claraityignore
         blocked, _pattern = is_blocked(validated_path)
         if blocked:
             raise ValueError("Access denied: file is blocked by user policy")
@@ -372,7 +372,7 @@ class ListDirectoryTool(FileOperationTool):
                 )
 
             entries = []
-            # Filter out .clarityignore-blocked files (silent omit)
+            # Filter out .claraityignore-blocked files (silent omit)
             all_entries = list(path.iterdir())
             allowed_entries = filter_paths(all_entries)
             allowed_set = set(allowed_entries)
@@ -657,7 +657,7 @@ class RunCommandTool(Tool):
                 error="Command cannot be empty",
             )
 
-        # --- CLARITYIGNORE CHECK ---
+        # --- CLARAITYIGNORE CHECK ---
         cmd_blocked, cmd_reason = check_command(command)
         if cmd_blocked:
             return ToolResult(
@@ -746,7 +746,7 @@ class RunCommandTool(Tool):
                     ),
                 )
 
-            # --- CLARITYIGNORE CHECK ---
+            # --- CLARAITYIGNORE CHECK ---
             cmd_blocked, cmd_reason = check_command(command)
             if cmd_blocked:
                 return ToolResult(
@@ -779,28 +779,52 @@ class RunCommandTool(Tool):
                     )
                 cwd = str(cwd_path.absolute())
 
-            # Sanitize cmd.exe/bash syntax for PowerShell (defensive -- LLM sometimes
-            # generates '&&' chains or '2>nul' despite being told to use PowerShell)
-            command = sanitize_for_powershell(command)
+            # Detect preferred shell and execute accordingly.
+            # On Windows, prefer bash (Git Bash) for reliable exit codes and
+            # Unix syntax parity. Fall back to PowerShell if bash unavailable.
+            from src.platform import detect_preferred_shell, get_bash_env
+
+            shell_info = detect_preferred_shell()
+
+            # Only sanitize for PowerShell; bash doesn't need it
+            if shell_info["syntax"] == "powershell":
+                command = sanitize_for_powershell(command)
 
             # Execute command
-            # On Windows, use PowerShell instead of cmd.exe for better Unix compatibility
-            # Use explicit UTF-8 encoding with error replacement to avoid cp1252 decode errors
             # stdin=DEVNULL prevents subprocess from reading terminal input
             # CREATE_NO_WINDOW / start_new_session isolate subprocess from parent terminal,
             # preventing tools like npx from writing escape sequences directly to the TUI
             if platform.system() == "Windows":
-                result = subprocess.run(
-                    ["powershell", "-NoProfile", "-Command", command],
-                    cwd=cwd,
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout,
-                    encoding="utf-8",
-                    errors="replace",
-                    stdin=subprocess.DEVNULL,
-                    creationflags=subprocess.CREATE_NO_WINDOW,
-                )
+                if shell_info["shell"] == "bash":
+                    # Git Bash: reliable exit codes, Unix syntax.
+                    # get_bash_env() ensures Git tools (tail, grep, etc.) are on
+                    # PATH even when spawned from VS Code's system PATH.
+                    bash_env = get_bash_env(shell_info["path"])
+                    result = subprocess.run(
+                        [shell_info["path"], "-c", command],
+                        cwd=cwd,
+                        capture_output=True,
+                        text=True,
+                        timeout=timeout,
+                        encoding="utf-8",
+                        errors="replace",
+                        stdin=subprocess.DEVNULL,
+                        creationflags=subprocess.CREATE_NO_WINDOW,
+                        env=bash_env,
+                    )
+                else:
+                    # PowerShell fallback
+                    result = subprocess.run(
+                        ["powershell", "-NoProfile", "-Command", command],
+                        cwd=cwd,
+                        capture_output=True,
+                        text=True,
+                        timeout=timeout,
+                        encoding="utf-8",
+                        errors="replace",
+                        stdin=subprocess.DEVNULL,
+                        creationflags=subprocess.CREATE_NO_WINDOW,
+                    )
             else:
                 # On Unix-like systems, use the default shell
                 result = subprocess.run(

@@ -94,8 +94,8 @@ Director tools         -> checkpoints where the LLM signals "I'm done with this 
    - LLM explores, then calls director_complete_understand(context)
 
 3. PLAN phase:
-   - Prompt: "Write a plan to .clarity/plans/, then call director_complete_plan."
-   - Tools: read-only + write_file (only .clarity/plans/) + director_complete_plan
+   - Prompt: "Write a plan to .claraity/plans/, then call director_complete_plan."
+   - Tools: read-only + write_file (only .claraity/plans/) + director_complete_plan
    - LLM writes plan markdown, then calls director_complete_plan(plan_document, slices)
 
 4. AWAITING_APPROVAL:
@@ -122,8 +122,8 @@ Director tools         -> checkpoints where the LLM signals "I'm done with this 
 ```
 
 **Key design decisions:**
-- File-based plan: LLM writes rich markdown to `.clarity/plans/`, tool references file path (avoids JSON escaping issues)
-- Path-based gating: `write_file` allowed in PLAN phase only for `.clarity/plans/` paths
+- File-based plan: LLM writes rich markdown to `.claraity/plans/`, tool references file path (avoids JSON escaping issues)
+- Path-based gating: `write_file` allowed in PLAN phase only for `.claraity/plans/` paths
 - Delegation-first EXECUTE: prompt instructs Director to delegate, not code directly (Approach A: prompt-driven, not enforced)
 - Silent tool cards: Director checkpoint tools hidden from TUI (phase transitions are internal)
 - Approval widget replay guard: skips mounting during session replay if tool result already exists
@@ -186,7 +186,7 @@ The Director runs tests and calls `director_complete_integration` but the user n
 **Plan:** `docs/CODEBASE_SURVEY_PLAN.md`
 **Depends on:** Phase 2 (done)
 
-A codebase surveyor that scans the project and generates `.clarity/codebase_context.md` — a persistent, LLM-consumable document loaded into every session.
+A codebase surveyor that scans the project and generates `.claraity/codebase_context.md` — a persistent, LLM-consumable document loaded into every session.
 
 **Two scenarios:**
 - **Existing project:** Survey first, then work. Agent refuses to work without context.
@@ -206,7 +206,7 @@ A codebase surveyor that scans the project and generates `.clarity/codebase_cont
 - Incremental survey updates on git changes
 - Session persistence for Director state (survive app restart)
 - Enforced delegation (Approach B: gate write tools in EXECUTE)
-- ClarityDB backing store for queryable codebase intelligence
+- ClaraityDB backing store for queryable codebase intelligence
 
 ---
 
@@ -225,7 +225,7 @@ Phase 2.5: User-in-the-Loop   <- NEXT (understanding alignment, review enforceme
 Phase 3: Codebase Survey       <- PARKED (persistent project intelligence)
     |
     v
-Phase 4: Full Integration      <- FUTURE (TUI, auto-detect, ClarityDB)
+Phase 4: Full Integration      <- FUTURE (TUI, auto-detect, ClaraityDB)
 ```
 
 ## Key Documents

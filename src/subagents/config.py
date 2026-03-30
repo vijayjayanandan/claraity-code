@@ -15,8 +15,8 @@ LLM configuration is nested under an ``llm:`` key::
 All ``llm`` fields are optional. Omitted fields inherit from the main agent.
 
 Configuration files are loaded hierarchically:
-1. Project: .clarity/agents/*.md (highest priority)
-2. User: ~/.clarity/agents/*.md (lower priority)
+1. Project: .claraity/agents/*.md (highest priority)
+2. User: ~/.claraity/agents/*.md (lower priority)
 """
 
 import logging
@@ -137,7 +137,7 @@ class SubAgentConfig:
             ValueError: If file format is invalid
 
         Example:
-            >>> config = SubAgentConfig.from_file(Path(".clarity/agents/code-reviewer.md"))
+            >>> config = SubAgentConfig.from_file(Path(".claraity/agents/code-reviewer.md"))
             >>> print(config.name)
             'code-reviewer'
         """
@@ -275,7 +275,7 @@ class SubAgentConfig:
             >>> SubAgentConfig.create_template(
             ...     "my-agent",
             ...     "My custom subagent",
-            ...     Path(".clarity/agents/my-agent.md")
+            ...     Path(".claraity/agents/my-agent.md")
             ... )
         """
         # Validate name format
@@ -330,16 +330,16 @@ You are an expert in [YOUR DOMAIN].
 
 
 class SubAgentConfigLoader:
-    """Loads subagent configurations from prompts directory and .clarity/agents/.
+    """Loads subagent configurations from prompts directory and .claraity/agents/.
 
     Search order (highest to lowest priority):
-    1. Project: .clarity/agents/*.md  -- user customizations, overrides built-ins
+    1. Project: .claraity/agents/*.md  -- user customizations, overrides built-ins
     2. Built-in: src/prompts/subagents/ (Python constants)
-    3. User: ~/.clarity/agents/*.md   -- global user customizations
+    3. User: ~/.claraity/agents/*.md   -- global user customizations
 
     Project-level configs intentionally override built-ins so users can fork
     and customize any built-in subagent by creating a same-named .md file in
-    .clarity/agents/.
+    .claraity/agents/.
     """
 
     def __init__(self, working_directory: Path | None = None):
@@ -354,7 +354,7 @@ class SubAgentConfigLoader:
     def discover_all(self) -> dict[str, SubAgentConfig]:
         """Discover all subagent configurations.
 
-        Priority (highest wins): project .clarity/agents/ > built-in > user ~/.clarity/agents/
+        Priority (highest wins): project .claraity/agents/ > built-in > user ~/.claraity/agents/
 
         Returns:
             dict mapping subagent names to configs
@@ -368,7 +368,7 @@ class SubAgentConfigLoader:
         configs: dict[str, SubAgentConfig] = {}
 
         # 1. User global directory (lowest priority -- loaded first, overridden by everything)
-        user_dir = Path.home() / ".clarity" / "agents"
+        user_dir = Path.home() / ".claraity" / "agents"
         if user_dir.exists():
             user_configs = self._load_from_directory(user_dir, source="user")
             configs.update(user_configs)
@@ -386,7 +386,7 @@ class SubAgentConfigLoader:
             )
 
         # 3. Project directory (highest priority -- overrides built-ins, enables fork/customize)
-        project_dir = self.working_directory / ".clarity" / "agents"
+        project_dir = self.working_directory / ".claraity" / "agents"
         if project_dir.exists():
             project_configs = self._load_from_directory(project_dir, source="project")
             overrides = [n for n in project_configs if n in configs]
@@ -470,7 +470,7 @@ class SubAgentConfigLoader:
                     "name": "knowledge-builder",
                     "description": (
                         "Codebase analyst that autonomously explores the project and generates "
-                        "structured markdown knowledge base files in .clarity/knowledge/. "
+                        "structured markdown knowledge base files in .claraity/knowledge/. "
                         'Delegate with a SHORT task like "Build knowledge base for this project" '
                         'or "Update architecture.md". Do NOT specify file contents, structure, '
                         "or filenames -- the subagent discovers these on its own."

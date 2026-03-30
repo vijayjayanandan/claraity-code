@@ -1,11 +1,11 @@
-"""Tests for .clarityignore file blocking feature."""
+"""Tests for .claraityignore file blocking feature."""
 
 import os
 from pathlib import Path
 
 import pytest
 
-from src.tools.clarityignore import check_command, filter_paths, is_blocked
+from src.tools.claraityignore import check_command, filter_paths, is_blocked
 
 
 @pytest.fixture()
@@ -16,7 +16,7 @@ def workspace(tmp_path, monkeypatch):
 
 
 def _write_ignore(workspace: Path, content: str) -> None:
-    (workspace / ".clarityignore").write_text(content, encoding="utf-8")
+    (workspace / ".claraityignore").write_text(content, encoding="utf-8")
 
 
 # ---------- Parsing ----------
@@ -127,7 +127,7 @@ class TestFilterPaths:
 
 
 class TestFileToolIntegration:
-    """Test that file tools respect .clarityignore via _validate_path."""
+    """Test that file tools respect .claraityignore via _validate_path."""
 
     @pytest.fixture(autouse=True)
     def _setup_tools(self, workspace):
@@ -197,7 +197,7 @@ class TestFileToolIntegration:
         assert "user policy" in result.error
         # Must NOT leak the pattern or filename mechanism
         assert "*.key" not in result.error
-        assert ".clarityignore" not in result.error
+        assert ".claraityignore" not in result.error
 
 
 # ---------- Search Tool Integration ----------
@@ -289,7 +289,7 @@ class TestListDirectoryIntegration:
 
 class TestLSPToolIntegration:
     def test_get_file_outline_blocked(self, workspace):
-        """GetFileOutlineTool should block files matched by .clarityignore."""
+        """GetFileOutlineTool should block files matched by .claraityignore."""
         from src.tools.lsp_tools import GetFileOutlineTool
 
         (workspace / "secret.py").write_text("class Secret: pass")
@@ -306,7 +306,7 @@ class TestLSPToolIntegration:
         assert "user policy" in result.error
 
     def test_get_file_outline_allowed(self, workspace):
-        """GetFileOutlineTool should allow files not in .clarityignore."""
+        """GetFileOutlineTool should allow files not in .claraityignore."""
         from src.tools.lsp_tools import GetFileOutlineTool
 
         (workspace / "app.py").write_text("class App: pass")
@@ -327,19 +327,19 @@ class TestLSPToolIntegration:
 
 class TestKnowledgeToolIntegration:
     def test_query_file_blocked(self, workspace):
-        from src.tools.knowledge_tools import KnowledgeFileTool
+        from src.tools.knowledge_tools import KnowledgeQueryTool
 
         _write_ignore(workspace, "*.env")
-        tool = KnowledgeFileTool()
+        tool = KnowledgeQueryTool()
         result = tool.execute(file_path="secrets.env")
         assert result.status.value == "error"
         assert "user policy" in result.error
 
     def test_query_file_allowed(self, workspace):
-        from src.tools.knowledge_tools import KnowledgeFileTool
+        from src.tools.knowledge_tools import KnowledgeQueryTool
 
         _write_ignore(workspace, "*.env")
-        tool = KnowledgeFileTool()
+        tool = KnowledgeQueryTool()
         result = tool.execute(file_path="src/core/agent.py")
         # May fail (no DB) but should NOT be "user policy" error
         assert "user policy" not in (result.error or "")
@@ -389,7 +389,7 @@ class TestCheckCommand:
     def test_opaque_error_message(self, workspace):
         _write_ignore(workspace, "*.env")
         _blocked, reason = check_command("cat .env")
-        assert ".clarityignore" not in reason
+        assert ".claraityignore" not in reason
         assert "*.env" not in reason
         assert ".env" not in reason
 

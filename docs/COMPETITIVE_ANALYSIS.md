@@ -101,7 +101,7 @@ ClarAIty is roughly where Aider is (55), but with different strengths. That's no
 - The default compaction summarizer is non-LLM. So your "compressed history" is low-quality.
 - EpisodicMemory triggers compression at 80% of budget, keeping last 3 turns. That's basic FIFO with a fancy name.
 - ObservationStore (pointer-based masking) is a clever idea but feels like a solution looking for a problem. How often does a tool output actually get recovered after masking?
-- **No cross-session memory**. Every new conversation starts from zero. Claude Code has CLAUDE.md files that persist project knowledge. Your `.clarity/` directory has config but no auto-learned memory.
+- **No cross-session memory**. Every new conversation starts from zero. Claude Code has CLAUDE.md files that persist project knowledge. Your `.claraity/` directory has config but no auto-learned memory.
 
 **The honest assessment**: You've built the infrastructure for sophisticated memory management, but the actual intelligence layer on top is thin. The architectural foundation is ahead of the actual capability.
 
@@ -146,11 +146,11 @@ This is ClarAIty's strongest area relative to competitors.
 **What exists**:
 - MCP integration for external tools.
 - Per-subagent LLM override.
-- `.clarity/subagents/` for custom subagent configs.
+- `.claraity/subagents/` for custom subagent configs.
 
 **What doesn't exist**:
 - The **skill system is planned but not implemented**. You have it in memory as "EvoSkill-inspired skill loading & discovery" with Phase 1/Phase 2 plans. Zero code.
-- **No custom rules file**. Cursor has `.cursorrules`. Claude Code has `CLAUDE.md`. ClarAIty reads CLAUDE.md (per the CLAUDE.md constraint docs), but there's no `.clarity/rules.md` or equivalent.
+- **No custom rules file**. Cursor has `.cursorrules`. Claude Code has `CLAUDE.md`. ClarAIty reads CLAUDE.md (per the CLAUDE.md constraint docs), but there's no `.claraity/rules.md` or equivalent.
 - **No user-extensible slash commands**. The SlashCommandDispatcher (75 lines) routes hardcoded commands. Users can't add their own.
 - **No pluggable context providers**. Context assembly is code-only in `context_builder.py`. Can't plug in custom context sources.
 - **No community ecosystem**. No marketplace, no plugin directory, no contributed skills.
@@ -261,7 +261,7 @@ The agent is powerful internally but doesn't show it to users.
 | 2 | **Welcome/onboarding page** with feature showcase and "try this" prompts | DX | 5 -> 6 |
 | 3 | **Inline diff in chat** — render diffs inside tool cards, not in separate editor | UX | 6 -> 7 |
 | 4 | **LLM-based compaction** — use the model to summarize evicted messages | Memory | 6 -> 7 |
-| 5 | **Custom rules file** (`.clarity/rules.md`) loaded into system prompt | Extensibility | 4 -> 5 |
+| 5 | **Custom rules file** (`.claraity/rules.md`) loaded into system prompt | Extensibility | 4 -> 5 |
 
 ### Tier 2: Strategic Investments (2-6 weeks each)
 
@@ -269,7 +269,7 @@ The agent is powerful internally but doesn't show it to users.
 |---|------------|-----------|-------------------|
 | 6 | **Embedding-based semantic search** for relevant file discovery | Context | 5.5 -> 7 |
 | 7 | **Parallel subagent execution** (concurrent subprocess delegation) | Multi-Agent | 7 -> 8 |
-| 8 | **Skill system Phase 1** (manual skills in `.clarity/skills/` with trigger matching) | Extensibility | 5 -> 7 |
+| 8 | **Skill system Phase 1** (manual skills in `.claraity/skills/` with trigger matching) | Extensibility | 5 -> 7 |
 | 9 | **Auto-generated project memory** (cross-session learning) | Memory | 7 -> 8 |
 | 10 | **Quick model switcher** in toolbar/status bar | DX | 6 -> 7 |
 

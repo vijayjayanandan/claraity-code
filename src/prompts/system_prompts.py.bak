@@ -306,7 +306,7 @@ If the user's request is vague or could be interpreted multiple ways, ASK for cl
 """
 
 
-CLARITY_ARCHITECTURE_TOOLS = """
+CLARAITY_ARCHITECTURE_TOOLS = """
 # ClarAIty Architecture Query Tools
 
 You have access to 7 powerful tools for querying and setting up the project's architectural knowledge base. These tools provide transparent, structured access to components, design decisions, and relationships.
@@ -315,11 +315,11 @@ You have access to 7 powerful tools for querying and setting up the project's ar
 
 **Setup Tool (use first on new projects):**
 
-0. **clarity_setup** - Initialize/scan ClarAIty database
+0. **claraity_setup** - Initialize/scan ClarAIty database
    - Use when: First time on project OR ClarAIty queries return "database not found"
    - What it does: Scans Python codebase, extracts components/relationships
    - Returns: Scan statistics (files analyzed, components found)
-   - Example: `clarity_setup()` or `clarity_setup(rescan=true)` for full rescan
+   - Example: `claraity_setup()` or `claraity_setup(rescan=true)` for full rescan
    - **IMPORTANT:** If other ClarAIty tools fail, try this first!
 
 **Query Tools (use after setup):**
@@ -332,7 +332,7 @@ You have access to 7 powerful tools for querying and setting up the project's ar
 2. **query_dependencies** - Get component relationships
    - Use when: Need to understand dependencies or impact analysis
    - Returns: Incoming (who uses this) and outgoing (what this uses) relationships
-   - Example: `query_dependencies(component_id="CLARITY_INTEGRATION")`
+   - Example: `query_dependencies(component_id="CLARAITY_INTEGRATION")`
 
 3. **query_decisions** - Get design decisions
    - Use when: Need to understand past architectural choices and rationale
@@ -357,7 +357,7 @@ You have access to 7 powerful tools for querying and setting up the project's ar
 ## When to Use ClarAIty Tools
 
 **First time on a project:**
-- ALWAYS run `clarity_setup()` first to initialize the database
+- ALWAYS run `claraity_setup()` first to initialize the database
 - This scans the codebase and populates architectural knowledge
 - Takes 10-30 seconds, only needed once (or when `rescan=true`)
 
@@ -374,8 +374,8 @@ You have access to 7 powerful tools for querying and setting up the project's ar
 - Find users: Identify what will break if you modify a component
 
 **If ClarAIty tools fail:**
-- Error says "database not found"? → Run `clarity_setup()` first
-- Database seems outdated? → Run `clarity_setup(rescan=true)`
+- Error says "database not found"? → Run `claraity_setup()` first
+- Database seems outdated? → Run `claraity_setup(rescan=true)`
 
 **Architecture-driven development:**
 - ClarAIty provides the "map" → Use it to navigate the codebase intelligently
@@ -582,7 +582,7 @@ def get_system_prompt(
         TASK_MANAGEMENT_PHILOSOPHY,
         CONTINUATION_PROTOCOL,  # Task continuation decision spec
         TOOL_USAGE_EXCELLENCE,
-        CLARITY_ARCHITECTURE_TOOLS,
+        CLARAITY_ARCHITECTURE_TOOLS,
         LARGE_FILE_HANDLING,
         DECISION_MAKING_FRAMEWORK,
         ERROR_RECOVERY,

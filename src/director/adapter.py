@@ -86,7 +86,7 @@ class DirectorAdapter:
         are allowed -- zero impact on normal agent behavior.
 
         Special case: write_file is allowed in PLAN phase ONLY for
-        .clarity/plans/ paths (so the LLM can write its plan document).
+        .claraity/plans/ paths (so the LLM can write its plan document).
 
         Args:
             tool_name: Name of the tool being called
@@ -111,7 +111,7 @@ class DirectorAdapter:
             file_path = tool_args.get("file_path", "")
             # Normalize path separators for cross-platform
             normalized = file_path.replace("\\", "/")
-            if ".clarity/plans/" in normalized:
+            if ".claraity/plans/" in normalized:
                 logger.debug(
                     "director_write_allowed_for_plan_doc",
                     path=file_path,

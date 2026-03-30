@@ -10,6 +10,9 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import type { WebViewMessage } from "../types";
 
+/** Sentinel value used to display dots in a password field without storing the real key. */
+const KEY_STORED_SENTINEL = "__stored__";
+
 interface ConfigPanelProps {
   postMessage: (msg: WebViewMessage) => void;
   onBack: () => void;
@@ -28,34 +31,41 @@ interface ConfigPanelProps {
 interface ConfigSnapshot {
   backend: string;
   baseUrl: string;
-  apiKey: string;
   hasApiKey: boolean;
   model: string;
   temperature: number;
   maxTokens: number;
   contextWindow: number;
   thinkingBudget: string;
-  searchKey: string;
   hasSearchKey: boolean;
   subagentModels: Record<string, string>;
+  enrichmentModel: string;
+  enrichmentSystemPrompt: string;
+  enrichmentDefaultPrompt: string;
 }
 
 function snapshotEqual(a: ConfigSnapshot, b: ConfigSnapshot): boolean {
   if (
     a.backend !== b.backend ||
     a.baseUrl !== b.baseUrl ||
-    a.apiKey !== b.apiKey ||
     a.model !== b.model ||
     a.temperature !== b.temperature ||
     a.maxTokens !== b.maxTokens ||
     a.contextWindow !== b.contextWindow ||
     a.thinkingBudget !== b.thinkingBudget ||
-    a.searchKey !== b.searchKey
+    a.enrichmentModel !== b.enrichmentModel ||
+    a.enrichmentSystemPrompt !== b.enrichmentSystemPrompt
   ) return false;
-  const aKeys = Object.keys(a.subagentModels).sort();
-  const bKeys = Object.keys(b.subagentModels).sort();
-  if (aKeys.join(",") !== bKeys.join(",")) return false;
-  return aKeys.every((k) => a.subagentModels[k] === b.subagentModels[k]);
+  // Treat a missing key and an empty-string value as equivalent —
+  // the server strips empty subagent entries, so {} and {"code-reviewer": ""}
+  // mean the same thing (no override set).
+  const allKeys = new Set([
+    ...Object.keys(a.subagentModels),
+    ...Object.keys(b.subagentModels),
+  ]);
+  return [...allKeys].every(
+    (k) => (a.subagentModels[k] || "") === (b.subagentModels[k] || "")
+  );
 }
 
 /** Parse raw server config into a typed ConfigSnapshot. */
@@ -63,18 +73,25 @@ function parseSnapshot(cfg: Record<string, unknown>): ConfigSnapshot {
   return {
     backend: typeof cfg.backend_type === "string" ? cfg.backend_type : "openai",
     baseUrl: typeof cfg.base_url === "string" ? cfg.base_url : "",
-    apiKey: typeof cfg.api_key === "string" ? cfg.api_key : "",
     hasApiKey: !!cfg.has_api_key,
     model: typeof cfg.model === "string" ? cfg.model : "",
     temperature: cfg.temperature != null ? Number(cfg.temperature) : 0.2,
     maxTokens: cfg.max_tokens != null ? Number(cfg.max_tokens) : 16384,
     contextWindow: cfg.context_window != null ? Number(cfg.context_window) : 131072,
     thinkingBudget: cfg.thinking_budget != null ? String(cfg.thinking_budget) : "",
-    searchKey: typeof cfg.search_key === "string" ? cfg.search_key : "",
     hasSearchKey: !!cfg.has_search_key,
     subagentModels: (cfg.subagent_models != null && typeof cfg.subagent_models === "object")
       ? { ...(cfg.subagent_models as Record<string, string>) }
       : {},
+    enrichmentModel: typeof (cfg.prompt_enrichment as Record<string, unknown>)?.model === "string"
+      ? (cfg.prompt_enrichment as Record<string, unknown>).model as string
+      : "",
+    enrichmentSystemPrompt: typeof (cfg.prompt_enrichment as Record<string, unknown>)?.system_prompt === "string"
+      ? (cfg.prompt_enrichment as Record<string, unknown>).system_prompt as string
+      : "",
+    enrichmentDefaultPrompt: typeof (cfg.prompt_enrichment as Record<string, unknown>)?.default_system_prompt === "string"
+      ? (cfg.prompt_enrichment as Record<string, unknown>).default_system_prompt as string
+      : "",
   };
 }
 
@@ -107,22 +124,19 @@ export function ConfigPanel({
   const [subagentModels, setSubagentModels] = useState<Record<string, string>>({});
   const [showSubagents, setShowSubagents] = useState(true);
   const [sameModel, setSameModel] = useState(false);
+  const [enrichmentModel, setEnrichmentModel] = useState("");
+  const [enrichmentSystemPrompt, setEnrichmentSystemPrompt] = useState("");
+  const [enrichmentDefaultPrompt, setEnrichmentDefaultPrompt] = useState("");
+  const [showEnrichment, setShowEnrichment] = useState(true);
+  const [enrichmentDropdownOpen, setEnrichmentDropdownOpen] = useState(false);
   const [fetchStatus, setFetchStatus] = useState("");
 
   // ── Save / notification state ────────────────────────────────────────────────
   const [isSaving, setIsSaving] = useState(false);
   const [notificationDismissed, setNotificationDismissed] = useState(false);
 
-  // Ref mirror of isSaving so the configNotification effect always reads the
-  // current value without needing isSaving in its dependency array (which would
-  // cause it to re-run and reset the dismiss timer on unrelated renders).
-  const isSavingRef = useRef(false);
-  useEffect(() => { isSavingRef.current = isSaving; }, [isSaving]);
-
   // Last snapshot committed to disk — basis for dirty-checking and cancel reset.
   const savedSnapshot = useRef<ConfigSnapshot | null>(null);
-  // Snapshot captured at the moment Save is clicked — committed only on success.
-  const pendingSnapshot = useRef<ConfigSnapshot | null>(null);
 
   // ── Typeahead state ──────────────────────────────────────────────────────────
   const [modelListOpen, setModelListOpen] = useState(false);
@@ -135,81 +149,74 @@ export function ConfigPanel({
     postMessage({ type: "getConfig" });
   }, [postMessage]);
 
-  // Apply incoming configData only when safe: not dirty and not mid-save.
-  // This prevents a background CONFIG_LOADED from overwriting in-progress edits
-  // or an in-flight save from being displaced before its ACK arrives.
-  const isDirtyRef = useRef(false);
+  // Apply incoming configData — hydrates the form and resets the dirty baseline.
+  // Skipped while a save is in flight so the ACK-triggered re-request doesn't
+  // overwrite the form mid-save.
   useEffect(() => {
     if (!configData) return;
-    if (isSavingRef.current || isDirtyRef.current) return;
+    if (isSaving) return;
     const snap = parseSnapshot(configData);
     savedSnapshot.current = snap;
     applySnapshot(snap);
-  }, [configData]); // isSaving / isDirty intentionally read via refs, not deps
+  }, [configData, isSaving]);
 
   /** Apply a snapshot to all form fields (shared by hydration and cancel). */
   function applySnapshot(snap: ConfigSnapshot) {
     setBackend(snap.backend);
     setBaseUrl(snap.baseUrl);
-    setApiKey(snap.apiKey);
     setHasApiKey(snap.hasApiKey);
+    setApiKey(snap.hasApiKey ? KEY_STORED_SENTINEL : "");
     setModel(snap.model);
     setTemperature(snap.temperature);
     setMaxTokens(snap.maxTokens);
     setContextWindow(snap.contextWindow);
     setThinkingBudget(snap.thinkingBudget);
-    setSearchKey(snap.searchKey);
     setHasSearchKey(snap.hasSearchKey);
+    setSearchKey(snap.hasSearchKey ? KEY_STORED_SENTINEL : "");
     setSubagentModels({ ...snap.subagentModels });
     setSameModel(deriveSameModel(snap, configSubagentNames));
+    setEnrichmentModel(snap.enrichmentModel);
+    setEnrichmentSystemPrompt(snap.enrichmentSystemPrompt);
+    setEnrichmentDefaultPrompt(snap.enrichmentDefaultPrompt);
     setFetchStatus("");
   }
 
   // ── Round-trip completion ────────────────────────────────────────────────────
-  // configNotification is the sole signal that the save completed.
-  // isSavingRef avoids a stale closure without adding isSaving to the dep array
-  // (which would incorrectly re-run the dismiss timer whenever saving changes).
+  // When the server ACKs the save, clear the saving state and re-request the
+  // config. The fresh config_loaded response will rehydrate savedSnapshot from
+  // the actual persisted values, which resets the dirty baseline correctly.
   useEffect(() => {
     if (!configNotification) return;
     setNotificationDismissed(false);
-
-    if (isSavingRef.current) {
-      setIsSaving(false);
-      if (configNotification.success && pendingSnapshot.current) {
-        // Commit only on confirmed success; on error the form stays dirty so
-        // the user can see what failed and retry.
-        savedSnapshot.current = pendingSnapshot.current;
-      }
-      pendingSnapshot.current = null;
+    setIsSaving(false);
+    if (configNotification.success) {
+      postMessage({ type: "getConfig" });
     }
-
     const timer = setTimeout(() => setNotificationDismissed(true), 4000);
     return () => clearTimeout(timer);
-  }, [configNotification]);
+  }, [configNotification, postMessage]);
 
   // ── Dirty tracking ───────────────────────────────────────────────────────────
   const currentSnapshot = useMemo<ConfigSnapshot>(() => ({
     backend,
     baseUrl,
-    apiKey,
     hasApiKey,
     model,
     temperature,
     maxTokens,
     contextWindow,
     thinkingBudget,
-    searchKey,
     hasSearchKey,
     subagentModels,
-  }), [backend, baseUrl, apiKey, hasApiKey, model, temperature, maxTokens, contextWindow, thinkingBudget, searchKey, hasSearchKey, subagentModels]);
+    enrichmentModel,
+    enrichmentSystemPrompt,
+    enrichmentDefaultPrompt,
+  }), [backend, baseUrl, hasApiKey, model, temperature, maxTokens, contextWindow, thinkingBudget, hasSearchKey, subagentModels, enrichmentModel, enrichmentSystemPrompt, enrichmentDefaultPrompt]);
 
   const isDirty = useMemo(() => {
     if (!savedSnapshot.current) return false;
     return !snapshotEqual(currentSnapshot, savedSnapshot.current);
   }, [currentSnapshot]);
-
-  // Keep ref in sync so the configData hydration effect can read it safely.
-  useEffect(() => { isDirtyRef.current = isDirty; }, [isDirty]);
 
   // ── Backend change ───────────────────────────────────────────────────────────
   const handleBackendChange = useCallback((val: string) => {
@@ -225,7 +232,7 @@ export function ConfigPanel({
       type: "listModels",
       backend,
       base_url: baseUrl,
-      api_key: apiKey || "__use_stored__",
+      api_key: (apiKey && apiKey !== KEY_STORED_SENTINEL) ? apiKey : "__use_stored__",
     });
   }, [backend, baseUrl, apiKey, postMessage]);
 
@@ -274,6 +281,14 @@ export function ConfigPanel({
     );
   }, [sameModel, model, configSubagentNames]);
 
+  // ── Enrichment model typeahead ───────────────────────────────────────────────
+  const filteredEnrichmentModels = useMemo(() => {
+    const all = configModels?.models ?? [];
+    if (all.length === 0) return [];
+    const query = enrichmentModel.toLowerCase().trim();
+    return query ? all.filter((m) => m.toLowerCase().includes(query)) : all;
+  }, [configModels, enrichmentModel]);
+
   // ── Subagent typeahead ───────────────────────────────────────────────────────
   const filteredSubagentModels = useCallback((name: string) => {
     const all = configModels?.models ?? [];
@@ -297,24 +312,27 @@ export function ConfigPanel({
       ...currentSnapshot,
       subagentModels: saModels, // normalized: empty entries stripped
     };
-    pendingSnapshot.current = snap;
     setIsSaving(true);
 
-    postMessage({
-      type: "saveConfig",
-      config: {
-        backend_type: snap.backend,
-        base_url: snap.baseUrl,
-        api_key: snap.apiKey,
-        model: snap.model,
-        temperature: snap.temperature,
-        max_tokens: snap.maxTokens,
-        context_window: snap.contextWindow,
-        thinking_budget: snap.thinkingBudget || null,
-        subagent_models: snap.subagentModels,
-        search_key: snap.searchKey,
-      },
-    });
+    // Keys are write-only: only include them if the user typed a new value.
+    // Empty field means "no change" — the server keeps the existing stored key.
+    const payload: Record<string, unknown> = {
+      backend_type: snap.backend,
+      base_url: snap.baseUrl,
+      model: snap.model,
+      temperature: snap.temperature,
+      max_tokens: snap.maxTokens,
+      context_window: snap.contextWindow,
+      thinking_budget: snap.thinkingBudget || null,
+      subagent_models: snap.subagentModels,
+    };
+    if (apiKey && apiKey !== KEY_STORED_SENTINEL) { payload.api_key = apiKey; }
+    if (searchKey && searchKey !== KEY_STORED_SENTINEL) { payload.search_key = searchKey; }
+    payload.prompt_enrichment = {
+      model: enrichmentModel.trim(),
+      system_prompt: enrichmentSystemPrompt.trim(),
+    };
+    postMessage({ type: "saveConfig", config: payload });
   }, [currentSnapshot, subagentModels, configSubagentNames, postMessage]);
 
   // ── Cancel ───────────────────────────────────────────────────────────────────
@@ -401,7 +419,9 @@ export function ConfigPanel({
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder="sk-..."
+              onFocus={() => { if (apiKey === KEY_STORED_SENTINEL) setApiKey(""); }}
+              onBlur={() => { if (apiKey === "" && hasApiKey) setApiKey(KEY_STORED_SENTINEL); }}
+              placeholder="Enter new key to update"
             />
           </Field>
 
@@ -513,7 +533,9 @@ export function ConfigPanel({
                 type="password"
                 value={searchKey}
                 onChange={(e) => setSearchKey(e.target.value)}
-                placeholder="tvly-..."
+                onFocus={() => { if (searchKey === KEY_STORED_SENTINEL) setSearchKey(""); }}
+                onBlur={() => { if (searchKey === "" && hasSearchKey) setSearchKey(KEY_STORED_SENTINEL); }}
+                placeholder="Enter new key to update"
               />
             </Field>
           </div>
@@ -600,6 +622,99 @@ export function ConfigPanel({
               )}
             </div>
           )}
+
+          {/* Prompt Enrichment */}
+          <div className="settings-section">
+            <button
+              className="disclosure-row"
+              onClick={() => setShowEnrichment(!showEnrichment)}
+            >
+              <i className={`codicon codicon-chevron-${showEnrichment ? "down" : "right"}`} />
+              <span className="settings-section-label" style={{ margin: 0 }}>Prompt Enrichment</span>
+            </button>
+            {showEnrichment && (
+              <div style={{ paddingLeft: 8, paddingTop: 4 }}>
+                <Field label="Model">
+                  <div style={{ position: "relative" }}>
+                    <div className="model-input-wrap">
+                      <input
+                        className="form-input"
+                        type="text"
+                        value={enrichmentModel}
+                        onChange={(e) => {
+                          setEnrichmentModel(e.target.value);
+                          if (hasModels) setEnrichmentDropdownOpen(true);
+                        }}
+                        onFocus={() => { if (hasModels) setEnrichmentDropdownOpen(true); }}
+                        onBlur={() => setTimeout(() => setEnrichmentDropdownOpen(false), 200)}
+                        placeholder="(inherit from main model)"
+                      />
+                      {enrichmentModel && (
+                        <button
+                          className="model-clear-btn"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            setEnrichmentModel("");
+                            if (hasModels) setEnrichmentDropdownOpen(true);
+                          }}
+                          tabIndex={-1}
+                          title="Clear"
+                        >
+                          <i className="codicon codicon-close" />
+                        </button>
+                      )}
+                    </div>
+                    {enrichmentDropdownOpen && filteredEnrichmentModels.length > 0 && (
+                      <div
+                        className="model-list sa-typeahead"
+                        onMouseDown={(e) => e.preventDefault()}
+                      >
+                        {filteredEnrichmentModels.map((m) => (
+                          <div
+                            key={m}
+                            className={`model-list-item${enrichmentModel === m ? " selected" : ""}`}
+                            onClick={() => {
+                              setEnrichmentModel(m);
+                              setEnrichmentDropdownOpen(false);
+                            }}
+                            style={enrichmentModel === m ? {
+                              background: "var(--vscode-list-activeSelectionBackground)",
+                              color: "var(--vscode-list-activeSelectionForeground)",
+                            } : undefined}
+                          >
+                            {m}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </Field>
+                <Field label={
+                  <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    Enrichment Prompt
+                    {enrichmentSystemPrompt && (
+                      <button
+                        className="model-clear-btn"
+                        title="Reset to default"
+                        onClick={() => setEnrichmentSystemPrompt("")}
+                        tabIndex={-1}
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </span>
+                }>
+                  <textarea
+                    className="form-textarea"
+                    value={enrichmentSystemPrompt}
+                    rows={6}
+                    onChange={(e) => setEnrichmentSystemPrompt(e.target.value)}
+                    placeholder={enrichmentDefaultPrompt || "(use built-in default)"}
+                  />
+                </Field>
+              </div>
+            )}
+          </div>
 
         </fieldset>
       </div>

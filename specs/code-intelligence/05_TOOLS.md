@@ -675,7 +675,7 @@ class LoadSmartContextTool(BaseTool):
             output = f"[SMART CONTEXT]\n"
             output += f"Query Type: {context.query_type}\n"
             output += f"Tokens: {context.token_count} / {max_tokens}\n"
-            output += f"Sources: ClarAIty={context.sources['clarity']}, "
+            output += f"Sources: ClarAIty={context.sources['claraity']}, "
             output += f"RAG={context.sources['rag']}, LSP={context.sources['lsp']}\n\n"
             output += context.full_context
 
@@ -710,7 +710,7 @@ CODE_INTELLIGENCE_SCHEMAS = [
 # Update ALL_TOOLS
 ALL_TOOLS = [
     *FILE_OPERATION_SCHEMAS,
-    *CLARITY_SCHEMAS,
+    *CLARAITY_SCHEMAS,
     *CODE_INTELLIGENCE_SCHEMAS,  # NEW
     # ... other tools
 ]

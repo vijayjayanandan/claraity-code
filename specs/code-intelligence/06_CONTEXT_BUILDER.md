@@ -33,7 +33,7 @@ memory: 35%
 # New token allocation
 system_prompt: 15%  (unchanged)
 task: 10%          # Reduced (less task description needed)
-clarity: 10%       # NEW - Component architecture
+claraity: 10%       # NEW - Component architecture
 rag: 20%           # Reduced (precision from LSP reduces need)
 lsp: 20%           # NEW - Symbol-level precision
 memory: 25%        # Reduced (smarter context = less memory needed)
@@ -166,7 +166,7 @@ async def build_context(
             f"{smart_context.query_type} query"
         )
         self.logger.debug(
-            f"Sources: ClarAIty={smart_context.sources['clarity']}, "
+            f"Sources: ClarAIty={smart_context.sources['claraity']}, "
             f"RAG={smart_context.sources['rag']}, "
             f"LSP={smart_context.sources['lsp']}"
         )
@@ -329,7 +329,7 @@ async def test_build_context_with_orchestrator():
     orchestrator.load_smart_context = AsyncMock(return_value=SmartContext(
         full_context="[CLARAITY] ...\n[LSP] ...\n[RAG] ...",
         token_count=1500,
-        sources={"clarity": 300, "rag": 500, "lsp": 700},
+        sources={"claraity": 300, "rag": 500, "lsp": 700},
         query_type="SYMBOLIC",
         metadata={}
     ))

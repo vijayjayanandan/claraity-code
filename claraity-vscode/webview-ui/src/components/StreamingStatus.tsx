@@ -10,6 +10,7 @@ import type { ToolStateData } from "../types";
 
 interface StreamingStatusProps {
   isStreaming: boolean;
+  isCompacting: boolean;
   currentThinking: { content: string; open: boolean } | null;
   toolCards: Record<string, ToolStateData>;
   todos: unknown[];
@@ -28,6 +29,7 @@ function formatElapsed(seconds: number): string {
 
 export function StreamingStatus({
   isStreaming,
+  isCompacting,
   currentThinking,
   toolCards,
   todos,
@@ -57,10 +59,12 @@ export function StreamingStatus({
 
   if (!isStreaming) return null;
 
-  // Derive status text: thinking > running tool > activeForm > default
+  // Derive status text: compacting > thinking > running tool > activeForm > default
   let statusText = "Streaming...";
 
-  if (currentThinking) {
+  if (isCompacting) {
+    statusText = "Compacting conversation...";
+  } else if (currentThinking) {
     statusText = "Thinking...";
   } else {
     // Find the most recent running tool

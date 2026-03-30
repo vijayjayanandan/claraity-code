@@ -25,9 +25,9 @@ from src.session.models.message import ToolCall, ToolCallFunction
 # ---------------------------------------------------------------------------
 
 def _load_api_config() -> Dict[str, Any]:
-    """Load API config from .clarity/config.yaml + credential_store, like the real agent."""
+    """Load API config from .claraity/config.yaml + credential_store, like the real agent."""
     project_root = Path(__file__).resolve().parent.parent.parent
-    config_path = project_root / ".clarity" / "config.yaml"
+    config_path = project_root / ".claraity" / "config.yaml"
 
     if config_path.exists():
         with open(config_path, "r") as f:
@@ -74,7 +74,7 @@ def _has_valid_api() -> bool:
 # Skip marker for tests requiring a real API
 requires_api = pytest.mark.skipif(
     not _has_valid_api(),
-    reason="No API key or base_url configured (need .clarity/config.yaml or env vars)",
+    reason="No API key or base_url configured (need .claraity/config.yaml or env vars)",
 )
 
 

@@ -17,7 +17,7 @@ import uuid
 from pathlib import Path
 from datetime import datetime
 
-DB_PATH = Path(".clarity/ai-coding-agent.db")
+DB_PATH = Path(".claraity/ai-coding-agent.db")
 
 
 def generate_id(prefix: str) -> str:
@@ -654,7 +654,7 @@ def main():
         print(f"  Implementation patterns added: {pattern_count}")
 
         print(f"\n[NEXT STEP] Implement GetImplementationSpecTool")
-        print(f"Add to: src/tools/clarity_tools.py")
+        print(f"Add to: src/tools/claraity_tools.py")
 
         return 0
 

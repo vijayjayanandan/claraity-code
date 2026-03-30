@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from src.claraity.claraity_db import (
-    ClarityStore,
+    ClaraityStore,
     render_compact_briefing,
     render_module_detail,
     render_file_detail,
@@ -20,10 +20,10 @@ from src.claraity.claraity_db import (
 
 @pytest.fixture
 def temp_store():
-    """Create a ClarityStore with a temporary DB."""
+    """Create a ClaraityStore with a temporary DB."""
     temp_dir = tempfile.mkdtemp()
     db_path = Path(temp_dir) / "test_knowledge.db"
-    store = ClarityStore(str(db_path))
+    store = ClaraityStore(str(db_path))
     yield store
     store.close()
     shutil.rmtree(temp_dir)
@@ -92,8 +92,8 @@ def populated_store(temp_store):
 # Schema & CRUD Tests
 # =============================================================================
 
-class TestClarityStore:
-    """Test ClarityStore basic operations."""
+class TestClaraityStore:
+    """Test ClaraityStore basic operations."""
 
     def test_create_store(self, temp_store):
         assert temp_store.conn is not None or temp_store.db_path.exists()
@@ -160,13 +160,13 @@ class TestClarityStore:
         assert "uses" in stats["edge_types"]
 
     def test_make_id_deterministic(self):
-        id1 = ClarityStore._make_id("e", "a:b:uses")
-        id2 = ClarityStore._make_id("e", "a:b:uses")
+        id1 = ClaraityStore._make_id("e", "a:b:uses")
+        id2 = ClaraityStore._make_id("e", "a:b:uses")
         assert id1 == id2
 
     def test_make_id_different_inputs(self):
-        id1 = ClarityStore._make_id("e", "a:b:uses")
-        id2 = ClarityStore._make_id("e", "a:c:uses")
+        id1 = ClaraityStore._make_id("e", "a:b:uses")
+        id2 = ClaraityStore._make_id("e", "a:c:uses")
         assert id1 != id2
 
     def test_close_and_reopen(self, temp_store):
@@ -175,7 +175,7 @@ class TestClarityStore:
         temp_store.close()
 
         # Reopen
-        store2 = ClarityStore(db_path)
+        store2 = ClaraityStore(db_path)
         nodes = store2.get_all_nodes()
         assert len(nodes) == 1
         assert nodes[0]["name"] == "Persisted"

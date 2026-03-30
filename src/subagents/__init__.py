@@ -18,7 +18,7 @@ Example:
     >>> from src.core.agent import CodingAgent
     >>>
     >>> # Load configuration
-    >>> config = SubAgentConfig.from_file(Path(".clarity/agents/code-reviewer.md"))
+    >>> config = SubAgentConfig.from_file(Path(".claraity/agents/code-reviewer.md"))
     >>>
     >>> # Create subagent
     >>> main_agent = CodingAgent()

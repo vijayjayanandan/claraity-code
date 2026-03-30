@@ -68,8 +68,8 @@ flowchart TB
 
   SAM -->|loads configs| CFG[SubAgentConfigLoader]
   CFG -->|"1. built-in (highest)"| BUILTIN[src/prompts/subagents/*.py]
-  CFG -->|"2. user (legacy)"| USER[~/.clarity/agents/*.md]
-  CFG -->|"3. project (legacy)"| PROJ[.clarity/agents/*.md]
+  CFG -->|"2. user (legacy)"| USER[~/.claraity/agents/*.md]
+  CFG -->|"3. project (legacy)"| PROJ[.claraity/agents/*.md]
 
   TE --> DTool[delegate_to_subagent tool]
   DTool -->|sync: in-process| SA[SubAgent]
@@ -191,8 +191,8 @@ sequenceDiagram
 **Where they live (3-tier priority):**
 
 1. **Built-in Python prompts:** `src/prompts/subagents/*.py` (highest priority, always wins)
-2. **User-level:** `~/.clarity/agents/*.md` (legacy/deprecated, cannot override built-in)
-3. **Project-level:** `.clarity/agents/*.md` (legacy/deprecated, can override user but not built-in)
+2. **User-level:** `~/.claraity/agents/*.md` (legacy/deprecated, cannot override built-in)
+3. **Project-level:** `.claraity/agents/*.md` (legacy/deprecated, can override user but not built-in)
 
 > Note: The markdown format (YAML frontmatter + markdown body) is considered legacy. The primary configs for `code-reviewer`, `test-writer`, and `doc-writer` are Python constants in `src/prompts/subagents/`. Custom subagents can still use the markdown format in tiers 2 and 3.
 
@@ -251,7 +251,7 @@ Subagents isolate context in multiple layers:
    - `SubAgent._build_context(...)` constructs messages starting from the subagent's system prompt and the task description.
    - The subagent does *not* reuse the main agent's entire conversation history.
 3. **Separate transcript persistence**
-   - Each execution writes to `.clarity/sessions/subagents/<name>-<session_id>.jsonl`.
+   - Each execution writes to `.claraity/sessions/subagents/<name>-<session_id>.jsonl`.
 
 **Analogy:** separate notebooks per specialist so notes don't get mixed.
 
@@ -331,7 +331,7 @@ Subagents support cooperative cancellation via `CancelToken`:
 ### Why config-as-markdown (legacy) + Python constants (primary)?
 
 - **Editable by humans and LLMs:** YAML frontmatter for structure + markdown body for the system prompt.
-- **Project override:** legacy `.clarity/agents` configs can add custom subagents beyond the built-ins.
+- **Project override:** legacy `.claraity/agents` configs can add custom subagents beyond the built-ins.
 - **Python constants:** Built-in prompts in `src/prompts/subagents/` are versioned with the code and cannot be accidentally overridden.
 
 ### Why two execution modes (in-process + subprocess)?
@@ -363,7 +363,7 @@ Checks:
 
 - Ensure `SubAgentManager.discover_subagents()` ran (agent init typically calls it).
 - For built-in subagents: verify `src/prompts/subagents/` has the corresponding Python module.
-- For custom subagents: verify configs exist in `.clarity/agents/*.md` or `~/.clarity/agents/*.md`.
+- For custom subagents: verify configs exist in `.claraity/agents/*.md` or `~/.claraity/agents/*.md`.
 - Confirm the `name:` field matches what you pass to the tool.
 - Remember: built-in names cannot be overridden by markdown configs.
 
@@ -418,7 +418,7 @@ Where to look:
 
 ### 6.5 Transcript / persistence debugging
 
-- Subagent transcripts: `.clarity/sessions/subagents/*.jsonl`
+- Subagent transcripts: `.claraity/sessions/subagents/*.jsonl`
 - Each subagent run has a unique `session_id` included in `SubAgentResult.metadata`.
 
 Where to look:

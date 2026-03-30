@@ -165,7 +165,7 @@ class DirectorCompleteUnderstandTool(Tool):
 class DirectorCompletePlanTool(Tool):
     """Checkpoint for the PLAN phase.
 
-    Called by the LLM after it writes a plan document to .clarity/plans/.
+    Called by the LLM after it writes a plan document to .claraity/plans/.
     Transitions PLAN -> AWAITING_APPROVAL.
     """
 
@@ -176,7 +176,7 @@ class DirectorCompletePlanTool(Tool):
             description=(
                 "Signal that the PLAN phase is complete. "
                 "BEFORE calling this, write your full plan (with rationale, "
-                "decisions, trade-offs) to .clarity/plans/director_plan.md "
+                "decisions, trade-offs) to .claraity/plans/director_plan.md "
                 "using write_file. Then call this with the file path and "
                 "a list of slice titles for execution tracking."
             ),
@@ -211,7 +211,7 @@ class DirectorCompletePlanTool(Tool):
                 output=None,
                 error=(
                     "plan_document is required. First write your full plan to "
-                    ".clarity/plans/director_plan.md using write_file, then "
+                    ".claraity/plans/director_plan.md using write_file, then "
                     "call this tool with the file path."
                 ),
             )
@@ -338,7 +338,7 @@ class DirectorCompletePlanTool(Tool):
             "properties": {
                 "plan_document": {
                     "type": "string",
-                    "description": "Path to the markdown plan file (e.g. .clarity/plans/director_plan.md)",
+                    "description": "Path to the markdown plan file (e.g. .claraity/plans/director_plan.md)",
                 },
                 "summary": {
                     "type": "string",

@@ -40,6 +40,10 @@ export interface ToolStateData {
     original_content: string;
     modified_content: string;
   };
+  /** Cumulative tokens consumed by the subagent (across all LLM calls). */
+  cumulative_tokens?: number;
+  /** Prompt tokens from the subagent's most recent LLM call. */
+  context_tokens?: number;
 }
 
 export interface MessageData {
@@ -167,6 +171,21 @@ export interface ArchitectureResponse {
 }
 
 // ============================================================================
+// Background task data shapes
+// ============================================================================
+
+export interface BackgroundTaskData {
+  task_id: string;
+  command: string;
+  description: string;
+  status: "running" | "completed" | "failed" | "timed_out" | "cancelled";
+  elapsed_seconds: number;
+  exit_code?: number | null;
+  stdout?: string;
+  stderr?: string;
+}
+
+// ============================================================================
 // Subagent data shapes
 // ============================================================================
 
@@ -251,8 +270,8 @@ export type ServerMessage =
   | { type: "thinking_end" }
   | { type: "file_read"; file_path: string; content?: string }
   | { type: "context_updated"; used: number; limit: number; iteration?: number }
-  | { type: "context_compacting" }
-  | { type: "context_compacted"; old_tokens: number; new_tokens: number }
+  | { type: "context_compacting"; tokens_before: number }
+  | { type: "context_compacted"; messages_removed: number; tokens_before: number; tokens_after: number }
   // Interactive
   | { type: "interactive"; event: "clarify_request"; data: { uuid: string; call_id: string; questions: unknown[]; context?: string } }
   | { type: "interactive"; event: "plan_submitted"; data: { uuid: string; call_id: string; plan_hash: string; excerpt: string; truncated: boolean; plan_path?: string } }
@@ -262,12 +281,13 @@ export type ServerMessage =
   | { type: "pause_prompt_start"; reason: string; reason_code: string; stats: Record<string, unknown>; pending_todos?: string[] }
   | { type: "pause_prompt_end"; continue_work: boolean; feedback?: string | null }
   // Subagent
-  | { type: "subagent"; event: "registered"; data: { subagent_id: string; parent_tool_call_id: string; model_name: string; subagent_name: string; transcript_path: string } }
+  | { type: "subagent"; event: "registered"; data: { subagent_id: string; parent_tool_call_id: string; model_name: string; subagent_name: string; transcript_path: string; context_window?: number } }
   | { type: "subagent"; event: "unregistered"; data: { subagent_id: string } }
   // Misc
-  | { type: "session_info"; session_id: string; model_name: string; permission_mode: string; working_directory: string; auto_approve_categories?: Record<string, boolean> }
+  | { type: "session_info"; session_id: string; model_name: string; permission_mode: string; working_directory: string; auto_approve_categories?: Record<string, boolean>; limits?: LimitsData }
   | { type: "error"; error_type: string; user_message: string; recoverable: boolean }
   | { type: "todos_updated"; todos: unknown[] }
+  | { type: "background_tasks_updated"; tasks: BackgroundTaskData[] }
   | { type: "config_loaded"; [key: string]: unknown }
   | { type: "models_list"; [key: string]: unknown }
   | { type: "config_saved"; [key: string]: unknown }
@@ -276,6 +296,7 @@ export type ServerMessage =
   | { type: "limits_saved"; success: boolean; message: string; limits?: LimitsData }
   | { type: "sessions_list"; sessions: SessionSummary[] }
   | { type: "session_history"; messages: ReplayMessage[] }
+  | { type: "session_deleted"; session_id: string; success: boolean; message?: string }
   | { type: "jira_profiles"; profiles: JiraProfile[]; connected_profile: string | null; error?: string }
   | { type: "jira_config_saved"; success: boolean; message: string; profile?: string }
   | { type: "jira_connect_result"; success: boolean; message: string; profile?: string; tool_count?: number }
@@ -295,5 +316,6 @@ export type ServerMessage =
   | { type: "subagent_saved"; success: boolean; name: string; message: string }
   | { type: "subagent_deleted"; success: boolean; name: string; message: string }
   // Prompt Enrichment
-  | { type: "enriched_prompt"; original: string; enriched: string }
+  | { type: "enrichment_delta"; delta: string }
+  | { type: "enrichment_complete"; original: string; enriched: string }
   | { type: "enrichment_error"; message: string };

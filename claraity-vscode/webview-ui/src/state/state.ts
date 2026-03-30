@@ -16,6 +16,7 @@ import type {
   ArchitectureResponse,
   SubAgentInfo,
   LimitsData,
+  BackgroundTaskData,
 } from "../types";
 
 export type { FileAttachment, ImageAttachment };
@@ -31,7 +32,8 @@ export type TimelineEntry =
   | { type: "thinking"; id: string; content: string; tokenCount?: number }
   | { type: "code"; id: string; language: string; content: string }
   | { type: "subagent"; id: string; subagentId: string }
-  | { type: "error"; id: string; message: string };
+  | { type: "error"; id: string; message: string }
+  | { type: "compaction_summary"; id: string; content: string };
 
 // ============================================================================
 // Supporting types
@@ -74,6 +76,12 @@ export interface SubagentInfo {
   messages: string[];
   /** Chronological ordering of text messages and tool cards within the card. */
   timeline: SubagentTimelineEntry[];
+  /** Cumulative tokens consumed across all LLM calls. */
+  totalTokens: number;
+  /** Prompt tokens from the most recent LLM call (current context size). */
+  contextTokens: number;
+  /** Model's context window limit. */
+  contextWindow: number;
 }
 
 // ============================================================================
@@ -95,6 +103,7 @@ export interface AppState {
   // Chat
   messages: ChatMessage[];
   isStreaming: boolean;
+  isCompacting: boolean;
   markdownBuffer: string;
 
   // Timeline — ordered sequence of UI elements
@@ -121,6 +130,9 @@ export interface AppState {
   clarifyRequest: { callId: string; questions: unknown[]; context?: string } | null;
   planApproval: { callId: string; planHash: string; excerpt: string; truncated: boolean; planPath?: string; isDirector?: boolean } | null;
 
+  // Chat input draft — preserved across panel switches
+  chatDraft: string;
+
   // Panels
   activePanel: "chat" | "config" | "jira" | "sessions" | "mcp" | "architecture" | "beads" | "subagents" | null;
   sessions: SessionSummary[];
@@ -136,6 +148,11 @@ export interface AppState {
 
   // Todos
   todos: unknown[];
+
+  // Background tasks
+  backgroundTasks: BackgroundTaskData[];
+  /** Task IDs dismissed by user — prevents re-adding on next server update. */
+  _dismissedBgTasks: Set<string>;
 
   // Input
   attachments: FileAttachment[];
@@ -202,6 +219,7 @@ export const initialState: AppState = {
 
   messages: [],
   isStreaming: false,
+  isCompacting: false,
   markdownBuffer: "",
 
   timeline: [],
@@ -221,6 +239,8 @@ export const initialState: AppState = {
   clarifyRequest: null,
   planApproval: null,
 
+  chatDraft: "",
+
   activePanel: "chat",
   sessions: [],
 
@@ -231,6 +251,8 @@ export const initialState: AppState = {
 
   autoApprove: { read: true, edit: false, execute: false, browser: false, knowledge_update: false, subagent: false },
   todos: [],
+  backgroundTasks: [],
+  _dismissedBgTasks: new Set<string>(),
 
   attachments: [],
   images: [],

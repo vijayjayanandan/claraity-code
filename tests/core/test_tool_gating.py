@@ -203,7 +203,7 @@ class TestNeedsApproval:
         with patch("src.core.plan_mode.is_agent_internal_write", return_value=True):
             result = gating.needs_approval(
                 "write_file",
-                {"file_path": ".clarity/sessions/test.jsonl"}
+                {"file_path": ".claraity/sessions/test.jsonl"}
             )
         assert result is False
 

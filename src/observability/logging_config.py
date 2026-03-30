@@ -244,7 +244,7 @@ def create_json_formatter() -> structlog.stdlib.ProcessorFormatter:
     """
     Create a ProcessorFormatter that renders to JSON lines.
 
-    Used for JSONL file output (.clarity/logs/app.jsonl).
+    Used for JSONL file output (.claraity/logs/app.jsonl).
     """
     return structlog.stdlib.ProcessorFormatter(
         # These processors run on the event_dict extracted from record.msg
@@ -678,7 +678,7 @@ def _install_crash_hooks():
 def configure_logging(
     mode: Literal["cli", "tui"] = "cli",
     log_level: str | None = None,
-    log_dir: str = ".clarity/logs",
+    log_dir: str = ".claraity/logs",
     max_bytes: int = 50 * 1024 * 1024,  # 50MB
     backup_count: int = 5,
 ) -> None:
@@ -688,7 +688,7 @@ def configure_logging(
     All logs go to JSONL file only - NO console output in any mode.
     Console is reserved for user-facing messages via Rich console.print().
 
-    Configuration is loaded from `.clarity/config.yaml` with layered overrides:
+    Configuration is loaded from `.claraity/config.yaml` with layered overrides:
         Environment variables > CLI flags > config.yaml > code defaults
 
     Args:
@@ -707,7 +707,7 @@ def configure_logging(
     process_run_id = str(uuid.uuid4())[:12]
     run_id.set(process_run_id)
 
-    # ---- Load centralized config from .clarity/config.yaml ----
+    # ---- Load centralized config from .claraity/config.yaml ----
     from .log_config_loader import (
         apply_component_levels,
         generate_default_config,

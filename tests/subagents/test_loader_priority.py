@@ -1,9 +1,9 @@
 """Tests for SubAgentConfigLoader priority ordering.
 
 Verifies the load order introduced for configurable subagents:
-  user ~/.clarity/agents/  (lowest)
+  user ~/.claraity/agents/  (lowest)
   built-in Python constants
-  project .clarity/agents/ (highest -- can override built-ins)
+  project .claraity/agents/ (highest -- can override built-ins)
 """
 
 import pytest
@@ -60,7 +60,7 @@ class TestSourceStamping:
             )
 
     def test_project_source_is_stamped(self, tmp_path):
-        project_dir = tmp_path / ".clarity" / "agents"
+        project_dir = tmp_path / ".claraity" / "agents"
         _make_md(project_dir, "custom-agent", "A custom agent", "You are custom.")
 
         loader = SubAgentConfigLoader(working_directory=tmp_path)
@@ -70,7 +70,7 @@ class TestSourceStamping:
         assert configs["custom-agent"].metadata["source"] == "project"
 
     def test_user_source_is_stamped(self, tmp_path):
-        user_dir = tmp_path / "user_home" / ".clarity" / "agents"
+        user_dir = tmp_path / "user_home" / ".claraity" / "agents"
         _make_md(user_dir, "user-agent", "A user agent", "You are a user agent.")
 
         loader = SubAgentConfigLoader(working_directory=tmp_path)
@@ -86,11 +86,11 @@ class TestSourceStamping:
 # ---------------------------------------------------------------------------
 
 class TestProjectOverridesBuiltin:
-    """Project .clarity/agents/ configs must win over built-in Python constants."""
+    """Project .claraity/agents/ configs must win over built-in Python constants."""
 
     def test_project_overrides_builtin_code_reviewer(self, tmp_path):
-        """Forking code-reviewer via .clarity/agents/ replaces the built-in."""
-        project_dir = tmp_path / ".clarity" / "agents"
+        """Forking code-reviewer via .claraity/agents/ replaces the built-in."""
+        project_dir = tmp_path / ".claraity" / "agents"
         _make_md(
             project_dir,
             "code-reviewer",
@@ -116,7 +116,7 @@ class TestProjectOverridesBuiltin:
 
         # Pick the first built-in and override it
         target = sorted(builtin_names)[0]
-        project_dir = tmp_path / ".clarity" / "agents"
+        project_dir = tmp_path / ".claraity" / "agents"
         _make_md(project_dir, target, "Overridden agent", "You are overridden.")
 
         loader = SubAgentConfigLoader(working_directory=tmp_path)
@@ -131,7 +131,7 @@ class TestProjectOverridesBuiltin:
         assert len(builtin_names) > 1, "Need at least 2 built-ins for this test"
 
         target = sorted(builtin_names)[0]
-        project_dir = tmp_path / ".clarity" / "agents"
+        project_dir = tmp_path / ".claraity" / "agents"
         _make_md(project_dir, target, "Overridden", "Overridden prompt.")
 
         loader = SubAgentConfigLoader(working_directory=tmp_path)
@@ -144,7 +144,7 @@ class TestProjectOverridesBuiltin:
 
     def test_project_adds_new_custom_subagent(self, tmp_path):
         """Project dir can also add brand-new subagents not in built-ins."""
-        project_dir = tmp_path / ".clarity" / "agents"
+        project_dir = tmp_path / ".claraity" / "agents"
         _make_md(project_dir, "my-custom-agent", "My custom agent", "You are custom.")
 
         loader = SubAgentConfigLoader(working_directory=tmp_path)
@@ -159,11 +159,11 @@ class TestProjectOverridesBuiltin:
 # ---------------------------------------------------------------------------
 
 class TestBuiltinOverridesUser:
-    """Built-in Python constants must win over user ~/.clarity/agents/."""
+    """Built-in Python constants must win over user ~/.claraity/agents/."""
 
     def test_builtin_beats_user_global(self, tmp_path):
         user_home = tmp_path / "user_home"
-        user_dir = user_home / ".clarity" / "agents"
+        user_dir = user_home / ".claraity" / "agents"
         _make_md(
             user_dir,
             "code-reviewer",
@@ -183,7 +183,7 @@ class TestBuiltinOverridesUser:
     def test_user_global_adds_new_agents(self, tmp_path):
         """User global dir can add new subagents not present in built-ins."""
         user_home = tmp_path / "user_home"
-        user_dir = user_home / ".clarity" / "agents"
+        user_dir = user_home / ".claraity" / "agents"
         _make_md(user_dir, "my-user-agent", "User agent", "You are a user agent.")
 
         loader = SubAgentConfigLoader(working_directory=tmp_path)
@@ -203,8 +203,8 @@ class TestProjectOverridesUser:
 
     def test_project_beats_user_for_custom_agent(self, tmp_path):
         user_home = tmp_path / "user_home"
-        user_dir = user_home / ".clarity" / "agents"
-        project_dir = tmp_path / ".clarity" / "agents"
+        user_dir = user_home / ".claraity" / "agents"
+        project_dir = tmp_path / ".claraity" / "agents"
 
         _make_md(user_dir, "shared-agent", "User version", "User prompt.")
         _make_md(project_dir, "shared-agent", "Project version", "Project prompt.")
@@ -234,8 +234,8 @@ class TestFullPriorityStack:
           - other builtins -> builtin (no override)
         """
         user_home = tmp_path / "user_home"
-        user_dir = user_home / ".clarity" / "agents"
-        project_dir = tmp_path / ".clarity" / "agents"
+        user_dir = user_home / ".claraity" / "agents"
+        project_dir = tmp_path / ".claraity" / "agents"
 
         _make_md(user_dir, "code-reviewer", "User reviewer", "User reviewer prompt.")
         _make_md(user_dir, "user-only-agent", "User only", "User only prompt.")
@@ -276,7 +276,7 @@ class TestReload:
         assert "late-agent" not in configs_before
 
         # Add a new file after initial load
-        project_dir = tmp_path / ".clarity" / "agents"
+        project_dir = tmp_path / ".claraity" / "agents"
         _make_md(project_dir, "late-agent", "Late agent", "You arrived late.")
 
         configs_after = loader.reload()
@@ -289,7 +289,7 @@ class TestReload:
         assert configs_before["code-reviewer"].metadata["source"] == "builtin"
 
         # Fork code-reviewer after initial load
-        project_dir = tmp_path / ".clarity" / "agents"
+        project_dir = tmp_path / ".claraity" / "agents"
         _make_md(project_dir, "code-reviewer", "Forked reviewer", "Forked prompt.")
 
         configs_after = loader.reload()

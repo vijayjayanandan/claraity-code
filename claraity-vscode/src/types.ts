@@ -114,6 +114,11 @@ export interface ResumeSessionPayload {
     session_id: string;
 }
 
+export interface DeleteSessionPayload {
+    type: 'delete_session';
+    session_id: string;
+}
+
 export interface GetJiraProfilesPayload {
     type: 'get_jira_profiles';
 }
@@ -167,6 +172,7 @@ export type ClientMessage =
     | NewSessionPayload
     | ListSessionsPayload
     | ResumeSessionPayload
+    | DeleteSessionPayload
     | GetJiraProfilesPayload
     | SaveJiraConfigPayload
     | ConnectJiraPayload
@@ -182,6 +188,8 @@ export type ClientMessage =
     | { type: 'mcp_save_tools'; server_name: string; tools: Record<string, boolean> }
     | { type: 'mcp_reconnect'; server_name: string }
     | { type: 'mcp_reload' }
+    // Background tasks
+    | { type: 'cancel_background_task'; task_id: string }
     // ClarAIty Knowledge & Beads
     | { type: 'get_beads' }
     | { type: 'get_architecture' }
@@ -196,7 +204,7 @@ export type ClientMessage =
     | { type: 'get_limits' }
     | { type: 'save_limits'; limits: import('../shared/protocol').LimitsData }
     // Prompt Enrichment
-    | { type: 'enrich_prompt'; content: string };
+    | { type: 'enrich_prompt'; content: string; history?: Array<{ role: string; content: string }> };
 
 // ============================================================================
 // Extension <-> WebView postMessage types
@@ -206,7 +214,7 @@ export type ExtensionMessage =
     | { type: 'serverMessage'; payload: ServerMessage }
     | { type: 'connectionStatus'; status: 'connected' | 'disconnected' | 'reconnecting' }
     | { type: 'sessionInfo'; sessionId: string; model: string; permissionMode: string;
-        autoApproveCategories?: Record<string, boolean> }
+        autoApproveCategories?: Record<string, boolean>; limits?: import('../shared/protocol').LimitsData }
     | { type: 'sessionsList'; sessions: SessionSummary[] }
     | { type: 'sessionHistory'; messages: ReplayMessage[] }
     | { type: 'showSessionHistory' }
@@ -215,7 +223,8 @@ export type ExtensionMessage =
     | { type: 'undoComplete'; turnId: string; restoredFiles: string[] }
     | { type: 'fileSelected'; path: string; name: string }
     | { type: 'insertAndSend'; content: string }
-    | { type: 'enrichedPrompt'; original: string; enriched: string }
+    | { type: 'enrichmentDelta'; delta: string }
+    | { type: 'enrichmentComplete'; original: string; enriched: string }
     | { type: 'enrichmentError'; message: string };
 
 export type WebViewMessage =
@@ -238,6 +247,7 @@ export type WebViewMessage =
     | { type: 'newSession' }
     | { type: 'listSessions' }
     | { type: 'resumeSession'; sessionId: string }
+    | { type: 'deleteSession'; sessionId: string }
     | { type: 'undoTurn'; turnId: string }
     | { type: 'pickFile' }
     | { type: 'openFile'; path: string }
@@ -272,7 +282,9 @@ export type WebViewMessage =
     | { type: 'getLimits' }
     | { type: 'saveLimits'; limits: import('../shared/protocol').LimitsData }
     // Prompt Enrichment
-    | { type: 'enrichPrompt'; content: string }
+    | { type: 'enrichPrompt'; content: string; history?: Array<{ role: string; content: string }> }
+    // Background tasks
+    | { type: 'cancelBackgroundTask'; taskId: string }
     // Server connection control
     | { type: 'disconnectServer' }
     | { type: 'reconnectServer' };

@@ -1,10 +1,10 @@
 """Context Injector - Inject continuation context into user messages.
 
 This module handles injecting compaction summaries into user messages using
-<clarity-context> tags. The injection follows a one-shot pattern: after injection,
+<claraity-context> tags. The injection follows a one-shot pattern: after injection,
 the pending summary is cleared to prevent duplicate injection.
 
-The <clarity-context> format is similar to Claude Code's <system-reminder> pattern,
+The <claraity-context> format is similar to Claude Code's <system-reminder> pattern,
 providing the LLM with continuity context while clearly marking it as reference-only.
 """
 
@@ -23,7 +23,7 @@ class ContextInjector:
     """
     Inject continuation context into user messages.
 
-    The injector prepends <clarity-context> blocks to user messages when
+    The injector prepends <claraity-context> blocks to user messages when
     there is pending context (e.g., from compaction). This provides the LLM
     with continuity while clearly marking the context as reference-only.
 
@@ -53,14 +53,14 @@ class ContextInjector:
         Build final user message with injected context.
 
         If there is a pending continuation summary from compaction,
-        it will be prepended to the user input as a <clarity-context> block.
+        it will be prepended to the user input as a <claraity-context> block.
         The pending summary is consumed (cleared) after injection.
 
         Args:
             user_input: Raw user input
 
         Returns:
-            User message with <clarity-context> prepended if needed,
+            User message with <claraity-context> prepended if needed,
             otherwise the original user input with minimal wrapping
         """
         parts = []
@@ -94,7 +94,7 @@ class ContextInjector:
 
     def _format_context_block(self, summary: str) -> str:
         """
-        Format the summary as a <clarity-context> block.
+        Format the summary as a <claraity-context> block.
 
         The block includes:
         - TYPE: Identifies this as a continuation summary
@@ -106,19 +106,19 @@ class ContextInjector:
             summary: The continuation summary to format
 
         Returns:
-            Formatted <clarity-context> block
+            Formatted <claraity-context> block
         """
-        return f"""<clarity-context>
+        return f"""<claraity-context>
 TYPE: continuation_summary
 PRIORITY: reference_only
 INSTRUCTION: This is context from earlier in the conversation that was compacted. Do NOT treat as new user intent. Use only for continuity and answering questions about prior work.
 
 {summary}
-</clarity-context>"""
+</claraity-context>"""
 
     def _escape_user_input(self, text: str) -> str:
         """
-        Escape any clarity-context tags in user input.
+        Escape any claraity-context tags in user input.
 
         This prevents users from injecting fake context blocks
         that could confuse the LLM about what's real context
@@ -128,12 +128,12 @@ INSTRUCTION: This is context from earlier in the conversation that was compacted
             text: Raw user input
 
         Returns:
-            Escaped text with clarity-context tags neutralized
+            Escaped text with claraity-context tags neutralized
         """
         return (
-            text.replace("<clarity-context>", "&lt;clarity-context&gt;")
-            .replace("</clarity-context>", "&lt;/clarity-context&gt;")
-            .replace("<clarity-context", "&lt;clarity-context")  # Catch partial tags
+            text.replace("<claraity-context>", "&lt;claraity-context&gt;")
+            .replace("</claraity-context>", "&lt;/claraity-context&gt;")
+            .replace("<claraity-context", "&lt;claraity-context")  # Catch partial tags
         )
 
     def _extract_sections(self, summary: str) -> list[str]:

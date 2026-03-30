@@ -18,7 +18,7 @@ import sqlite3
 from pathlib import Path
 
 
-def migrate_phase_system(db_path: str = '.clarity/ai-coding-agent.db'):
+def migrate_phase_system(db_path: str = '.claraity/ai-coding-agent.db'):
     """Add phase columns and populate phase data."""
 
     conn = sqlite3.connect(db_path)
@@ -45,7 +45,7 @@ def migrate_phase_system(db_path: str = '.clarity/ai-coding-agent.db'):
     print('\n[2/5] Populating Phase 0: Foundation...')
     phase_0_components = [
         'OBSERVABILITY_LAYER',
-        'CLARITY_INTEGRATION',
+        'CLARAITY_INTEGRATION',
         'WINDOWS_COMPATIBILITY',
         'LLM_FAILURE_HANDLER',
         'AGENT_INTERFACE'
@@ -127,7 +127,7 @@ def migrate_phase_system(db_path: str = '.clarity/ai-coding-agent.db'):
     print('[SUCCESS] Phase system migration complete!')
     print()
     print('[NEXT STEPS]')
-    print('1. Test: python -c "from src.tools.clarity_tools import GetNextTaskTool; tool = GetNextTaskTool(); result = tool.execute(); print(result.output)"')
+    print('1. Test: python -c "from src.tools.claraity_tools import GetNextTaskTool; tool = GetNextTaskTool(); result = tool.execute(); print(result.output)"')
     print('2. Expected: SELF_TESTING_LAYER (Phase 1, sequence 1)')
     print('3. Then: Populate implementation specs for SELF_TESTING_LAYER')
     print('=' * 80)

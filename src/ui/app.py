@@ -948,7 +948,7 @@ class CodingAgentApp(App):
                 self.set_timer(1.0, lambda: self.exit())
             return
 
-        self.notify("LLM configuration saved to .clarity/config.yaml")
+        self.notify("LLM configuration saved to .claraity/config.yaml")
 
         # If agent already exists, hot-swap the LLM backend
         if self.agent is not None:
@@ -1087,7 +1087,7 @@ class CodingAgentApp(App):
         # Create and wire subagent registry for live visibility
         self._setup_subagent_registry()
 
-        # Auto-connect MCP servers from .clarity/mcp_settings.json
+        # Auto-connect MCP servers from .claraity/mcp_settings.json
         if self.agent is not None:
             asyncio.create_task(self._connect_mcp_servers())
 
@@ -1129,7 +1129,7 @@ class CodingAgentApp(App):
     # ---- MCP auto-connect ----
 
     async def _connect_mcp_servers(self) -> None:
-        """Auto-connect to MCP servers from .clarity/mcp_settings.json.
+        """Auto-connect to MCP servers from .claraity/mcp_settings.json.
 
         Runs as a background task during startup. Errors are logged but
         do not block the TUI from becoming interactive.
@@ -1587,7 +1587,7 @@ class CodingAgentApp(App):
         from .session_picker import SessionPickerScreen
 
         # Determine sessions directory
-        sessions_dir = Path(".clarity/sessions")
+        sessions_dir = Path(".claraity/sessions")
 
         def on_session_selected(session_id: str | None) -> None:
             """Callback when session is selected or picker is cancelled."""
@@ -1620,7 +1620,7 @@ class CodingAgentApp(App):
         """
         from src.session.persistence.writer import SessionWriter
 
-        sessions_dir = Path(".clarity/sessions")
+        sessions_dir = Path(".claraity/sessions")
 
         # Find session file
         session_path = sessions_dir / session_id / "session.jsonl"
@@ -1706,11 +1706,10 @@ class CodingAgentApp(App):
 
         Preserves agent configuration while clearing all conversation state.
         """
-        import uuid as _uuid
-        from datetime import datetime
         from pathlib import Path
 
         from src.session.persistence.writer import SessionWriter
+        from src.session.scanner import generate_session_id
         from src.session.store.memory_store import MessageStore
 
         if not self.agent:
@@ -1729,10 +1728,8 @@ class CodingAgentApp(App):
             self.unbind_store()
 
             # 4. Generate new session ID and path
-            new_session_id = (
-                f"session-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{_uuid.uuid4().hex[:8]}"
-            )
-            session_dir = Path(".clarity/sessions") / new_session_id
+            new_session_id = generate_session_id()
+            session_dir = Path(".claraity/sessions") / new_session_id
             jsonl_path = session_dir / "session.jsonl"
 
             # 5. Reset core agent state
@@ -2264,9 +2261,9 @@ class CodingAgentApp(App):
         # Check if we should retry (with limit to prevent infinite loops)
         can_retry = recoverable and self._retry_count < self.MAX_RETRIES
 
-        # Optionally append error_id for debugging (CLARITY_SHOW_DEBUG_ERRORS=1)
+        # Optionally append error_id for debugging (CLARAITY_SHOW_DEBUG_ERRORS=1)
         display_msg = user_message
-        if os.getenv("CLARITY_SHOW_DEBUG_ERRORS") and error_id:
+        if os.getenv("CLARAITY_SHOW_DEBUG_ERRORS") and error_id:
             display_msg = f"{user_message} [ref: {error_id[:8]}]"
 
         if error_type == "rate_limit" and retry_after and status_bar:

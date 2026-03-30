@@ -1,7 +1,7 @@
 """
 Centralized logging configuration loader.
 
-Loads logging settings from `.clarity/config.yaml` and resolves them
+Loads logging settings from `.claraity/config.yaml` and resolves them
 against environment variables and CLI flags using a layered priority:
 
     Environment variables  (highest priority)
@@ -25,7 +25,7 @@ from typing import Optional
 # CONSTANTS
 # =============================================================================
 
-DEFAULT_CONFIG_PATH = ".clarity/config.yaml"
+DEFAULT_CONFIG_PATH = ".claraity/config.yaml"
 
 VALID_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 
@@ -290,9 +290,9 @@ logging:
 
   # Per-handler level control (what gets written WHERE)
   handlers:
-    jsonl: INFO           # JSONL file (.clarity/logs/app.jsonl)
-    logs_db: DEBUG        # SQLite queryable store (.clarity/logs/logs.db)
-    errors_db: ERROR      # Errors only (.clarity/metrics.db)
+    jsonl: INFO           # JSONL file (.claraity/logs/app.jsonl)
+    logs_db: DEBUG        # SQLite queryable store (.claraity/logs/logs.db)
+    errors_db: ERROR      # Errors only (.claraity/metrics.db)
 
   # Retention settings
   retention:

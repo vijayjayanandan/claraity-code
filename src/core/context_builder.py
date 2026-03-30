@@ -238,14 +238,24 @@ class ContextBuilder:
             elapsed_ms=round((time.monotonic() - _t0) * 1000),
         )
 
-        # Inject project knowledge base (same pattern as CLAUDE.md in Claude Code)
-        knowledge_content = self.memory.get_knowledge_base()
-        if knowledge_content:
+        # Inject project instructions from CLARAITY.md (if available)
+        project_instructions = self._load_project_instructions()
+        if project_instructions:
             system_prompt = (
                 system_prompt
                 + "\n\n"
-                + "Contents of .clarity/knowledge/ (project knowledge base - auto-loaded each session):\n\n"
-                + knowledge_content
+                + "# Project Instructions (from CLARAITY.md)\n\n"
+                + project_instructions
+            )
+
+        # Inject architecture brief from knowledge DB (if available)
+        knowledge_brief = self._load_knowledge_brief()
+        if knowledge_brief:
+            system_prompt = (
+                system_prompt
+                + "\n\n"
+                + "# Project Architecture (auto-loaded from knowledge DB)\n\n"
+                + knowledge_brief
             )
         logger.debug(
             "build_context_phase",
@@ -410,6 +420,46 @@ class ContextBuilder:
 
         # last_report is guaranteed to be set after build_context
         return context, self.last_report  # type: ignore
+
+    def _load_project_instructions(self) -> str:
+        """Load CLARAITY.md project instructions from the project root.
+
+        Checks common casing variants: CLARAITY.md, claraity.md, Claraity.md.
+        Returns file contents if found, empty string otherwise.
+        """
+        search_dir = self.project_root or Path.cwd()
+        for filename in ("CLARAITY.md", "claraity.md", "Claraity.md"):
+            filepath = search_dir / filename
+            try:
+                if filepath.is_file():
+                    content = filepath.read_text(encoding="utf-8").strip()
+                    if content:
+                        logger.debug("Loaded project instructions", file=str(filepath))
+                        return content
+            except (OSError, UnicodeDecodeError) as e:
+                logger.warning("Failed to read project instructions", file=str(filepath), error=str(e))
+        return ""
+
+    def _load_knowledge_brief(self) -> str:
+        """Load compact architecture brief from the knowledge DB.
+
+        Returns the brief markdown string, or empty string if no DB exists.
+        """
+        db_path = Path(".claraity/claraity_knowledge.db")
+        if not db_path.exists():
+            return ""
+
+        try:
+            from src.claraity.claraity_db import ClaraityStore, render_compact_briefing
+
+            store = ClaraityStore(str(db_path))
+            brief = render_compact_briefing(store)
+            if store.conn:
+                store.conn.close()
+            return brief
+        except Exception as e:
+            logger.warning("Failed to load knowledge brief", error=str(e))
+            return ""
 
     def estimate_tokens(self, context: list[dict[str, str]]) -> int:
         """

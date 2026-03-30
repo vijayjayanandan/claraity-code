@@ -129,11 +129,11 @@ class TestGatingInPlanPhase:
         assert adapter_in_plan.gate_tool("director_complete_plan") == DirectorGateDecision.ALLOW
 
     def test_allows_write_file_for_plan_docs(self, adapter_in_plan):
-        """write_file allowed only for .clarity/plans/ paths."""
+        """write_file allowed only for .claraity/plans/ paths."""
         from src.director.adapter import DirectorGateDecision
         result = adapter_in_plan.gate_tool(
             "write_file",
-            {"file_path": ".clarity/plans/director_plan.md"}
+            {"file_path": ".claraity/plans/director_plan.md"}
         )
         assert result == DirectorGateDecision.ALLOW
 

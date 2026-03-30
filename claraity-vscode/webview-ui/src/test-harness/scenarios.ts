@@ -2,11 +2,11 @@
  * Pre-built message sequences for the test harness.
  *
  * Each scenario returns an array of { msg, delayMs? } items
- * that can be fed to window.__clarityInjectSequence().
+ * that can be fed to window.__claraityInjectSequence().
  *
  * Usage:
  *   import { bootstrap, basicChat } from './scenarios';
- *   await window.__clarityInjectSequence([...bootstrap(), ...basicChat()]);
+ *   await window.__claraityInjectSequence([...bootstrap(), ...basicChat()]);
  */
 import type { ExtensionMessage, ServerMessage } from "../types";
 
@@ -340,7 +340,7 @@ export function subagentDelegation(): Step[] {
           parent_tool_call_id: delegateCallId,
           model_name: "gpt-4o-mini",
           subagent_name: "research",
-          transcript_path: ".clarity/sessions/subagents/research-sa-001.jsonl",
+          transcript_path: ".claraity/sessions/subagents/research-sa-001.jsonl",
         },
       },
       50,

@@ -22,7 +22,7 @@
                     _load_knowledge_base()
                     (src/memory/memory_manager.py:1215)
                               |
-                    reads from _project_root / .clarity/knowledge/
+                    reads from _project_root / .claraity/knowledge/
                               |
          +--------+--------+--------+-----------+----------+----------+
          |        |        |        |           |          |
@@ -72,19 +72,19 @@
 
 | File | Line Cap | Owner | Purpose |
 |------|----------|-------|---------|
-| `.clarity/knowledge/core.md` | 200 | knowledge-builder subagent | Project overview, key components |
-| `.clarity/knowledge/architecture.md` | none | knowledge-builder subagent | Module map, dependencies, data flow |
-| `.clarity/knowledge/file-guide.md` | none | knowledge-builder subagent | Entry points, file purposes, navigation |
-| `.clarity/knowledge/conventions.md` | none | knowledge-builder subagent | Coding standards, patterns, constraints |
-| `.clarity/knowledge/decisions.md` | 100 | main agent | Significant design choices with rationale |
-| `.clarity/knowledge/lessons.md` | 100 | main agent | Debugging lessons, gotchas, ALWAYS/NEVER rules |
+| `.claraity/knowledge/core.md` | 200 | knowledge-builder subagent | Project overview, key components |
+| `.claraity/knowledge/architecture.md` | none | knowledge-builder subagent | Module map, dependencies, data flow |
+| `.claraity/knowledge/file-guide.md` | none | knowledge-builder subagent | Entry points, file purposes, navigation |
+| `.claraity/knowledge/conventions.md` | none | knowledge-builder subagent | Coding standards, patterns, constraints |
+| `.claraity/knowledge/decisions.md` | 100 | main agent | Significant design choices with rationale |
+| `.claraity/knowledge/lessons.md` | 100 | main agent | Debugging lessons, gotchas, ALWAYS/NEVER rules |
 
 ### Configuration Files (runtime)
 
 | File | Created By | Purpose |
 |------|-----------|---------|
-| `.clarity/knowledge/scan_config.yaml` | `_ensure_scan_config()` on first `kb_detect_changes` call | Include/exclude glob patterns for file scanning |
-| `.clarity/knowledge/.manifest.json` | `KBUpdateManifestTool` | Tracks file stats and knowledge coverage for incremental updates |
+| `.claraity/knowledge/scan_config.yaml` | `_ensure_scan_config()` on first `kb_detect_changes` call | Include/exclude glob patterns for file scanning |
+| `.claraity/knowledge/.manifest.json` | `KBUpdateManifestTool` | Tracks file stats and knowledge coverage for incremental updates |
 
 ### Test Files
 
@@ -104,7 +104,7 @@
 2.   knowledge_content = self.memory.get_knowledge_base()   context_builder.py:249
 3.     MemoryManager.get_knowledge_base()             memory_manager.py:1265
 4.       MemoryManager._load_knowledge_base()         memory_manager.py:1215
-5.         reads self._project_root / ".clarity" / "knowledge" / <filename>
+5.         reads self._project_root / ".claraity" / "knowledge" / <filename>
 6.         for each (filename, max_lines) in _KNOWLEDGE_FILES:
 7.           filepath.read_text(encoding='utf-8')
 8.           if max_lines > 0 and len(lines) > max_lines: truncate
@@ -123,7 +123,7 @@ The knowledge content is appended directly to the system prompt string at `conte
 system_prompt = (
     system_prompt
     + "\n\n"
-    + "Contents of .clarity/knowledge/ (project knowledge base - auto-loaded each session):\n\n"
+    + "Contents of .claraity/knowledge/ (project knowledge base - auto-loaded each session):\n\n"
     + knowledge_content
 )
 ```
@@ -147,7 +147,7 @@ self._project_root: Path = Path(starting_directory).resolve() if starting_direct
 `_project_root` is set once at construction. Knowledge directory is resolved as:
 ```python
 # memory_manager.py:1232
-knowledge_dir = self._project_root / ".clarity" / "knowledge"
+knowledge_dir = self._project_root / ".claraity" / "knowledge"
 ```
 
 **Bug fix**: Previously used `Path.cwd()` directly in `_load_knowledge_base()`, which failed when CWD differed from project root (e.g., subagent processes). Fixed by using `self._project_root`.
@@ -167,7 +167,7 @@ knowledge_dir = self._project_root / ".clarity" / "knowledge"
 6.     returns dict if exists -> INCREMENTAL mode
 7.   _scan_project_files(root)                       knowledge_tools.py:137
 8.     _read_kb_config(root)                         knowledge_tools.py:63
-9.       reads .clarity/knowledge/scan_config.yaml
+9.       reads .claraity/knowledge/scan_config.yaml
 10.      returns {include: [...], exclude: [...]}
 11.    _git_ls_files(root)                           knowledge_tools.py:88
 12.      runs: git ls-files (cwd=root, timeout=30s)
@@ -280,7 +280,7 @@ Key directives to the main agent:
 
 ### scan_config.yaml
 
-Location: `.clarity/knowledge/scan_config.yaml`
+Location: `.claraity/knowledge/scan_config.yaml`
 
 Created automatically by `_ensure_scan_config()` (knowledge_tools.py:54) on first `kb_detect_changes` call.
 
@@ -315,7 +315,7 @@ Used only when `git ls-files` is unavailable (knowledge_tools.py:160-168):
 
 ```python
 _skip_dirs = {
-    '.git', '.hg', '.svn', '.clarity',
+    '.git', '.hg', '.svn', '.claraity',
     '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache',
     'node_modules', '.next', 'dist', 'build', 'out',
     '.venv', 'venv', '.env', 'env',
@@ -333,9 +333,9 @@ _skip_dirs = {
 
 **Symptom**: Knowledge files not loading when agent CWD differs from project root.
 
-**Root cause**: `_load_knowledge_base()` used `Path.cwd()` to locate `.clarity/knowledge/`.
+**Root cause**: `_load_knowledge_base()` used `Path.cwd()` to locate `.claraity/knowledge/`.
 
-**Fix**: Introduced `self._project_root` (memory_manager.py:107), set at construction from `starting_directory` parameter. `_load_knowledge_base()` uses `self._project_root / ".clarity" / "knowledge"` (line 1232).
+**Fix**: Introduced `self._project_root` (memory_manager.py:107), set at construction from `starting_directory` parameter. `_load_knowledge_base()` uses `self._project_root / ".claraity" / "knowledge"` (line 1232).
 
 **Test**: `test_knowledge_uses_project_root_not_cwd` (test_knowledge_base.py:312-331).
 
@@ -441,7 +441,7 @@ Parameters:
 - `test_load_preserves_file_order` -- order matches `_KNOWLEDGE_FILES`
 - `test_load_skips_missing_files` -- graceful skip
 - `test_load_skips_empty_files` -- whitespace-only ignored
-- `test_no_knowledge_dir` -- missing `.clarity/knowledge/` returns `""`
+- `test_no_knowledge_dir` -- missing `.claraity/knowledge/` returns `""`
 - `test_core_truncation_at_200_lines` -- 250 lines truncated to 200
 - `test_core_exactly_200_lines_not_truncated` -- boundary check
 - `test_decisions_truncation_at_100_lines` -- decisions.md capped
@@ -482,8 +482,8 @@ Parameters:
 
 | Constant | Location | Value |
 |----------|----------|-------|
-| `MANIFEST_PATH` | knowledge_tools.py:21 | `".clarity/knowledge/.manifest.json"` |
-| `SCAN_CONFIG_PATH` | knowledge_tools.py:35 | `".clarity/knowledge/scan_config.yaml"` |
+| `MANIFEST_PATH` | knowledge_tools.py:21 | `".claraity/knowledge/.manifest.json"` |
+| `SCAN_CONFIG_PATH` | knowledge_tools.py:35 | `".claraity/knowledge/scan_config.yaml"` |
 | `_SKIP_EXTENSIONS` | knowledge_tools.py:24-32 | Set of 27 binary/non-source extensions |
 | `_KNOWLEDGE_FILES` | memory_manager.py:1206-1213 | 6-element list of (filename, max_lines) tuples |
 | `KNOWLEDGE_MAINTENANCE` | system_prompts.py:827-844 | System prompt section for experiential file guidance |

@@ -608,7 +608,7 @@ class TestSerializeInteractiveNotifications:
                 "plan_hash": "sha256-abc",
                 "excerpt": "## Plan\n1. Step one\n2. Step two",
                 "truncated": False,
-                "plan_path": ".clarity/plans/plan.md",
+                "plan_path": ".claraity/plans/plan.md",
             },
         )
         notification = StoreNotification(
@@ -623,7 +623,7 @@ class TestSerializeInteractiveNotifications:
         assert result["data"]["plan_hash"] == "sha256-abc"
         assert result["data"]["excerpt"].startswith("## Plan")
         assert result["data"]["truncated"] is False
-        assert result["data"]["plan_path"] == ".clarity/plans/plan.md"
+        assert result["data"]["plan_path"] == ".claraity/plans/plan.md"
 
     def test_director_plan_submitted(self):
         msg = self._make_system_message(

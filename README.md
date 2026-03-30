@@ -8,7 +8,7 @@ An AI-powered coding agent with a professional TUI, 30+ built-in tools, subagent
 pip install claraity-code
 ```
 
-Set your LLM endpoint in `.clarity/config.yaml` (or environment variables):
+Set your LLM endpoint in `.claraity/config.yaml` (or environment variables):
 
 ```bash
 export LLM_API_KEY=your-api-key
@@ -64,17 +64,17 @@ Automatic prompt caching for Anthropic and compatible providers. The built-in `C
 
 ### Session Persistence
 
-Every session is saved as append-only JSONL in `.clarity/sessions/`. Resume any previous session with full conversation history, tool call results, and context intact.
+Every session is saved as append-only JSONL in `.claraity/sessions/`. Resume any previous session with full conversation history, tool call results, and context intact.
 
 ### Structured Logging & Observability
 
-All logs go to `.clarity/logs/app.jsonl` as structured JSONL -- no console noise, no TUI interference. Query logs with:
+All logs go to `.claraity/logs/app.jsonl` as structured JSONL -- no console noise, no TUI interference. Query logs with:
 
 ```bash
 python -m src.observability.log_query --tail 50
 ```
 
-Performance metrics and error tracking stored in `.clarity/metrics.db` (SQLite).
+Performance metrics and error tracking stored in `.claraity/metrics.db` (SQLite).
 
 ## SubAgents
 
@@ -91,14 +91,14 @@ The agent delegates specialized tasks to focused subagents, each with their own 
 | **general-purpose** | Versatile agent with full tool access for multi-step research and implementation |
 | **knowledge-builder** | Autonomously explores a codebase and generates structured knowledge base files |
 
-Each subagent can use a different LLM model (configured per-agent in `config.yaml`). Transcripts are saved to `.clarity/sessions/subagents/`.
+Each subagent can use a different LLM model (configured per-agent in `config.yaml`). Transcripts are saved to `.claraity/sessions/subagents/`.
 
 ## Knowledge Base
 
-ClarAIty loads project knowledge automatically from `.clarity/knowledge/`:
+ClarAIty loads project knowledge automatically from `.claraity/knowledge/`:
 
 ```
-.clarity/
+.claraity/
   knowledge/
     architecture.md      # System design overview
     conventions.md       # Coding standards
@@ -110,9 +110,9 @@ All `.md` files in this directory are loaded into the agent's context at startup
 
 **File-based memory hierarchy** (4 levels, highest to lowest priority):
 
-1. **Enterprise** -- `/etc/clarity/memory.md` (Linux) or `C:/ProgramData/clarity/memory.md` (Windows)
-2. **User** -- `~/.clarity/memory.md`
-3. **Project** -- `./.clarity/memory.md` (version-controlled, team-shareable)
+1. **Enterprise** -- `/etc/claraity/memory.md` (Linux) or `C:/ProgramData/claraity/memory.md` (Windows)
+2. **User** -- `~/.claraity/memory.md`
+3. **Project** -- `./.claraity/memory.md` (version-controlled, team-shareable)
 4. **Imports** -- `@path/to/file.md` syntax for modular includes (circular detection built-in)
 
 ## Permission Modes
@@ -131,7 +131,7 @@ Switch modes mid-session with `/mode` or `Alt+M` in the TUI.
 
 Extend the agent with external services via [Model Context Protocol](https://modelcontextprotocol.io/) servers. MCP tools are discovered dynamically and merged with native tools.
 
-Configure in `.clarity/config.yaml`:
+Configure in `.claraity/config.yaml`:
 
 ```yaml
 mcp_servers:
@@ -146,7 +146,7 @@ Supports both SSE (remote) and stdio (local) transports. Tools are namespaced wi
 
 ## Configuration
 
-All configuration lives in `.clarity/config.yaml`:
+All configuration lives in `.claraity/config.yaml`:
 
 ```yaml
 logging:

@@ -63,9 +63,9 @@ QueueListener
 
 | Store | Purpose | Retention | Query Method | Location |
 |-------|---------|-----------|--------------|----------|
-| **logs.db** | All log levels | 7 days | SQL (indexed) | `.clarity/logs/logs.db` |
-| **metrics.db** | Errors only | 30 days | SQL (categorized) | `.clarity/metrics.db` |
-| **app.jsonl** | Human-readable | 50MB (5 files) | grep/jq | `.clarity/logs/app.jsonl` |
+| **logs.db** | All log levels | 7 days | SQL (indexed) | `.claraity/logs/logs.db` |
+| **metrics.db** | Errors only | 30 days | SQL (categorized) | `.claraity/metrics.db` |
+| **app.jsonl** | Human-readable | 50MB (5 files) | grep/jq | `.claraity/logs/app.jsonl` |
 
 ---
 
@@ -304,7 +304,7 @@ timeouts = query_session_errors(
 ## Configuration
 
 ### Default Configuration
-Located in `.clarity/config.yaml`:
+Located in `.claraity/config.yaml`:
 
 ```yaml
 logging:
@@ -315,12 +315,12 @@ logging:
       enabled: false  # No console spam
     file:
       enabled: true
-      path: .clarity/logs/app.jsonl
+      path: .claraity/logs/app.jsonl
       max_bytes: 10485760  # 10MB per file
       backup_count: 5
     sqlite:
       enabled: true
-      path: .clarity/logs/logs.db
+      path: .claraity/logs/logs.db
       batch_size: 50
       flush_interval: 5.0
   
@@ -331,9 +331,9 @@ logging:
 
 ### Environment Variable Overrides
 ```bash
-export CLARITY_LOG_LEVEL=DEBUG
-export CLARITY_LOG_DB_PATH=.clarity/logs/logs.db
-export CLARITY_LOG_RETENTION_DAYS=14
+export CLARAITY_LOG_LEVEL=DEBUG
+export CLARAITY_LOG_DB_PATH=.claraity/logs/logs.db
+export CLARAITY_LOG_RETENTION_DAYS=14
 ```
 
 ---
@@ -377,7 +377,7 @@ export CLARITY_LOG_RETENTION_DAYS=14
 
 ### Logs not appearing in database
 1. Check SQLite handler enabled: `config.yaml` → `logging.handlers.sqlite.enabled: true`
-2. Verify database path writable: `.clarity/logs/` directory exists
+2. Verify database path writable: `.claraity/logs/` directory exists
 3. Check stderr for "Queue full" messages (increase queue size)
 
 ### Context not appearing in logs
@@ -389,11 +389,11 @@ export CLARITY_LOG_RETENTION_DAYS=14
 1. Use indexed fields: `session_id`, `level`, `ts`, `component`
 2. Add time filter: `since_minutes=30`
 3. Limit results: `limit=100`
-4. For full-text search, use JSONL files instead: `grep "timeout" .clarity/logs/app.jsonl`
+4. For full-text search, use JSONL files instead: `grep "timeout" .claraity/logs/app.jsonl`
 
 ### Database growing too large
 1. Reduce retention: `store.cleanup_old_logs(days=3)`
-2. Vacuum database: `sqlite3 .clarity/logs/logs.db "VACUUM;"`
+2. Vacuum database: `sqlite3 .claraity/logs/logs.db "VACUUM;"`
 3. Increase log level: `INFO` → `WARNING`
 
 ---
@@ -413,7 +413,7 @@ When you need to understand or modify logging behavior, read these files in orde
 - **Quick reference**: This document
 - **API docs**: Docstrings in `src/observability/__init__.py`
 - **Examples**: `tests/observability/` directory
-- **Configuration**: `.clarity/config.yaml`
+- **Configuration**: `.claraity/config.yaml`
 
 ---
 

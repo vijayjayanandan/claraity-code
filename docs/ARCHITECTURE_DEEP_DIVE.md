@@ -405,7 +405,7 @@ OVERRIDES = {
 **Subagent System** (src/subagents/):
 - `SubAgent` (1,174 lines): Independent context, own MessageStore, configurable LLM
 - `Runner` (393 lines): Subprocess entry point, bootstraps from stdin JSON
-- `Manager` (495 lines): Discovery from `.clarity/subagents/`, config loading
+- `Manager` (495 lines): Discovery from `.claraity/subagents/`, config loading
 - Tool subset: file ops, search, LSP, commands — no task tools, plan mode, nested delegation
 
 ---
@@ -516,8 +516,8 @@ structlog.get_logger()
   -> stdlib Logger
     -> QueueHandler (non-blocking, 10K queue)
       -> QueueListener
-        |-> RotatingFileHandler (.clarity/logs/app.jsonl)
-        |-> SQLiteLogHandler (.clarity/metrics.db)
+        |-> RotatingFileHandler (.claraity/logs/app.jsonl)
+        |-> SQLiteLogHandler (.claraity/metrics.db)
 ```
 
 **Context propagation**: `ContextVar` for run_id, session_id, stream_id, request_id, component, operation — async-safe across await boundaries.

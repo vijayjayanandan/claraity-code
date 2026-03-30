@@ -1,7 +1,7 @@
 """LLM Configuration Wizard Screen.
 
 A modal screen that allows users to configure the LLM backend, model,
-and per-subagent model overrides. Saves to `.clarity/config.yaml`.
+and per-subagent model overrides. Saves to `.claraity/config.yaml`.
 
 Triggered via:
 - Command palette: Ctrl+P -> "Configure LLM"

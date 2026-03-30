@@ -41,7 +41,7 @@ class HookManager:
     """
     In-process Python hooks manager.
 
-    Loads Python hook functions from .clarity/hooks.py and executes them
+    Loads Python hook functions from .claraity/hooks.py and executes them
     synchronously (no subprocess, no async/await).
 
     Performance: <1ms per hook execution
@@ -52,7 +52,7 @@ class HookManager:
         Initialize hook manager.
 
         Args:
-            hooks_file: Path to hooks.py file (default: .clarity/hooks.py)
+            hooks_file: Path to hooks.py file (default: .claraity/hooks.py)
             session_id: Session identifier (generated if not provided)
         """
         self.session_id = session_id or str(uuid.uuid4())
@@ -68,8 +68,8 @@ class HookManager:
     def _load_default_hooks(self) -> None:
         """Load hooks from default locations."""
         hooks_paths = [
-            Path("./.clarity/hooks.py"),  # Project level
-            Path.home() / ".clarity" / "hooks.py",  # User level
+            Path("./.claraity/hooks.py"),  # Project level
+            Path.home() / ".claraity" / "hooks.py",  # User level
         ]
 
         for path in hooks_paths:

@@ -111,7 +111,7 @@ class TestHandleListSubagents:
             assert b["config_path"] is None
 
     def test_project_subagent_appears_in_list(self, tmp_path):
-        project_dir = tmp_path / ".clarity" / "agents"
+        project_dir = tmp_path / ".claraity" / "agents"
         _make_md(project_dir, "my-custom-agent", "My custom agent", "You are custom.")
 
         handler = _make_handler(tmp_path)
@@ -155,7 +155,7 @@ class TestHandleSaveSubagent:
             "system_prompt": "You are a new agent.",
         }))
 
-        target = tmp_path / ".clarity" / "agents" / "new-agent.md"
+        target = tmp_path / ".claraity" / "agents" / "new-agent.md"
         assert target.exists()
 
     def test_file_content_is_valid_subagent_config(self, tmp_path):
@@ -169,7 +169,7 @@ class TestHandleSaveSubagent:
         }))
 
         from src.subagents.config import SubAgentConfig
-        config = SubAgentConfig.from_file(tmp_path / ".clarity" / "agents" / "valid-agent.md")
+        config = SubAgentConfig.from_file(tmp_path / ".claraity" / "agents" / "valid-agent.md")
         assert config.name == "valid-agent"
         assert config.description == "Valid agent"
         assert "You are valid." in config.system_prompt
@@ -186,7 +186,7 @@ class TestHandleSaveSubagent:
         }))
 
         from src.subagents.config import SubAgentConfig
-        config = SubAgentConfig.from_file(tmp_path / ".clarity" / "agents" / "tool-agent.md")
+        config = SubAgentConfig.from_file(tmp_path / ".claraity" / "agents" / "tool-agent.md")
         assert config.tools is not None
         assert "read_file" in config.tools
         assert "write_file" in config.tools
@@ -280,7 +280,7 @@ class TestHandleSaveSubagent:
 
         assert sent[0]["success"] is True
         from src.subagents.config import SubAgentConfig
-        config = SubAgentConfig.from_file(tmp_path / ".clarity" / "agents" / "overwrite-agent.md")
+        config = SubAgentConfig.from_file(tmp_path / ".claraity" / "agents" / "overwrite-agent.md")
         assert config.description == "Second version"
 
 
@@ -291,7 +291,7 @@ class TestHandleSaveSubagent:
 class TestHandleDeleteSubagent:
 
     def test_deletes_existing_project_file(self, tmp_path):
-        project_dir = tmp_path / ".clarity" / "agents"
+        project_dir = tmp_path / ".claraity" / "agents"
         _make_md(project_dir, "deletable-agent")
 
         handler = _make_handler(tmp_path)
@@ -333,7 +333,7 @@ class TestHandleDeleteSubagent:
         assert sent[0]["success"] is False
 
     def test_hot_reloads_after_delete(self, tmp_path):
-        project_dir = tmp_path / ".clarity" / "agents"
+        project_dir = tmp_path / ".claraity" / "agents"
         _make_md(project_dir, "hot-reload-agent")
 
         handler = _make_handler(tmp_path)
@@ -345,7 +345,7 @@ class TestHandleDeleteSubagent:
 
     def test_delete_then_builtin_restored(self, tmp_path):
         """After deleting a forked built-in, the original built-in is visible again."""
-        project_dir = tmp_path / ".clarity" / "agents"
+        project_dir = tmp_path / ".claraity" / "agents"
         _make_md(project_dir, "code-reviewer", "Forked reviewer", "Forked prompt.")
 
         handler = _make_handler(tmp_path)

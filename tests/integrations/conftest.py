@@ -5,7 +5,7 @@ when src.tools is the *first* package to be imported (which happens when
 test_mcp_bridge.py imports bridge.py -> src.tools.base).
 
 The circular chain:
-  src.tools.__init__ -> ... -> src.clarity -> src.llm (partial)
+  src.tools.__init__ -> ... -> src.claraity -> src.llm (partial)
       -> src.session -> src.core.__init__ -> agent.py
       -> from src.llm import LLMBackend  (fails: src.llm half-init'd)
 

@@ -5,7 +5,7 @@ Each profile stores its Jira URL and username in a JSON config file.
 API tokens are stored securely in SecretStore (OS keychain / encrypted file).
 
 Transport: stdio via `uvx mcp-atlassian`
-Config dir: .clarity/integrations/jira/<profile>.json  (no secrets)
+Config dir: .claraity/integrations/jira/<profile>.json  (no secrets)
 Secrets:    SecretStore key "jira_api_token_<profile>"
 """
 
@@ -24,7 +24,7 @@ except ImportError:
     logger = logging.getLogger(__name__)
 
 # Config directory for all Jira profiles
-DEFAULT_CONFIG_DIR = Path(".clarity") / "integrations" / "jira"
+DEFAULT_CONFIG_DIR = Path(".claraity") / "integrations" / "jira"
 
 
 def _secret_key(profile: str) -> str:
@@ -35,7 +35,7 @@ def _secret_key(profile: str) -> str:
 class JiraConnection:
     """Manages a single Jira profile connection via mcp-atlassian.
 
-    Config file (.clarity/integrations/jira/<profile>.json) holds:
+    Config file (.claraity/integrations/jira/<profile>.json) holds:
       - jira_url: Jira Cloud URL (e.g. "https://mycompany.atlassian.net")
       - username: Atlassian account email
       - enabled: whether the profile is active

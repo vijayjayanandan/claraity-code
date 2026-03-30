@@ -2,14 +2,14 @@
 
 ## Context
 
-ClarityDB (SQL) and its 16 tools have been disconnected from the agent. The SQL-based approach was not LLM-friendly - the agent had to query structured data through tools, adding token overhead and indirection. We're replacing it with a markdown knowledge base in `.clarity/knowledge/` that both the agent and user can read natively. The agent builds and maintains this knowledge through a dedicated subagent, and core knowledge is auto-loaded into every session.
+ClaraityDB (SQL) and its 16 tools have been disconnected from the agent. The SQL-based approach was not LLM-friendly - the agent had to query structured data through tools, adding token overhead and indirection. We're replacing it with a markdown knowledge base in `.claraity/knowledge/` that both the agent and user can read natively. The agent builds and maintains this knowledge through a dedicated subagent, and core knowledge is auto-loaded into every session.
 
 ---
 
 ## 1. Knowledge File Structure
 
 ```
-.clarity/knowledge/
+.claraity/knowledge/
 ├── core.md              # Always loaded into context (~200 lines max)
 ├── architecture.md      # Module map, layers, data flows
 ├── file-guide.md        # Key files, what they do, their quirks
@@ -46,11 +46,11 @@ User -> CodingAgent -> MemoryManager -> MessageStore -> JSONL files
 When working on a task, read the relevant knowledge file first:
 | Topic | File | Read when... |
 |-------|------|-------------|
-| Module relationships, data flows | .clarity/knowledge/architecture.md | Refactoring, adding features, understanding dependencies |
-| What each file does, key methods | .clarity/knowledge/file-guide.md | Navigating the codebase, finding where to make changes |
-| Coding patterns, naming, style | .clarity/knowledge/conventions.md | Writing new code, reviewing code |
-| Why things are built this way | .clarity/knowledge/decisions.md | Questioning a design choice, considering alternatives |
-| Past bugs, gotchas, debugging tips | .clarity/knowledge/lessons.md | Debugging, hitting unexpected behavior |
+| Module relationships, data flows | .claraity/knowledge/architecture.md | Refactoring, adding features, understanding dependencies |
+| What each file does, key methods | .claraity/knowledge/file-guide.md | Navigating the codebase, finding where to make changes |
+| Coding patterns, naming, style | .claraity/knowledge/conventions.md | Writing new code, reviewing code |
+| Why things are built this way | .claraity/knowledge/decisions.md | Questioning a design choice, considering alternatives |
+| Past bugs, gotchas, debugging tips | .claraity/knowledge/lessons.md | Debugging, hitting unexpected behavior |
 
 ## Maintaining This Knowledge Base
 After completing a significant task, update the relevant file if you:
@@ -86,7 +86,7 @@ The whole point of markdown is that it's just files. The agent already has every
 
 | Operation | Existing Tool | Example |
 |-----------|--------------|---------|
-| **Read knowledge** | `read_file` | `read_file(".clarity/knowledge/architecture.md")` |
+| **Read knowledge** | `read_file` | `read_file(".claraity/knowledge/architecture.md")` |
 | **Write/update knowledge** | `edit_file` / `write_file` | Edit a section, append a learning |
 | **Build full knowledge base** | `delegate_to_subagent` | Delegate to `knowledge-builder` subagent |
 | **Search knowledge** | `grep` / `search_code` | Search across knowledge files |
@@ -101,7 +101,7 @@ The agent is guided by system prompt instructions on when and how to maintain th
 
 ### Configuration
 - **Name:** `knowledge-builder`
-- **Purpose:** Reads the codebase and generates/updates `.clarity/knowledge/` files
+- **Purpose:** Reads the codebase and generates/updates `.claraity/knowledge/` files
 - **Tools available:** `read_file`, `write_file`, `edit_file`, `list_directory`, `search_code`, `grep`, `glob` (read-heavy, write to knowledge files only)
 - **Prompt:** Instructs the subagent to explore the codebase systematically and produce structured markdown files
 
@@ -111,12 +111,12 @@ The subagent prompt should instruct it to:
 2. Read key files (agent.py, app.py, memory_manager.py, etc.)
 3. Identify architecture layers, module responsibilities, data flows
 4. Document conventions found in the code (naming, patterns, error handling)
-5. Write findings to `.clarity/knowledge/*.md` files
+5. Write findings to `.claraity/knowledge/*.md` files
 6. Accept a `scope` parameter: `full` (regenerate all) or `incremental` (update specific topic)
 
 ### Registration
 - Add to `src/subagents/config.py` alongside existing subagents (code-reviewer, test-writer, etc.)
-- Add subagent prompt file at `.clarity/agents/knowledge-builder.md`
+- Add subagent prompt file at `.claraity/agents/knowledge-builder.md`
 
 ### Invocation
 The agent delegates using its existing tool:
@@ -130,7 +130,7 @@ delegate_to_subagent(subagent="knowledge-builder", task="Build the full knowledg
 
 ### Approach: Extend `MemoryManager.get_context_for_llm()`
 
-Add a new injection point after file memories (line 820) that loads `.clarity/knowledge/core.md`:
+Add a new injection point after file memories (line 820) that loads `.claraity/knowledge/core.md`:
 
 ```python
 # After line 820 in memory_manager.py
@@ -144,7 +144,7 @@ if knowledge_core:
 ```
 
 ### `_load_knowledge_core()` method
-- Reads `.clarity/knowledge/core.md` if it exists
+- Reads `.claraity/knowledge/core.md` if it exists
 - Truncates to 200 lines max
 - Caches the content (reload on file change or once per session)
 - Returns empty string if file doesn't exist (graceful degradation)
@@ -172,13 +172,13 @@ After significant work, the agent checks the "Maintaining This Knowledge Base" s
 
 | File | Purpose |
 |------|---------|
-| `.clarity/knowledge/core.md` | Template - initially empty, populated by subagent |
-| `.clarity/knowledge/architecture.md` | Template |
-| `.clarity/knowledge/file-guide.md` | Template |
-| `.clarity/knowledge/conventions.md` | Template |
-| `.clarity/knowledge/decisions.md` | Template |
-| `.clarity/knowledge/lessons.md` | Template |
-| `.clarity/agents/knowledge-builder.md` | Subagent prompt |
+| `.claraity/knowledge/core.md` | Template - initially empty, populated by subagent |
+| `.claraity/knowledge/architecture.md` | Template |
+| `.claraity/knowledge/file-guide.md` | Template |
+| `.claraity/knowledge/conventions.md` | Template |
+| `.claraity/knowledge/decisions.md` | Template |
+| `.claraity/knowledge/lessons.md` | Template |
+| `.claraity/agents/knowledge-builder.md` | Subagent prompt |
 
 ## 7. Files to Modify
 
@@ -193,8 +193,8 @@ No changes needed to `system_prompts.py` - all instructions live in `core.md` it
 
 ## 8. Implementation Order
 
-1. **Create knowledge directory and templates** - `.clarity/knowledge/*.md` with section headers
-2. **Create knowledge-builder subagent** - prompt file at `.clarity/agents/knowledge-builder.md` + config in `src/subagents/config.py`
+1. **Create knowledge directory and templates** - `.claraity/knowledge/*.md` with section headers
+2. **Create knowledge-builder subagent** - prompt file at `.claraity/agents/knowledge-builder.md` + config in `src/subagents/config.py`
 3. **Add auto-loading** - `_load_knowledge_core()` in `memory_manager.py`
 4. **Test** - run agent, delegate to knowledge-builder, verify files populated, verify `core.md` loads
 
@@ -203,9 +203,9 @@ No changes needed to `system_prompts.py` - all instructions live in `core.md` it
 ## 9. Verification
 
 1. **Subagent delegation:** Start agent, ask "build the knowledge base" - agent should delegate to `knowledge-builder` subagent
-2. **Knowledge generation:** Verify `.clarity/knowledge/` files are populated with meaningful content
+2. **Knowledge generation:** Verify `.claraity/knowledge/` files are populated with meaningful content
 3. **Auto-loading:** Start a new session, ask "what do you know about this project?" - should reference `core.md` content without needing to read it
 4. **Incremental update:** Complete a task, ask agent to update knowledge - verify relevant file updated via `edit_file`
-5. **User readability:** Open `.clarity/knowledge/architecture.md` in VS Code - should be clear, well-structured markdown
+5. **User readability:** Open `.claraity/knowledge/architecture.md` in VS Code - should be clear, well-structured markdown
 6. **No new tools:** `python -c "from src.tools.tool_schemas import ALL_TOOLS; print(len(ALL_TOOLS))"` - should still show 29 (unchanged)
 7. **Tests:** `pytest tests/` - no regressions

@@ -466,9 +466,9 @@ class TestRunCommandTool:
         )
 
         assert result.status == ToolStatus.SUCCESS
-        # Note: On Windows with PowerShell, pwd works too
-        assert str(tmp_path).replace("\\", "/") in result.output.replace("\\", "/") or \
-               str(tmp_path) in result.output
+        # Bash on Windows (Git Bash/MSYS) translates paths (e.g. C:\...\Temp -> /tmp/...),
+        # so compare the directory basename which is preserved across all shells.
+        assert tmp_path.name in result.output
 
     def test_run_command_failure(self):
         """Test running a command that fails."""
@@ -521,6 +521,77 @@ class TestRunCommandTool:
 
         # Command may succeed or fail, but should have stderr
         assert "STDERR" in result.output or "Error message" in str(result.output)
+
+
+class TestRunCommandBashExecution:
+    """Tests for bash execution path on Windows (shell detection integration)."""
+
+    def test_and_chaining_works(self):
+        """'&&' chaining should work and return exit code 0."""
+        tool = RunCommandTool()
+        result = tool.execute(command="echo first && echo second")
+        assert result.status == ToolStatus.SUCCESS
+        assert result.metadata["exit_code"] == 0
+        assert "first" in result.output
+        assert "second" in result.output
+
+    def test_and_chaining_fails_on_first(self):
+        """'&&' should short-circuit: if first command fails, second doesn't run."""
+        tool = RunCommandTool()
+        result = tool.execute(command="exit 1 && echo should-not-appear")
+        assert result.status == ToolStatus.ERROR
+        assert "should-not-appear" not in (result.output or "")
+
+    def test_pipe_exit_code_is_reliable(self):
+        """Pipes should return exit code 0 when the pipeline succeeds.
+
+        This is the original bug: PowerShell pipes (Select-Object) return exit code 1
+        even on success. With bash, this should be clean.
+        """
+        tool = RunCommandTool()
+        result = tool.execute(command="echo line1 | tail -1")
+        assert result.status == ToolStatus.SUCCESS
+        assert result.metadata["exit_code"] == 0
+
+    def test_unix_tools_available(self):
+        """Standard Unix tools (grep, tail, head) should be available via bash."""
+        tool = RunCommandTool()
+        result = tool.execute(command="echo hello world | grep hello")
+        assert result.status == ToolStatus.SUCCESS
+        assert "hello" in result.output
+
+    def test_powershell_sanitize_skipped_for_bash(self):
+        """When using bash, '&&' should NOT be sanitized to '; '."""
+        tool = RunCommandTool()
+        # If sanitization happened, 'exit 1 ; echo appeared' would print 'appeared'
+        # because ';' runs regardless of exit code. With &&, it should not.
+        result = tool.execute(command="exit 1 && echo appeared")
+        assert "appeared" not in (result.output or "")
+
+    def test_semicolon_runs_regardless(self):
+        """';' should run second command even if first fails (bash semantics).
+
+        Note: 'exit 1' terminates the bash process, so we use 'false' instead
+        (which sets exit code 1 without terminating the shell).
+        """
+        tool = RunCommandTool()
+        result = tool.execute(command="false ; echo still-ran")
+        assert "still-ran" in result.output
+
+    def test_stderr_captured(self):
+        """stderr should be captured in bash mode."""
+        tool = RunCommandTool()
+        result = tool.execute(command="echo error-msg >&2")
+        assert "STDERR" in result.output
+        assert "error-msg" in result.output
+
+    def test_environment_variables(self):
+        """Environment variable expansion should work in bash."""
+        tool = RunCommandTool()
+        result = tool.execute(command="echo $HOME")
+        assert result.status == ToolStatus.SUCCESS
+        # $HOME should expand to something (not the literal string)
+        assert "$HOME" not in result.output
 
 
 if __name__ == "__main__":

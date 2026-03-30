@@ -21,7 +21,6 @@ jest.mock('../python-env');
 jest.mock('../file-decoration-provider');
 jest.mock('../code-lens-provider');
 jest.mock('../undo-manager');
-jest.mock('../workspace-detector');
 
 import { StdioConnection } from '../stdio-connection';
 import { ClarAItySidebarProvider } from '../sidebar-provider';
@@ -29,7 +28,6 @@ import { resolveLaunchConfig } from '../python-env';
 import { ClarAItyFileDecorationProvider } from '../file-decoration-provider';
 import { ClarAItyCodeLensProvider } from '../code-lens-provider';
 import { UndoManager } from '../undo-manager';
-import { detectProjectContext, formatProjectContext } from '../workspace-detector';
 
 // ── Types for mock instances ────────────────────────────────────────────────
 
@@ -50,7 +48,6 @@ interface MockSidebarProvider {
     showSessionHistory: jest.Mock;
     setSecrets: jest.Mock;
     setConnection: jest.Mock;
-    setProjectContext: jest.Mock;
     postToWebview: jest.Mock;
     openDiffFromCommand: jest.Mock;
 }
@@ -150,7 +147,6 @@ function setupMocks() {
         showSessionHistory: jest.fn(),
         setSecrets: jest.fn(),
         setConnection: jest.fn(),
-        setProjectContext: jest.fn(),
         postToWebview: jest.fn(),
         openDiffFromCommand: jest.fn(),
     };
@@ -183,8 +179,6 @@ function setupMocks() {
     (ClarAItyCodeLensProvider as jest.Mock).mockImplementation(() => mockCodeLensInstance);
     (UndoManager as jest.Mock).mockImplementation(() => mockUndoManagerInstance);
     (resolveLaunchConfig as jest.Mock).mockResolvedValue(null);
-    (detectProjectContext as jest.Mock).mockResolvedValue(null);
-    (formatProjectContext as jest.Mock).mockReturnValue('Language: TypeScript / React');
 }
 
 /**
@@ -1300,50 +1294,6 @@ describe('extension.ts', () => {
     // workspace detection
     // ──────────────────────────────────────────────────────────────────────
 
-    describe('workspace detection', () => {
-        test('sets project context on sidebar when detected', async () => {
-            (detectProjectContext as jest.Mock).mockResolvedValue({
-                language: 'TypeScript',
-                framework: 'React',
-            });
-
-            const ctx = createMockContext();
-            activate(ctx);
-
-            await flushPromises();
-
-            expect(mockSidebarInstance.setProjectContext).toHaveBeenCalledWith(
-                expect.any(String),
-            );
-        });
-
-        test('does not set project context when detection returns null', async () => {
-            (detectProjectContext as jest.Mock).mockResolvedValue(null);
-
-            const ctx = createMockContext();
-            activate(ctx);
-
-            await flushPromises();
-
-            expect(mockSidebarInstance.setProjectContext).not.toHaveBeenCalled();
-        });
-
-        test('handles detection failure gracefully', async () => {
-            (detectProjectContext as jest.Mock).mockRejectedValue(new Error('Failed'));
-
-            const ctx = createMockContext();
-            activate(ctx);
-
-            await flushPromises();
-
-            // Should not throw, just log the error
-            const channel = (vscode.window.createOutputChannel as jest.Mock)
-                .mock.results[0].value;
-            expect(channel.appendLine).toHaveBeenCalledWith(
-                expect.stringContaining('Workspace detection failed'),
-            );
-        });
-    });
 });
 
 // ── Utility ─────────────────────────────────────────────────────────────────

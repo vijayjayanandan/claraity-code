@@ -73,47 +73,47 @@ class TestGrepToolPathSecurity:
 class TestAgentInternalWriteSecurity:
     """S12: is_agent_internal_write must use resolved paths."""
 
-    def test_rejects_traversal_with_clarity_substring(self):
-        """Path containing .clarity/ but traversing out must be rejected."""
+    def test_rejects_traversal_with_claraity_substring(self):
+        """Path containing .claraity/ but traversing out must be rejected."""
         from src.core.plan_mode import is_agent_internal_write
-        # This path contains "/.clarity/" but traverses OUT of .clarity
+        # This path contains "/.claraity/" but traverses OUT of .claraity
         result = is_agent_internal_write(
             "write_file",
-            {"file_path": ".clarity/../../etc/crontab"}
+            {"file_path": ".claraity/../../etc/crontab"}
         )
-        assert result is False, "Should reject path that traverses out of .clarity"
+        assert result is False, "Should reject path that traverses out of .claraity"
 
     def test_rejects_config_yaml(self):
-        """Writes to .clarity/config.yaml must require approval."""
+        """Writes to .claraity/config.yaml must require approval."""
         from src.core.plan_mode import is_agent_internal_write
         result = is_agent_internal_write(
             "write_file",
-            {"file_path": ".clarity/config.yaml"}
+            {"file_path": ".claraity/config.yaml"}
         )
         assert result is False, "config.yaml should NOT bypass approval"
 
     def test_allows_sessions_subdir(self):
-        """Writes to .clarity/sessions/ are legitimate agent-internal writes."""
+        """Writes to .claraity/sessions/ are legitimate agent-internal writes."""
         from src.core.plan_mode import is_agent_internal_write
         result = is_agent_internal_write(
             "write_file",
-            {"file_path": ".clarity/sessions/test-session.jsonl"}
+            {"file_path": ".claraity/sessions/test-session.jsonl"}
         )
         assert result is True
 
     def test_allows_plans_subdir(self):
-        """Writes to .clarity/plans/ are legitimate agent-internal writes."""
+        """Writes to .claraity/plans/ are legitimate agent-internal writes."""
         from src.core.plan_mode import is_agent_internal_write
         result = is_agent_internal_write(
             "write_file",
-            {"file_path": ".clarity/plans/plan-001.md"}
+            {"file_path": ".claraity/plans/plan-001.md"}
         )
         assert result is True
 
     def test_rejects_non_write_tools(self):
         """Non-write tools should never bypass approval via this check."""
         from src.core.plan_mode import is_agent_internal_write
-        assert is_agent_internal_write("read_file", {"file_path": ".clarity/sessions/x"}) is False
+        assert is_agent_internal_write("read_file", {"file_path": ".claraity/sessions/x"}) is False
         assert is_agent_internal_write("run_command", {"command": "ls"}) is False
 
     def test_rejects_empty_path(self):

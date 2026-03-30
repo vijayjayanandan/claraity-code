@@ -2,7 +2,7 @@
 
 ## 🚀 What is This?
 
-**ClarAIty Flow Visualization** shows how code flows through components in the AI Coding Agent. Unlike the component diagram (clarity-viz.html) which shows static architecture, this shows **dynamic execution paths**.
+**ClarAIty Flow Visualization** shows how code flows through components in the AI Coding Agent. Unlike the component diagram (claraity-viz.html) which shows static architecture, this shows **dynamic execution paths**.
 
 ## 📊 What's Inside?
 
@@ -95,7 +95,7 @@ When an AI agent needs to modify the workflow:
 ## 📁 Files Generated
 
 ```
-.clarity/ai-coding-agent.db      ← Database with flow data
+.claraity/ai-coding-agent.db      ← Database with flow data
 flow-data.json                    ← Exported JSON (14KB)
 flow-viz-embedded.html            ← Standalone visualization (46KB)
 ```
@@ -106,7 +106,7 @@ When codebase changes, regenerate:
 
 ```bash
 # 1. Re-populate flow data (if flow logic changed)
-python3 src/clarity/populate_workflow_flow.py
+python3 src/claraity/populate_workflow_flow.py
 
 # 2. Export to JSON
 python3 export_flow_data.py
@@ -158,7 +158,7 @@ This visualization answers the question you asked:
 
 ### Difference from Component Diagram
 
-**Component Diagram (clarity-viz.html):**
+**Component Diagram (claraity-viz.html):**
 - Shows WHAT components exist
 - Shows HOW they relate (static relationships)
 - Good for: Understanding architecture structure
@@ -205,7 +205,7 @@ This is the **POC/Prototype** for ClarAIty flow visualization. It demonstrates:
 ---
 
 **Created**: 2025-10-27
-**Data Source**: `.clarity/ai-coding-agent.db` (flow_steps table)
+**Data Source**: `.claraity/ai-coding-agent.db` (flow_steps table)
 **Export Script**: `export_flow_data.py`
 **Generator Script**: `create_flow_viz.py`
 **Visualization**: `flow-viz-embedded.html` (46KB standalone file)

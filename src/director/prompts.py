@@ -55,7 +55,7 @@ TOOLS AVAILABLE:
 - web_search, web_fetch -- research best practices, libraries, patterns
 - `clarify` -- ask the user if a design decision needs their input
 - `delegate_to_subagent` -- delegate planning to the 'planner' subagent
-- `write_file` -- write your plan document to .clarity/plans/ ONLY
+- `write_file` -- write your plan document to .claraity/plans/ ONLY
 - `director_complete_plan` -- submit plan and advance to approval
 
 WORKFLOW OPTIONS:
@@ -66,7 +66,7 @@ Option A: Delegate to Planner Subagent (RECOMMENDED for complex tasks)
    - Specific questions or constraints to address
    - Request for a detailed implementation plan
 2. Review the planner's output
-3. Write the plan to .clarity/plans/director_plan.md using write_file
+3. Write the plan to .claraity/plans/director_plan.md using write_file
 4. Call `director_complete_plan` with the plan details
 
 Option B: Create Plan Directly (for simple, well-understood tasks)
@@ -76,7 +76,7 @@ Option B: Create Plan Directly (for simple, well-understood tasks)
    - Vertical slices (3-5) with what each builds
    - Risk assessment and constraints
 2. Write the COMPLETE plan as a markdown document using write_file:
-   Path: .clarity/plans/director_plan.md
+   Path: .claraity/plans/director_plan.md
    Include: executive summary, decision rationale with comparison tables,
    slice details, test criteria, risks
 3. Call `director_complete_plan` with:
@@ -206,7 +206,7 @@ _PLAN_TOOLS = READ_ONLY_TOOLS | frozenset(
         "list_directory",
         "delegate_to_subagent",
         # NOTE: write_file is NOT in this set. The adapter handles it
-        # with path-based gating (only .clarity/plans/ allowed).
+        # with path-based gating (only .claraity/plans/ allowed).
     }
 )
 

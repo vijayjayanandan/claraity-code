@@ -10,7 +10,7 @@ from src.subagents.config import SubAgentConfig, SubAgentConfigLoader, SubAgentL
 @pytest.fixture
 def temp_config_dir(tmp_path):
     """Create temporary directory for config files."""
-    config_dir = tmp_path / ".clarity" / "agents"
+    config_dir = tmp_path / ".claraity" / "agents"
     config_dir.mkdir(parents=True)
     return config_dir
 
@@ -404,7 +404,7 @@ Prompt 2
     def test_discover_all_hierarchical(self, tmp_path):
         """Test hierarchical loading (user + project)."""
         # Create user directory
-        user_dir = tmp_path / "user" / ".clarity" / "agents"
+        user_dir = tmp_path / "user" / ".claraity" / "agents"
         user_dir.mkdir(parents=True)
 
         user_config = user_dir / "user-agent.md"
@@ -416,7 +416,7 @@ User prompt
 """)
 
         # Create project directory
-        project_dir = tmp_path / "project" / ".clarity" / "agents"
+        project_dir = tmp_path / "project" / ".claraity" / "agents"
         project_dir.mkdir(parents=True)
 
         project_config = project_dir / "project-agent.md"
@@ -439,7 +439,7 @@ Project prompt
     def test_project_overrides_user(self, tmp_path):
         """Test that project configs override user configs with same name."""
         # Create user directory
-        user_dir = tmp_path / "user" / ".clarity" / "agents"
+        user_dir = tmp_path / "user" / ".claraity" / "agents"
         user_dir.mkdir(parents=True)
 
         user_config = user_dir / "shared-agent.md"
@@ -451,7 +451,7 @@ User prompt
 """)
 
         # Create project directory with same agent name
-        project_dir = tmp_path / "project" / ".clarity" / "agents"
+        project_dir = tmp_path / "project" / ".claraity" / "agents"
         project_dir.mkdir(parents=True)
 
         project_config = project_dir / "shared-agent.md"

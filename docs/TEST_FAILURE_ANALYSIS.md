@@ -26,15 +26,15 @@
 | `tests/subagents/test_subagent.py` | 12 | Collection error |
 | `tests/core/test_agent_subagent_integration.py` | 10 | Collection error |
 | `tests/test_memory_observation_integration.py` | 8 | Collection error |
-| `tests/test_testing/test_integration.py` | 4 | Collection error (via clarity_tools) |
-| `tests/clarity/test_clarity_api.py` | 1 | Collection error |
+| `tests/test_testing/test_integration.py` | 4 | Collection error (via claraity_tools) |
+| `tests/claraity/test_claraity_api.py` | 1 | Collection error |
 
 ### Import chain
 
 ```
-src.tools.clarity_tools
-  -> src.clarity.__init__
-    -> src.clarity.core.generator
+src.tools.claraity_tools
+  -> src.claraity.__init__
+    -> src.claraity.core.generator
       -> src.llm (starts loading)
         -> src.llm.base
           -> src.session.models.message
@@ -306,7 +306,7 @@ src.cli
               → loads events.py directly, does NOT re-run __init__.py
             → src.llm finishes loading completely                 [3]
         line 22: from src.tools import ...
-          → src.tools.__init__ → clarity_tools → src.clarity
+          → src.tools.__init__ → claraity_tools → src.claraity
             → from src.llm import LLMBackend
               src.llm already FULLY loaded (from [3]) → works!
 ```
@@ -315,7 +315,7 @@ src.cli
 
 ```
 test_search_tools.py
-  → src.tools.__init__ → clarity_tools → src.clarity
+  → src.tools.__init__ → claraity_tools → src.claraity
     → from src.llm import ...
       → src.llm starts loading (PARTIALLY)                       [1]
         → src.llm.base → src.session → ... → src.core.events
@@ -326,7 +326,7 @@ test_search_tools.py
                 → ImportError!
 ```
 
-The critical difference: in normal startup, `src.core` loads first, so `src.llm` is fully resolved before the clarity chain needs it. In tests, `src.tools` or `src.clarity` can load first, causing `src.llm` to be mid-initialization when `src.core.__init__` tries to import from it.
+The critical difference: in normal startup, `src.core` loads first, so `src.llm` is fully resolved before the claraity chain needs it. In tests, `src.tools` or `src.claraity` can load first, causing `src.llm` to be mid-initialization when `src.core.__init__` tries to import from it.
 
 **Risk:** This is a latent bug. Any future refactor that changes import order in `src/cli.py` could break production. Fixing the circular import properly (e.g., lazy imports in `src/core/__init__.py`) would eliminate this fragility.
 

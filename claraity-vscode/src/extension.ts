@@ -11,7 +11,7 @@ import { resolveLaunchConfig } from './python-env';
 import { ClarAItyFileDecorationProvider } from './file-decoration-provider';
 import { ClarAItyCodeLensProvider } from './code-lens-provider';
 import { UndoManager } from './undo-manager';
-import { detectProjectContext, formatProjectContext } from './workspace-detector';
+
 import { StdioConnection } from './stdio-connection';
 import { ServerMessage } from './types';
 
@@ -181,17 +181,6 @@ export function activate(context: vscode.ExtensionContext) {
             }, 15_000);
         });
     }
-
-    // Detect workspace context for first-message enrichment
-    detectProjectContext().then((ctx) => {
-        if (ctx) {
-            const contextBlock = formatProjectContext(ctx);
-            sidebarProvider.setProjectContext(contextBlock);
-            log.appendLine(`[ClarAIty] Project: ${ctx.language}${ctx.framework ? ' / ' + ctx.framework : ''}`);
-        }
-    }).catch((err) => {
-        log.appendLine(`[ClarAIty] Workspace detection failed: ${err}`);
-    });
 
     // Register commands
     context.subscriptions.push(

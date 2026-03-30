@@ -1,7 +1,7 @@
 """
-.clarityignore support -- gitignore-style file blocking.
+.claraityignore support -- gitignore-style file blocking.
 
-Reads `.clarityignore` from the current working directory on every call (no caching).
+Reads `.claraityignore` from the current working directory on every call (no caching).
 Public functions:
 - is_blocked(file_path) -> (bool, pattern|None) for file tools (hard error)
 - filter_paths(paths) -> list[Path] for search/list tools (silent omit)
@@ -16,24 +16,24 @@ import pathspec
 
 from src.observability import get_logger
 
-logger = get_logger("tools.clarityignore")
+logger = get_logger("tools.claraityignore")
 
-CLARITYIGNORE_FILENAME = ".clarityignore"
+CLARAITYIGNORE_FILENAME = ".claraityignore"
 
 
 def _load_patterns() -> tuple[list[str], Optional[pathspec.PathSpec]]:
-    """Read .clarityignore and return (raw_lines, compiled_spec).
+    """Read .claraityignore and return (raw_lines, compiled_spec).
 
     Returns ([], None) if file doesn't exist or is empty.
     """
-    ignore_path = Path.cwd() / CLARITYIGNORE_FILENAME
+    ignore_path = Path.cwd() / CLARAITYIGNORE_FILENAME
     if not ignore_path.is_file():
         return [], None
 
     try:
         text = ignore_path.read_text(encoding="utf-8")
     except OSError as e:
-        logger.warning("clarityignore_read_error", error=str(e))
+        logger.warning("claraityignore_read_error", error=str(e))
         return [], None
 
     lines = []
@@ -61,7 +61,7 @@ def _normalize_path(file_path: str | Path) -> str:
 
 
 def is_blocked(file_path: str | Path) -> tuple[bool, Optional[str]]:
-    """Check if a file path is blocked by .clarityignore.
+    """Check if a file path is blocked by .claraityignore.
 
     Args:
         file_path: Absolute or relative file path to check.
@@ -83,7 +83,7 @@ def is_blocked(file_path: str | Path) -> tuple[bool, Optional[str]]:
     for line in lines:
         single_spec = pathspec.PathSpec.from_lines("gitwildmatch", [line])
         if single_spec.match_file(normalized):
-            logger.info("clarityignore_blocked", path=normalized, pattern=line)
+            logger.info("claraityignore_blocked", path=normalized, pattern=line)
             return True, line
 
     # Shouldn't reach here, but defensive
@@ -91,7 +91,7 @@ def is_blocked(file_path: str | Path) -> tuple[bool, Optional[str]]:
 
 
 def filter_paths(paths: list[Path]) -> list[Path]:
-    """Filter out paths that match .clarityignore patterns.
+    """Filter out paths that match .claraityignore patterns.
 
     Silent filtering for search/list tools -- returns only unblocked paths.
     """
@@ -111,7 +111,7 @@ def check_command(command: str) -> tuple[bool, Optional[str]]:
     """Check if a shell command references any blocked files.
 
     Tokenizes the command via shlex.split and checks each token against
-    .clarityignore patterns. Catches straightforward commands like
+    .claraityignore patterns. Catches straightforward commands like
     ``cat .env`` or ``type secrets/key.txt``.
 
     Args:
@@ -134,7 +134,7 @@ def check_command(command: str) -> tuple[bool, Optional[str]]:
     for token in tokens:
         normalized = _normalize_path(token)
         if spec.match_file(normalized):
-            logger.info("clarityignore_command_blocked", command=command, token=token)
+            logger.info("claraityignore_command_blocked", command=command, token=token)
             return True, "Access denied: command references a file blocked by user policy"
 
     return False, None

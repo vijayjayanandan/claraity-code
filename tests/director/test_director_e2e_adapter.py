@@ -314,7 +314,7 @@ class TestToolGatingByPhase:
             assert adapter.gate_tool(tool) == DirectorGateDecision.DENY, f"{tool} should be denied"
 
     def test_plan_write_file_path_restricted(self):
-        """write_file allowed in PLAN only for .clarity/plans/ paths."""
+        """write_file allowed in PLAN only for .claraity/plans/ paths."""
         adapter, understand, _, _, _ = _make_adapter_with_tools()
         adapter.start("task")
         understand.execute(task_description="task")
@@ -322,7 +322,7 @@ class TestToolGatingByPhase:
 
         # write_file allowed for plan docs
         assert adapter.gate_tool(
-            "write_file", {"file_path": ".clarity/plans/director_plan.md"}
+            "write_file", {"file_path": ".claraity/plans/director_plan.md"}
         ) == DirectorGateDecision.ALLOW
 
         # write_file denied for other paths

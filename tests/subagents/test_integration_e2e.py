@@ -11,7 +11,7 @@ from src.llm import LLMBackendType, LLMResponse
 @pytest.fixture
 def temp_agent_configs(tmp_path):
     """Create temporary agent configuration files."""
-    agents_dir = tmp_path / ".clarity" / "agents"
+    agents_dir = tmp_path / ".claraity" / "agents"
     agents_dir.mkdir(parents=True)
 
     # Code reviewer agent

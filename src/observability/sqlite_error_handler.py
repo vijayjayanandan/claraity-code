@@ -81,7 +81,7 @@ class SQLiteErrorHandler(logging.Handler):
 
     def __init__(
         self,
-        db_path: str = ".clarity/metrics.db",
+        db_path: str = ".claraity/metrics.db",
         queue_size: int = ERROR_QUEUE_SIZE,
     ):
         """

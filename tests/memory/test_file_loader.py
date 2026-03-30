@@ -27,8 +27,8 @@ class TestMemoryFileLoader:
 
     @pytest.fixture
     def temp_memory_dir(self, tmp_path):
-        """Create temporary .clarity directory."""
-        memory_dir = tmp_path / ".clarity"
+        """Create temporary .claraity directory."""
+        memory_dir = tmp_path / ".claraity"
         memory_dir.mkdir()
         return memory_dir
 
@@ -72,7 +72,7 @@ class TestMemoryFileLoader:
         # Create project memory
         project_dir = tmp_path / "project"
         project_dir.mkdir()
-        memory_dir = project_dir / ".clarity"
+        memory_dir = project_dir / ".claraity"
         memory_dir.mkdir()
         memory_file = memory_dir / "memory.md"
         memory_file.write_text("# Project Memory\n\nProject content\n", encoding="utf-8")
@@ -87,7 +87,7 @@ class TestMemoryFileLoader:
         # Create user memory
         user_dir = tmp_path / "user"
         user_dir.mkdir()
-        user_memory_dir = user_dir / ".clarity"
+        user_memory_dir = user_dir / ".claraity"
         user_memory_dir.mkdir()
         user_memory_file = user_memory_dir / "memory.md"
         user_memory_file.write_text("# User Memory\n\nUser content\n", encoding="utf-8")
@@ -98,7 +98,7 @@ class TestMemoryFileLoader:
         # Create project memory
         project_dir = tmp_path / "project"
         project_dir.mkdir()
-        project_memory_dir = project_dir / ".clarity"
+        project_memory_dir = project_dir / ".claraity"
         project_memory_dir.mkdir()
         project_memory_file = project_memory_dir / "memory.md"
         project_memory_file.write_text("# Project Memory\n\nProject content\n", encoding="utf-8")
@@ -116,11 +116,11 @@ class TestMemoryFileLoader:
 
     def test_project_hierarchy_traversal(self, loader, tmp_path):
         """Test upward traversal to find project memory."""
-        # Create nested structure: root/.clarity/memory.md
+        # Create nested structure: root/.claraity/memory.md
         # and start from root/subdir/subsubdir
         root = tmp_path / "root"
         root.mkdir()
-        memory_dir = root / ".clarity"
+        memory_dir = root / ".claraity"
         memory_dir.mkdir()
         memory_file = memory_dir / "memory.md"
         memory_file.write_text("# Root Memory\n\nFound me!\n", encoding="utf-8")
@@ -159,23 +159,23 @@ class TestMemoryFileLoader:
         assert imported_file in loader.loaded_files
 
     def test_import_home(self, loader, tmp_path, monkeypatch):
-        """Test home directory import (@~/.clarity/file.md) restricted to ~/.clarity/."""
+        """Test home directory import (@~/.claraity/file.md) restricted to ~/.claraity/."""
         # Mock home directory
         home_dir = tmp_path / "home"
         home_dir.mkdir()
         monkeypatch.setattr(Path, "home", lambda: home_dir)
         monkeypatch.chdir(tmp_path)
 
-        # Create main file with home import (must be inside ~/.clarity/)
+        # Create main file with home import (must be inside ~/.claraity/)
         main_dir = tmp_path / "main"
         main_dir.mkdir()
         main_file = main_dir / "memory.md"
-        main_file.write_text("@~/.clarity/preferences.md\n# Main Content\n", encoding="utf-8")
+        main_file.write_text("@~/.claraity/preferences.md\n# Main Content\n", encoding="utf-8")
 
-        # Create home .clarity file
-        clarity_dir = home_dir / ".clarity"
-        clarity_dir.mkdir()
-        home_file = clarity_dir / "preferences.md"
+        # Create home .claraity file
+        claraity_dir = home_dir / ".claraity"
+        claraity_dir.mkdir()
+        home_file = claraity_dir / "preferences.md"
         home_file.write_text("# My Preferences\n\nHome content!\n", encoding="utf-8")
 
         content = loader._load_file(main_file)
@@ -292,7 +292,7 @@ class TestMemoryFileLoader:
 
         assert path.exists()
         assert path.name == "memory.md"
-        assert ".clarity" in str(path)
+        assert ".claraity" in str(path)
 
         content = path.read_text(encoding="utf-8")
         assert "Project Memory" in content
@@ -310,7 +310,7 @@ class TestMemoryFileLoader:
 
         assert path.exists()
         assert path.name == "memory.md"
-        assert ".clarity" in str(path)
+        assert ".claraity" in str(path)
 
         content = path.read_text(encoding="utf-8")
         assert "User Memory" in content
@@ -321,7 +321,7 @@ class TestMemoryFileLoader:
         monkeypatch.chdir(tmp_path)
 
         # Create existing file with Quick Notes section
-        memory_dir = tmp_path / ".clarity"
+        memory_dir = tmp_path / ".claraity"
         memory_dir.mkdir()
         memory_file = memory_dir / "memory.md"
         memory_file.write_text(
@@ -346,7 +346,7 @@ class TestMemoryFileLoader:
         monkeypatch.chdir(tmp_path)
 
         # Create existing file without Quick Notes
-        memory_dir = tmp_path / ".clarity"
+        memory_dir = tmp_path / ".claraity"
         memory_dir.mkdir()
         memory_file = memory_dir / "memory.md"
         memory_file.write_text("# Project Memory\n\nExisting content\n", encoding="utf-8")
@@ -375,7 +375,7 @@ class TestMemoryFileLoader:
 
         assert path.exists()
         assert path.name == "memory.md"
-        assert ".clarity" in str(path)
+        assert ".claraity" in str(path)
 
         content = path.read_text(encoding="utf-8")
         assert "# ClarAIty Project Memory" in content
@@ -386,7 +386,7 @@ class TestMemoryFileLoader:
 
     def test_init_project_memory_custom_path(self, loader, tmp_path):
         """Test initializing project memory at custom path."""
-        custom_path = tmp_path / "custom" / ".clarity" / "memory.md"
+        custom_path = tmp_path / "custom" / ".claraity" / "memory.md"
 
         path = loader.init_project_memory(path=custom_path)
 
@@ -411,21 +411,21 @@ class TestMemoryFileLoader:
         """Test enterprise path on Linux."""
         mock_system.return_value = "Linux"
         path = loader._get_enterprise_path()
-        assert path == Path("/etc/clarity/memory.md")
+        assert path == Path("/etc/claraity/memory.md")
 
     @patch('platform.system')
     def test_enterprise_path_darwin(self, mock_system, loader):
         """Test enterprise path on macOS."""
         mock_system.return_value = "Darwin"
         path = loader._get_enterprise_path()
-        assert path == Path("/etc/clarity/memory.md")
+        assert path == Path("/etc/claraity/memory.md")
 
     @patch('platform.system')
     def test_enterprise_path_windows(self, mock_system, loader):
         """Test enterprise path on Windows."""
         mock_system.return_value = "Windows"
         path = loader._get_enterprise_path()
-        assert path == Path("C:/ProgramData/clarity/memory.md")
+        assert path == Path("C:/ProgramData/claraity/memory.md")
 
     @patch('platform.system')
     def test_enterprise_path_unknown(self, mock_system, loader):
@@ -458,19 +458,19 @@ class TestMemoryFileLoader:
 
         assert resolved == expected
 
-    def test_resolve_import_path_home_clarity(self, loader, tmp_path, monkeypatch):
-        """Test resolving ~/ import restricted to ~/.clarity/ directory."""
+    def test_resolve_import_path_home_claraity(self, loader, tmp_path, monkeypatch):
+        """Test resolving ~/ import restricted to ~/.claraity/ directory."""
         home_dir = tmp_path / "home"
         home_dir.mkdir()
         monkeypatch.setattr(Path, "home", lambda: home_dir)
 
-        # Inside ~/.clarity/ - should be allowed
-        resolved = loader._resolve_import_path("~/.clarity/docs/file.md", tmp_path)
-        expected = (home_dir / ".clarity" / "docs" / "file.md").resolve()
+        # Inside ~/.claraity/ - should be allowed
+        resolved = loader._resolve_import_path("~/.claraity/docs/file.md", tmp_path)
+        expected = (home_dir / ".claraity" / "docs" / "file.md").resolve()
         assert resolved == expected
 
-    def test_resolve_import_path_home_outside_clarity_blocked(self, loader, tmp_path, monkeypatch):
-        """Test ~/ import outside ~/.clarity/ is blocked."""
+    def test_resolve_import_path_home_outside_claraity_blocked(self, loader, tmp_path, monkeypatch):
+        """Test ~/ import outside ~/.claraity/ is blocked."""
         # Set up home and project as separate sibling directories so they don't overlap
         home_dir = tmp_path / "home"
         home_dir.mkdir()
@@ -480,7 +480,7 @@ class TestMemoryFileLoader:
         monkeypatch.setattr(Path, "home", lambda: home_dir)
         monkeypatch.chdir(project_dir)
 
-        # ~/docs/file.md resolves outside both ~/.clarity/ and project_dir - should be blocked
+        # ~/docs/file.md resolves outside both ~/.claraity/ and project_dir - should be blocked
         resolved = loader._resolve_import_path("~/docs/file.md", project_dir)
         assert resolved is None
 
@@ -580,15 +580,15 @@ class TestMemoryFileLoaderIntegration:
         home_dir.mkdir()
         monkeypatch.setattr(Path, "home", lambda: home_dir)
 
-        # Create user memory with import inside ~/.clarity/
-        user_clarity_dir = home_dir / ".clarity"
-        user_clarity_dir.mkdir()
-        user_prefs = user_clarity_dir / "preferences.md"
+        # Create user memory with import inside ~/.claraity/
+        user_claraity_dir = home_dir / ".claraity"
+        user_claraity_dir.mkdir()
+        user_prefs = user_claraity_dir / "preferences.md"
         user_prefs.write_text("# User Preferences\n\nI like tabs\n", encoding="utf-8")
 
-        user_memory = user_clarity_dir / "memory.md"
+        user_memory = user_claraity_dir / "memory.md"
         user_memory.write_text(
-            "@~/.clarity/preferences.md\n# User Memory\n\nUser level\n",
+            "@~/.claraity/preferences.md\n# User Memory\n\nUser level\n",
             encoding="utf-8"
         )
 
@@ -599,10 +599,10 @@ class TestMemoryFileLoaderIntegration:
         project_docs = project_dir / "docs.md"
         project_docs.write_text("# Project Docs\n\nProject info\n", encoding="utf-8")
 
-        project_memory_dir = project_dir / ".clarity"
+        project_memory_dir = project_dir / ".claraity"
         project_memory_dir.mkdir()
         project_memory = project_memory_dir / "memory.md"
-        # Use @../docs.md to go up from .clarity to project dir (still within project root)
+        # Use @../docs.md to go up from .claraity to project dir (still within project root)
         project_memory.write_text(
             "@../docs.md\n# Project Memory\n\nProject level\n",
             encoding="utf-8"

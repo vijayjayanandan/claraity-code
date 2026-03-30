@@ -137,7 +137,7 @@ export function MCPPanel({
         <button
           className="mcp-icon-btn"
           onClick={() => postMessage({ type: "mcpOpenConfig", scope: "project" })}
-          title="Edit project settings (.clarity/mcp_settings.json)"
+          title="Edit project settings (.claraity/mcp_settings.json)"
           aria-label="Edit project MCP settings"
         >
           <i className="codicon codicon-file" />
@@ -145,7 +145,7 @@ export function MCPPanel({
         <button
           className="mcp-icon-btn"
           onClick={() => postMessage({ type: "mcpOpenConfig", scope: "global" })}
-          title="Edit global settings (~/.clarity/mcp_settings.json)"
+          title="Edit global settings (~/.claraity/mcp_settings.json)"
           aria-label="Edit global MCP settings"
         >
           <i className="codicon codicon-globe" />
@@ -195,7 +195,7 @@ export function MCPPanel({
               <p>No MCP servers configured.</p>
               <p className="mcp-hint">
                 Browse the <button className="link-button" onClick={() => handleTabSwitch("marketplace")}>Marketplace</button> to add servers,
-                or edit <code>.clarity/mcp_settings.json</code> directly.
+                or edit <code>.claraity/mcp_settings.json</code> directly.
               </p>
             </div>
           ) : (

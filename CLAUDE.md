@@ -198,7 +198,7 @@ Store updates → _handle_store_notification() → UI refresh
 
 **Data flow:**
 ```
-User → CodingAgent → MemoryManager → MessageStore → .clarity/sessions/*.jsonl
+User → CodingAgent → MemoryManager → MessageStore → .claraity/sessions/*.jsonl
                                            ↓
                                     StoreAdapter (read) → TUI
 ```
@@ -274,7 +274,7 @@ When modifying tool state emission, store events, or protocol signals, verify al
 
 ## SESSION PERSISTENCE
 
-- **Location:** `.clarity/sessions/<session_id>.jsonl`
+- **Location:** `.claraity/sessions/<session_id>.jsonl`
 - **Format:** One JSON object per line: `{"role": "...", "meta": {...}, "content": "..."}`
 - **Resume:** JSONL replayed into MessageStore on session load
 
@@ -282,10 +282,10 @@ When modifying tool state emission, store events, or protocol signals, verify al
 
 ## LOGS & DIAGNOSTICS
 
-- **Application logs:** `.clarity/logs/app.jsonl` (structured JSONL, all log levels)
-- **Metrics DB:** `.clarity/metrics.db` (SQLite, performance metrics and error tracking)
+- **Application logs:** `.claraity/logs/app.jsonl` (structured JSONL, all log levels)
+- **Metrics DB:** `.claraity/metrics.db` (SQLite, performance metrics and error tracking)
 - **Query logs:** `python -m src.observability.log_query --tail 50`
-- **Subagent transcripts:** `.clarity/sessions/subagents/<name>-<session_id>.jsonl`
+- **Subagent transcripts:** `.claraity/sessions/subagents/<name>-<session_id>.jsonl`
 
 ---
 

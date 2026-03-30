@@ -40,7 +40,7 @@ For each file creation task, you MUST:
 - Longest of the 4 (slightly higher token usage)
 - May feel repetitive
 
-**Use When:** You want maximum clarity and explicitness
+**Use When:** You want maximum claraity and explicitness
 
 ---
 
@@ -69,12 +69,12 @@ For file creation tasks, generate ALL write_file calls in this response."""
 - Concise yet complete
 - "Parallel" is familiar from Claude Code docs
 - Uses "NOW" for urgency without harshness
-- Balances brevity with clarity
+- Balances brevity with claraity
 
 **Cons:**
 - None identified in testing
 
-**Use When:** You want the best balance of clarity, conciseness, and performance
+**Use When:** You want the best balance of claraity, conciseness, and performance
 
 ---
 
@@ -176,7 +176,7 @@ Think of this as a compiler: you must process ALL source files in one compilatio
 3. ✅ Concise (5 bullet points)
 4. ✅ Familiar "parallel" framing from Claude Code
 5. ✅ Professional tone (not harsh)
-6. ✅ Balances brevity with clarity
+6. ✅ Balances brevity with claraity
 
 **Implementation:**
 
@@ -280,7 +280,7 @@ Step 2: write_file for second file
 | Situation | Use This Prompt |
 |-----------|----------------|
 | **Default (recommended)** | Parallel Instruction ⭐ |
-| Maximum clarity needed | Explicit Instruction |
+| Maximum claraity needed | Explicit Instruction |
 | Emphasize completeness | Atomic Transaction |
 | Bulk operations framing | Batch Processing |
 | Testing alternatives | Try all 4 (all work!) |

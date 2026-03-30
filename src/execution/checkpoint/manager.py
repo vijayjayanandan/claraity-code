@@ -326,6 +326,9 @@ class CheckpointManager:
             FileNotFoundError: If checkpoint file doesn't exist
             json.JSONDecodeError: If checkpoint file is corrupted
         """
+        if not self._is_valid_checkpoint_id(checkpoint_id):
+            raise ValueError(f"Invalid checkpoint ID: {checkpoint_id}")
+
         checkpoint_file = self.checkpoint_dir / f"checkpoint_{checkpoint_id}.json"
 
         if not checkpoint_file.exists():
@@ -459,7 +462,7 @@ class CheckpointManager:
                 resolved_path = checkpoint_file.resolve()
                 checkpoint_dir_resolved = self.checkpoint_dir.resolve()
 
-                if not str(resolved_path).startswith(str(checkpoint_dir_resolved)):
+                if not resolved_path.is_relative_to(checkpoint_dir_resolved):
                     continue
 
                 checkpoint_file.unlink()

@@ -459,7 +459,7 @@ class TestReport:
 ### Scenario 1: ClarAIty Layer Diagrams
 
 ```python
-CLARITY_LAYERS_TEST = TestScenario(
+CLARAITY_LAYERS_TEST = TestScenario(
     name="ClarAIty Layer Diagrams - All Layers",
     description="Autonomous validation of all 10 layer detail diagrams",
     steps=[
@@ -534,7 +534,7 @@ RESPONSIVE_TEST = TestScenario(
 python -m src.cli test-ui --url http://localhost:3000
 
 # Test specific scenario
-python -m src.cli test-ui --scenario clarity-layers
+python -m src.cli test-ui --scenario claraity-layers
 
 # List available scenarios
 python -m src.cli test-ui --list-scenarios
@@ -546,7 +546,7 @@ python -m src.cli test-ui --interactive
 python -m src.cli test-ui --report-only --from-screenshots ./screenshots/
 
 # CI/CD mode (JSON output)
-python -m src.cli test-ui --scenario clarity-layers --format json
+python -m src.cli test-ui --scenario claraity-layers --format json
 ```
 
 ### CLI Implementation
@@ -566,7 +566,7 @@ async def test_ui(url, scenario, interactive, format):
     analysis = UIAnalysisTool()
     agent = UITestAgent(browser, analysis)
 
-    if scenario == "clarity-layers":
+    if scenario == "claraity-layers":
         report = await agent.test_all_layers()
     elif url:
         report = await agent.test_page(url, expectations=[])
@@ -630,7 +630,7 @@ async def test_ui(url, scenario, interactive, format):
 - [ ] Create `src/testing/` module
 - [ ] Implement UITestAgent class
 - [ ] Implement TestScenario, TestStep, TestReport classes
-- [ ] Create CLARITY_LAYERS_TEST scenario
+- [ ] Create CLARAITY_LAYERS_TEST scenario
 - [ ] Implement test_all_layers method
 - [ ] Add markdown/HTML report generation
 - [ ] Write integration tests (5 tests)
@@ -653,7 +653,7 @@ async def test_ui(url, scenario, interactive, format):
 - [ ] Write CLI tests (3 tests)
 
 **Success Criteria**:
-- ✅ `python -m src.cli test-ui --scenario clarity-layers` works
+- ✅ `python -m src.cli test-ui --scenario claraity-layers` works
 - ✅ Generates HTML report with embedded screenshots
 - ✅ JSON output works for CI/CD
 - ✅ Progress shown in terminal
@@ -673,7 +673,7 @@ async def test_ui(url, scenario, interactive, format):
 
 ```bash
 # Run full test suite
-python -m src.cli test-ui --scenario clarity-layers
+python -m src.cli test-ui --scenario claraity-layers
 
 # Output:
 # Testing ClarAIty Layer Diagrams...
@@ -777,7 +777,7 @@ plan = await planner.create_plan(
 ### 1. URL Whitelisting
 - Default: Only localhost URLs allowed
 - External URLs require explicit user approval
-- Configurable whitelist in `.claritysettings`
+- Configurable whitelist in `.claraitysettings`
 
 ### 2. Browser Sandboxing
 - Playwright runs in isolated context
@@ -785,7 +785,7 @@ plan = await planner.create_plan(
 - Automatic cleanup on exit
 
 ### 3. Screenshot Privacy
-- Screenshots saved to `/tmp/.clarity/screenshots/` by default
+- Screenshots saved to `/tmp/.claraity/screenshots/` by default
 - Automatic deletion after 24 hours
 - User can configure retention policy
 
@@ -960,7 +960,7 @@ tests/
 docs/
   UI_TESTING.md             # Usage guide
 
-.clarity/
+.claraity/
   screenshots/              # Temporary screenshot storage
   test_reports/             # Generated reports
 ```

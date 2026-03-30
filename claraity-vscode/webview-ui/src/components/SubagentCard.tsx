@@ -65,7 +65,25 @@ export function SubagentCard({ info, toolCards: toolCardsList, postMessage }: Su
         ? `${currentToolName}${currentToolArg ? ` \u2014 ${currentToolArg}` : ""}`
         : "Starting\u2026")
     : "Completed";
-  const statsText = `${info.toolCount > 0 ? `${info.toolCount} tools | ` : ""}${elapsed}s`;
+
+  // Format token count as compact string (e.g. 1234 -> "1.2k", 52100 -> "52k")
+  const fmtTokens = (n: number): string => {
+    if (n < 1000) return String(n);
+    if (n < 10000) return `${(n / 1000).toFixed(1)}k`;
+    return `${Math.round(n / 1000)}k`;
+  };
+
+  // Build stats fragments
+  const statsParts: string[] = [];
+  if (info.toolCount > 0) statsParts.push(`${info.toolCount} tools`);
+  statsParts.push(`${elapsed}s`);
+  if (info.contextTokens > 0 && info.contextWindow > 0) {
+    statsParts.push(`ctx ${fmtTokens(info.contextTokens)}/${fmtTokens(info.contextWindow)}`);
+  } else if (info.contextTokens > 0) {
+    statsParts.push(`ctx ${fmtTokens(info.contextTokens)}`);
+  }
+  if (info.totalTokens > 0) statsParts.push(`${fmtTokens(info.totalTokens)} tokens`);
+  const statsText = statsParts.join(" | ");
 
   return (
     <div className={`tool-card${info.active ? " subagent-active" : ""}`}>

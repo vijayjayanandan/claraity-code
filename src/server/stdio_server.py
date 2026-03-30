@@ -51,7 +51,6 @@ import os
 import re
 import sys
 import threading
-import uuid
 from pathlib import Path
 from typing import Any
 
@@ -65,6 +64,7 @@ from src.server.serializers import (
     serialize_store_notification,
 )
 from src.session.persistence.writer import SessionWriter
+from src.session.scanner import SESSION_ID_RE as _SESSION_ID_RE, generate_session_id as _generate_session_id
 from src.session.store.memory_store import StoreNotification
 
 logger = get_logger("server.stdio")
@@ -84,18 +84,6 @@ _JIRA_CONNECT_TIMEOUT = float(os.environ.get("CLARAITY_JIRA_TIMEOUT", "120"))
 
 # Valid permission modes
 _VALID_MODES = frozenset({"plan", "normal", "auto"})
-
-# Session ID validation (prevents path traversal).
-# Accepts two formats:
-#   UUID:       xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx  (stdio server)
-#   Date-based: session-YYYYMMDD-HHMMSS-xxxxxxxx      (TUI)
-_SESSION_ID_RE = re.compile(
-    r"^(?:"
-    r"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}"  # UUID
-    r"|session-\d{8}-\d{6}-[a-f0-9]{8}"  # TUI date-based
-    r")$",
-    re.IGNORECASE,
-)
 
 
 # ---------------------------------------------------------------------------
@@ -258,6 +246,7 @@ class StdioProtocol(UIProtocol):
         "new_session": "_handle_new_session",
         "list_sessions": "_handle_list_sessions",
         "resume_session": "_handle_resume_session",
+        "delete_session": "_handle_delete_session",
         "get_jira_profiles": "_handle_jira_profiles",
         "save_jira_config": "_handle_jira_save",
         "connect_jira": "_handle_jira_connect_dispatch",
@@ -284,6 +273,8 @@ class StdioProtocol(UIProtocol):
         "reload_subagents": "_handle_reload_subagents",
         # Prompt Enrichment
         "enrich_prompt": "_handle_enrich_prompt",
+        # Background tasks
+        "cancel_background_task": "_handle_cancel_background_task",
     }
 
     def __init__(
@@ -341,7 +332,7 @@ class StdioProtocol(UIProtocol):
                 logger.warning("stdio_session_writer_close_error", error=str(e))
             self._session_writer = None
 
-        sessions_dir = Path(self._working_directory) / ".clarity" / "sessions"
+        sessions_dir = Path(self._working_directory) / ".claraity" / "sessions"
         jsonl_path = sessions_dir / session_id / "session.jsonl"
         writer = SessionWriter(file_path=jsonl_path)
         await writer.open()
@@ -804,19 +795,15 @@ class StdioProtocol(UIProtocol):
 
     async def _handle_new_session(self, data: dict) -> None:
         """Reset agent to a fresh session (New Chat)."""
-        from datetime import datetime
-
         from src.session.store.memory_store import MessageStore
 
-        new_session_id = (
-            f"session-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
-        )
+        new_session_id = _generate_session_id()
 
         self._agent.reset_session(new_session_id)
         new_store = MessageStore()
         self._agent.memory.set_message_store(new_store, new_session_id)
 
-        sessions_dir = Path(self._working_directory) / ".clarity" / "sessions"
+        sessions_dir = Path(self._working_directory) / ".claraity" / "sessions"
         await self._switch_session(
             new_session_id, new_store, sessions_dir / new_session_id / "session.jsonl"
         )
@@ -827,7 +814,7 @@ class StdioProtocol(UIProtocol):
         """List available sessions for the history panel."""
         from src.session.scanner import scan_sessions
 
-        sessions_dir = Path(self._working_directory) / ".clarity" / "sessions"
+        sessions_dir = Path(self._working_directory) / ".claraity" / "sessions"
         try:
             sessions = scan_sessions(sessions_dir, limit=50)
 
@@ -860,13 +847,14 @@ class StdioProtocol(UIProtocol):
     def _find_session_file(self, session_id: str) -> Path | None:
         """Locate the JSONL file for a session (directory or flat structure).
 
-        Validates session_id as a UUID to prevent path traversal attacks.
+        Validates session_id against SESSION_ID_RE to prevent path traversal attacks.
+        Checks both directory-based (session_id/session.jsonl) and flat (session_id.jsonl) layouts.
         """
         if not _SESSION_ID_RE.match(session_id):
             logger.warning("stdio_invalid_session_id", session_id=session_id[:50])
             return None
 
-        sessions_dir = Path(self._working_directory) / ".clarity" / "sessions"
+        sessions_dir = Path(self._working_directory) / ".claraity" / "sessions"
         for candidate in (
             sessions_dir / session_id / "session.jsonl",
             sessions_dir / f"{session_id}.jsonl",
@@ -915,6 +903,52 @@ class StdioProtocol(UIProtocol):
             await self._send_error(
                 "session_resume_error", "Failed to resume session. Check server logs."
             )
+
+    async def _handle_delete_session(self, data: dict) -> None:
+        """Delete a session by session_id."""
+        from src.core.session_manager import SessionManager
+        from src.session.scanner import scan_sessions
+
+        session_id = data.get("session_id", "")
+        if not session_id:
+            await self._send_json({"type": "session_deleted", "session_id": "", "success": False, "message": "session_id is required"})
+            return
+
+        # Refuse to delete the currently active session
+        if session_id == self._session_id:
+            await self._send_json({"type": "session_deleted", "session_id": session_id, "success": False, "message": "Cannot delete the active session"})
+            return
+
+        sessions_dir = Path(self._working_directory) / ".claraity" / "sessions"
+        try:
+            manager = SessionManager(sessions_dir=sessions_dir)
+            deleted = manager.delete_session(session_id)
+            if not deleted:
+                await self._send_json({"type": "session_deleted", "session_id": session_id, "success": False, "message": f"Session not found: {session_id}"})
+                return
+
+            await self._send_json({"type": "session_deleted", "session_id": session_id, "success": True})
+
+            # Send refreshed session list so UI updates immediately
+            sessions = scan_sessions(sessions_dir, limit=50)
+            sessions_data = [
+                {
+                    "session_id": s.session_id,
+                    "first_message": s.display_title,
+                    "message_count": s.message_count,
+                    "updated_at": s.updated_at.isoformat(),
+                    "git_branch": s.git_branch,
+                }
+                for s in sessions
+                if s.session_id != self._session_id
+            ]
+            await self._send_json({"type": "sessions_list", "sessions": sessions_data})
+
+            logger.info("stdio_session_deleted", session_id=session_id)
+
+        except Exception as e:
+            logger.error("stdio_delete_session_error", error=str(e))
+            await self._send_json({"type": "session_deleted", "session_id": session_id, "success": False, "message": "Failed to delete session. Check server logs."})
 
     # -----------------------------------------------------------------
     # Jira integration handlers
@@ -1535,7 +1569,7 @@ class StdioProtocol(UIProtocol):
         try:
             from src.claraity.claraity_beads import BeadStore
 
-            db_path = os.path.join(self._working_directory, ".clarity", "claraity_beads.db")
+            db_path = os.path.join(self._working_directory, ".claraity", "claraity_beads.db")
             if not os.path.exists(db_path):
                 await self._send_json(
                     {
@@ -1628,9 +1662,9 @@ class StdioProtocol(UIProtocol):
     async def _handle_get_architecture(self, data: dict) -> None:
         """Query the knowledge DB and send architecture graph data to the client."""
         try:
-            from src.claraity.claraity_db import ClarityStore
+            from src.claraity.claraity_db import ClaraityStore
 
-            db_path = os.path.join(self._working_directory, ".clarity", "claraity_knowledge.db")
+            db_path = os.path.join(self._working_directory, ".claraity", "claraity_knowledge.db")
             if not os.path.exists(db_path):
                 await self._send_json(
                     {
@@ -1644,7 +1678,7 @@ class StdioProtocol(UIProtocol):
                 )
                 return
 
-            store = ClarityStore(db_path)
+            store = ClaraityStore(db_path)
             try:
                 raw_nodes = store.get_all_nodes()
                 raw_edges = store.get_all_edges()
@@ -1727,18 +1761,18 @@ class StdioProtocol(UIProtocol):
     async def _handle_approve_knowledge(self, data: dict) -> None:
         """Review the knowledge DB - approve or reject with comments."""
         try:
-            from src.claraity.claraity_db import ClarityStore
+            from src.claraity.claraity_db import ClaraityStore
             from datetime import datetime, timezone
 
             approved_by = data.get("approved_by", "unknown")
             status = data.get("status", "approved")
             comments = data.get("comments", "")
-            db_path = os.path.join(self._working_directory, ".clarity", "claraity_knowledge.db")
+            db_path = os.path.join(self._working_directory, ".claraity", "claraity_knowledge.db")
             if not os.path.exists(db_path):
                 await self._send_error("approve_error", "Knowledge DB not found")
                 return
 
-            store = ClarityStore(db_path)
+            store = ClaraityStore(db_path)
             try:
                 metadata = store.get_metadata()
                 version = int(metadata.get("knowledge_version", "0")) + 1
@@ -1843,7 +1877,7 @@ class StdioProtocol(UIProtocol):
             })
 
     async def _handle_save_subagent(self, data: dict) -> None:
-        """Save or update a custom subagent config to .clarity/agents/<name>.md."""
+        """Save or update a custom subagent config to .claraity/agents/<name>.md."""
         import re as _re
 
         name = str(data.get("name", "")).strip()
@@ -1887,7 +1921,7 @@ class StdioProtocol(UIProtocol):
 
         try:
             working_dir = Path(self._working_directory) if self._working_directory else Path.cwd()
-            agents_dir = working_dir / ".clarity" / "agents"
+            agents_dir = working_dir / ".claraity" / "agents"
             agents_dir.mkdir(parents=True, exist_ok=True)
 
             # Build .md content with properly escaped YAML frontmatter
@@ -1940,7 +1974,7 @@ class StdioProtocol(UIProtocol):
 
         try:
             working_dir = Path(self._working_directory) if self._working_directory else Path.cwd()
-            agents_dir = working_dir / ".clarity" / "agents"
+            agents_dir = working_dir / ".claraity" / "agents"
             target = agents_dir / f"{name}.md"
 
             if not target.exists():
@@ -2005,29 +2039,29 @@ class StdioProtocol(UIProtocol):
     async def _handle_export_knowledge(self, data: dict) -> None:
         """Export both knowledge and beads DBs to JSONL."""
         try:
-            from src.claraity.claraity_db import ClarityStore
+            from src.claraity.claraity_db import ClaraityStore
             from src.claraity.claraity_beads import BeadStore
 
             results = []
-            kb_path = os.path.join(self._working_directory, ".clarity", "claraity_knowledge.db")
+            kb_path = os.path.join(self._working_directory, ".claraity", "claraity_knowledge.db")
             if os.path.exists(kb_path):
-                store = ClarityStore(kb_path)
+                store = ClaraityStore(kb_path)
                 try:
                     count = store.export_jsonl(
                         os.path.join(
-                            self._working_directory, ".clarity", "claraity_knowledge.jsonl"
+                            self._working_directory, ".claraity", "claraity_knowledge.jsonl"
                         )
                     )
                     results.append(f"Knowledge: {count} records")
                 finally:
                     store.close()
 
-            bd_path = os.path.join(self._working_directory, ".clarity", "claraity_beads.db")
+            bd_path = os.path.join(self._working_directory, ".claraity", "claraity_beads.db")
             if os.path.exists(bd_path):
                 store = BeadStore(bd_path)
                 try:
                     count = store.export_jsonl(
-                        os.path.join(self._working_directory, ".clarity", "claraity_beads.jsonl")
+                        os.path.join(self._working_directory, ".claraity", "claraity_beads.jsonl")
                     )
                     results.append(f"Beads: {count} records")
                 finally:
@@ -2047,20 +2081,36 @@ class StdioProtocol(UIProtocol):
     # Prompt Enrichment
     # -----------------------------------------------------------------
 
-    _ENRICHMENT_SYSTEM_PROMPT = (
-        "You are a prompt enrichment assistant for a coding agent called ClarAIty. "
-        "Given a short user request and codebase context, expand it into a detailed, "
-        "structured prompt that will help the coding agent understand exactly what to do.\n\n"
-        "Output format:\n"
-        "## Context\n[relevant area of codebase]\n\n"
-        "## Requirements\n[numbered specific requirements]\n\n"
-        "## Key Files\n[files to examine/modify with their purpose]\n\n"
-        "## Constraints\n[rules to follow]\n\n"
-        "Be concise. Do not add requirements the user did not ask for."
-    )
+    def _build_enrichment_backend(self, pe, cfg):
+        """Return the LLM backend to use for prompt enrichment.
+
+        Falls back to the main agent's backend when no enrichment model is
+        configured or it matches the main model.
+        """
+        if not pe.model or pe.model == self._agent.llm.config.model_name:
+            return self._agent.llm
+
+        from src.llm import LLMBackendType, LLMConfig, OllamaBackend, OpenAIBackend
+
+        llm_config = LLMConfig(
+            backend_type=LLMBackendType(cfg.backend_type),
+            model_name=pe.model,
+            base_url=cfg.base_url,
+            temperature=0.2,
+            max_tokens=200,
+            top_p=0.95,
+            context_window=8192,
+        )
+        if cfg.backend_type == "anthropic":
+            from src.llm.anthropic_backend import AnthropicBackend
+            return AnthropicBackend(llm_config, api_key=cfg.api_key)
+        elif cfg.backend_type == "ollama":
+            return OllamaBackend(llm_config)
+        else:
+            return OpenAIBackend(llm_config, api_key=cfg.api_key)
 
     async def _handle_enrich_prompt(self, data: dict) -> None:
-        """Enrich a short user prompt using knowledge DB context + LLM."""
+        """Rewrite a short user prompt into a clear, precise instruction using streaming LLM."""
         content = data.get("content", "").strip()
         if not content:
             await self._send_json(
@@ -2069,55 +2119,52 @@ class StdioProtocol(UIProtocol):
             return
 
         try:
-            import asyncio
+            from src.llm.config_loader import load_llm_config
 
-            # 1. Gather codebase context from knowledge DB
-            context_parts = []
-            kb_path = os.path.join(
-                self._working_directory, ".clarity", "claraity_knowledge.db"
-            )
-            if os.path.exists(kb_path):
-                from src.claraity.claraity_db import ClarityStore, render_compact_briefing, render_search
+            cfg = load_llm_config(self._config_path)
+            pe = cfg.prompt_enrichment
+            backend = self._build_enrichment_backend(pe, cfg)
+            from src.prompts.enrichment import ENRICHMENT_SYSTEM_PROMPT
+            system_prompt = pe.system_prompt or ENRICHMENT_SYSTEM_PROMPT
 
-                store = ClarityStore(kb_path)
-                try:
-                    briefing = render_compact_briefing(store)
-                    if briefing:
-                        context_parts.append(briefing)
-                    # Extract keywords for search (simple: split, filter short words)
-                    keywords = [w for w in content.split() if len(w) > 2]
-                    for kw in keywords[:3]:
-                        search_result = render_search(store, kw)
-                        if search_result and "No results" not in search_result:
-                            context_parts.append(search_result)
-                            break  # One good search result is enough
-                finally:
-                    store.close()
+            # Build conversation history context from the last few chat turns.
+            # Each entry is {"role": "user"|"assistant", "content": str}.
+            raw_history = data.get("history") or []
+            history_text = ""
+            if raw_history and isinstance(raw_history, list):
+                lines = []
+                for entry in raw_history:
+                    if not isinstance(entry, dict):
+                        continue
+                    role = str(entry.get("role", "")).strip()
+                    text = str(entry.get("content", "")).strip()
+                    if role in ("user", "assistant") and text:
+                        label = "User" if role == "user" else "Assistant"
+                        lines.append(f"{label}: {text}")
+                if lines:
+                    history_text = "Recent conversation:\n" + "\n".join(lines) + "\n\n"
 
-            codebase_context = "\n\n".join(context_parts) if context_parts else "No codebase knowledge available."
+            user_message = f'{history_text}User request: "{content}"'
 
-            # 2. Make a lightweight LLM call using the agent's backend
-            backend = self._agent.llm_backend
             messages = [
-                {"role": "system", "content": self._ENRICHMENT_SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": (
-                        f"User's request: {content}\n\n"
-                        f"Codebase context:\n{codebase_context}"
-                    ),
-                },
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
             ]
 
-            # Run sync generate() in a thread to avoid blocking the event loop
-            response = await asyncio.to_thread(
-                backend.generate, messages, max_tokens=1000
-            )
+            accumulated = []
+            async for delta in backend.generate_provider_deltas_async(
+                messages, max_tokens=200
+            ):
+                if delta.text_delta:
+                    accumulated.append(delta.text_delta)
+                    await self._send_json(
+                        {"type": "enrichment_delta", "delta": delta.text_delta}
+                    )
 
-            enriched = response.content or content
+            enriched = "".join(accumulated) or content
             await self._send_json(
                 {
-                    "type": "enriched_prompt",
+                    "type": "enrichment_complete",
                     "original": content,
                     "enriched": enriched,
                 }
@@ -2133,6 +2180,49 @@ class StdioProtocol(UIProtocol):
             await self._send_json(
                 {"type": "enrichment_error", "message": str(e)}
             )
+
+    # -----------------------------------------------------------------
+    # Background tasks
+    # -----------------------------------------------------------------
+
+    async def _handle_cancel_background_task(self, data: dict) -> None:
+        task_id = data.get("task_id", "")
+        if not task_id:
+            return
+        registry = self._agent._bg_registry
+        success, message = await registry.cancel(task_id)
+        logger.info("stdio_bg_task_cancel", task_id=task_id, success=success, message=message)
+        # Send updated task list so the panel refreshes
+        await self._send_background_tasks_update()
+
+    async def _send_background_tasks_update(self) -> None:
+        """Send current background task list to the client."""
+        import time
+
+        MAX_OUTPUT_PREVIEW = 8192  # 8 KB preview for panel display
+
+        registry = self._agent._bg_registry
+        tasks = []
+        for info in registry.all_tasks():
+            elapsed = (info.end_time or time.monotonic()) - info.start_time
+            entry: dict = {
+                "task_id": info.task_id,
+                "command": info.command,
+                "description": info.description or info.command[:80],
+                "status": info.status.value,
+                "elapsed_seconds": round(elapsed, 1),
+                "exit_code": info.exit_code,
+            }
+            # Include output for finished tasks
+            if info.status.value != "running":
+                stdout = (info.stdout or "").strip()
+                stderr = (info.stderr or "").strip()
+                if stdout:
+                    entry["stdout"] = stdout[:MAX_OUTPUT_PREVIEW]
+                if stderr:
+                    entry["stderr"] = stderr[:MAX_OUTPUT_PREVIEW]
+            tasks.append(entry)
+        await self._send_json({"type": "background_tasks_updated", "tasks": tasks})
 
     # -----------------------------------------------------------------
     # Streaming
@@ -2246,6 +2336,87 @@ async def run_stdio_server(
         )
 
     agent._on_auto_approve_changed = _on_auto_approve_changed
+
+    # Register background task completion callback.
+    # Completions are debounced over a 1.5s window so tasks that finish in quick
+    # succession are batched into a single <task-notification> turn instead of
+    # triggering one LLM call per task.
+    # remove_from_completed() prevents drain_completed() in the tool loop
+    # (agent.py:2761) from re-delivering tasks already queued here.
+    MAX_INLINE_OUTPUT = 4096
+    BG_DEBOUNCE_SECS = 2.0
+
+    # Pending completions accumulate here until the debounce timer fires.
+    _bg_pending: list = []
+    _bg_debounce_handle: list = [None]  # mutable container so closure can reassign
+
+    def _flush_bg_pending() -> None:
+        """Build one batched notification from all pending completions and enqueue it."""
+        _bg_debounce_handle[0] = None
+        tasks = list(_bg_pending)
+        _bg_pending.clear()
+        if not tasks:
+            return
+
+        task_blocks = []
+        for completed_task in tasks:
+            desc = completed_task.description or completed_task.command[:80]
+            exit_info = f" (exit code {completed_task.exit_code})" if completed_task.exit_code is not None else ""
+            summary = f'Background command "{desc}" {completed_task.status.value}{exit_info}'
+
+            stdout = (completed_task.stdout or "").strip()
+            stderr = (completed_task.stderr or "").strip()
+            if len(stdout) > MAX_INLINE_OUTPUT:
+                stdout = stdout[:MAX_INLINE_OUTPUT] + "\n... (truncated)"
+            if len(stderr) > MAX_INLINE_OUTPUT:
+                stderr = stderr[:MAX_INLINE_OUTPUT] + "\n... (truncated)"
+
+            output_section = ""
+            if stdout:
+                output_section += f"<stdout>\n{stdout}\n</stdout>\n"
+            if stderr:
+                output_section += f"<stderr>\n{stderr}\n</stderr>\n"
+
+            task_blocks.append(
+                "<task>\n"
+                f"<task-id>{completed_task.task_id}</task-id>\n"
+                f"<status>{completed_task.status.value}</status>\n"
+                f"<exit-code>{completed_task.exit_code}</exit-code>\n"
+                f"<summary>{summary}</summary>\n"
+                f"{output_section}"
+                "</task>"
+            )
+            agent._bg_registry.remove_from_completed(completed_task.task_id)
+
+        notification = "<task-notification>\n" + "\n".join(task_blocks) + "\n</task-notification>"
+
+        try:
+            protocol._chat_queue.put_nowait({"content": notification})
+        except asyncio.QueueFull:
+            logger.warning("stdio_bg_notification_dropped_queue_full",
+                           task_ids=[t.task_id for t in tasks])
+
+    def _on_bg_task_update(active_count: int, completed_task=None) -> None:
+        # Always refresh the panel
+        asyncio.ensure_future(
+            protocol._safe_background_send(protocol._send_background_tasks_update())
+        )
+
+        if completed_task is None:
+            return  # Launch event, not a completion
+
+        # Accumulate and (re)start debounce timer
+        _bg_pending.append(completed_task)
+        if _bg_debounce_handle[0] is not None:
+            _bg_debounce_handle[0].cancel()
+        try:
+            loop = asyncio.get_running_loop()
+            _bg_debounce_handle[0] = loop.call_later(BG_DEBOUNCE_SECS, _flush_bg_pending)
+        except RuntimeError:
+            # No running loop (e.g. during shutdown) -- flush immediately
+            _flush_bg_pending()
+
+    agent._bg_registry.set_completion_callback(_on_bg_task_update)
 
     # Send session_info as first message = ready signal
     model_name = getattr(agent, "model_name", "unknown")

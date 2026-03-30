@@ -103,7 +103,7 @@ class EncryptedFileSecretStore(SecretStore):
     def __init__(self, store_dir: Path | None = None):
         from cryptography.fernet import Fernet
 
-        self._store_dir = store_dir or Path(".clarity") / "secrets"
+        self._store_dir = store_dir or Path(".claraity") / "secrets"
         self._store_dir.mkdir(parents=True, exist_ok=True)
         self._enc_path = self._store_dir / "secrets.enc"
         self._key_path = self._store_dir / "secret.key"

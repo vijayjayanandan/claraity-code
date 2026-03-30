@@ -22,11 +22,11 @@ from typing import Any, Optional
 
 
 # ---------------------------------------------------------------------------
-# ClarityStore - thin wrapper around SQLite
+# ClaraityStore - thin wrapper around SQLite
 # ---------------------------------------------------------------------------
 
 
-class ClarityStore:
+class ClaraityStore:
     """Read/write interface to claraity_knowledge.db (nodes + edges property graph)."""
 
     SCHEMA = """
@@ -68,7 +68,7 @@ class ClarityStore:
     CREATE INDEX IF NOT EXISTS idx_edges_type  ON edges(type);
     """
 
-    def __init__(self, db_path: str = ".clarity/claraity_knowledge.db"):
+    def __init__(self, db_path: str = ".claraity/claraity_knowledge.db"):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn: Optional[sqlite3.Connection] = None
@@ -97,9 +97,22 @@ class ClarityStore:
         finally:
             cursor.close()
 
+    FTS_SCHEMA = """
+    CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
+        node_id UNINDEXED,
+        node_type UNINDEXED,
+        name,
+        description,
+        extra_text,
+        tokenize='unicode61'
+    );
+    """
+
     def _ensure_schema(self):
         with self._cursor() as cur:
             cur.executescript(self.SCHEMA)
+            cur.executescript(self.FTS_SCHEMA)
+            self._backfill_fts_if_needed(cur)
 
     def close(self):
         if self.conn:
@@ -123,6 +136,64 @@ class ClarityStore:
     @staticmethod
     def _now() -> str:
         return datetime.now(timezone.utc).isoformat()
+
+    # -- FTS helpers ----------------------------------------------------------
+
+    def _build_extra_text(self, cur, node_id: str, properties: dict = None) -> str:
+        """Build the extra_text column for FTS: edge labels + properties."""
+        parts = []
+        # Edge labels involving this node
+        cur.execute(
+            "SELECT label FROM edges WHERE (from_id=? OR to_id=?) AND label IS NOT NULL",
+            (node_id, node_id),
+        )
+        for row in cur.fetchall():
+            parts.append(row[0])
+        # Flattened properties values
+        if properties:
+            for v in properties.values():
+                if isinstance(v, str):
+                    parts.append(v)
+                elif isinstance(v, list):
+                    parts.extend(str(item) for item in v)
+        return " ".join(parts)
+
+    def _upsert_fts(self, cur, node_id: str, node_type: str, name: str,
+                    description: str, properties: dict = None) -> None:
+        """Insert or replace a node's FTS entry."""
+        extra = self._build_extra_text(cur, node_id, properties)
+        cur.execute("DELETE FROM nodes_fts WHERE node_id=?", (node_id,))
+        cur.execute(
+            "INSERT INTO nodes_fts (node_id, node_type, name, description, extra_text) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (node_id, node_type, name, description or "", extra),
+        )
+
+    def _delete_fts(self, cur, node_id: str) -> None:
+        """Remove a node's FTS entry."""
+        cur.execute("DELETE FROM nodes_fts WHERE node_id=?", (node_id,))
+
+    def _backfill_fts_if_needed(self, cur) -> None:
+        """One-time backfill: populate FTS from existing nodes if FTS is empty."""
+        fts_count = cur.execute("SELECT COUNT(*) FROM nodes_fts").fetchone()[0]
+        node_count = cur.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
+        if fts_count == 0 and node_count > 0:
+            self._rebuild_fts_index(cur)
+
+    def _rebuild_fts_index(self, cur) -> None:
+        """Full rebuild of FTS index from nodes table."""
+        cur.execute("DELETE FROM nodes_fts")
+        rows = cur.execute(
+            "SELECT id, type, name, description, properties FROM nodes"
+        ).fetchall()
+        for row in rows:
+            props = json.loads(row[4]) if row[4] else {}
+            extra = self._build_extra_text(cur, row[0], props)
+            cur.execute(
+                "INSERT INTO nodes_fts (node_id, node_type, name, description, extra_text) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (row[0], row[1], row[2], row[3] or "", extra),
+            )
 
     # -- Internal implementations (take a cursor, no commit) -----------------
 
@@ -159,6 +230,7 @@ class ClarityStore:
                 now,
             ),
         )
+        self._upsert_fts(cur, node_id, node_type, name, description, properties)
 
     def _add_edge_impl(
         self,
@@ -220,10 +292,21 @@ class ClarityStore:
             f"UPDATE nodes SET {', '.join(updates)} WHERE id=?",
             tuple(values),
         )
-        return cur.rowcount
+        rowcount = cur.rowcount
+        # Re-index FTS with current node data
+        if rowcount > 0:
+            row = cur.execute(
+                "SELECT type, name, description, properties FROM nodes WHERE id=?",
+                (node_id,),
+            ).fetchone()
+            if row:
+                props = json.loads(row[3]) if row[3] else {}
+                self._upsert_fts(cur, node_id, row[0], row[1], row[2], props)
+        return rowcount
 
     def _remove_node_impl(self, cur, node_id: str) -> tuple[bool, int]:
         """Remove a node and all its connected edges. Returns (node_deleted, edges_removed)."""
+        self._delete_fts(cur, node_id)
         cur.execute("DELETE FROM edges WHERE from_id=? OR to_id=?", (node_id, node_id))
         edge_count = cur.rowcount
         cur.execute("DELETE FROM nodes WHERE id=?", (node_id,))
@@ -450,37 +533,98 @@ class ClarityStore:
         related_to: str = None,
         show: str = "detail",
         keyword: str = None,
+        search: str = None,
+        module_id: str = None,
+        file_path: str = None,
+        impact: str = None,
     ) -> str:
-        """Flexible query that returns markdown. All parameters optional.
+        """Unified query tool. All parameters optional; combine for compound queries.
 
-        Combinations:
+        Parameters:
+          search="token"                   -> FTS5 full-text search (ranked, snippets)
+          search="token", node_type="decision" -> FTS5 filtered by type
           node_id="comp-x"                 -> detail for that node + its edges
+          node_id="comp-x, mod-core"       -> detail for multiple nodes
           node_type="invariant"            -> list all nodes of that type
+          module_id="mod-core"             -> module detail (components, files, deps)
+          file_path="src/core/agent.py"    -> file context (role, module, decisions)
+          impact="comp-message-store"      -> blast radius analysis
           related_to="mod-core"            -> all edges involving that node
           related_to="mod-core", show="constraints" -> decisions/invariants for that node
-          keyword="memory"                 -> search by name/description
+          keyword="memory"                 -> simple substring search (prefer search= for FTS)
+          show="brief"                     -> compact architecture overview
           show="overview"                  -> architecture overview from metadata
           show="metadata"                  -> all scan_metadata key-value pairs
           (no params)                      -> stats summary
         """
+        sections = []
+
+        # -- Dispatchers that return immediately (no graph needed) --
+        if show == "brief":
+            from src.claraity.claraity_db import render_compact_briefing
+            return render_compact_briefing(self)
         if show == "overview":
             return self._query_overview()
         if show == "metadata":
             return self._query_metadata()
 
-        # All remaining branches need the full graph
-        all_nodes = self.get_all_nodes()
-        all_edges = self.get_all_edges()
-        node_map = {n["id"]: n for n in all_nodes}
+        # -- FTS search --
+        if search:
+            from src.claraity.claraity_db import render_search
+            sections.append(render_search(self, search, node_type=node_type))
 
-        if keyword:
-            return self._query_keyword(keyword, all_nodes)
+        # -- Module detail --
+        if module_id:
+            from src.claraity.claraity_db import render_module_detail
+            sections.append(render_module_detail(self, module_id))
+
+        # -- File detail --
+        if file_path:
+            from src.claraity.claraity_db import render_file_detail
+            sections.append(render_file_detail(self, file_path))
+
+        # -- Impact analysis --
+        if impact:
+            from src.claraity.claraity_db import render_impact
+            sections.append(render_impact(self, impact))
+
+        # If any of the above produced results, append node_id/keyword/type
+        # below. If none of the above matched, fall through to graph queries.
+
+        # -- Graph-based queries --
+        all_nodes = None
+        all_edges = None
+        node_map = None
+
+        def _ensure_graph():
+            nonlocal all_nodes, all_edges, node_map
+            if all_nodes is None:
+                all_nodes = self.get_all_nodes()
+                all_edges = self.get_all_edges()
+                node_map = {n["id"]: n for n in all_nodes}
+
+        if keyword and not search:
+            _ensure_graph()
+            sections.append(self._query_keyword(keyword, all_nodes))
+
         if node_id:
-            return self._query_node(node_id, node_map, all_edges)
-        if node_type:
-            return self._query_type(node_type, all_nodes)
+            _ensure_graph()
+            # Support comma-separated node IDs
+            ids = [nid.strip() for nid in node_id.split(",") if nid.strip()]
+            for nid in ids:
+                sections.append(self._query_node(nid, node_map, all_edges))
+
+        if node_type and not search:
+            _ensure_graph()
+            sections.append(self._query_type(node_type, all_nodes))
+
         if related_to:
-            return self._query_related(related_to, node_map, all_edges, show)
+            _ensure_graph()
+            sections.append(self._query_related(related_to, node_map, all_edges, show))
+
+        if sections:
+            return "\n\n---\n\n".join(sections)
+
         return self._query_stats()
 
     def _query_overview(self) -> str:
@@ -607,6 +751,93 @@ class ClarityStore:
         if stats["edge_types"]:
             lines.append(f"- **Edge types**: {', '.join(f'{t}={c}' for t, c in stats['edge_types'].items())}")
         return "\n".join(lines)
+
+    # -- Full-text search (FTS5) ----------------------------------------------
+
+    @staticmethod
+    def _normalize_fts_query(query: str) -> str:
+        """Convert plain multi-word queries to OR queries for FTS5.
+
+        FTS5 uses implicit AND for space-separated words, which is too strict
+        for natural-language queries from the agent (e.g., "settings config panel
+        subagent" would require ALL words in a single node).
+
+        This converts plain multi-word queries to use OR so any matching word
+        returns results, ranked by relevance. Explicit FTS5 syntax (AND, OR, NOT,
+        quotes, prefix *, column:) is left untouched.
+        """
+        # If the query already uses explicit FTS5 operators, pass through as-is
+        fts5_markers = (" AND ", " OR ", " NOT ", '"', "*", ":")
+        if any(marker in query for marker in fts5_markers):
+            return query
+
+        words = query.split()
+        if len(words) <= 1:
+            return query
+
+        return " OR ".join(words)
+
+    def search_fts(
+        self,
+        query: str,
+        node_type: str = None,
+        limit: int = 20,
+    ) -> list[dict]:
+        """Full-text search across all node content using SQLite FTS5.
+
+        Supports FTS5 query syntax:
+          - Simple keywords: "streaming"
+          - Boolean: "async AND streaming", "memory NOT test"
+          - Prefix: "stream*"
+          - Phrase: '"message store"'
+          - Column filter: "description:persistence"
+
+        Plain multi-word queries (no operators) are auto-converted to OR queries
+        so that any matching word returns results, ranked by relevance.
+
+        Args:
+            query: FTS5 query string
+            node_type: Optional filter by node type (module, component, decision, etc.)
+            limit: Max results (default 20)
+
+        Returns:
+            List of dicts with node_id, node_type, name, snippet, rank.
+        """
+        query = self._normalize_fts_query(query)
+        with self._cursor() as cur:
+            if node_type:
+                sql = (
+                    "SELECT node_id, node_type, name, "
+                    "snippet(nodes_fts, 3, '**', '**', '...', 48) as snippet, "
+                    "rank "
+                    "FROM nodes_fts "
+                    "WHERE nodes_fts MATCH ? AND node_type = ? "
+                    "ORDER BY rank "
+                    "LIMIT ?"
+                )
+                rows = cur.execute(sql, (query, node_type, limit)).fetchall()
+            else:
+                sql = (
+                    "SELECT node_id, node_type, name, "
+                    "snippet(nodes_fts, 3, '**', '**', '...', 48) as snippet, "
+                    "rank "
+                    "FROM nodes_fts "
+                    "WHERE nodes_fts MATCH ? "
+                    "ORDER BY rank "
+                    "LIMIT ?"
+                )
+                rows = cur.execute(sql, (query, limit)).fetchall()
+
+            results = []
+            for row in rows:
+                results.append({
+                    "node_id": row[0],
+                    "node_type": row[1],
+                    "name": row[2],
+                    "snippet": row[3],
+                    "rank": row[4],
+                })
+            return results
 
     def auto_layout(self) -> dict:
         """Compute flow_rank/flow_col for all modules based on dependency graph.
@@ -820,13 +1051,13 @@ class ClarityStore:
 
     def _rebuild_from_jsonl(self, jsonl_path: Path):
         """Rebuild this store's DB from a JSONL file (called from __init__)."""
-        rebuilt = ClarityStore.import_jsonl(str(jsonl_path), str(self.db_path))
+        rebuilt = ClaraityStore.import_jsonl(str(jsonl_path), str(self.db_path))
         self.conn = rebuilt.conn
         rebuilt.conn = None  # Transfer ownership, prevent double-close
 
     # -- JSONL Export/Import ---------------------------------------------------
 
-    def export_jsonl(self, path: str = ".clarity/claraity_knowledge.jsonl") -> int:
+    def export_jsonl(self, path: str = ".claraity/claraity_knowledge.jsonl") -> int:
         """Export entire DB to JSONL for git tracking. Returns line count.
 
         Order: metadata first, then nodes, then edges (for FK-safe import).
@@ -866,8 +1097,8 @@ class ClarityStore:
 
     @classmethod
     def import_jsonl(
-        cls, jsonl_path: str, db_path: str = ".clarity/claraity_knowledge.db"
-    ) -> "ClarityStore":
+        cls, jsonl_path: str, db_path: str = ".claraity/claraity_knowledge.db"
+    ) -> "ClaraityStore":
         """Rebuild SQLite DB from JSONL file. Deletes existing DB first."""
         db = Path(db_path)
         if db.exists():
@@ -916,7 +1147,7 @@ class ClarityStore:
 
     # -- Export ----------------------------------------------------------------
 
-    def export_graph_json(self, path: str = ".clarity/graph.json"):
+    def export_graph_json(self, path: str = ".claraity/graph.json"):
         """Export full graph as JSON for D3.js visualization."""
         nodes = self.get_all_nodes()
         edges = self.get_all_edges()
@@ -944,8 +1175,8 @@ class ClarityStore:
         with open(out, "w", encoding="utf-8") as f:
             json.dump(graph, f, indent=2, default=str)
 
-        # Also write to clarity-ui/ for local HTTP serving
-        ui_path = Path("clarity-ui/graph.json")
+        # Also write to claraity-ui/ for local HTTP serving
+        ui_path = Path("claraity-ui/graph.json")
         if ui_path.parent.exists():
             with open(ui_path, "w", encoding="utf-8") as f:
                 json.dump(graph, f, indent=2, default=str)
@@ -958,12 +1189,12 @@ class ClarityStore:
 # ---------------------------------------------------------------------------
 
 
-def populate(store: ClarityStore):
+def populate(store: ClaraityStore):
     """Populate the DB with ClarAIty codebase architectural knowledge."""
 
     store.set_metadata("repo_name", "ai-coding-agent")
     store.set_metadata("repo_language", "python")
-    store.set_metadata("scanned_at", ClarityStore._now())
+    store.set_metadata("scanned_at", ClaraityStore._now())
     store.set_metadata("scanned_by", "claude-opus-4")
     store.set_metadata("total_files", "224")
     store.set_metadata("total_lines", "~79,320")
@@ -1796,7 +2027,7 @@ def populate(store: ClarityStore):
             "comp-hook-mgr",
             "component",
             "HookManager",
-            "Loads and executes user-defined hooks from .clarity/hooks.py",
+            "Loads and executes user-defined hooks from .claraity/hooks.py",
             "src/hooks/manager.py",
             536,
             "low",
@@ -2229,7 +2460,7 @@ def populate(store: ClarityStore):
 DEFAULT_EXTENSIONS = {".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".java", ".rs", ".rb", ".cs"}
 
 
-def scan_files(store: ClarityStore, root: str = "src", extensions: list[str] = None) -> dict:
+def scan_files(store: ClaraityStore, root: str = "src", extensions: list[str] = None) -> dict:
     """Scan source files and add as layer 4 nodes. Language-agnostic.
 
     Returns a drift report:
@@ -2448,8 +2679,8 @@ def scan_files(store: ClarityStore, root: str = "src", extensions: list[str] = N
         if any(skip in src_file.parts for skip in skip_dirs):
             continue
 
-        # Skip files blocked by .clarityignore
-        from src.tools.clarityignore import is_blocked
+        # Skip files blocked by .claraityignore
+        from src.tools.claraityignore import is_blocked
 
         if is_blocked(src_file)[0]:
             continue
@@ -2520,7 +2751,7 @@ def scan_files(store: ClarityStore, root: str = "src", extensions: list[str] = N
     drift["total_scanned"] = file_count
 
     # Update scanned_at timestamp
-    store.set_metadata("scanned_at", ClarityStore._now())
+    store.set_metadata("scanned_at", ClaraityStore._now())
 
     summary = (
         f"[OK] Scanned {file_count} files: "
@@ -2537,7 +2768,7 @@ def scan_files(store: ClarityStore, root: str = "src", extensions: list[str] = N
 # ---------------------------------------------------------------------------
 
 
-def _load_graph(store: ClarityStore) -> dict:
+def _load_graph(store: ClaraityStore) -> dict:
     """Load and index all nodes/edges from the DB."""
     nodes = store.get_all_nodes()
     edges = store.get_all_edges()
@@ -2569,7 +2800,7 @@ def _load_graph(store: ClarityStore) -> dict:
     }
 
 
-def render_compact_briefing(store: ClarityStore) -> str:
+def render_compact_briefing(store: ClaraityStore) -> str:
     """Compact overview for system prompt injection (~1500 tokens).
     Covers: modules, cross-module deps, decisions, invariants."""
     g = _load_graph(store)
@@ -2645,7 +2876,7 @@ def render_compact_briefing(store: ClarityStore) -> str:
     return "\n".join(lines)
 
 
-def render_module_detail(store: ClarityStore, module_id: str) -> str:
+def render_module_detail(store: ClaraityStore, module_id: str) -> str:
     """Detailed view of a single module: components + files + relationships."""
     g = _load_graph(store)
     node_map, mod_children = g["node_map"], g["mod_children"]
@@ -2724,7 +2955,7 @@ def render_module_detail(store: ClarityStore, module_id: str) -> str:
     return "\n".join(lines)
 
 
-def render_file_detail(store: ClarityStore, file_path: str) -> str:
+def render_file_detail(store: ClaraityStore, file_path: str) -> str:
     """Detail view of a single file: role, parent module/component, related decisions."""
     g = _load_graph(store)
     node_map, child_to_mod = g["node_map"], g["child_to_mod"]
@@ -2799,61 +3030,61 @@ def render_file_detail(store: ClarityStore, file_path: str) -> str:
     return "\n".join(lines)
 
 
-def render_search(store: ClarityStore, keyword: str) -> str:
-    """Search nodes by keyword. Returns matches + one-hop neighbors."""
-    g = _load_graph(store)
-    node_map = g["node_map"]
-    kw = keyword.lower()
+def render_search(store: ClaraityStore, keyword: str, node_type: str = None) -> str:
+    """Full-text search across all knowledge content using FTS5.
 
-    # Search across name, description, properties
-    matches = []
-    for n in g["nodes"]:
-        if n["type"] == "file" and n.get("properties", {}).get("role") == "package init":
-            continue  # skip __init__.py noise
-        name_match = kw in (n.get("name") or "").lower()
-        desc_match = kw in (n.get("description") or "").lower()
-        prop_match = kw in json.dumps(n.get("properties", {})).lower()
-        if name_match or desc_match or prop_match:
-            matches.append(n)
+    Supports boolean queries (AND/OR/NOT), prefix (stream*), phrases ("message store").
+    Falls back to simple substring search if FTS5 query fails (e.g., special characters).
+    """
+    try:
+        matches = store.search_fts(keyword, node_type=node_type, limit=20)
+    except Exception:
+        # FTS5 query syntax error — fall back to simple LIKE search
+        matches = _fallback_search(store, keyword, node_type)
 
     if not matches:
-        return f"No results for '{keyword}'."
+        filter_note = f" (type={node_type})" if node_type else ""
+        return f"No results for '{keyword}'{filter_note}."
 
-    lines = []
-    lines.append(f'## Search: "{keyword}" ({len(matches)} matches)')
-    lines.append("")
+    type_label = f" type={node_type}" if node_type else ""
+    lines = [f'## Search: "{keyword}"{type_label} ({len(matches)} matches)', ""]
 
-    for m in matches[:15]:  # limit to 15 results
-        lines.append(f"### {m['name']} ({m['type']})")
-        if m.get("file_path"):
-            lc = f", {m['line_count']} lines" if m.get("line_count") else ""
-            lines.append(f"- **File**: {m['file_path']}{lc}")
-        if m.get("description"):
-            lines.append(f"- **Description**: {m['description']}")
-        if m.get("risk_level") and m["type"] == "component":
-            lines.append(f"- **Risk**: {m['risk_level']}")
-
-        # One-hop neighbors
-        out = [e for e in g["dep_edges"] if e["from_id"] == m["id"]]
-        inc = [e for e in g["dep_edges"] if e["to_id"] == m["id"]]
-        if out:
-            targets = [f"{node_map.get(e['to_id'], {}).get('name', e['to_id'])}" for e in out[:5]]
-            lines.append(f"- **Depends on**: {', '.join(targets)}")
-        if inc:
-            sources = [
-                f"{node_map.get(e['from_id'], {}).get('name', e['from_id'])}" for e in inc[:5]
-            ]
-            lines.append(f"- **Used by**: {', '.join(sources)}")
-
+    for m in matches:
+        lines.append(f"### {m['name']} ({m['node_type']})")
+        lines.append(f"- **ID**: {m['node_id']}")
+        if m.get("snippet"):
+            lines.append(f"- **Match**: {m['snippet']}")
         lines.append("")
-
-    if len(matches) > 15:
-        lines.append(f"*... and {len(matches) - 15} more results*")
 
     return "\n".join(lines)
 
 
-def render_impact(store: ClarityStore, component_id: str) -> str:
+def _fallback_search(
+    store: ClaraityStore, keyword: str, node_type: str = None
+) -> list[dict]:
+    """Simple LIKE-based search when FTS5 query syntax is invalid."""
+    all_nodes = store.get_all_nodes()
+    kw = keyword.lower()
+    results = []
+    for n in all_nodes:
+        if node_type and n["type"] != node_type:
+            continue
+        if n["type"] == "file" and store.parse_properties(n).get("role") == "package init":
+            continue
+        name_match = kw in (n.get("name") or "").lower()
+        desc_match = kw in (n.get("description") or "").lower()
+        if name_match or desc_match:
+            results.append({
+                "node_id": n["id"],
+                "node_type": n["type"],
+                "name": n["name"],
+                "snippet": (n.get("description") or "")[:200],
+                "rank": 0,
+            })
+    return results[:20]
+
+
+def render_impact(store: ClaraityStore, component_id: str) -> str:
     """Show what would be affected by changes to a component."""
     g = _load_graph(store)
     node_map = g["node_map"]
@@ -2939,7 +3170,7 @@ Commands:
         sys.exit(1)
 
     cmd = sys.argv[1]
-    store = ClarityStore()
+    store = ClaraityStore()
 
     try:
         if cmd in ("populate", "all"):
@@ -2962,12 +3193,12 @@ Commands:
 
         if cmd in ("export-jsonl", "all"):
             count = store.export_jsonl()
-            print(f"[OK] Exported {count} records to .clarity/claraity_knowledge.jsonl")
+            print(f"[OK] Exported {count} records to .claraity/claraity_knowledge.jsonl")
 
         if cmd == "import-jsonl":
-            jsonl_path = sys.argv[2] if len(sys.argv) > 2 else ".clarity/claraity_knowledge.jsonl"
+            jsonl_path = sys.argv[2] if len(sys.argv) > 2 else ".claraity/claraity_knowledge.jsonl"
             store.close()
-            store = ClarityStore.import_jsonl(jsonl_path)
+            store = ClaraityStore.import_jsonl(jsonl_path)
             stats = store.get_stats()
             print(
                 f"[OK] Rebuilt DB from JSONL: {stats['total_nodes']} nodes, {stats['total_edges']} edges"

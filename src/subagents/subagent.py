@@ -40,7 +40,7 @@ logger = get_logger(__name__)
 
 
 # Default transcript directory (relative to project root)
-DEFAULT_TRANSCRIPT_DIR = Path(".clarity/sessions/subagents")
+DEFAULT_TRANSCRIPT_DIR = Path(".claraity/sessions/subagents")
 
 
 @dataclass
@@ -148,7 +148,7 @@ class SubAgent:
                     and optional model/tools/context_window overrides
             main_agent: Main agent (provides default LLM, tools, and working directory).
                        Optional if llm and tool_executor are provided directly.
-            transcript_dir: Directory for JSONL transcripts (default: .clarity/sessions/subagents/)
+            transcript_dir: Directory for JSONL transcripts (default: .claraity/sessions/subagents/)
             llm: LLMBackend instance (direct injection for subprocess mode)
             tool_executor: ToolExecutor instance (direct injection for subprocess mode)
             working_directory: Working directory path (direct injection for subprocess mode)
@@ -210,6 +210,10 @@ class SubAgent:
 
         # Track execution history
         self.execution_history: list[SubAgentResult] = []
+
+        # Token usage tracking (accumulated across all LLM calls)
+        self._total_tokens: int = 0
+        self._context_tokens: int = 0  # prompt_tokens from last LLM call
 
         # Per-subagent LLM: create separate backend if llm overrides are set
         self._override_llm = None
@@ -317,7 +321,7 @@ class SubAgent:
         Mirrors the parent agent's needs_approval() logic:
         - AUTO mode: never ask
         - Tool already auto-approved by user: skip
-        - Agent-internal writes (.clarity/): skip
+        - Agent-internal writes (.claraity/): skip
         - NORMAL mode + risky tool: ask
         """
         if self._permission_mode == "auto":
@@ -412,6 +416,8 @@ class SubAgent:
                     "iterations": len(tool_calls),
                     "subagent_id": self.session_id,
                     "transcript_path": str(self._transcript_path),
+                    "total_tokens": self._total_tokens,
+                    "context_tokens": self._context_tokens,
                 },
                 tool_calls=tool_calls,
                 execution_time=execution_time,
@@ -672,6 +678,10 @@ class SubAgent:
             messages=current_context, tools=subagent_tools, tool_choice="none"
         )
 
+        # Accumulate token usage from summary call
+        self._total_tokens += final_response.total_tokens or 0
+        self._context_tokens = final_response.prompt_tokens or 0
+
         final_msg = Message.create_assistant(
             content=final_response.content or "",
             session_id=self.session_id,
@@ -849,6 +859,10 @@ class SubAgent:
                 messages=current_context, tools=subagent_tools, tool_choice="auto"
             )
 
+            # Accumulate token usage
+            self._total_tokens += llm_response.total_tokens or 0
+            self._context_tokens = llm_response.prompt_tokens or 0
+
             response_content = llm_response.content or ""
             tool_calls = llm_response.tool_calls
 
@@ -1007,7 +1021,11 @@ class SubAgent:
                     tool_call_id=tool_call_id,
                     status=ToolStatus.RUNNING,
                     tool_name=tool_name,
-                    extra_metadata=build_tool_metadata(tool_name, tool_args, args_summary),
+                    extra_metadata=build_tool_metadata(
+                        tool_name, tool_args, args_summary,
+                        cumulative_tokens=self._total_tokens,
+                        context_tokens=self._context_tokens,
+                    ),
                 )
 
                 try:

@@ -117,8 +117,13 @@ test-*-workspace/
 # Checkpoints (session data)
 .checkpoints/
 
-# ClarAIty agent workspace (runtime data)
-.clarity/
+# ClarAIty agent workspace (runtime data - match in any subdirectory)
+**/.claraity/
+**/.clarity/
+
+# Test output files
+claraity-vscode/ts_ext_test_out.txt
+claraity-vscode/webview-ui/ts_webview_test_out.txt
 
 # Roo Code workspace config
 .roo/

@@ -157,10 +157,10 @@ Agent.__init__()
     │       └─> Servers NOT started yet (wait for first query)
     │
     ├─> Create CodeIntelligenceOrchestrator
-    │   └─> Wires together: LSPManager + ClarityDB + RAG
+    │   └─> Wires together: LSPManager + ClaraityDB + RAG
     │
     ├─> Enhanced ContextBuilder
-    │   └─> Now has access to: orchestrator, lsp_manager, clarity_db
+    │   └─> Now has access to: orchestrator, lsp_manager, claraity_db
     │
     └─> Register Code Intelligence Tools
         └─> 7 tools added to ToolExecutor
@@ -390,7 +390,7 @@ assert result["uri"] == "file:///.../auth.py"
 **Validation**:
 ```python
 # Test script
-orchestrator = CodeIntelligenceOrchestrator(lsp_manager, clarity_db, retriever)
+orchestrator = CodeIntelligenceOrchestrator(lsp_manager, claraity_db, retriever)
 context = await orchestrator.load_smart_context("What does authenticate do?")
 assert "architectural_context" in context["context"]
 assert "relevant_code" in context["context"]
@@ -480,7 +480,7 @@ pip install "mcp[cli]"       # MCP SDK (Phase 2, optional)
 
 ### Internal Dependencies
 
-- **Existing**: ClarityDB, HybridRetriever, ContextBuilder, Agent
+- **Existing**: ClaraityDB, HybridRetriever, ContextBuilder, Agent
 - **New**: All Code Intelligence components build on these
 
 ---

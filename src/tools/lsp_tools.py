@@ -23,7 +23,7 @@ from src.code_intelligence.lsp_client_manager import LSPClientManager
 from src.code_intelligence.lsp_runtime import get_manager_async, lsp_run
 
 from .base import Tool, ToolResult, ToolStatus
-from .clarityignore import is_blocked
+from .claraityignore import is_blocked
 from .search_tools import validate_path_security
 
 
@@ -93,7 +93,7 @@ class GetFileOutlineTool(Tool):
     async def _execute_async(self, file_path: str) -> ToolResult:
         """Async implementation of execute."""
         try:
-            # Check .clarityignore
+            # Check .claraityignore
             blocked, _pattern = is_blocked(file_path)
             if blocked:
                 return ToolResult(
@@ -411,7 +411,7 @@ class GetSymbolContextTool(Tool):
             if file_hint:
                 workspace_symbols = self._filter_by_file(workspace_symbols, file_hint)
 
-            # Step 2b: Filter out .clarityignore-blocked files
+            # Step 2b: Filter out .claraityignore-blocked files
             workspace_symbols = [
                 s for s in workspace_symbols
                 if not is_blocked(

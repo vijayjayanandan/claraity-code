@@ -178,10 +178,14 @@ class TestToolFiltering:
         llm_response_with_tools = Mock(spec=LLMResponse)
         llm_response_with_tools.content = ""
         llm_response_with_tools.tool_calls = [mock_tool_call]
+        llm_response_with_tools.total_tokens = 100
+        llm_response_with_tools.prompt_tokens = 80
 
         llm_response_done = Mock(spec=LLMResponse)
         llm_response_done.content = "Done"
         llm_response_done.tool_calls = None
+        llm_response_done.total_tokens = 50
+        llm_response_done.prompt_tokens = 40
 
         mock_main_agent.llm.generate_with_tools.side_effect = [
             llm_response_with_tools,
@@ -329,6 +333,8 @@ class TestLLMOverride:
         llm_response = Mock(spec=LLMResponse)
         llm_response.content = "Override model response"
         llm_response.tool_calls = None
+        llm_response.total_tokens = 100
+        llm_response.prompt_tokens = 80
         mock_override_llm.generate_with_tools.return_value = llm_response
 
         mock_create.return_value = mock_override_llm
@@ -424,6 +430,8 @@ class TestMetadata:
         llm_response = Mock(spec=LLMResponse)
         llm_response.content = "Done"
         llm_response.tool_calls = None
+        llm_response.total_tokens = 100
+        llm_response.prompt_tokens = 80
         mock_main_agent.llm.generate_with_tools.return_value = llm_response
 
         with patch('src.subagents.subagent.SyncJSONLWriter'):
@@ -444,6 +452,8 @@ class TestMetadata:
         llm_response = Mock(spec=LLMResponse)
         llm_response.content = "Done"
         llm_response.tool_calls = None
+        llm_response.total_tokens = 100
+        llm_response.prompt_tokens = 80
         mock_override.generate_with_tools.return_value = llm_response
 
         mock_create.return_value = mock_override

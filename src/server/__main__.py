@@ -19,7 +19,7 @@ def main():
     parser = argparse.ArgumentParser(description="ClarAIty VS Code Server")
     parser.add_argument("--workdir", default=None, help="Working directory (default: cwd)")
     parser.add_argument(
-        "--config", default=None, help="Config file path (default: .clarity/config.yaml)"
+        "--config", default=None, help="Config file path (default: .claraity/config.yaml)"
     )
     parser.add_argument(
         "--stdio", action="store_true", help="Use stdio transport (stdin/stdout JSON lines)"
@@ -54,7 +54,7 @@ def main():
     if args.config:
         config_path = args.config
     else:
-        project_config = os.path.join(working_directory, ".clarity", "config.yaml")
+        project_config = os.path.join(working_directory, ".claraity", "config.yaml")
         config_path = project_config if os.path.isfile(project_config) else SYSTEM_CONFIG_PATH
 
     # stdio mode: stdin for commands, TCP for events (for VS Code extension)

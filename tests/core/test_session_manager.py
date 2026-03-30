@@ -12,6 +12,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from src.core.session_manager import SessionManager, SessionMetadata
+from src.session.scanner import SESSION_ID_RE, generate_session_id
 
 
 class TestSessionMetadata:
@@ -20,8 +21,9 @@ class TestSessionMetadata:
     def test_create_metadata(self):
         """Test creating SessionMetadata."""
         now = datetime.now().isoformat()
+        session_id = generate_session_id()
         metadata = SessionMetadata(
-            session_id="abc12345-1234-5678-90ab-1234567890ab",
+            session_id=session_id,
             name="test-session",
             created_at=now,
             updated_at=now,
@@ -32,7 +34,7 @@ class TestSessionMetadata:
             duration_minutes=135.5,
         )
 
-        assert metadata.session_id == "abc12345-1234-5678-90ab-1234567890ab"
+        assert metadata.session_id == session_id
         assert metadata.name == "test-session"
         assert metadata.task_description == "Test task"
         assert metadata.message_count == 42
@@ -40,8 +42,9 @@ class TestSessionMetadata:
 
     def test_short_id(self):
         """Test short ID property."""
+        session_id = generate_session_id()
         metadata = SessionMetadata(
-            session_id="abc12345-1234-5678-90ab-1234567890ab",
+            session_id=session_id,
             name="test",
             created_at=datetime.now().isoformat(),
             updated_at=datetime.now().isoformat(),
@@ -52,7 +55,7 @@ class TestSessionMetadata:
             duration_minutes=0.0,
         )
 
-        assert metadata.short_id == "abc12345"
+        assert metadata.short_id == session_id[:8]
 
     def test_to_dict(self):
         """Test converting to dictionary."""
@@ -160,8 +163,8 @@ class TestSessionManager:
         """Test initialization with default location."""
         manager = SessionManager()
 
-        # Should create in .clarity/sessions
-        expected_path = Path.cwd() / ".clarity" / "sessions"
+        # Should create in .claraity/sessions
+        expected_path = Path.cwd() / ".claraity" / "sessions"
         assert manager.sessions_dir == expected_path
 
     # ==================== Save Session Tests ====================
@@ -175,7 +178,7 @@ class TestSessionManager:
         )
 
         assert session_id is not None
-        assert len(session_id) == 36  # UUID length
+        assert SESSION_ID_RE.match(session_id)
 
         # Check session directory created
         session_dir = manager.sessions_dir / session_id
@@ -277,11 +280,8 @@ class TestSessionManager:
 
         short_id = session_id[:8]
 
-        # Load with short ID
-        loaded_state = manager.load_session(short_id)
-
-        assert "metadata" in loaded_state
-        assert loaded_state["metadata"]["session_id"] == session_id
+        with pytest.raises(ValueError, match="Session not found"):
+            manager.load_session(short_id)
 
     def test_load_session_not_found(self, manager):
         """Test loading non-existent session raises error."""
@@ -407,7 +407,7 @@ class TestSessionManager:
 
     def test_delete_session_not_found(self, manager):
         """Test deleting non-existent session."""
-        result = manager.delete_session("nonexistent-id")
+        result = manager.delete_session(generate_session_id())
         assert result is False
 
     def test_delete_session_removes_from_manifest(self, manager, sample_state):
@@ -434,7 +434,7 @@ class TestSessionManager:
         # Delete with short ID
         result = manager.delete_session(short_id)
 
-        assert result is True
+        assert result is False
 
     # ==================== Get Session Info Tests ====================
 
@@ -465,8 +465,7 @@ class TestSessionManager:
         short_id = session_id[:8]
         info = manager.get_session_info(short_id)
 
-        assert info is not None
-        assert info.session_id == session_id
+        assert info is None
 
     # ==================== Find Session Tests ====================
 
@@ -530,6 +529,77 @@ class TestSessionManager:
 
         assert latest is not None
         assert latest.name == "newest"
+
+
+class TestDeleteSession:
+    """Test delete_session behavior with validated session IDs."""
+
+    @pytest.fixture
+    def temp_dir(self):
+        """Create temporary directory for tests."""
+        tmpdir = Path(tempfile.mkdtemp())
+        yield tmpdir
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+    @pytest.fixture
+    def manager(self, temp_dir):
+        """Create SessionManager with temporary directory."""
+        return SessionManager(sessions_dir=temp_dir)
+
+    def test_delete_session_valid_id_removes_real_session_directory(self, manager):
+        """Test deleting a valid-format session directory containing a session.jsonl file."""
+        session_id = generate_session_id()
+        session_dir = manager.sessions_dir / session_id
+        session_dir.mkdir(parents=True)
+        (session_dir / "session.jsonl").write_text('{"role": "user", "content": "hello"}\n', encoding="utf-8")
+
+        result = manager.delete_session(session_id)
+
+        assert result is True
+        assert not session_dir.exists()
+
+    def test_delete_session_nonexistent_valid_id_returns_false(self, manager):
+        """Test deleting a valid-format but missing session returns False."""
+        result = manager.delete_session(generate_session_id())
+
+        assert result is False
+
+    @pytest.mark.parametrize("session_id", ["../../etc", "uuid-no-prefix"])
+    def test_find_session_dir_rejects_invalid_format_ids(self, manager, session_id):
+        """Test invalid session IDs are rejected before filesystem access."""
+        assert manager._find_session_dir(session_id) is None
+
+
+class TestSessionIdUtils:
+    """Test session ID regex and generator utilities."""
+
+    def test_session_id_re_matches_valid_ids(self):
+        """Test SESSION_ID_RE accepts valid session IDs."""
+        assert SESSION_ID_RE.match("session-20250328-143022-a3f1bc90")
+        assert SESSION_ID_RE.match("SESSION-20250328-143022-A3F1BC90")
+
+    @pytest.mark.parametrize("session_id", [
+        "abc12345-1234-5678-90ab-1234567890ab",
+        "../../etc",
+        "",
+    ])
+    def test_session_id_re_rejects_invalid_ids(self, session_id):
+        """Test SESSION_ID_RE rejects invalid formats."""
+        assert SESSION_ID_RE.match(session_id) is None
+
+    def test_generate_session_id_matches_regex(self):
+        """Test generated session IDs match SESSION_ID_RE."""
+        session_id = generate_session_id()
+
+        assert isinstance(session_id, str)
+        assert SESSION_ID_RE.match(session_id)
+
+    def test_generate_session_id_returns_unique_values(self):
+        """Test successive generated session IDs are different."""
+        first = generate_session_id()
+        second = generate_session_id()
+
+        assert first != second
 
 
 if __name__ == "__main__":

@@ -845,8 +845,8 @@ async def load_smart_context(
 
     # Layer 1: ClarAIty (architectural context)
     try:
-        clarity_context = await self._load_clarity_context(task_description)
-        context_parts.append(("clarity", clarity_context))
+        claraity_context = await self._load_claraity_context(task_description)
+        context_parts.append(("claraity", claraity_context))
     except Exception as e:
         logger.warning(f"ClarAIty context failed: {e}")
         # Continue without architectural context
@@ -1012,7 +1012,7 @@ async def load_smart_context(task_description: str, max_tokens: int = 2000) -> d
 
 **Resources** (read-only data):
 ```python
-@mcp.resource("clarity://components/{component_id}")
+@mcp.resource("claraity://components/{component_id}")
 def get_component_details(component_id: str) -> str:
     """Get ClarAIty component details."""
 
@@ -1047,7 +1047,7 @@ import logging
 
 from .lsp_manager import LSPClientManager
 from .orchestrator import CodeIntelligenceOrchestrator
-from src.clarity.core.database.clarity_db import ClarityDB
+from src.claraity.core.database.claraity_db import ClaraityDB
 
 logger = logging.getLogger(__name__)
 
@@ -1058,10 +1058,10 @@ async def app_lifespan(server: FastMCP):
     logger.info("Starting Code Intelligence MCP server...")
 
     lsp_manager = LSPClientManager(working_directory=Path.cwd())
-    clarity_db = ClarityDB()
+    claraity_db = ClaraityDB()
     orchestrator = CodeIntelligenceOrchestrator(
         lsp_manager=lsp_manager,
-        clarity_db=clarity_db,
+        claraity_db=claraity_db,
         retriever=None  # Will be set by agent
     )
 
@@ -1069,7 +1069,7 @@ async def app_lifespan(server: FastMCP):
         # Provide context to tools
         yield {
             "lsp_manager": lsp_manager,
-            "clarity_db": clarity_db,
+            "claraity_db": claraity_db,
             "orchestrator": orchestrator
         }
     finally:
@@ -1195,12 +1195,12 @@ async def load_smart_context(
         raise
 
 # Resources
-@mcp.resource("clarity://components/{component_id}")
+@mcp.resource("claraity://components/{component_id}")
 def get_component_details(component_id: str) -> str:
     """Get ClarAIty component details."""
-    from src.clarity.core.database.clarity_db import ClarityDB
+    from src.claraity.core.database.claraity_db import ClaraityDB
 
-    db = ClarityDB()
+    db = ClaraityDB()
     component = db.get_component(component_id)
 
     return f"""
@@ -1297,7 +1297,7 @@ def _register_code_intelligence_tools(self) -> None:
     self.tool_executor.register_tool(LoadSmartContextTool(
         lsp_manager_factory=get_lsp_manager,
         context_builder=self.context_builder,
-        clarity_db=self.clarity_db
+        claraity_db=self.claraity_db
     ))
 ```
 
@@ -1657,12 +1657,12 @@ class QueryType(Enum):
 @dataclass
 class LayerWeights:
     """Token budget allocation across layers."""
-    clarity: float  # 0.0 to 1.0
+    claraity: float  # 0.0 to 1.0
     rag: float      # 0.0 to 1.0
     lsp: float      # 0.0 to 1.0
 
     def __post_init__(self):
-        total = self.clarity + self.rag + self.lsp
+        total = self.claraity + self.rag + self.lsp
         if not (0.99 <= total <= 1.01):
             raise ValueError(f"Layer weights must sum to 1.0, got {total}")
 
@@ -1677,11 +1677,11 @@ class CodeIntelligenceOrchestrator:
     def __init__(
         self,
         lsp_manager: LSPClientManager,
-        clarity_db: ClarityDB,
+        claraity_db: ClaraityDB,
         retriever: HybridRetriever
     ):
         self.lsp_manager = lsp_manager
-        self.clarity_db = clarity_db
+        self.claraity_db = claraity_db
         self.retriever = retriever
 
     async def load_smart_context(
@@ -1708,22 +1708,22 @@ class CodeIntelligenceOrchestrator:
         weights = self._get_layer_weights(query_type)
 
         # Calculate token budgets
-        clarity_budget = int(max_tokens * weights.clarity)
+        claraity_budget = int(max_tokens * weights.claraity)
         rag_budget = int(max_tokens * weights.rag)
         lsp_budget = int(max_tokens * weights.lsp)
 
         # Load each layer (parallel)
-        clarity_context, rag_context, lsp_context = await asyncio.gather(
-            self._load_clarity_layer(task_description, clarity_budget),
+        claraity_context, rag_context, lsp_context = await asyncio.gather(
+            self._load_claraity_layer(task_description, claraity_budget),
             self._load_rag_layer(task_description, rag_budget, file_paths),
             self._load_lsp_layer(task_description, lsp_budget, file_paths),
             return_exceptions=True
         )
 
         # Handle errors gracefully
-        if isinstance(clarity_context, Exception):
-            logger.warning(f"ClarAIty layer failed: {clarity_context}")
-            clarity_context = ""
+        if isinstance(claraity_context, Exception):
+            logger.warning(f"ClarAIty layer failed: {claraity_context}")
+            claraity_context = ""
 
         if isinstance(rag_context, Exception):
             logger.warning(f"RAG layer failed: {rag_context}")
@@ -1735,7 +1735,7 @@ class CodeIntelligenceOrchestrator:
 
         # Assemble final context
         return self._assemble_context(
-            clarity=clarity_context,
+            claraity=claraity_context,
             rag=rag_context,
             lsp=lsp_context,
             query_type=query_type
@@ -1775,14 +1775,14 @@ class CodeIntelligenceOrchestrator:
     def _get_layer_weights(self, query_type: QueryType) -> LayerWeights:
         """Get layer weights based on query type."""
         WEIGHT_MAP = {
-            QueryType.ARCHITECTURAL: LayerWeights(clarity=0.5, rag=0.3, lsp=0.2),
-            QueryType.SEMANTIC: LayerWeights(clarity=0.1, rag=0.7, lsp=0.2),
-            QueryType.SYMBOLIC: LayerWeights(clarity=0.1, rag=0.2, lsp=0.7),
-            QueryType.COMPLEX: LayerWeights(clarity=0.33, rag=0.33, lsp=0.34),
+            QueryType.ARCHITECTURAL: LayerWeights(claraity=0.5, rag=0.3, lsp=0.2),
+            QueryType.SEMANTIC: LayerWeights(claraity=0.1, rag=0.7, lsp=0.2),
+            QueryType.SYMBOLIC: LayerWeights(claraity=0.1, rag=0.2, lsp=0.7),
+            QueryType.COMPLEX: LayerWeights(claraity=0.33, rag=0.33, lsp=0.34),
         }
         return WEIGHT_MAP[query_type]
 
-    async def _load_clarity_layer(
+    async def _load_claraity_layer(
         self,
         task_description: str,
         budget: int
@@ -1794,7 +1794,7 @@ class CodeIntelligenceOrchestrator:
         # Search components
         components = []
         for keyword in keywords:
-            matches = self.clarity_db.search_components(keyword)
+            matches = self.claraity_db.search_components(keyword)
             components.extend(matches[:2])  # Top 2 per keyword
 
         # Format context
@@ -1911,7 +1911,7 @@ Signature: {symbol.get('detail', 'N/A')}
 
     def _assemble_context(
         self,
-        clarity: str,
+        claraity: str,
         rag: str,
         lsp: str,
         query_type: QueryType
@@ -1919,8 +1919,8 @@ Signature: {symbol.get('detail', 'N/A')}
         """Assemble final context from layers."""
         context_sections = []
 
-        if clarity:
-            context_sections.append(f"<architectural_context>\n{clarity}\n</architectural_context>")
+        if claraity:
+            context_sections.append(f"<architectural_context>\n{claraity}\n</architectural_context>")
 
         if rag:
             context_sections.append(f"<relevant_code>\n{rag}\n</relevant_code>")
@@ -1936,7 +1936,7 @@ Signature: {symbol.get('detail', 'N/A')}
             "layer_count": len(context_sections),
             "query_type": query_type.value,
             "layers": {
-                "clarity": bool(clarity),
+                "claraity": bool(claraity),
                 "rag": bool(rag),
                 "lsp": bool(lsp)
             }
@@ -2021,14 +2021,14 @@ Signature: {symbol.get('detail', 'N/A')}
 
 **3. CodeIntelligenceOrchestrator** (`src/code_intelligence/orchestrator.py`)
 - **Lines**: ~500 LOC
-- **Dependencies**: LSPClientManager, ClarityDB, HybridRetriever
+- **Dependencies**: LSPClientManager, ClaraityDB, HybridRetriever
 - **Time**: 1.5 hours
 
 **Key Methods**:
 - `load_smart_context()` - Multi-tier loading
 - `_classify_query()` - Query type detection
 - `_get_layer_weights()` - Token budget allocation
-- `_load_clarity_layer()`, `_load_rag_layer()`, `_load_lsp_layer()`
+- `_load_claraity_layer()`, `_load_rag_layer()`, `_load_lsp_layer()`
 - `_assemble_context()` - Final context assembly
 
 **4. CodeIntelligenceConfig** (`src/code_intelligence/config.py`)
@@ -2066,7 +2066,7 @@ Signature: {symbol.get('detail', 'N/A')}
 
 **Changes**:
 - Add `lsp_manager`, `orchestrator` parameters to `__init__`
-- Add `use_lsp`, `use_clarity` parameters to `build_context()`
+- Add `use_lsp`, `use_claraity` parameters to `build_context()`
 - Update token budget allocation
 - Add LSP and ClarAIty context assembly
 
@@ -2286,7 +2286,7 @@ def test_token_efficiency():
             user_query=query,
             use_rag=True,
             use_lsp=False,
-            use_clarity=False
+            use_claraity=False
         )
         tokens_before = count_tokens(context_before)
 
@@ -2295,7 +2295,7 @@ def test_token_efficiency():
             user_query=query,
             use_rag=True,
             use_lsp=True,
-            use_clarity=True
+            use_claraity=True
         )
         tokens_after = count_tokens(context_after)
 

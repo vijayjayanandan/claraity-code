@@ -218,6 +218,15 @@ class BackgroundTaskRegistry:
         self._completed_queue.clear()
         return completed
 
+    def remove_from_completed(self, task_id: str) -> None:
+        """Remove a specific task from the completed queue without draining others.
+
+        Use this when a task has already been delivered via another path (e.g.
+        the idle _chat_queue path in stdio_server) to prevent the tool loop's
+        drain_completed() from re-delivering it.
+        """
+        self._completed_queue = [t for t in self._completed_queue if t.task_id != task_id]
+
     async def cancel_all(self) -> int:
         """Cancel all running tasks. Returns count cancelled."""
         count = 0
@@ -288,26 +297,57 @@ class BackgroundTaskRegistry:
         """Execute command as async subprocess and capture output."""
         info = self._tasks[task_id]
         communicate_task = None
-        # Sanitize cmd.exe/bash syntax for PowerShell
-        command = sanitize_for_powershell(command)
+
+        # Detect preferred shell; only sanitize for PowerShell
+        from src.platform import detect_preferred_shell, get_bash_env
+
+        shell_info = detect_preferred_shell()
+        if shell_info["syntax"] == "powershell":
+            command = sanitize_for_powershell(command)
+
         try:
             # Platform-specific subprocess creation
+            # stdin=DEVNULL is MANDATORY -- see CLAUDE.md "subprocess.run stdin inheritance".
+            # Without it, child processes inherit the parent's stdin handle, causing
+            # deadlocks in stdio mode where a background thread reads stdin for JSON.
+            # CREATE_NO_WINDOW / start_new_session isolate the subprocess from the
+            # parent terminal, preventing escape sequences from leaking into the TUI.
             if platform.system() == "Windows":
-                process = await asyncio.create_subprocess_exec(
-                    "powershell",
-                    "-NoProfile",
-                    "-Command",
-                    command,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    cwd=working_dir,
-                )
+                import subprocess as _sp
+
+                if shell_info["shell"] == "bash":
+                    bash_env = get_bash_env(shell_info["path"])
+                    process = await asyncio.create_subprocess_exec(
+                        shell_info["path"],
+                        "-c",
+                        command,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                        stdin=asyncio.subprocess.DEVNULL,
+                        cwd=working_dir,
+                        creationflags=_sp.CREATE_NO_WINDOW,
+                        env=bash_env,
+                    )
+                else:
+                    process = await asyncio.create_subprocess_exec(
+                        "powershell",
+                        "-NoProfile",
+                        "-Command",
+                        command,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                        stdin=asyncio.subprocess.DEVNULL,
+                        cwd=working_dir,
+                        creationflags=_sp.CREATE_NO_WINDOW,
+                    )
             else:
                 process = await asyncio.create_subprocess_shell(
                     command,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
+                    stdin=asyncio.subprocess.DEVNULL,
                     cwd=working_dir,
+                    start_new_session=True,
                 )
 
             # Use asyncio.wait instead of asyncio.wait_for: in Python 3.12+,

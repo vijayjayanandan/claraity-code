@@ -37,23 +37,23 @@ CodeIntelligenceOrchestrator
     │
     ├─> lsp_manager: LSPClientManager
     ├─> rag_retriever: HybridRetriever
-    ├─> clarity_db: ClarityDB (optional)
+    ├─> claraity_db: ClaraityDB (optional)
     ├─> config: CodeIntelligenceConfig
     │
     └─> Methods:
         ├─> load_smart_context(task_description, file_path, line, column, max_tokens) -> SmartContext
         ├─> classify_query(task_description) -> QueryType
-        ├─> load_clarity_context(task_description, max_tokens) -> str
+        ├─> load_claraity_context(task_description, max_tokens) -> str
         ├─> load_rag_context(task_description, max_tokens) -> str
         ├─> load_lsp_context(file_path, line, column, max_tokens) -> str
-        └─> merge_contexts(clarity, rag, lsp) -> str
+        └─> merge_contexts(claraity, rag, lsp) -> str
 
 QueryType = Literal["ARCHITECTURAL", "SEMANTIC", "SYMBOLIC", "COMPLEX"]
 
 SmartContext:
     - full_context: str
     - token_count: int
-    - sources: Dict[str, int]  # {"clarity": 150, "rag": 300, "lsp": 400}
+    - sources: Dict[str, int]  # {"claraity": 150, "rag": 300, "lsp": 400}
     - query_type: QueryType
 ```
 
@@ -93,7 +93,7 @@ class CodeIntelligenceOrchestrator:
         self,
         lsp_manager: LSPClientManager,
         rag_retriever: HybridRetriever,
-        clarity_db: Optional[ClarityDB] = None,
+        claraity_db: Optional[ClaraityDB] = None,
         config: Optional[CodeIntelligenceConfig] = None
     ):
         """Initialize orchestrator."""
@@ -111,7 +111,7 @@ class CodeIntelligenceOrchestrator:
     def classify_query(self, task_description: str) -> QueryType:
         """Classify query into ARCHITECTURAL, SEMANTIC, SYMBOLIC, or COMPLEX."""
 
-    async def load_clarity_context(
+    async def load_claraity_context(
         self,
         task_description: str,
         max_tokens: int
@@ -146,7 +146,7 @@ def __init__(
     self,
     lsp_manager: LSPClientManager,
     rag_retriever: HybridRetriever,
-    clarity_db: Optional[ClarityDB] = None,
+    claraity_db: Optional[ClaraityDB] = None,
     config: Optional[CodeIntelligenceConfig] = None
 ):
     """
@@ -155,12 +155,12 @@ def __init__(
     Args:
         lsp_manager: LSP client manager for symbol queries
         rag_retriever: Hybrid retriever for semantic search
-        clarity_db: Optional ClarAIty DB for architecture queries
+        claraity_db: Optional ClarAIty DB for architecture queries
         config: Optional configuration (auto-detects if None)
     """
     self.lsp_manager = lsp_manager
     self.rag_retriever = rag_retriever
-    self.clarity_db = clarity_db
+    self.claraity_db = claraity_db
     self.config = config or CodeIntelligenceConfig.auto_detect()
 
     import logging
@@ -168,10 +168,10 @@ def __init__(
 
     # Token allocation weights by query type
     self.allocation_weights = {
-        "ARCHITECTURAL": {"clarity": 0.70, "rag": 0.20, "lsp": 0.10},
-        "SEMANTIC": {"clarity": 0.10, "rag": 0.70, "lsp": 0.20},
-        "SYMBOLIC": {"clarity": 0.05, "rag": 0.15, "lsp": 0.80},
-        "COMPLEX": {"clarity": 0.20, "rag": 0.40, "lsp": 0.40},
+        "ARCHITECTURAL": {"claraity": 0.70, "rag": 0.20, "lsp": 0.10},
+        "SEMANTIC": {"claraity": 0.10, "rag": 0.70, "lsp": 0.20},
+        "SYMBOLIC": {"claraity": 0.05, "rag": 0.15, "lsp": 0.80},
+        "COMPLEX": {"claraity": 0.20, "rag": 0.40, "lsp": 0.40},
     }
 ```
 
@@ -216,7 +216,7 @@ async def load_smart_context(
         ...     max_tokens=2000
         ... )
         >>> print(context.query_type)  # "SYMBOLIC"
-        >>> print(context.sources)  # {"clarity": 100, "rag": 300, "lsp": 1600}
+        >>> print(context.sources)  # {"claraity": 100, "rag": 300, "lsp": 1600}
     """
     # Step 1: Classify query
     query_type = self.classify_query(task_description)
@@ -224,12 +224,12 @@ async def load_smart_context(
 
     # Step 2: Allocate token budgets
     weights = self.allocation_weights[query_type]
-    clarity_tokens = int(max_tokens * weights["clarity"])
+    claraity_tokens = int(max_tokens * weights["claraity"])
     rag_tokens = int(max_tokens * weights["rag"])
     lsp_tokens = int(max_tokens * weights["lsp"])
 
     self.logger.debug(
-        f"Token allocation: clarity={clarity_tokens}, "
+        f"Token allocation: claraity={claraity_tokens}, "
         f"rag={rag_tokens}, lsp={lsp_tokens}"
     )
 
@@ -239,8 +239,8 @@ async def load_smart_context(
     tasks = []
 
     # ClarAIty (if available)
-    if self.clarity_db and clarity_tokens > 0:
-        tasks.append(self.load_clarity_context(task_description, clarity_tokens))
+    if self.claraity_db and claraity_tokens > 0:
+        tasks.append(self.load_claraity_context(task_description, claraity_tokens))
     else:
         tasks.append(asyncio.sleep(0, result=""))
 
@@ -256,10 +256,10 @@ async def load_smart_context(
     else:
         tasks.append(asyncio.sleep(0, result=""))
 
-    clarity_ctx, rag_ctx, lsp_ctx = await asyncio.gather(*tasks)
+    claraity_ctx, rag_ctx, lsp_ctx = await asyncio.gather(*tasks)
 
     # Step 4: Merge contexts
-    full_context = self.merge_contexts(clarity_ctx, rag_ctx, lsp_ctx)
+    full_context = self.merge_contexts(claraity_ctx, rag_ctx, lsp_ctx)
 
     # Calculate actual token counts
     from tiktoken import encoding_for_model
@@ -267,7 +267,7 @@ async def load_smart_context(
     actual_tokens = len(enc.encode(full_context))
 
     sources = {
-        "clarity": len(enc.encode(clarity_ctx)) if clarity_ctx else 0,
+        "claraity": len(enc.encode(claraity_ctx)) if claraity_ctx else 0,
         "rag": len(enc.encode(rag_ctx)) if rag_ctx else 0,
         "lsp": len(enc.encode(lsp_ctx)) if lsp_ctx else 0,
     }
@@ -377,10 +377,10 @@ def classify_query(self, task_description: str) -> QueryType:
 
 ---
 
-### Method: load_clarity_context
+### Method: load_claraity_context
 
 ```python
-async def load_clarity_context(
+async def load_claraity_context(
     self,
     task_description: str,
     max_tokens: int
@@ -401,7 +401,7 @@ async def load_clarity_context(
         Formatted ClarAIty context string
 
     Example:
-        >>> ctx = await orchestrator.load_clarity_context(
+        >>> ctx = await orchestrator.load_claraity_context(
         ...     "How does auth work?", max_tokens=500
         ... )
         >>> print(ctx)
@@ -410,13 +410,13 @@ async def load_clarity_context(
         Purpose: Handle user login/logout...
         Dependencies: UserDB, TokenManager...
     """
-    if not self.clarity_db:
+    if not self.claraity_db:
         return ""
 
     try:
         # Query ClarAIty for relevant components
         # (This assumes ClarAIty tools/API exist)
-        from src.tools.clarity_tools import search_components
+        from src.tools.claraity_tools import search_components
 
         results = search_components(query=task_description, max_results=3)
 
@@ -621,7 +621,7 @@ async def load_lsp_context(
 ```python
 def merge_contexts(
     self,
-    clarity_ctx: str,
+    claraity_ctx: str,
     rag_ctx: str,
     lsp_ctx: str
 ) -> str:
@@ -632,7 +632,7 @@ def merge_contexts(
     (Architectural overview first, then precision, then breadth)
 
     Args:
-        clarity_ctx: ClarAIty context
+        claraity_ctx: ClarAIty context
         rag_ctx: RAG context
         lsp_ctx: LSP context
 
@@ -641,8 +641,8 @@ def merge_contexts(
     """
     parts = []
 
-    if clarity_ctx:
-        parts.append(clarity_ctx)
+    if claraity_ctx:
+        parts.append(claraity_ctx)
 
     if lsp_ctx:
         parts.append(lsp_ctx)
@@ -798,7 +798,7 @@ async def test_graceful_degradation_lsp_failure():
 ```python
 # Allocate more tokens to LSP for SYMBOLIC queries
 allocation_weights = {
-    "SYMBOLIC": {"clarity": 0.05, "rag": 0.15, "lsp": 0.80},
+    "SYMBOLIC": {"claraity": 0.05, "rag": 0.15, "lsp": 0.80},
     # 80% of budget goes to LSP for precision
 }
 ```
@@ -807,8 +807,8 @@ allocation_weights = {
 
 ```python
 # Load all layers concurrently (reduces latency)
-clarity_ctx, rag_ctx, lsp_ctx = await asyncio.gather(
-    self.load_clarity_context(...),
+claraity_ctx, rag_ctx, lsp_ctx = await asyncio.gather(
+    self.load_claraity_context(...),
     self.load_rag_context(...),
     self.load_lsp_context(...)
 )
@@ -818,12 +818,12 @@ clarity_ctx, rag_ctx, lsp_ctx = await asyncio.gather(
 
 ```python
 # BAD: Loads layers sequentially (3x slower)
-clarity_ctx = await self.load_clarity_context(...)
-rag_ctx = await self.load_rag_context(...)  # Waits for clarity to finish
+claraity_ctx = await self.load_claraity_context(...)
+rag_ctx = await self.load_rag_context(...)  # Waits for claraity to finish
 lsp_ctx = await self.load_lsp_context(...)  # Waits for rag to finish
 
 # GOOD: Load in parallel
-clarity_ctx, rag_ctx, lsp_ctx = await asyncio.gather(...)
+claraity_ctx, rag_ctx, lsp_ctx = await asyncio.gather(...)
 ```
 
 ---

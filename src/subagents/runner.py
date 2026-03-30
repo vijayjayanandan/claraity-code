@@ -70,7 +70,7 @@ def _create_llm_backend(llm_config_dict, api_key):
         raise ValueError(f"Unsupported backend_type: {backend_type}")
 
 
-def _create_tool_executor(tools_allowlist=None):
+def _create_tool_executor(tools_allowlist=None, tools_blocklist=None):
     """Create a ToolExecutor with standard tool instances.
 
     Registers parameterless tool constructors only. Tools requiring
@@ -79,6 +79,8 @@ def _create_tool_executor(tools_allowlist=None):
     Args:
         tools_allowlist: Optional list of tool names to register.
                         If None, all standard tools are registered.
+        tools_blocklist: Optional list of tool names to exclude.
+                        Applied after allowlist filtering.
 
     Returns:
         ToolExecutor instance with registered tools
@@ -95,6 +97,11 @@ def _create_tool_executor(tools_allowlist=None):
     if tools_allowlist:
         allowed = set(tools_allowlist)
         all_tools = [t for t in all_tools if t.name in allowed]
+
+    # Apply blocklist filter if specified
+    if tools_blocklist:
+        blocked = set(tools_blocklist)
+        all_tools = [t for t in all_tools if t.name not in blocked]
 
     for tool in all_tools:
         executor.register_tool(tool)
@@ -241,7 +248,14 @@ def main():
 
         # 3. Create ToolExecutor with appropriate tools
         tools_allowlist = input_data.config.get("tools")
-        tool_executor = _create_tool_executor(tools_allowlist)
+        # Knowledge write tools are restricted to knowledge-builder only
+        subagent_name = input_data.config.get("name", "")
+        if subagent_name != "knowledge-builder":
+            from src.prompts.subagents import KNOWLEDGE_WRITE_TOOLS
+            tools_blocklist = KNOWLEDGE_WRITE_TOOLS
+        else:
+            tools_blocklist = None
+        tool_executor = _create_tool_executor(tools_allowlist, tools_blocklist)
 
         # 3b. Set workspace root on file operation tools for path validation
         # Without this, _workspace_root stays None and validate_path_security
@@ -310,6 +324,7 @@ def main():
             IPCEventType.REGISTERED,
             subagent_id=subagent.session_id,
             model_name=llm.config.model_name,
+            context_window=llm.config.context_window,
         )
 
         # 8. Subscribe to subagent's MessageStore -> emit notifications

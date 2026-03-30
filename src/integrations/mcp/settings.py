@@ -1,6 +1,6 @@
 """MCP settings manager - file-based configuration for MCP servers.
 
-Loads/saves .clarity/mcp_settings.json which stores:
+Loads/saves .claraity/mcp_settings.json which stores:
 - Server definitions (transport, command, args, env, enabled)
 - Per-tool visibility overrides (enabled/disabled per tool)
 
@@ -25,8 +25,8 @@ except ImportError:
 
 
 # Settings file locations
-DEFAULT_PROJECT_PATH = Path(".clarity") / "mcp_settings.json"
-DEFAULT_GLOBAL_PATH = Path.home() / ".clarity" / "mcp_settings.json"
+DEFAULT_PROJECT_PATH = Path(".claraity") / "mcp_settings.json"
+DEFAULT_GLOBAL_PATH = Path.home() / ".claraity" / "mcp_settings.json"
 
 
 @dataclass
@@ -75,7 +75,7 @@ class McpServerSettings:
     tools: dict[str, McpToolOverride] = field(default_factory=dict)
 
     # NOTE: env values are stored in plaintext in mcp_settings.json.
-    # The file lives under .clarity/ which is gitignored by default.
+    # The file lives under .claraity/ which is gitignored by default.
     # For sensitive tokens, prefer referencing env vars by name
     # (e.g. set GITHUB_TOKEN in your shell, not in this file).
 
@@ -244,8 +244,8 @@ class McpSettingsManager:
     """Manages MCP settings across project and global scope.
 
     Two config files, merged at load time:
-    - Project: .clarity/mcp_settings.json (per-project, team-shared)
-    - Global:  ~/.clarity/mcp_settings.json (personal, all projects)
+    - Project: .claraity/mcp_settings.json (per-project, team-shared)
+    - Global:  ~/.claraity/mcp_settings.json (personal, all projects)
 
     Merge rule: both files' servers are combined. If the same server name
     exists in both, the project config wins.

@@ -29,6 +29,7 @@ export type {
   KnowledgeApproval,
   SubAgentInfo,
   LimitsData,
+  BackgroundTaskData,
 } from "../../shared/protocol";
 
 // ============================================================================
@@ -49,7 +50,8 @@ export type ExtensionMessage =
   | { type: "undoComplete"; turnId: string; restoredFiles: string[] }
   | { type: "fileSelected"; path: string; name: string }
   | { type: "insertAndSend"; content: string }
-  | { type: "enrichedPrompt"; original: string; enriched: string }
+  | { type: "enrichmentDelta"; delta: string }
+  | { type: "enrichmentComplete"; original: string; enriched: string }
   | { type: "enrichmentError"; message: string };
 
 // ============================================================================
@@ -78,6 +80,7 @@ export type WebViewMessage =
   | { type: "newSession" }
   | { type: "listSessions" }
   | { type: "resumeSession"; sessionId: string }
+  | { type: "deleteSession"; sessionId: string }
   | { type: "undoTurn"; turnId: string }
   | { type: "pickFile" }
   | { type: "openFile"; path: string }
@@ -111,7 +114,9 @@ export type WebViewMessage =
   | { type: "getLimits" }
   | { type: "saveLimits"; limits: LimitsData }
   // Prompt Enrichment
-  | { type: "enrichPrompt"; content: string }
+  | { type: "enrichPrompt"; content: string; history?: Array<{ role: string; content: string }> }
+  // Background tasks
+  | { type: "cancelBackgroundTask"; taskId: string }
   // Server connection control
   | { type: "disconnectServer" }
   | { type: "reconnectServer" };

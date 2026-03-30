@@ -22,9 +22,12 @@ interface InputBoxProps {
   enrichmentEnabled: boolean;
   enrichmentLoading: boolean;
   enrichedPreview: string | null;
+  enrichedOriginal: string | null;
   onToggleEnrichment: (enabled: boolean) => void;
   onRequestEnrichment: (content: string) => void;
   onClearEnrichment: () => void;
+  draft: string;
+  onDraftChange: (draft: string) => void;
 }
 
 const MAX_IMAGES = 5;
@@ -59,11 +62,15 @@ export function InputBox({
   enrichmentEnabled,
   enrichmentLoading,
   enrichedPreview,
+  enrichedOriginal,
   onToggleEnrichment,
   onRequestEnrichment,
   onClearEnrichment,
+  draft,
+  onDraftChange,
 }: InputBoxProps) {
-  const [text, setText] = useState("");
+  const text = draft;
+  const setText = onDraftChange;
   const [showMentions, setShowMentions] = useState(false);
   const [mentionIndex, setMentionIndex] = useState(0);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
@@ -152,25 +159,6 @@ export function InputBox({
     if (enrichedPreview !== null) setEditedPreview(enrichedPreview);
   }, [enrichedPreview]);
 
-  // Handle send — intercept for enrichment when enabled
-  const handleSend = useCallback(() => {
-    if (isStreaming) {
-      onInterrupt();
-      return;
-    }
-    const trimmed = text.trim();
-    if (!trimmed && images.length === 0 && attachments.length === 0) return;
-
-    // If enrichment is ON and no preview yet, request enrichment instead of sending
-    if (enrichmentEnabled && !enrichedPreview && !enrichmentLoading) {
-      onRequestEnrichment(trimmed);
-      return;
-    }
-
-    onSend(trimmed, attachments.length > 0 ? attachments : undefined, images.length > 0 ? images : undefined);
-    setText("");
-  }, [text, isStreaming, onSend, onInterrupt, attachments, images, enrichmentEnabled, enrichedPreview, enrichmentLoading, onRequestEnrichment]);
-
   // Send the enriched (possibly edited) prompt
   const handleSendEnriched = useCallback(() => {
     const content = editedPreview ?? enrichedPreview ?? "";
@@ -179,6 +167,35 @@ export function InputBox({
     setText("");
     onClearEnrichment();
   }, [editedPreview, enrichedPreview, onSend, attachments, images, onClearEnrichment]);
+
+  // Handle send — intercept for enrichment when enabled
+  const handleSend = useCallback(() => {
+    if (isStreaming) {
+      onInterrupt();
+      return;
+    }
+    // Block while enrichment LLM is running (spinner is visible)
+    if (enrichmentLoading) return;
+
+    // If enrichment preview is showing, send the enriched (possibly edited) text
+    // (checked before the empty-input guard since the original draft may be empty)
+    if (enrichedPreview) {
+      handleSendEnriched();
+      return;
+    }
+
+    const trimmed = text.trim();
+    if (!trimmed && images.length === 0 && attachments.length === 0) return;
+
+    // If enrichment is ON and no preview yet, request enrichment instead of sending
+    if (enrichmentEnabled) {
+      onRequestEnrichment(trimmed);
+      return;
+    }
+
+    onSend(trimmed, attachments.length > 0 ? attachments : undefined, images.length > 0 ? images : undefined);
+    setText("");
+  }, [text, isStreaming, onSend, onInterrupt, attachments, images, enrichmentEnabled, enrichedPreview, enrichmentLoading, onRequestEnrichment, handleSendEnriched]);
 
   // Cancel enrichment preview
   const handleCancelEnrichment = useCallback(() => {
@@ -443,6 +460,12 @@ export function InputBox({
       {/* Enrichment preview area */}
       {enrichedPreview && !enrichmentLoading && (
         <div className="enrichment-preview">
+          {enrichedOriginal && (
+            <div className="enrichment-original">
+              <div className="enrichment-original-label">Original</div>
+              <div className="enrichment-original-text">{enrichedOriginal}</div>
+            </div>
+          )}
           <div className="enrichment-preview-header">
             <span className="enrichment-preview-label">
               <i className="codicon codicon-sparkle" />

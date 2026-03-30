@@ -443,7 +443,7 @@ class TestGenerateDefaultConfig:
 
     def test_creates_file_when_missing(self, tmp_path):
         """Creates config file when it does not exist, returns True."""
-        config_path = str(tmp_path / ".clarity" / "config.yaml")
+        config_path = str(tmp_path / ".claraity" / "config.yaml")
         result = generate_default_config(config_path)
 
         assert result is True

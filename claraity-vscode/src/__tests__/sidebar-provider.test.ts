@@ -790,6 +790,35 @@ describe('ClarAItySidebarProvider', () => {
                 }),
             );
         });
+
+        test('deleteSession sends delete_session with session_id to server', () => {
+            const { sendMessage } = resolveView();
+
+            sendMessage({ type: 'deleteSession', sessionId: 'sess-abc' });
+
+            expect(connection.send).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    type: 'delete_session',
+                    session_id: 'sess-abc',
+                }),
+            );
+        });
+
+        test('session_deleted server message is forwarded to webview as serverMessage', () => {
+            const { webview } = resolveView();
+
+            const msg: ServerMessage = {
+                type: 'session_deleted',
+                session_id: 'sess-abc',
+                success: true,
+            };
+            connection._onMessageEmitter.fire(msg);
+
+            expect(webview.postMessage).toHaveBeenCalledWith({
+                type: 'serverMessage',
+                payload: msg,
+            });
+        });
     });
 
     // -----------------------------------------------------------------------
@@ -1093,7 +1122,7 @@ describe('handleWebviewMessage subagent routing', () => {
     });
 
     test('openSubagentFile shows warning when file does not exist', () => {
-        // The mock workspace root exists but .clarity/agents/code-reviewer.md does not
+        // The mock workspace root exists but .claraity/agents/code-reviewer.md does not
         const { sendMessage } = resolveView();
 
         sendMessage({ type: 'openSubagentFile', name: 'code-reviewer' });
@@ -1152,7 +1181,7 @@ describe('handleServerMessage subagent routing', () => {
                 system_prompt: 'You are custom.',
                 tools: ['read_file'],
                 source: 'project' as const,
-                config_path: '/workspace/.clarity/agents/my-agent.md',
+                config_path: '/workspace/.claraity/agents/my-agent.md',
             },
         ];
 

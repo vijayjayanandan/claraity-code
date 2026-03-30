@@ -383,7 +383,7 @@ class CodingAgent(AgentInterface):
 
         # Initialize plan mode state (Claude Code-style planning workflow)
         # Must be initialized before tools registration since plan mode tools need it
-        self.plan_mode_state = PlanModeState(clarity_dir=self.working_directory / ".clarity")
+        self.plan_mode_state = PlanModeState(claraity_dir=self.working_directory / ".claraity")
 
         # Session ID for plan mode (will be set when session starts)
         self._session_id: str | None = None
@@ -914,11 +914,6 @@ class CodingAgent(AgentInterface):
             KnowledgeScanFilesTool,
             KnowledgeUpdateTool,
             KnowledgeQueryTool,
-            KnowledgeBriefTool,
-            KnowledgeModuleTool,
-            KnowledgeFileTool,
-            KnowledgeSearchTool,
-            KnowledgeImpactTool,
             KnowledgeSetMetadataTool,
             BeadReadyTool,
             BeadCreateTool,
@@ -931,11 +926,6 @@ class CodingAgent(AgentInterface):
         self.tool_executor.register_tool(KnowledgeScanFilesTool())
         self.tool_executor.register_tool(KnowledgeUpdateTool())
         self.tool_executor.register_tool(KnowledgeQueryTool())
-        self.tool_executor.register_tool(KnowledgeBriefTool())
-        self.tool_executor.register_tool(KnowledgeModuleTool())
-        self.tool_executor.register_tool(KnowledgeFileTool())
-        self.tool_executor.register_tool(KnowledgeSearchTool())
-        self.tool_executor.register_tool(KnowledgeImpactTool())
         self.tool_executor.register_tool(KnowledgeSetMetadataTool())
         self.tool_executor.register_tool(BeadReadyTool())
         self.tool_executor.register_tool(BeadCreateTool())
@@ -1019,7 +1009,7 @@ class CodingAgent(AgentInterface):
         self._invalidate_tools_cache()
 
     async def connect_mcp_from_settings(self) -> dict[str, int]:
-        """Auto-connect to MCP servers defined in .clarity/mcp_settings.json.
+        """Auto-connect to MCP servers defined in .claraity/mcp_settings.json.
 
         Loads the settings file, connects to all enabled servers, discovers
         tools with per-tool visibility filtering applied. New tools found
@@ -2099,7 +2089,7 @@ class CodingAgent(AgentInterface):
                                     partial = response_content.strip()
                                     if len(partial) > 4000:
                                         partial = partial[:4000] + "..."
-                                    # Tag as timed out for clarity in conversation history
+                                    # Tag as timed out for claraity in conversation history
                                     self.memory.add_assistant_message(
                                         partial
                                         + "\n\n[TIMED OUT: Response was cut off due to provider timeout. User chose to stop.]"
@@ -2961,7 +2951,7 @@ class CodingAgent(AgentInterface):
             HydrationResult with store, base_llm_messages, agent_state, report
 
         Usage:
-            result = agent.resume_session_from_jsonl(Path(".clarity/sessions/abc/session.jsonl"))
+            result = agent.resume_session_from_jsonl(Path(".claraity/sessions/abc/session.jsonl"))
             agent.set_session_id(session_id, is_new_session=False)
         """
         from src.session import HydrationResult, SessionHydrator
@@ -3546,9 +3536,19 @@ class CodingAgent(AgentInterface):
                 self.llm.client.close()
         except Exception:
             pass
-        # Close async client
+        # Close async client — .close() is a coroutine on AsyncOpenAI/AsyncAnthropic,
+        # so it must be run via asyncio.run(). If no event loop is available (e.g.
+        # during process shutdown), skip it — the OS will reclaim the connections.
         try:
             if hasattr(self.llm, "async_client") and hasattr(self.llm.async_client, "close"):
-                self.llm.async_client.close()
+                import asyncio
+                import inspect
+                result = self.llm.async_client.close()
+                if inspect.isawaitable(result):
+                    try:
+                        asyncio.get_event_loop().run_until_complete(result)
+                    except RuntimeError:
+                        # Event loop already closed — safe to skip
+                        pass
         except Exception:
             pass

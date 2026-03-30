@@ -4,7 +4,7 @@
  * Each action represents a user interaction or server event
  * that triggers a state transition.
  */
-import type { ToolStateData, SessionSummary, ReplayMessage, FileAttachment, ImageAttachment, JiraProfile, McpServerInfo, McpMarketplaceEntry, BeadsResponse, ArchitectureResponse, SubAgentInfo, LimitsData } from "../types";
+import type { ToolStateData, SessionSummary, ReplayMessage, FileAttachment, ImageAttachment, JiraProfile, McpServerInfo, McpMarketplaceEntry, BeadsResponse, ArchitectureResponse, SubAgentInfo, LimitsData, BackgroundTaskData } from "../types";
 import type { AppState, SubagentInfo } from "./state";
 
 export type Action =
@@ -25,7 +25,7 @@ export type Action =
   | { type: "THINKING_END" }
   // Messages
   | { type: "ADD_USER_MESSAGE"; content: string; attachments?: FileAttachment[]; images?: ImageAttachment[] }
-  | { type: "MESSAGE_ADDED"; data: { uuid: string; role: string; content: string; stream_id?: string }; subagentId?: string }
+  | { type: "MESSAGE_ADDED"; data: { uuid: string; role: string; content: string; stream_id?: string; is_compact_summary?: boolean }; subagentId?: string }
   | { type: "MESSAGE_UPDATED"; data: { uuid: string; content: string }; subagentId?: string }
   | { type: "MESSAGE_FINALIZED"; streamId: string }
   // Tools
@@ -44,7 +44,10 @@ export type Action =
   | { type: "PERMISSION_MODE_CHANGED"; mode: string }
   // Context
   | { type: "CONTEXT_UPDATED"; used: number; limit: number; iteration?: number }
+  | { type: "CONTEXT_COMPACTING" }
+  | { type: "CONTEXT_COMPACTED" }
   // Panels
+  | { type: "SET_CHAT_DRAFT"; draft: string }
   | { type: "SET_ACTIVE_PANEL"; panel: AppState["activePanel"] }
   | { type: "SET_SESSIONS"; sessions: SessionSummary[] }
   | { type: "REPLAY_MESSAGES"; messages: ReplayMessage[] }
@@ -52,6 +55,9 @@ export type Action =
   | { type: "AUTO_APPROVE_CHANGED"; categories: Record<string, boolean> }
   // Todos
   | { type: "TODOS_UPDATED"; todos: unknown[] }
+  // Background tasks
+  | { type: "BACKGROUND_TASKS_UPDATED"; tasks: BackgroundTaskData[] }
+  | { type: "DISMISS_BACKGROUND_TASK"; taskId: string }
   // Input
   | { type: "ADD_ATTACHMENT"; attachment: FileAttachment }
   | { type: "REMOVE_ATTACHMENT"; index: number }
@@ -87,7 +93,8 @@ export type Action =
   // Prompt Enrichment
   | { type: "SET_ENRICHMENT_ENABLED"; enabled: boolean }
   | { type: "SET_ENRICHMENT_LOADING"; loading: boolean }
-  | { type: "SET_ENRICHED_PREVIEW"; original: string; enriched: string }
+  | { type: "ENRICHMENT_DELTA"; delta: string }
+  | { type: "ENRICHMENT_COMPLETE"; original: string; enriched: string }
   | { type: "CLEAR_ENRICHED_PREVIEW" }
   // Error
   | { type: "ERROR"; errorType: string; message: string };

@@ -39,10 +39,10 @@ def mock_keyring():
 
 @pytest.fixture
 def config_dir(tmp_path):
-    """Create a temp .clarity directory with config.yaml."""
-    clarity_dir = tmp_path / ".clarity"
-    clarity_dir.mkdir()
-    return clarity_dir
+    """Create a temp .claraity directory with config.yaml."""
+    claraity_dir = tmp_path / ".claraity"
+    claraity_dir.mkdir()
+    return claraity_dir
 
 
 @pytest.fixture

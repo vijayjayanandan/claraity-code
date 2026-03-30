@@ -35,7 +35,7 @@ from typing import Any, Optional
 # =============================================================================
 
 # Default database path (grouped with JSONL files in logs directory)
-DEFAULT_LOG_DB_PATH = ".clarity/logs/logs.db"
+DEFAULT_LOG_DB_PATH = ".claraity/logs/logs.db"
 
 # Default retention period (shorter than errors' 30 days due to higher volume)
 DEFAULT_LOG_RETENTION_DAYS = 7

@@ -12,6 +12,9 @@ import builtins
 
 from .windows import (
     create_virtualenv_command,
+    # Shell detection
+    detect_preferred_shell,
+    get_bash_env,
     get_activation_script,
     # Encoding safety
     get_console_encoding,
@@ -53,6 +56,8 @@ __all__ = [
     "is_unix",
     "get_platform_name",
     "get_shell_type",
+    "detect_preferred_shell",
+    "get_bash_env",
     # Path normalization
     "normalize_path",
     "to_posix_path",

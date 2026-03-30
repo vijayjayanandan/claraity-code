@@ -7,7 +7,7 @@ This module provides comprehensive session persistence allowing users to:
 - Share sessions with team members
 
 Session Storage Structure:
-    .clarity/
+    .claraity/
       sessions/
         manifest.json                 # Index of all sessions
         <session-id>/
@@ -21,7 +21,6 @@ Session Storage Structure:
 import json
 import logging
 import shutil
-import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -107,10 +106,10 @@ class SessionManager:
 
         Args:
             sessions_dir: Directory for session storage
-                         (default: .clarity/sessions)
+                         (default: .claraity/sessions)
         """
         if sessions_dir is None:
-            sessions_dir = Path.cwd() / ".clarity" / "sessions"
+            sessions_dir = Path.cwd() / ".claraity" / "sessions"
 
         self.sessions_dir = Path(sessions_dir)
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
@@ -161,7 +160,8 @@ class SessionManager:
             >>> session_id = manager.save_session("feature-auth", state)
         """
         # Generate session ID
-        session_id = str(uuid.uuid4())
+        from src.session.scanner import generate_session_id
+        session_id = generate_session_id()
 
         # Create metadata
         now = datetime.now().isoformat()
@@ -397,10 +397,10 @@ class SessionManager:
         Returns:
             Path to session directory or None if not found
         """
-        import re
+        from src.session.scanner import SESSION_ID_RE
 
-        # Validate session ID format (UUID or UUID prefix) to prevent path traversal
-        if not re.match(r"^[0-9a-f\-]{1,36}$", session_id):
+        # Validate session ID format to prevent path traversal
+        if not SESSION_ID_RE.match(session_id):
             logger.warning(f"[SESSION] Invalid session ID format rejected: {session_id!r}")
             return None
 

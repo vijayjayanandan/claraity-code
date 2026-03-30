@@ -12,6 +12,7 @@ Use text markers: [OK], [FAIL], [WARN], [INFO], [TEST]
 """
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -62,6 +63,105 @@ def get_shell_type() -> str:
             return "fish"
         else:
             return "bash"  # Default to bash
+
+
+def _find_git_bash() -> str | None:
+    """Find Git Bash on Windows, checking PATH and common install locations.
+
+    shutil.which("bash") only works when Git's usr/bin is on PATH, which is
+    true inside Git Bash but NOT when VS Code or other processes spawn Python
+    using the system PATH.  We fall back to probing well-known install dirs.
+    """
+    # 1. Try PATH first (works in Git Bash terminals)
+    bash_path = shutil.which("bash")
+    if bash_path:
+        normalised = bash_path.replace("\\", "/").lower()
+        # Reject WSL bash (System32/SysWOW64) -- it launches a full Linux
+        # environment where Windows paths (C:\...) are invalid.
+        if "system32" in normalised or "syswow64" in normalised:
+            bash_path = None
+        else:
+            return bash_path
+
+    # 2. Probe well-known Git for Windows install locations
+    candidates = [
+        os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "Git", "usr", "bin", "bash.exe"),
+        os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"), "Git", "usr", "bin", "bash.exe"),
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Git", "usr", "bin", "bash.exe"),
+        # git.exe is typically on PATH even when bash.exe isn't -- derive from it
+    ]
+
+    # 3. Derive from git.exe location (most reliable when Git is installed but
+    #    only C:\Program Files\Git\cmd is on PATH)
+    git_path = shutil.which("git")
+    if git_path:
+        # git.exe is usually at .../Git/cmd/git.exe -> bash at .../Git/usr/bin/bash.exe
+        git_dir = os.path.dirname(os.path.dirname(os.path.abspath(git_path)))
+        candidates.insert(0, os.path.join(git_dir, "usr", "bin", "bash.exe"))
+
+    for candidate in candidates:
+        if candidate and os.path.isfile(candidate):
+            return candidate
+
+    return None
+
+
+def get_bash_env(bash_path: str) -> dict[str, str] | None:
+    """Build an env dict that ensures Git Bash tools (tail, head, grep, etc.) are on PATH.
+
+    When VS Code spawns the Python server, the system PATH typically includes
+    Git\\cmd (for git.exe) but NOT Git\\usr\\bin (where bash, tail, grep, etc. live).
+    This function prepends the bash directory so all companion tools are available.
+
+    Returns None if no PATH modification is needed (bash dir already on PATH).
+    """
+    bash_dir = os.path.dirname(os.path.abspath(bash_path))
+    current_path = os.environ.get("PATH", "")
+
+    # Check if bash_dir is already on PATH (case-insensitive on Windows)
+    path_dirs = [p.lower().rstrip(os.sep) for p in current_path.split(os.pathsep)]
+    if bash_dir.lower().rstrip(os.sep) in path_dirs:
+        return None  # Already on PATH, no modification needed
+
+    # Prepend bash_dir to PATH
+    env = os.environ.copy()
+    env["PATH"] = bash_dir + os.pathsep + current_path
+    return env
+
+
+# Cached result for detect_preferred_shell (computed once per process)
+_preferred_shell: dict[str, str | None] = {}
+
+
+def detect_preferred_shell() -> dict[str, str | None]:
+    """Detect the best available shell for command execution.
+
+    On Windows, prefers bash (Git Bash) over PowerShell because:
+    - Reliable exit codes (PowerShell pipes corrupt them)
+    - Unix syntax parity with macOS/Linux (&&, |, redirects)
+    - No need for PowerShell sanitization layer
+
+    Returns a dict with:
+        shell: "bash" | "powershell" | "sh" (the shell name)
+        path:  Absolute path to the shell executable, or None if using system default
+        syntax: "unix" | "powershell" (which syntax family the LLM should use)
+    """
+    if _preferred_shell:
+        return dict(_preferred_shell)  # Return copy to prevent cache mutation
+
+    if is_windows():
+        bash_path = _find_git_bash()
+        if bash_path:
+            _preferred_shell.update({"shell": "bash", "path": bash_path, "syntax": "unix"})
+        else:
+            _preferred_shell.update({"shell": "powershell", "path": "powershell", "syntax": "powershell"})
+    else:
+        # Unix: use system default
+        shell_env = os.environ.get("SHELL", "/bin/bash")
+        shell_name = os.path.basename(shell_env)
+        _preferred_shell.update({"shell": shell_name, "path": shell_env, "syntax": "unix"})
+
+    return dict(_preferred_shell)
 
 
 # =============================================================================

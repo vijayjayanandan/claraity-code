@@ -324,7 +324,7 @@ async def _process_user_message(self, message: str):
         self._processing = False
 ```
 
-### 11. **Approval UI Clarity**
+### 11. **Approval UI Claraity**
 
 **Location:** Approval prompt display
 

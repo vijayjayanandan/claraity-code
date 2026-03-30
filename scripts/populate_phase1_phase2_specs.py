@@ -18,7 +18,7 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.tools.clarity_tools import add_method, add_acceptance_criterion
+from src.tools.claraity_tools import add_method, add_acceptance_criterion
 
 
 def populate_long_running_controller():

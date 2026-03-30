@@ -15,6 +15,7 @@ interface PlanWidgetProps {
   planPath?: string;
   isDirector?: boolean;
   postMessage: (msg: WebViewMessage) => void;
+  onDismiss: () => void;
 }
 
 export function PlanWidget({
@@ -24,10 +25,9 @@ export function PlanWidget({
   planPath,
   isDirector,
   postMessage,
+  onDismiss,
 }: PlanWidgetProps) {
-  const [dismissed, setDismissed] = useState(false);
   const [feedback, setFeedback] = useState("");
-  const [result, setResult] = useState<string | null>(null);
 
   const planHtml = useMemo(() => renderMarkdown(excerpt), [excerpt]);
 
@@ -39,10 +39,9 @@ export function PlanWidget({
         approved: true,
         autoAcceptEdits: autoAccept,
       });
-      setResult(autoAccept ? "[Plan approved (auto-accept edits)]" : "[Plan approved]");
-      setDismissed(true);
+      onDismiss();
     },
-    [planHash, postMessage],
+    [planHash, postMessage, onDismiss],
   );
 
   const handleReject = useCallback(() => {
@@ -52,27 +51,8 @@ export function PlanWidget({
       approved: false,
       feedback: feedback.trim() || null,
     });
-    setResult("[Plan rejected]");
-    setDismissed(true);
-  }, [planHash, feedback, postMessage]);
-
-  if (dismissed) {
-    return (
-      <div className="interactive-widget plan-widget">
-        <div
-          className="widget-body"
-          style={{
-            fontSize: 12,
-            color: result?.includes("approved")
-              ? "var(--vscode-testing-iconPassed)"
-              : "var(--vscode-testing-iconFailed)",
-          }}
-        >
-          {result}
-        </div>
-      </div>
-    );
-  }
+    onDismiss();
+  }, [planHash, feedback, postMessage, onDismiss]);
 
   return (
     <div className="interactive-widget plan-widget">

@@ -22,7 +22,7 @@ class EnterPlanModeTool(Tool):
     Tool for entering plan mode.
 
     When called, this tool:
-    1. Creates a plan file at .clarity/plans/<session_id>.md
+    1. Creates a plan file at .claraity/plans/<session_id>.md
     2. Activates read-only restrictions (only read tools + plan file writes allowed)
     3. Returns the plan file path for the LLM to write to
     """

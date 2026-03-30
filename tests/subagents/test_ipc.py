@@ -44,7 +44,7 @@ class TestSubprocessInput:
             task_description="Review src/auth.py for security issues",
             working_directory="/home/user/project",
             max_iterations=25,
-            transcript_path=".clarity/sessions/subagents/code-reviewer-abc123.jsonl",
+            transcript_path=".claraity/sessions/subagents/code-reviewer-abc123.jsonl",
         )
 
         json_str = inp.to_json()
@@ -56,7 +56,7 @@ class TestSubprocessInput:
         assert restored.task_description == "Review src/auth.py for security issues"
         assert restored.working_directory == "/home/user/project"
         assert restored.max_iterations == 25
-        assert restored.transcript_path == ".clarity/sessions/subagents/code-reviewer-abc123.jsonl"
+        assert restored.transcript_path == ".claraity/sessions/subagents/code-reviewer-abc123.jsonl"
 
     def test_defaults(self):
         """SubprocessInput uses correct defaults."""

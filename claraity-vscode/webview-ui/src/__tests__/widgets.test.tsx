@@ -686,6 +686,12 @@ describe("PlanWidget", () => {
     postMessage = vi.fn();
   });
 
+  let onDismiss: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    onDismiss = vi.fn();
+  });
+
   function renderPlanWidget(overrides: Partial<Parameters<typeof PlanWidget>[0]> = {}) {
     const props = {
       callId: "plan-1",
@@ -693,6 +699,7 @@ describe("PlanWidget", () => {
       excerpt: "## Plan\n- Step 1: Read files\n- Step 2: Implement changes",
       truncated: false,
       postMessage,
+      onDismiss,
       ...overrides,
     };
     return render(<PlanWidget {...props} />);
@@ -798,20 +805,16 @@ describe("PlanWidget", () => {
     });
   });
 
-  test("after approval, shows '[Plan approved]'", async () => {
+  test("after approval, calls onDismiss to clear global state", async () => {
     renderPlanWidget();
 
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Approve" }));
 
-    expect(screen.getByText("[Plan approved]")).toBeInTheDocument();
-    // Action buttons are gone
-    expect(
-      screen.queryByRole("button", { name: "Approve" })
-    ).not.toBeInTheDocument();
+    expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 
-  test("after auto-accept approval, shows '[Plan approved (auto-accept edits)]'", async () => {
+  test("after auto-accept approval, calls onDismiss to clear global state", async () => {
     renderPlanWidget();
 
     const user = userEvent.setup();
@@ -819,18 +822,16 @@ describe("PlanWidget", () => {
       screen.getByRole("button", { name: "Approve + Auto-accept Edits" })
     );
 
-    expect(
-      screen.getByText("[Plan approved (auto-accept edits)]")
-    ).toBeInTheDocument();
+    expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 
-  test("after rejection, shows '[Plan rejected]'", async () => {
+  test("after rejection, calls onDismiss to clear global state", async () => {
     renderPlanWidget();
 
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Reject" }));
 
-    expect(screen.getByText("[Plan rejected]")).toBeInTheDocument();
+    expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 
   test("shows default plan path text when truncated and no planPath", () => {

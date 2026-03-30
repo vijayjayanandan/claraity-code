@@ -148,8 +148,8 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
     private view?: vscode.WebviewView;
     private diffProvider: DiffContentProvider;
     private diffProviderRegistration: vscode.Disposable;
-    private projectContext: string | null = null;
-    private contextSentThisSession = false;
+
+
     private commandExecutor: CommandExecutor;
     private secrets: vscode.SecretStorage | null = null;
 
@@ -249,10 +249,7 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                 const raw = msg as Record<string, unknown>;
                 const config = (raw.config ?? {}) as Record<string, unknown>;
                 if (apiKey) { config.has_api_key = true; }
-                if (tavilyKey) {
-                    config.has_search_key = true;
-                    config.search_key = tavilyKey;
-                }
+                if (tavilyKey) { config.has_search_key = true; }
                 const augmented = { ...raw, config } as unknown as ServerMessage;
                 this.postToWebview({ type: 'serverMessage', payload: augmented });
             });
@@ -264,7 +261,6 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
 
         // Extract session info for status bar etc.
         if (msg.type === 'session_info') {
-            this.contextSentThisSession = false; // Reset so context is sent with next message
             this.diffProvider.clearAll(); // Free memory from previous session's diffs
             this.postToWebview({
                 type: 'sessionInfo',
@@ -283,15 +279,21 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
         if (msg.type === 'session_history') {
             this.postToWebview({ type: 'sessionHistory', messages: msg.messages });
         }
+        if (msg.type === 'session_deleted') {
+            this.postToWebview({ type: 'serverMessage', payload: msg });
+        }
 
         // Handle VS Code terminal execution
         if (msg.type === 'execute_in_terminal') {
             this.commandExecutor.queueCommand(msg.task_id, msg.command, msg.working_dir, msg.timeout);
         }
 
-        // Prompt enrichment response — forward directly to webview
-        if (msg.type === 'enriched_prompt') {
-            this.postToWebview({ type: 'enrichedPrompt', original: msg.original, enriched: msg.enriched });
+        // Prompt enrichment — forward streaming deltas and completion to webview
+        if (msg.type === 'enrichment_delta') {
+            this.postToWebview({ type: 'enrichmentDelta', delta: msg.delta });
+        }
+        if (msg.type === 'enrichment_complete') {
+            this.postToWebview({ type: 'enrichmentComplete', original: msg.original, enriched: msg.enriched });
         }
         if (msg.type === 'enrichment_error') {
             this.postToWebview({ type: 'enrichmentError', message: msg.message });
@@ -441,7 +443,11 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                 break;
 
             case 'enrichPrompt':
-                this.connection?.send({ type: 'enrich_prompt', content: msg.content } as ClientMessage);
+                this.connection?.send({ type: 'enrich_prompt', content: msg.content, history: msg.history } as ClientMessage);
+                break;
+
+            case 'cancelBackgroundTask':
+                this.connection?.send({ type: 'cancel_background_task', task_id: msg.taskId } as ClientMessage);
                 break;
 
             case 'disconnectServer':
@@ -470,6 +476,10 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
 
             case 'resumeSession':
                 this.connection?.send({ type: 'resume_session', session_id: msg.sessionId } as ClientMessage);
+                break;
+
+            case 'deleteSession':
+                this.connection?.send({ type: 'delete_session', session_id: msg.sessionId } as ClientMessage);
                 break;
 
             case 'undoTurn':
@@ -530,11 +540,11 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                 let configPath: string;
                 if (scope === 'global') {
                     const homeDir = require('os').homedir();
-                    configPath = path.join(homeDir, '.clarity', 'mcp_settings.json');
+                    configPath = path.join(homeDir, '.claraity', 'mcp_settings.json');
                 } else {
                     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
                     if (!workspaceRoot) break;
-                    configPath = path.join(workspaceRoot, '.clarity', 'mcp_settings.json');
+                    configPath = path.join(workspaceRoot, '.claraity', 'mcp_settings.json');
                 }
                 const uri = vscode.Uri.file(configPath);
                 const fs = require('fs') as typeof import('fs');
@@ -672,7 +682,7 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                     vscode.window.showWarningMessage('No workspace folder open.');
                     break;
                 }
-                const agentFilePath = path.join(workspaceRoot, '.clarity', 'agents', `${msg.name}.md`);
+                const agentFilePath = path.join(workspaceRoot, '.claraity', 'agents', `${msg.name}.md`);
                 const fs = require('fs') as typeof import('fs');
                 if (!fs.existsSync(agentFilePath)) {
                     vscode.window.showWarningMessage(
@@ -908,10 +918,6 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
         if (systemContext) {
             finalContent = `<system-context>\n${systemContext}\n</system-context>\n\n${content}`;
         }
-        if (this.projectContext && !this.contextSentThisSession) {
-            this.contextSentThisSession = true;
-            finalContent = this.projectContext + '\n\n' + finalContent;
-        }
         if (attachments && attachments.length > 0) {
             const fileParts: string[] = [];
             for (const attachment of attachments) {
@@ -978,10 +984,6 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
         this.postToWebview({ type: 'showSessionHistory' });
     }
 
-    /** Set the project context block to prepend to the first message of each session. */
-    setProjectContext(contextBlock: string): void {
-        this.projectContext = contextBlock;
-    }
 
     postToWebview(message: ExtensionMessage): void {
         this.view?.webview.postMessage(message);

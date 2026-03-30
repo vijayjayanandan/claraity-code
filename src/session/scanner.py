@@ -6,6 +6,7 @@ without pulling in Textual (which is excluded from the bundled binary).
 
 import json
 import re
+import uuid as _uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -13,6 +14,33 @@ from pathlib import Path
 from src.observability import get_logger
 
 logger = get_logger("session.scanner")
+
+# ---------------------------------------------------------------------------
+# Session ID format -- single source of truth
+# ---------------------------------------------------------------------------
+# Format: session-YYYYMMDD-HHMMSS-xxxxxxxx
+#   - Date/time prefix makes directories human-readable and naturally sorted
+#   - 8-char hex suffix provides enough entropy to prevent collisions
+#
+# Used by:
+#   - generate_session_id()  to create new session IDs
+#   - SESSION_ID_RE          to validate IDs before filesystem operations
+#     (prevents path traversal attacks)
+# ---------------------------------------------------------------------------
+
+SESSION_ID_RE = re.compile(
+    r"^session-\d{8}-\d{6}-[a-f0-9]{8}$",
+    re.IGNORECASE,
+)
+
+
+def generate_session_id() -> str:
+    """Generate a new unique session ID.
+
+    Returns:
+        Session ID in the format: session-YYYYMMDD-HHMMSS-xxxxxxxx
+    """
+    return f"session-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{_uuid.uuid4().hex[:8]}"
 
 
 @dataclass
@@ -65,7 +93,7 @@ def scan_sessions(sessions_dir: Path, limit: int = 50) -> list[SessionDisplay]:
     """Scan sessions directory for available sessions.
 
     Args:
-        sessions_dir: Path to .clarity/sessions directory
+        sessions_dir: Path to .claraity/sessions directory
         limit: Maximum number of sessions to return
 
     Returns:

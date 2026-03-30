@@ -13,7 +13,7 @@
       "Bash(wsl bash:*)",
       "Bash(export DASHSCOPE_API_KEY:*)",
       "Bash(curl:*)",
-      "Bash(export CLARITY_DB_PATH=\".clarity/ai-coding-agent.db\")",
+      "Bash(export CLARAITY_DB_PATH=\".claraity/ai-coding-agent.db\")",
       "Bash(export DASHSCOPE_API_KEY=\"sk-4e4a13fc4efb48408e22eb9feb40a03d\")",
       "Bash(set:*)",
       "Bash(powershell.exe -Command \"$env:DASHSCOPE_API_KEY=''sk-4e4a13fc4efb48408e22eb9feb40a03d''; python -c ''from src.validation import runner; print(\"\"success\"\")'' 2>&1 | Out-File -FilePath error.txt -Encoding UTF8\")",
@@ -26,7 +26,7 @@
       "WebFetch(domain:www.anthropic.com)",
       "WebFetch(domain:claude.com)",
       "Bash(findstr:*)",
-      "Bash(powershell -Command \"Get-Content ''C:\\\\Vijay\\\\Learning\\\\AI\\\\ai-coding-agent\\\\.clarity\\\\logs\\\\app.jsonl'' | Select-String -Pattern ''21:57'' | Select-Object -Last 10\")",
+      "Bash(powershell -Command \"Get-Content ''C:\\\\Vijay\\\\Learning\\\\AI\\\\ai-coding-agent\\\\.claraity\\\\logs\\\\app.jsonl'' | Select-String -Pattern ''21:57'' | Select-Object -Last 10\")",
       "Bash(for module in \"src.core.cancel_token\" \"src.memory.manager\" \"src.session.subagent_registry\" \"src.tools.file_ops\" \"src.workflow\" \"src.core.auth\")",
       "Bash(do echo \"=== $module ===\")",
       "Bash(done)",
@@ -38,7 +38,17 @@
       "Bash(python3:*)",
       "Bash(npx tsc:*)",
       "WebFetch(domain:marketplace.visualstudio.com)",
-      "WebFetch(domain:docs.anthropic.com)"
+      "WebFetch(domain:docs.anthropic.com)",
+      "Bash(gh api:*)",
+      "Bash(find /tmp/beads -type d \\\\\\(-name *schema* -o -name *migration* -o -name *database* -o -name *db* -o -name *internal* \\\\\\))",
+      "Bash(xargs grep:*)",
+      "Bash(ls:*)",
+      "WebFetch(domain:docs.openclaw.ai)",
+      "WebFetch(domain:snowan.gitbook.io)",
+      "WebFetch(domain:milvus.io)",
+      "Bash(grep -rIl -i 'claraity' . --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=__pycache__ --exclude-dir=htmlcov --exclude-dir=.claraity --exclude-dir=.claraity)",
+      "Bash(grep -rIl -i 'claraity' . --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=__pycache__ --exclude-dir=htmlcov --exclude-dir=.claraity --exclude-dir=.claraity --exclude-dir=.venv-build --exclude-dir=.venv --exclude-dir=build --exclude-dir=dist --exclude-dir=.pytest_cache --exclude-dir=.checkpoints --exclude-dir=out --exclude-dir=proxy_captures --exclude-dir=validation-results --exclude='*.pyc' --exclude='*.map')",
+      "Bash(xargs sed:*)"
     ],
     "deny": []
   }

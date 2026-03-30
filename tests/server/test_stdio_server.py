@@ -310,20 +310,21 @@ class TestBuildReplayMessages:
 
 
 class TestSessionIdRegex:
-    """Test _SESSION_ID_RE validates UUID format and rejects attacks."""
+    """Test _SESSION_ID_RE validates session-YYYYMMDD-HHMMSS-hex8 format and rejects attacks."""
 
-    def test_valid_uuid_lowercase(self):
-        assert _SESSION_ID_RE.match("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+    def test_valid_session_id_lowercase(self):
+        assert _SESSION_ID_RE.match("session-20260328-143022-a1b2c3d4")
 
-    def test_valid_uuid_uppercase(self):
-        assert _SESSION_ID_RE.match("A1B2C3D4-E5F6-7890-ABCD-EF1234567890")
+    def test_valid_session_id_uppercase_hex(self):
+        assert _SESSION_ID_RE.match("SESSION-20260328-143022-A1B2C3D4")
 
-    def test_valid_uuid_mixed_case(self):
-        assert _SESSION_ID_RE.match("a1B2c3D4-E5f6-7890-AbCd-eF1234567890")
+    def test_valid_session_id_mixed_case(self):
+        assert _SESSION_ID_RE.match("session-20260328-143022-aAbBcCdD")
 
-    def test_real_uuid4(self):
-        import uuid
-        assert _SESSION_ID_RE.match(str(uuid.uuid4()))
+    def test_generated_session_id(self):
+        from src.session.scanner import generate_session_id
+        sid = generate_session_id()
+        assert _SESSION_ID_RE.match(sid)
 
     def test_empty_string_fails(self):
         assert _SESSION_ID_RE.match("") is None
@@ -334,35 +335,35 @@ class TestSessionIdRegex:
     def test_path_traversal_encoded(self):
         assert _SESSION_ID_RE.match("..%2F..%2Fetc%2Fpasswd") is None
 
-    def test_path_traversal_with_uuid_prefix(self):
-        """UUID followed by path traversal must fail."""
-        assert _SESSION_ID_RE.match("a1b2c3d4-e5f6-7890-abcd-ef1234567890/../secret") is None
+    def test_path_traversal_with_session_prefix(self):
+        """Valid session ID followed by path traversal must fail."""
+        assert _SESSION_ID_RE.match("session-20260328-143022-a1b2c3d4/../secret") is None
 
-    def test_path_traversal_with_uuid_suffix(self):
-        """Path traversal before UUID must fail."""
-        assert _SESSION_ID_RE.match("../../a1b2c3d4-e5f6-7890-abcd-ef1234567890") is None
+    def test_path_traversal_with_session_suffix(self):
+        """Path traversal before session ID must fail."""
+        assert _SESSION_ID_RE.match("../../session-20260328-143022-a1b2c3d4") is None
 
-    def test_too_short(self):
-        assert _SESSION_ID_RE.match("a1b2c3d4-e5f6-7890-abcd") is None
+    def test_too_short_hex(self):
+        assert _SESSION_ID_RE.match("session-20260328-143022-a1b2c3") is None
 
-    def test_too_long(self):
-        assert _SESSION_ID_RE.match("a1b2c3d4-e5f6-7890-abcd-ef1234567890extra") is None
+    def test_too_long_hex(self):
+        assert _SESSION_ID_RE.match("session-20260328-143022-a1b2c3d4e5") is None
 
-    def test_missing_hyphens(self):
-        assert _SESSION_ID_RE.match("a1b2c3d4e5f67890abcdef1234567890") is None
+    def test_missing_session_prefix(self):
+        assert _SESSION_ID_RE.match("20260328-143022-a1b2c3d4") is None
 
-    def test_wrong_hyphen_positions(self):
-        assert _SESSION_ID_RE.match("a1b2c3d4e-5f6-7890-abcd-ef123456789") is None
+    def test_wrong_date_format(self):
+        assert _SESSION_ID_RE.match("session-2026328-143022-a1b2c3d4") is None
 
     def test_invalid_hex_chars(self):
-        assert _SESSION_ID_RE.match("g1b2c3d4-e5f6-7890-abcd-ef1234567890") is None
+        assert _SESSION_ID_RE.match("session-20260328-143022-g1b2c3d4") is None
 
     def test_null_bytes(self):
-        assert _SESSION_ID_RE.match("a1b2c3d4-e5f6-7890-abcd-ef12345678\x00") is None
+        assert _SESSION_ID_RE.match("session-20260328-143022-a1b2c3\x00") is None
 
     def test_spaces(self):
-        assert _SESSION_ID_RE.match(" a1b2c3d4-e5f6-7890-abcd-ef1234567890") is None
-        assert _SESSION_ID_RE.match("a1b2c3d4-e5f6-7890-abcd-ef1234567890 ") is None
+        assert _SESSION_ID_RE.match(" session-20260328-143022-a1b2c3d4") is None
+        assert _SESSION_ID_RE.match("session-20260328-143022-a1b2c3d4 ") is None
 
     def test_backslash_path(self):
         assert _SESSION_ID_RE.match("..\\..\\etc\\passwd") is None
@@ -375,6 +376,10 @@ class TestSessionIdRegex:
 
     def test_just_hyphens(self):
         assert _SESSION_ID_RE.match("--------") is None
+
+    def test_uuid_format_rejected(self):
+        """Old UUID format should not match the new session ID pattern."""
+        assert _SESSION_ID_RE.match("a1b2c3d4-e5f6-7890-abcd-ef1234567890") is None
 
 
 # ============================================================================
@@ -423,8 +428,8 @@ class TestFindSessionFile:
 
     def test_finds_directory_structure_session(self, tmp_path):
         """Finds session in sessions/<uuid>/session.jsonl structure."""
-        session_id = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-        sessions_dir = tmp_path / ".clarity" / "sessions" / session_id
+        session_id = "session-20260328-143022-a1b2c3d4"
+        sessions_dir = tmp_path / ".claraity" / "sessions" / session_id
         sessions_dir.mkdir(parents=True)
         jsonl_file = sessions_dir / "session.jsonl"
         jsonl_file.write_text("{}\n")
@@ -436,8 +441,8 @@ class TestFindSessionFile:
 
     def test_finds_flat_structure_session(self, tmp_path):
         """Finds session in sessions/<uuid>.jsonl flat structure."""
-        session_id = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-        sessions_dir = tmp_path / ".clarity" / "sessions"
+        session_id = "session-20260328-143022-a1b2c3d4"
+        sessions_dir = tmp_path / ".claraity" / "sessions"
         sessions_dir.mkdir(parents=True)
         jsonl_file = sessions_dir / f"{session_id}.jsonl"
         jsonl_file.write_text("{}\n")
@@ -449,8 +454,8 @@ class TestFindSessionFile:
 
     def test_prefers_directory_structure_over_flat(self, tmp_path):
         """When both structures exist, directory structure is found first."""
-        session_id = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-        sessions_dir = tmp_path / ".clarity" / "sessions"
+        session_id = "session-20260328-143022-a1b2c3d4"
+        sessions_dir = tmp_path / ".claraity" / "sessions"
 
         # Create directory structure
         dir_path = sessions_dir / session_id
@@ -713,3 +718,321 @@ class TestTunables:
         """_SESSION_ID_RE should be a compiled regex, not a raw string."""
         import re
         assert isinstance(_SESSION_ID_RE, re.Pattern)
+
+
+# ============================================================================
+# _handle_enrich_prompt
+# ============================================================================
+
+
+def _make_async_delta_gen(*text_deltas: str):
+    """Return an async generator that yields ProviderDelta-like objects for each text chunk."""
+    async def _gen():
+        for text in text_deltas:
+            yield SimpleNamespace(text_delta=text, finish_reason=None)
+    return _gen()
+
+
+def _make_protocol_for_enrich(deltas: tuple[str, ...] = ("enriched text",)):
+    """Build a minimal StdioProtocol instance suitable for enrich_prompt tests.
+
+    Uses SimpleNamespace so attribute access (agent.llm) matches the real
+    code path exactly — catching any typo like 'llm_backend' at test time.
+
+    The mock LLM's generate_provider_deltas_async yields one delta per element
+    in `deltas`, matching the streaming interface used by _handle_enrich_prompt.
+    """
+    mock_llm = MagicMock()
+    mock_llm.config = SimpleNamespace(model_name="test-model")
+    mock_llm.generate_provider_deltas_async = MagicMock(
+        return_value=_make_async_delta_gen(*deltas)
+    )
+
+    agent = SimpleNamespace(llm=mock_llm)
+
+    protocol = StdioProtocol.__new__(StdioProtocol)
+    protocol._agent = agent
+    protocol._config_path = ""
+    protocol._sent = []
+
+    async def _fake_send_json(data):
+        protocol._sent.append(data)
+
+    protocol._send_json = _fake_send_json
+
+    # Patch load_llm_config so tests don't need a real config file
+    from src.llm.config_loader import LLMConfigData
+    protocol._load_config = lambda: LLMConfigData()
+
+    return protocol
+
+
+def _run(coro):
+    """Run a coroutine in the test event loop."""
+    return asyncio.get_event_loop().run_until_complete(coro)
+
+
+class TestHandleEnrichPrompt:
+    """Tests for StdioProtocol._handle_enrich_prompt."""
+
+    def test_accesses_agent_llm_not_llm_backend(self):
+        """Regression: handler must use agent.llm, not agent.llm_backend.
+
+        An AttributeError on agent.llm_backend was silently swallowed,
+        causing the feature to appear broken with no user feedback.
+        """
+        protocol = _make_protocol_for_enrich()
+        assert not hasattr(protocol._agent, "llm_backend"), (
+            "Fixture misconfigured: agent should not have llm_backend"
+        )
+        assert hasattr(protocol._agent, "llm"), (
+            "Fixture misconfigured: agent must have llm"
+        )
+
+    def test_streaming_sends_delta_messages(self):
+        """Each text chunk from the LLM yields an enrichment_delta message."""
+        protocol = _make_protocol_for_enrich(deltas=("Fix ", "the ", "bug."))
+
+        with patch("src.llm.config_loader.load_llm_config") as mock_cfg:
+            from src.llm.config_loader import LLMConfigData
+            mock_cfg.return_value = LLMConfigData()
+            _run(protocol._handle_enrich_prompt({"type": "enrich_prompt", "content": "fix the bug"}))
+
+        delta_msgs = [m for m in protocol._sent if m["type"] == "enrichment_delta"]
+        assert len(delta_msgs) == 3
+        assert delta_msgs[0]["delta"] == "Fix "
+        assert delta_msgs[1]["delta"] == "the "
+        assert delta_msgs[2]["delta"] == "bug."
+
+    def test_complete_message_sent_after_all_deltas(self):
+        """enrichment_complete is sent after all deltas with concatenated enriched text."""
+        protocol = _make_protocol_for_enrich(deltas=("Fix ", "the ", "bug."))
+
+        with patch("src.llm.config_loader.load_llm_config") as mock_cfg:
+            from src.llm.config_loader import LLMConfigData
+            mock_cfg.return_value = LLMConfigData()
+            _run(protocol._handle_enrich_prompt({"type": "enrich_prompt", "content": "fix the bug"}))
+
+        complete_msgs = [m for m in protocol._sent if m["type"] == "enrichment_complete"]
+        assert len(complete_msgs) == 1
+        msg = complete_msgs[0]
+        assert msg["original"] == "fix the bug"
+        assert msg["enriched"] == "Fix the bug."
+
+    def test_delta_messages_come_before_complete(self):
+        """All enrichment_delta messages must precede enrichment_complete."""
+        protocol = _make_protocol_for_enrich(deltas=("A", "B"))
+
+        with patch("src.llm.config_loader.load_llm_config") as mock_cfg:
+            from src.llm.config_loader import LLMConfigData
+            mock_cfg.return_value = LLMConfigData()
+            _run(protocol._handle_enrich_prompt({"type": "enrich_prompt", "content": "hello"}))
+
+        types = [m["type"] for m in protocol._sent]
+        assert types == ["enrichment_delta", "enrichment_delta", "enrichment_complete"]
+
+    def test_uses_generate_provider_deltas_async_not_generate(self):
+        """Handler must use streaming generate_provider_deltas_async, not blocking generate."""
+        protocol = _make_protocol_for_enrich()
+
+        with patch("src.llm.config_loader.load_llm_config") as mock_cfg:
+            from src.llm.config_loader import LLMConfigData
+            mock_cfg.return_value = LLMConfigData()
+            _run(protocol._handle_enrich_prompt({"type": "enrich_prompt", "content": "add tests"}))
+
+        assert protocol._agent.llm.generate_provider_deltas_async.called, (
+            "generate_provider_deltas_async was not called"
+        )
+        assert not protocol._agent.llm.generate.called, (
+            "Blocking generate() was called — should use streaming instead"
+        )
+
+    def test_user_message_contains_request_in_quotes(self):
+        """User message must wrap the request in quotes for clear delineation."""
+        protocol = _make_protocol_for_enrich()
+
+        with patch("src.llm.config_loader.load_llm_config") as mock_cfg:
+            from src.llm.config_loader import LLMConfigData
+            mock_cfg.return_value = LLMConfigData()
+            _run(protocol._handle_enrich_prompt({"type": "enrich_prompt", "content": "add tests"}))
+
+        call_args = protocol._agent.llm.generate_provider_deltas_async.call_args
+        messages = call_args[0][0]
+        assert messages[0]["role"] == "system"
+        assert messages[1]["role"] == "user"
+        assert '"add tests"' in messages[1]["content"]
+
+    def test_custom_system_prompt_from_config_is_used(self):
+        """If prompt_enrichment.system_prompt is set in config, it replaces the built-in default."""
+        protocol = _make_protocol_for_enrich()
+
+        with patch("src.llm.config_loader.load_llm_config") as mock_cfg:
+            from src.llm.config_loader import LLMConfigData, PromptEnrichmentConfig
+            cfg = LLMConfigData()
+            cfg.prompt_enrichment = PromptEnrichmentConfig(system_prompt="Custom instructions.")
+            mock_cfg.return_value = cfg
+            _run(protocol._handle_enrich_prompt({"type": "enrich_prompt", "content": "hello"}))
+
+        call_args = protocol._agent.llm.generate_provider_deltas_async.call_args
+        messages = call_args[0][0]
+        assert messages[0]["content"] == "Custom instructions."
+
+    def test_empty_content_returns_enrichment_error(self):
+        """Empty prompt returns enrichment_error without calling the LLM."""
+        protocol = _make_protocol_for_enrich()
+
+        _run(protocol._handle_enrich_prompt({"type": "enrich_prompt", "content": ""}))
+
+        assert len(protocol._sent) == 1
+        assert protocol._sent[0]["type"] == "enrichment_error"
+        assert not protocol._agent.llm.generate_provider_deltas_async.called
+
+    def test_whitespace_only_content_returns_enrichment_error(self):
+        """Whitespace-only prompt is treated as empty."""
+        protocol = _make_protocol_for_enrich()
+
+        _run(protocol._handle_enrich_prompt({"type": "enrich_prompt", "content": "   "}))
+
+        assert protocol._sent[0]["type"] == "enrichment_error"
+
+    def test_llm_failure_returns_enrichment_error(self):
+        """If the LLM streaming call raises, enrichment_error is sent."""
+        async def _failing_gen(*a, **kw):
+            raise RuntimeError("LLM unavailable")
+            yield  # make it an async generator
+
+        mock_llm = MagicMock()
+        mock_llm.config = SimpleNamespace(model_name="test-model")
+        mock_llm.generate_provider_deltas_async = _failing_gen
+
+        protocol = StdioProtocol.__new__(StdioProtocol)
+        protocol._agent = SimpleNamespace(llm=mock_llm)
+        protocol._config_path = ""
+        protocol._sent = []
+
+        async def _fake_send_json(data):
+            protocol._sent.append(data)
+        protocol._send_json = _fake_send_json
+
+        with patch("src.llm.config_loader.load_llm_config") as mock_cfg:
+            from src.llm.config_loader import LLMConfigData
+            mock_cfg.return_value = LLMConfigData()
+            _run(protocol._handle_enrich_prompt({"type": "enrich_prompt", "content": "hello"}))
+
+        assert len(protocol._sent) == 1
+        msg = protocol._sent[0]
+        assert msg["type"] == "enrichment_error"
+        assert "LLM unavailable" in msg["message"]
+
+    def test_history_included_in_user_message(self):
+        """Chat history entries are prepended to the user message sent to the LLM."""
+        protocol = _make_protocol_for_enrich()
+        history = [
+            {"role": "user", "content": "I'm working on the auth module"},
+            {"role": "assistant", "content": "I can help with that."},
+        ]
+
+        with patch("src.llm.config_loader.load_llm_config") as mock_cfg:
+            from src.llm.config_loader import LLMConfigData
+            mock_cfg.return_value = LLMConfigData()
+            _run(protocol._handle_enrich_prompt({
+                "type": "enrich_prompt",
+                "content": "fix the login bug",
+                "history": history,
+            }))
+
+        call_args = protocol._agent.llm.generate_provider_deltas_async.call_args
+        user_content = call_args[0][0][1]["content"]
+        assert "I'm working on the auth module" in user_content
+        assert "I can help with that." in user_content
+        assert '"fix the login bug"' in user_content
+        # History must appear before the request
+        assert user_content.index("auth module") < user_content.index("fix the login bug")
+
+    def test_history_labels_roles_correctly(self):
+        """User turns are labelled 'User:' and assistant turns 'Assistant:'."""
+        protocol = _make_protocol_for_enrich()
+        history = [
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "hi there"},
+        ]
+
+        with patch("src.llm.config_loader.load_llm_config") as mock_cfg:
+            from src.llm.config_loader import LLMConfigData
+            mock_cfg.return_value = LLMConfigData()
+            _run(protocol._handle_enrich_prompt({
+                "type": "enrich_prompt",
+                "content": "do something",
+                "history": history,
+            }))
+
+        call_args = protocol._agent.llm.generate_provider_deltas_async.call_args
+        user_content = call_args[0][0][1]["content"]
+        assert "User: hello" in user_content
+        assert "Assistant: hi there" in user_content
+
+    def test_no_history_sends_request_only(self):
+        """When history is absent the user message contains only the request."""
+        protocol = _make_protocol_for_enrich()
+
+        with patch("src.llm.config_loader.load_llm_config") as mock_cfg:
+            from src.llm.config_loader import LLMConfigData
+            mock_cfg.return_value = LLMConfigData()
+            _run(protocol._handle_enrich_prompt({
+                "type": "enrich_prompt",
+                "content": "add tests",
+            }))
+
+        call_args = protocol._agent.llm.generate_provider_deltas_async.call_args
+        user_content = call_args[0][0][1]["content"]
+        assert "Recent conversation" not in user_content
+        assert '"add tests"' in user_content
+
+    def test_empty_history_list_ignored(self):
+        """An empty history list produces the same output as no history."""
+        protocol = _make_protocol_for_enrich()
+
+        with patch("src.llm.config_loader.load_llm_config") as mock_cfg:
+            from src.llm.config_loader import LLMConfigData
+            mock_cfg.return_value = LLMConfigData()
+            _run(protocol._handle_enrich_prompt({
+                "type": "enrich_prompt",
+                "content": "do it",
+                "history": [],
+            }))
+
+        call_args = protocol._agent.llm.generate_provider_deltas_async.call_args
+        user_content = call_args[0][0][1]["content"]
+        assert "Recent conversation" not in user_content
+
+    def test_invalid_history_entries_skipped(self):
+        """Non-dict entries and unknown roles in history are silently ignored."""
+        protocol = _make_protocol_for_enrich()
+        history = [
+            "not a dict",
+            {"role": "system", "content": "should be ignored"},
+            {"role": "user", "content": "valid entry"},
+            {"role": "assistant"},  # missing content
+        ]
+
+        with patch("src.llm.config_loader.load_llm_config") as mock_cfg:
+            from src.llm.config_loader import LLMConfigData
+            mock_cfg.return_value = LLMConfigData()
+            _run(protocol._handle_enrich_prompt({
+                "type": "enrich_prompt",
+                "content": "go",
+                "history": history,
+            }))
+
+        call_args = protocol._agent.llm.generate_provider_deltas_async.call_args
+        user_content = call_args[0][0][1]["content"]
+        assert "should be ignored" not in user_content
+        assert "User: valid entry" in user_content
+
+    def test_enrich_prompt_registered_in_handlers(self):
+        """enrich_prompt must be in the _HANDLERS dispatch table."""
+        assert "enrich_prompt" in StdioProtocol._HANDLERS
+
+    def test_enrich_prompt_handler_maps_to_correct_method(self):
+        """_HANDLERS['enrich_prompt'] must point to _handle_enrich_prompt."""
+        assert StdioProtocol._HANDLERS["enrich_prompt"] == "_handle_enrich_prompt"

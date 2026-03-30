@@ -165,7 +165,7 @@ The summary also tracks hit rate (percentage of calls that had any cache read to
 
 ### Per-Turn Cache Log
 
-Every LLM call emits a `[CACHE]` log line to `.clarity/logs/app.jsonl`:
+Every LLM call emits a `[CACHE]` log line to `.claraity/logs/app.jsonl`:
 
 ```json
 {"level": "INFO", "logger": "llm.openai_backend", "message": "[CACHE] prompt=4523 cached=3200"}
@@ -205,7 +205,7 @@ The file `test_prompt_caching.py` in the project root is a standalone diagnostic
 ### Usage
 
 ```bash
-# Use the default model from .clarity/config.yaml
+# Use the default model from .claraity/config.yaml
 python test_prompt_caching.py
 
 # Override with a specific model
@@ -215,7 +215,7 @@ python test_prompt_caching.py claude-3-7-sonnet-20250219
 
 ### What It Does
 
-1. Loads configuration from `.clarity/config.yaml` (base URL, model) and API key from the OS keyring or environment.
+1. Loads configuration from `.claraity/config.yaml` (base URL, model) and API key from the OS keyring or environment.
 2. Builds a realistic system prompt padded to exceed 1024 tokens (the minimum for most caching implementations) plus 5 tool definitions.
 3. Runs 5 sequential turns that mirror the agent's tool loop:
    - Turn 1: System + user message (cache write)

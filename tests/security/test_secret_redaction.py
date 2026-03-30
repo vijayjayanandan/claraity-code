@@ -140,22 +140,22 @@ class TestRedactDict:
 
 
 class TestGitignoreProtection:
-    """S4: Verify .clarity sensitive files are in .gitignore."""
+    """S4: Verify .claraity sensitive files are in .gitignore."""
 
     def test_gitignore_blocks_config(self):
         gitignore = Path(__file__).parent.parent.parent / ".gitignore"
         content = gitignore.read_text()
-        assert ".clarity/" in content or ".clarity/config.yaml" in content
+        assert ".claraity/" in content or ".claraity/config.yaml" in content
 
     def test_gitignore_blocks_sessions(self):
         gitignore = Path(__file__).parent.parent.parent / ".gitignore"
         content = gitignore.read_text()
-        assert ".clarity/" in content or ".clarity/sessions/" in content
+        assert ".claraity/" in content or ".claraity/sessions/" in content
 
     def test_gitignore_blocks_logs(self):
         gitignore = Path(__file__).parent.parent.parent / ".gitignore"
         content = gitignore.read_text()
-        assert ".clarity/" in content or ".clarity/logs/" in content
+        assert ".claraity/" in content or ".claraity/logs/" in content
 
 
 from pathlib import Path

@@ -285,7 +285,7 @@ ui.submit_action(InterruptSignal())
 
 ### JSONL Format
 
-File: `.clarity/sessions/<session-id>/session.jsonl`
+File: `.claraity/sessions/<session-id>/session.jsonl`
 
 One JSON object per line. Append-only. Auto-flush after each write (process-crash safe).
 

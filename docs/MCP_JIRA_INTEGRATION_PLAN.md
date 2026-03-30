@@ -139,7 +139,7 @@ ClarAIty currently has a native tool system: `Tool` base class + `ToolExecutor` 
   - `test_connection() → bool` - make a simple API call to verify tokens work
   - `get_mcp_server_url() → str` - construct the Atlassian Rovo MCP endpoint URL
   - `is_connected() → bool` - check if valid tokens exist
-- Config persisted to `.clarity/integrations/jira.json` (no secrets, just cloud_url + enabled flag)
+- Config persisted to `.claraity/integrations/jira.json` (no secrets, just cloud_url + enabled flag)
 
 ### Step 8: Agent Integration
 - **`src/tools/tool_schemas.py`**: Add `get_all_tools(mcp_definitions=None)` that returns `ALL_TOOLS + (mcp_definitions or [])`
@@ -181,5 +181,5 @@ ClarAIty currently has a native tool system: `Tool` base class + `ToolExecutor` 
    - Run `python -m src.cli --tui`
    - Type "search for open bugs in PROJECT" → agent should use `jira.search_issues`
    - Type "create a bug ticket for X" → agent should request approval before `jira.create_issue`
-3. **Secret leak check**: `grep -r "Bearer\|api_token\|access_token" .clarity/sessions/ .clarity/logs/` should return nothing
+3. **Secret leak check**: `grep -r "Bearer\|api_token\|access_token" .claraity/sessions/ .claraity/logs/` should return nothing
 4. **JSONL replay**: Stop and restart with `--session` flag → Jira tool results should render from JSONL without live Jira connection

@@ -83,7 +83,7 @@ def chat_mode(
             store = MessageStore()
 
         # Prepare session writer (directory created on first write, not now)
-        sessions_dir = Path(".clarity/sessions")
+        sessions_dir = Path(".claraity/sessions")
         session_dir = sessions_dir / session_id
         jsonl_path = session_dir / "session.jsonl"
         writer = SessionWriter(file_path=jsonl_path)
@@ -121,25 +121,25 @@ def main() -> None:
     )
 
     parser.add_argument(
-        "--model", default=None, help="Model name (from .env: LLM_MODEL, or .clarity/config.yaml)"
+        "--model", default=None, help="Model name (from .env: LLM_MODEL, or .claraity/config.yaml)"
     )
 
     parser.add_argument(
         "--backend",
         default=None,
         choices=["ollama", "openai"],
-        help="LLM backend (from .env: LLM_BACKEND, or .clarity/config.yaml)",
+        help="LLM backend (from .env: LLM_BACKEND, or .claraity/config.yaml)",
     )
 
     parser.add_argument(
-        "--url", default=None, help="Backend API URL (from .env: LLM_HOST, or .clarity/config.yaml)"
+        "--url", default=None, help="Backend API URL (from .env: LLM_HOST, or .claraity/config.yaml)"
     )
 
     parser.add_argument(
         "--context",
         type=int,
         default=None,
-        help="Context window size (from .env: MAX_CONTEXT_TOKENS, or .clarity/config.yaml)",
+        help="Context window size (from .env: MAX_CONTEXT_TOKENS, or .claraity/config.yaml)",
     )
 
     parser.add_argument(
@@ -159,21 +159,21 @@ def main() -> None:
         "--temperature",
         type=float,
         default=None,
-        help="LLM temperature (from .env: LLM_TEMPERATURE, or .clarity/config.yaml)",
+        help="LLM temperature (from .env: LLM_TEMPERATURE, or .claraity/config.yaml)",
     )
 
     parser.add_argument(
         "--max-tokens",
         type=int,
         default=None,
-        help="Max output tokens (from .env: LLM_MAX_TOKENS, or .clarity/config.yaml)",
+        help="Max output tokens (from .env: LLM_MAX_TOKENS, or .claraity/config.yaml)",
     )
 
     parser.add_argument(
         "--top-p",
         type=float,
         default=None,
-        help="Top-p sampling (from .env: LLM_TOP_P, or .clarity/config.yaml)",
+        help="Top-p sampling (from .env: LLM_TOP_P, or .claraity/config.yaml)",
     )
 
     parser.add_argument(
@@ -187,7 +187,7 @@ def main() -> None:
         "--log-level",
         default=None,
         choices=["debug", "info", "warning", "error", "critical"],
-        help="Override log level (overrides .clarity/config.yaml, overridden by LOG_LEVEL env var)",
+        help="Override log level (overrides .claraity/config.yaml, overridden by LOG_LEVEL env var)",
     )
 
     args = parser.parse_args()
@@ -197,12 +197,12 @@ def main() -> None:
     # ---------------------------------------------------------------
     from src.llm.config_loader import load_llm_config, resolve_llm_config
 
-    # Secure the .clarity workspace directory permissions at startup
-    from src.security.file_permissions import secure_clarity_workspace
+    # Secure the .claraity workspace directory permissions at startup
+    from src.security.file_permissions import secure_claraity_workspace
 
-    clarity_dir = Path(".clarity")
-    if clarity_dir.exists():
-        secure_clarity_workspace(clarity_dir)
+    claraity_dir = Path(".claraity")
+    if claraity_dir.exists():
+        secure_claraity_workspace(claraity_dir)
 
     llm_config = load_llm_config()
 

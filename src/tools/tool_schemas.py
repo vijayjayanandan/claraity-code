@@ -13,7 +13,17 @@ from src.llm.base import ToolDefinition
 
 READ_FILE_TOOL = ToolDefinition(
     name="read_file",
-    description="Read file contents with streaming line-range support. For large files, use start_line/end_line/max_lines to read in chunks. Returns content with line numbers (cat -n format). THIS IS YOUR PRIMARY TOOL for understanding any file.",
+    description=(
+        "Read file contents with streaming line-range support. Returns content with line numbers (cat -n format). "
+        "THIS IS YOUR PRIMARY TOOL for understanding any file.\n\n"
+        "IMPORTANT: You MUST read a file before making claims about it or editing it. "
+        "Do NOT use run_command with cat/head/tail to read files -- use this tool instead.\n\n"
+        "Strategy:\n"
+        "- <1000 lines: read completely\n"
+        "- 1000-5000 lines: read first 200 + grep for patterns, then targeted reads\n"
+        "- >5000 lines: use start_line/end_line to read specific sections\n"
+        "- If file is already in <referenced_files> context, do NOT re-read it"
+    ),
     parameters={
         "type": "object",
         "properties": {
@@ -40,7 +50,15 @@ READ_FILE_TOOL = ToolDefinition(
 
 WRITE_FILE_TOOL = ToolDefinition(
     name="write_file",
-    description="Create a new file with the specified content. Use this for NEW files only (not editing existing files).",
+    description=(
+        "Create a new file or completely rewrite an existing file. "
+        "Prefer edit_file for modifying existing files -- it only sends the diff.\n\n"
+        "Rules:\n"
+        "- Do NOT create documentation files (*.md, README) unless explicitly requested\n"
+        "- Do NOT use run_command with echo/cat heredoc to write files -- use this tool\n"
+        "- ALWAYS prefer editing existing files over creating new ones (prevents file bloat)\n"
+        "- Keep files under 100 lines if possible -- break large files into skeleton + edits"
+    ),
     parameters={
         "type": "object",
         "properties": {
@@ -56,7 +74,17 @@ WRITE_FILE_TOOL = ToolDefinition(
 
 EDIT_FILE_TOOL = ToolDefinition(
     name="edit_file",
-    description="Edit an existing file by replacing specific text. Use exact text matching - the old_text must match exactly (including whitespace).",
+    description=(
+        "Edit an existing file by replacing specific text. The old_text must match exactly "
+        "including whitespace and indentation.\n\n"
+        "Rules:\n"
+        "- You MUST read the file first before editing. This tool will fail if you haven't.\n"
+        "- Do NOT use run_command with sed/awk/perl to edit files -- use this tool\n"
+        "- Preserve exact indentation from the file (tabs/spaces as they appear)\n"
+        "- If old_text is not unique, provide more surrounding context to disambiguate\n"
+        "- Only edit code you need to change. Do not add docstrings, comments, or type "
+        "annotations to surrounding code you didn't modify"
+    ),
     parameters={
         "type": "object",
         "properties": {
@@ -92,7 +120,11 @@ APPEND_TO_FILE_TOOL = ToolDefinition(
 
 LIST_DIRECTORY_TOOL = ToolDefinition(
     name="list_directory",
-    description="list all files and subdirectories in a directory",
+    description=(
+        "List all files and subdirectories in a directory. "
+        "Use this instead of run_command with ls/dir/Get-ChildItem. "
+        "For finding files by pattern across directories, use glob instead."
+    ),
     parameters={
         "type": "object",
         "properties": {
@@ -102,23 +134,100 @@ LIST_DIRECTORY_TOOL = ToolDefinition(
     },
 )
 
-RUN_COMMAND_TOOL = ToolDefinition(
-    name="run_command",
-    description=(
+def _build_run_command_description() -> str:
+    """Build run_command description dynamically based on detected shell.
+
+    Modeled after Claude Code's Bash tool description — co-locates all behavioral
+    guidance with the tool definition so the LLM sees it at call time.
+    """
+    from src.platform import detect_preferred_shell
+
+    shell_info = detect_preferred_shell()
+
+    base = (
         "Execute a shell command and return its output. "
         "Use for running tests, building projects, executing scripts, package management, and git operations.\n\n"
-        "IMPORTANT - Shell environment:\n"
-        "- On Windows, commands run in PowerShell 5.1 (NOT cmd.exe, NOT bash).\n"
-        "- Do NOT use '&&' to chain commands -- PowerShell 5.1 does not support it. Use '; ' (semicolon) instead.\n"
-        "- Do NOT use 'cd /d' -- that is cmd.exe syntax. PowerShell uses 'Set-Location' or just 'cd'.\n"
+    )
+
+    # --- Shell environment (platform-adaptive) ---
+    if shell_info["syntax"] == "unix":
+        shell_section = (
+            "IMPORTANT - Shell environment:\n"
+            f"- Commands run in {shell_info['shell']} (Unix syntax).\n"
+            "- Use '&&' to chain dependent commands, '; ' for independent ones.\n"
+            "- Standard Unix tools available: grep, sed, awk, tail, head, etc.\n"
+        )
+    else:
+        shell_section = (
+            "IMPORTANT - Shell environment:\n"
+            "- Commands run in PowerShell 5.1 (NOT cmd.exe, NOT bash).\n"
+            "- Do NOT use '&&' to chain commands -- use '; ' (semicolon) instead.\n"
+            "- Do NOT use 'cd /d' (cmd.exe syntax). Use 'Set-Location' or 'cd'.\n"
+        )
+
+    # --- Dedicated tool preference (specific tool names) ---
+    dont_use = (
+        "\nDo NOT use run_command for these -- use dedicated tools instead:\n"
+        "- Reading files: cat, head, tail, type -> use read_file\n"
+        "- Searching content: grep, rg, findstr, Select-String -> use grep tool\n"
+        "- Finding files: find, ls, dir, Get-ChildItem -> use glob or list_directory\n"
+        "- Editing files: sed, awk, perl -i -> use edit_file\n"
+        "- Writing files: echo >>, cat <<EOF -> use write_file\n"
+        "Using dedicated tools gives better auditability and user experience.\n"
+    )
+
+    # --- Working directory & paths ---
+    paths = (
+        "\nWorking directory:\n"
         "- Prefer the working_directory parameter over 'cd' commands.\n"
-        "- On Unix/macOS, commands run in the default shell (bash/zsh).\n\n"
-        "Do NOT use run_command for:\n"
-        "- Reading files (use read_file)\n"
-        "- Searching code (use grep or glob)\n"
-        "- Editing files (use edit_file)\n"
-        "- Listing directories (use list_directory)"
-    ),
+        "- Use absolute paths to avoid losing your place between calls.\n"
+        "- Always quote file paths that contain spaces with double quotes.\n"
+    )
+
+    # --- Multiple commands ---
+    multi_cmd = (
+        "\nMultiple commands:\n"
+        "- Independent commands that can run in parallel -> make separate run_command calls.\n"
+        "- Dependent commands that must run sequentially -> chain with '&&'.\n"
+        "- Do NOT use newlines to separate commands in a single call.\n"
+    )
+
+    # --- Background execution ---
+    background = (
+        "\nLong-running commands:\n"
+        "- Use background=true for commands that take >30s (test suites, builds, linters).\n"
+        "- You will be notified when the background task completes -- do NOT poll or sleep.\n"
+        "- Do not use '&' at the end of the command; use the background parameter instead.\n"
+    )
+
+    # --- Behavioral guardrails ---
+    guardrails = (
+        "\nBehavioral rules:\n"
+        "- Always provide the description parameter (e.g., 'Run unit tests', 'Install dependencies').\n"
+        "- Commands run non-interactively (no terminal input). Do NOT run commands that require "
+        "interactive input (ssh without key auth, docker login, interactive installers).\n"
+        "- Avoid unnecessary 'sleep' commands. Do not sleep between commands that can run immediately.\n"
+        "- Do not retry the identical failing command blindly. Diagnose the error first, then try a targeted fix.\n"
+        "- If a command fails, read the error message and check your assumptions before switching approach.\n"
+        "- After a failure, try at most 3 attempts with the same approach before switching tactics.\n"
+    )
+
+    # --- Git safety ---
+    git_safety = (
+        "\nGit safety:\n"
+        "- Never run destructive git commands (push --force, reset --hard, checkout ., clean -f, branch -D) "
+        "without explicit user request.\n"
+        "- Never skip hooks (--no-verify) unless the user explicitly asks.\n"
+        "- Prefer creating new commits over amending existing ones.\n"
+        "- When staging files, prefer specific file names over 'git add -A' or 'git add .'.\n"
+    )
+
+    return base + shell_section + dont_use + paths + multi_cmd + background + guardrails + git_safety
+
+
+RUN_COMMAND_TOOL = ToolDefinition(
+    name="run_command",
+    description=_build_run_command_description(),
     parameters={
         "type": "object",
         "properties": {
@@ -157,7 +266,13 @@ RUN_COMMAND_TOOL = ToolDefinition(
 
 GREP_TOOL = ToolDefinition(
     name="grep",
-    description="Advanced regex search with file type filters, context lines, and multiple output modes. Production-grade search matching ripgrep capabilities. Use for finding code patterns, error handling, TODOs, etc.",
+    description=(
+        "Advanced regex search across files with file type filters, context lines, and "
+        "multiple output modes. Use for finding code patterns, error handling, TODOs, etc.\n\n"
+        "Use this instead of run_command with grep/rg/findstr/Select-String.\n"
+        "Supports full regex syntax (e.g., 'log.*Error', 'function\\s+\\w+'). "
+        "For cross-line patterns, enable multiline mode."
+    ),
     parameters={
         "type": "object",
         "properties": {
@@ -215,7 +330,11 @@ GREP_TOOL = ToolDefinition(
 
 GLOB_TOOL = ToolDefinition(
     name="glob",
-    description="Fast file pattern matching with recursive search. Find files by glob patterns (e.g., **/*.py, src/**/*.{ts,tsx}). Returns sorted by modification time.",
+    description=(
+        "Fast file pattern matching with recursive search. Find files by glob patterns "
+        "(e.g., **/*.py, src/**/*.{ts,tsx}). Returns sorted by modification time.\n\n"
+        "Use this instead of run_command with find/ls/dir/Get-ChildItem to locate files."
+    ),
     parameters={
         "type": "object",
         "properties": {
@@ -534,7 +653,7 @@ DIRECTOR_COMPLETE_PLAN_TOOL = ToolDefinition(
         "Signal that the PLAN phase is complete. "
         "BEFORE calling this tool, write your full implementation plan "
         "(with rationale, decisions, trade-offs) to a markdown file using write_file "
-        "at .clarity/plans/director_plan.md. Then call this tool with the file path "
+        "at .claraity/plans/director_plan.md. Then call this tool with the file path "
         "and a list of slice titles for execution tracking."
     ),
     parameters={
@@ -542,7 +661,7 @@ DIRECTOR_COMPLETE_PLAN_TOOL = ToolDefinition(
         "properties": {
             "plan_document": {
                 "type": "string",
-                "description": "Path to the markdown plan file you wrote (e.g. .clarity/plans/director_plan.md)",
+                "description": "Path to the markdown plan file you wrote (e.g. .claraity/plans/director_plan.md)",
             },
             "summary": {
                 "type": "string",
@@ -683,23 +802,34 @@ KNOWLEDGE_UPDATE_TOOL = ToolDefinition(
 KNOWLEDGE_QUERY_TOOL = ToolDefinition(
     name="knowledge_query",
     description=(
-        "Query the knowledge DB flexibly. Inspect nodes, edges, constraints, metadata, "
-        "or search by keyword. All parameters optional."
+        "Unified knowledge DB query. All params optional -- combine them. "
+        "FTS search (search=), node detail (node_id=), module (module_id=), "
+        "file context (file_path=), blast radius (impact=), overview (show='brief')."
     ),
     parameters={
         "type": "object",
         "properties": {
-            "node_id": {"type": "string", "description": "Detail for a specific node"},
+            "search": {
+                "type": "string",
+                "description": "FTS5 search: 'streaming', 'async AND NOT test', 'stream*', '\"message store\"'",
+            },
+            "node_id": {
+                "type": "string",
+                "description": "Node detail. Comma-separated for multiple: 'comp-memory-manager, comp-message-store'",
+            },
             "node_type": {
                 "type": "string",
-                "description": "List all nodes of type: module, component, system, decision, invariant, flow, file",
+                "description": "Filter: module, component, decision, invariant, flow, file, system",
             },
-            "related_to": {"type": "string", "description": "Show edges for this node ID"},
+            "module_id": {"type": "string", "description": "Module detail (e.g., mod-core)"},
+            "file_path": {"type": "string", "description": "File context (e.g., src/core/agent.py)"},
+            "impact": {"type": "string", "description": "Blast radius for component ID"},
+            "related_to": {"type": "string", "description": "Show edges for node ID"},
             "show": {
                 "type": "string",
-                "description": "What to return: detail, edges, constraints, overview, metadata",
+                "description": "Output: detail, brief, overview, metadata, constraints, edges",
             },
-            "keyword": {"type": "string", "description": "Search by name/description keyword"},
+            "keyword": {"type": "string", "description": "Simple substring search (prefer search=)"},
         },
         "required": [],
     },
@@ -715,72 +845,6 @@ KNOWLEDGE_SET_METADATA_TOOL = ToolDefinition(
             "value": {"type": "string", "description": "Metadata value"},
         },
         "required": ["key", "value"],
-    },
-)
-
-KNOWLEDGE_BRIEF_TOOL = ToolDefinition(
-    name="knowledge_brief",
-    description="Get a compact architecture overview of the codebase: modules, dependencies, design decisions, and invariants. Use at session start or when you need to understand the overall structure.",
-    parameters={"type": "object", "properties": {}, "required": []},
-)
-
-KNOWLEDGE_MODULE_TOOL = ToolDefinition(
-    name="knowledge_module",
-    description="Get detailed information about a module: its components, files, dependencies, and relationships. Use when you need to understand or modify a specific module.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "module_id": {
-                "type": "string",
-                "description": "Module ID (e.g., mod-core, mod-memory, mod-ui, mod-tools, mod-llm, mod-server)",
-            },
-        },
-        "required": ["module_id"],
-    },
-)
-
-KNOWLEDGE_FILE_TOOL = ToolDefinition(
-    name="knowledge_file",
-    description="Get a file's role, parent module, component it defines, dependencies, and applicable design decisions. Use BEFORE reading a file to understand its context.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "file_path": {
-                "type": "string",
-                "description": "File path relative to project root (e.g., src/core/agent.py)",
-            },
-        },
-        "required": ["file_path"],
-    },
-)
-
-KNOWLEDGE_SEARCH_TOOL = ToolDefinition(
-    name="knowledge_search",
-    description="Search the codebase knowledge base by keyword. Returns matching components, modules, files, decisions, and their relationships.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "keyword": {
-                "type": "string",
-                "description": "Search keyword (e.g., 'memory', 'auth', 'streaming')",
-            },
-        },
-        "required": ["keyword"],
-    },
-)
-
-KNOWLEDGE_IMPACT_TOOL = ToolDefinition(
-    name="knowledge_impact",
-    description="Show what would be affected by changing a component. Returns direct and indirect dependents (blast radius). Use BEFORE modifying a component to understand risk.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "component_id": {
-                "type": "string",
-                "description": "Component ID (e.g., comp-coding-agent, comp-memory-mgr, comp-message-store)",
-            },
-        },
-        "required": ["component_id"],
     },
 )
 
@@ -857,11 +921,6 @@ KNOWLEDGE_TOOLS = [
     KNOWLEDGE_SCAN_FILES_TOOL,
     KNOWLEDGE_UPDATE_TOOL,
     KNOWLEDGE_QUERY_TOOL,
-    KNOWLEDGE_BRIEF_TOOL,
-    KNOWLEDGE_MODULE_TOOL,
-    KNOWLEDGE_FILE_TOOL,
-    KNOWLEDGE_SEARCH_TOOL,
-    KNOWLEDGE_IMPACT_TOOL,
     KNOWLEDGE_SET_METADATA_TOOL,
     TASK_LIST_TOOL,
     TASK_CREATE_TOOL,

@@ -11,7 +11,7 @@ Uses the `keyring` library when available for OS-level secure storage:
 - Linux: Secret Service (GNOME Keyring / KWallet)
 
 When keyring is not installed, falls back to storing the API key in
-.clarity/config.yaml (same pattern as gh, aws, npm CLI tools).
+.claraity/config.yaml (same pattern as gh, aws, npm CLI tools).
 
 Engineering Principles:
 - Always persists the key somewhere (never silently drops it)
@@ -30,7 +30,7 @@ SERVICE_NAME = "claraity"
 USERNAME = "api_key"
 """Default keyring username for the main LLM API key."""
 
-DEFAULT_CONFIG_PATH = os.path.join(".clarity", "config.yaml")
+DEFAULT_CONFIG_PATH = os.path.join(".claraity", "config.yaml")
 
 
 def _safe_stderr(message: str) -> None:

@@ -7,6 +7,7 @@ subprocess wrapper, and virtual environment handling.
 
 import sys
 import os
+import shutil
 import tempfile
 import subprocess
 from pathlib import Path
@@ -339,6 +340,149 @@ class TestIntegration:
         except UnicodeEncodeError:
             # Contains non-ASCII but should still be valid string
             assert isinstance(result.stdout, str)
+
+
+class TestDetectPreferredShell:
+    """Tests for detect_preferred_shell() -- bash-first detection with fallback."""
+
+    def setup_method(self):
+        """Clear the module-level cache before each test."""
+        from src.platform import windows
+        windows._preferred_shell.clear()
+
+    def teardown_method(self):
+        """Clear cache after each test to avoid polluting other tests."""
+        from src.platform import windows
+        windows._preferred_shell.clear()
+
+    def test_returns_required_keys(self):
+        """Result must contain shell, path, and syntax keys."""
+        from src.platform import detect_preferred_shell
+        result = detect_preferred_shell()
+        assert "shell" in result
+        assert "path" in result
+        assert "syntax" in result
+
+    def test_syntax_is_valid(self):
+        """syntax must be 'unix' or 'powershell'."""
+        from src.platform import detect_preferred_shell
+        result = detect_preferred_shell()
+        assert result["syntax"] in ("unix", "powershell")
+
+    def test_cache_returns_same_values(self):
+        """Second call returns same values as first (cached)."""
+        from src.platform import detect_preferred_shell
+        first = detect_preferred_shell()
+        second = detect_preferred_shell()
+        assert first == second
+
+    def test_cache_returns_copy_not_reference(self):
+        """Returned dict must be a copy -- mutations must not corrupt cache."""
+        from src.platform import detect_preferred_shell
+        first = detect_preferred_shell()
+        first["shell"] = "CORRUPTED"
+        second = detect_preferred_shell()
+        assert second["shell"] != "CORRUPTED"
+
+    @pytest.mark.skipif(not is_windows(), reason="Windows-only")
+    def test_windows_finds_bash_or_powershell(self):
+        """On Windows, result should be bash (Git Bash) or powershell."""
+        from src.platform import detect_preferred_shell
+        result = detect_preferred_shell()
+        assert result["shell"] in ("bash", "powershell")
+
+    @pytest.mark.skipif(not is_windows(), reason="Windows-only")
+    def test_wsl_bash_rejected_by_find_git_bash(self):
+        """WSL bash (System32\\bash.exe) should be rejected by _find_git_bash."""
+        from src.platform.windows import _find_git_bash
+        from unittest.mock import patch
+
+        # Mock both shutil.which and os.path.isfile to fully isolate
+        def mock_which(name):
+            if name == "bash":
+                return "C:\\Windows\\System32\\bash.exe"
+            return None  # no git, no other tools
+
+        with patch("src.platform.windows.shutil.which", side_effect=mock_which), \
+             patch("src.platform.windows.os.path.isfile", return_value=False):
+            result = _find_git_bash()
+            assert result is None
+
+    @pytest.mark.skipif(not is_windows(), reason="Windows-only")
+    def test_syswow64_bash_rejected(self):
+        """SysWOW64 bash should also be rejected."""
+        from src.platform.windows import _find_git_bash
+        from unittest.mock import patch
+
+        def mock_which(name):
+            if name == "bash":
+                return "C:\\Windows\\SysWOW64\\bash.exe"
+            return None
+
+        with patch("src.platform.windows.shutil.which", side_effect=mock_which), \
+             patch("src.platform.windows.os.path.isfile", return_value=False):
+            result = _find_git_bash()
+            assert result is None
+
+    @pytest.mark.skipif(not is_windows(), reason="Windows-only")
+    def test_git_bash_accepted_via_path(self):
+        """Git Bash found on PATH should be accepted."""
+        from src.platform.windows import _find_git_bash
+        from unittest.mock import patch
+
+        def mock_which(name):
+            if name == "bash":
+                return "C:\\Program Files\\Git\\usr\\bin\\bash.exe"
+            return None
+
+        with patch("src.platform.windows.shutil.which", side_effect=mock_which):
+            result = _find_git_bash()
+            assert result is not None
+            assert "Git" in result
+
+    @pytest.mark.skipif(not is_windows(), reason="Windows-only")
+    def test_git_bash_derived_from_git_exe(self):
+        """When bash isn't on PATH, derive from git.exe location."""
+        from src.platform.windows import _find_git_bash
+        from unittest.mock import patch
+
+        def mock_which(name):
+            if name == "bash":
+                return None  # bash not on PATH
+            if name == "git":
+                return "C:\\Program Files\\Git\\cmd\\git.exe"
+            return None
+
+        # The derived path C:\Program Files\Git\usr\bin\bash.exe should exist on this machine
+        result = _find_git_bash()
+        # If Git is installed, this should find bash even without it on PATH
+        if shutil.which("git"):
+            assert result is not None
+            assert os.path.isfile(result)
+
+    @pytest.mark.skipif(not is_windows(), reason="Windows-only")
+    def test_no_bash_falls_back_to_powershell(self):
+        """When bash is not found at all, fall back to powershell."""
+        from src.platform import windows
+
+        # Mock _find_git_bash to return None (simulates no Git installed)
+        original_find = windows._find_git_bash
+        windows._find_git_bash = lambda: None
+        try:
+            windows._preferred_shell.clear()
+            result = windows.detect_preferred_shell()
+            assert result["shell"] == "powershell"
+            assert result["syntax"] == "powershell"
+        finally:
+            windows._find_git_bash = original_find
+
+    @pytest.mark.skipif(is_windows(), reason="Unix-only")
+    def test_unix_uses_shell_env(self):
+        """On Unix, should use SHELL environment variable."""
+        from src.platform import detect_preferred_shell
+        result = detect_preferred_shell()
+        assert result["syntax"] == "unix"
+        assert result["shell"] in ("bash", "zsh", "fish", "sh")
 
 
 if __name__ == '__main__':

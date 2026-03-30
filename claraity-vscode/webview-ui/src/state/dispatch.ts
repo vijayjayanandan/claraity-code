@@ -82,6 +82,11 @@ export function dispatchServerMessage(
       dispatch({ type: "TODOS_UPDATED", todos: msg.todos });
       break;
 
+    // ── Background tasks ──
+    case "background_tasks_updated":
+      dispatch({ type: "BACKGROUND_TASKS_UPDATED", tasks: msg.tasks });
+      break;
+
     // ── Auto-approve ──
     case "auto_approve_changed":
       dispatch({ type: "AUTO_APPROVE_CHANGED", categories: msg.categories });
@@ -166,6 +171,9 @@ export function dispatchServerMessage(
             active: true,
             messages: [],
             timeline: [],
+            totalTokens: 0,
+            contextTokens: 0,
+            contextWindow: msg.data.context_window ?? 0,
           },
         });
       } else if (msg.event === "unregistered") {
@@ -302,10 +310,15 @@ export function dispatchServerMessage(
       // Refresh architecture data to pick up new approval status
       break;
 
+    case "context_compacting":
+      dispatch({ type: "CONTEXT_COMPACTING" });
+      break;
+    case "context_compacted":
+      dispatch({ type: "CONTEXT_COMPACTED" });
+      break;
+
     // These are handled at a higher level or don't affect state
     case "session_info":
-    case "context_compacting":
-    case "context_compacted":
     case "file_read":
     case "execute_in_terminal":
       break;

@@ -81,7 +81,6 @@ class MemoryManager:
         self.file_memory_content = ""
 
         # Knowledge base cache
-        self._knowledge_core_content: str | None = None
 
         # Project root for knowledge base loading (avoids Path.cwd() dependency)
         self._project_root: Path = (
@@ -1061,12 +1060,12 @@ class MemoryManager:
 
     def load_file_memories(self, starting_dir: Path | None = None) -> str:
         """
-        Load hierarchical file memories from .clarity/memory.md files.
+        Load hierarchical file memories from .claraity/memory.md files.
 
         Loads from:
-        1. Enterprise: /etc/clarity/memory.md (Linux/Mac)
-        2. User: ~/.clarity/memory.md
-        3. Project: .clarity/memory.md (traverses upward from starting_dir)
+        1. Enterprise: /etc/claraity/memory.md (Linux/Mac)
+        2. User: ~/.claraity/memory.md
+        3. Project: .claraity/memory.md (traverses upward from starting_dir)
 
         Args:
             starting_dir: Directory to start search (default: cwd)
@@ -1095,87 +1094,6 @@ class MemoryManager:
         self.file_loader = MemoryFileLoader()
         return self.load_file_memories(starting_dir)
 
-    # Knowledge files loaded into agent context, in order.
-    # core.md is capped at 200 lines; decisions/lessons at 100 lines each.
-    # Others have no hard cap (written by knowledge-builder to be concise).
-    _KNOWLEDGE_FILES = [
-        "core.md",
-        "architecture.md",
-        "file-guide.md",
-        "conventions.md",
-        "decisions.md",
-        "lessons.md",
-    ]
-
-    _KNOWLEDGE_WARN_LINES = 200  # Log warning if any file exceeds this
-
-    def _load_knowledge_base(self, force_reload: bool = False) -> str:
-        """Load all knowledge base files into a single combined string.
-
-        Loads core.md, architecture.md, file-guide.md, conventions.md,
-        decisions.md, and lessons.md from .clarity/knowledge/ and combines
-        them with section separators. Logs a warning if any file exceeds
-        _KNOWLEDGE_WARN_LINES but does not truncate.
-
-        Args:
-            force_reload: If True, bypass cache and reload from disk
-
-        Returns:
-            Combined knowledge content or empty string if no files found
-        """
-        if not force_reload and self._knowledge_core_content is not None:
-            return self._knowledge_core_content
-
-        knowledge_dir = self._project_root / ".clarity" / "knowledge"
-
-        if not knowledge_dir.exists():
-            self._knowledge_core_content = ""
-            return ""
-
-        sections = []
-        for filename in self._KNOWLEDGE_FILES:
-            filepath = knowledge_dir / filename
-            if not filepath.exists():
-                continue
-
-            try:
-                content = filepath.read_text(encoding="utf-8")
-                if not content.strip():
-                    continue
-
-                line_count = content.count("\n") + 1
-                if line_count > self._KNOWLEDGE_WARN_LINES:
-                    logger.warning(
-                        "Knowledge file exceeds recommended size",
-                        file=filename,
-                        lines=line_count,
-                        recommended=self._KNOWLEDGE_WARN_LINES,
-                    )
-
-                sections.append(content)
-
-            except Exception as e:
-                logger.warning("Failed to load knowledge file", file=filename, error=str(e))
-                continue
-
-        combined = "\n\n---\n\n".join(sections) if sections else ""
-        self._knowledge_core_content = combined
-        return combined
-
-    def get_knowledge_base(self) -> str:
-        """Get combined knowledge base content (cached after first load)."""
-        return self._load_knowledge_base()
-
-    def reload_knowledge_base(self) -> str:
-        """Reload all knowledge base files (useful after editing).
-
-        Clears the cache and reloads from disk.
-
-        Returns:
-            Updated combined knowledge content
-        """
-        return self._load_knowledge_base(force_reload=True)
-
     def quick_add_memory(self, text: str, location: str = "project") -> Path:
         """
         Quick add memory to file (# syntax from user input).
@@ -1189,7 +1107,7 @@ class MemoryManager:
 
         Example:
             >>> manager.quick_add_memory("Always use 2-space indent", "project")
-            PosixPath('/path/to/project/.clarity/memory.md')
+            PosixPath('/path/to/project/.claraity/memory.md')
 
             >>> # Reload to see the change
             >>> manager.reload_file_memories()
@@ -1204,7 +1122,7 @@ class MemoryManager:
         Initialize a new project memory file with template.
 
         Args:
-            path: Path to create file (default: ./.clarity/memory.md)
+            path: Path to create file (default: ./.claraity/memory.md)
 
         Returns:
             Path to created file
@@ -1214,7 +1132,7 @@ class MemoryManager:
 
         Example:
             >>> manager.init_project_memory()
-            PosixPath('/path/to/project/.clarity/memory.md')
+            PosixPath('/path/to/project/.claraity/memory.md')
 
             >>> # Reload to include the new template
             >>> manager.reload_file_memories()
@@ -1223,9 +1141,9 @@ class MemoryManager:
 
         # Auto-reload to include the new template
         # If custom path provided, reload from its parent's parent directory
-        # (to find the .clarity directory)
+        # (to find the .claraity directory)
         if path:
-            # path is like: /some/dir/.clarity/memory.md
+            # path is like: /some/dir/.claraity/memory.md
             # We want to search from /some/dir
             search_dir = created_path.parent.parent
             self.reload_file_memories(starting_dir=search_dir)

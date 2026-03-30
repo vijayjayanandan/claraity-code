@@ -90,8 +90,8 @@ class SubAgentManager:
     - Result aggregation and error handling
 
     Subagents are loaded from:
-    1. Project directory: .clarity/agents/*.md (highest priority)
-    2. User directory: ~/.clarity/agents/*.md (lower priority)
+    1. Project directory: .claraity/agents/*.md (highest priority)
+    2. User directory: ~/.claraity/agents/*.md (lower priority)
 
     Example:
         >>> manager = SubAgentManager(main_agent, working_directory=Path.cwd())
@@ -146,8 +146,8 @@ class SubAgentManager:
         """Discover all available subagent configurations.
 
         Loads configurations from:
-        1. User directory: ~/.clarity/agents/*.md
-        2. Project directory: .clarity/agents/*.md (overrides user configs)
+        1. User directory: ~/.claraity/agents/*.md
+        2. Project directory: .claraity/agents/*.md (overrides user configs)
 
         Returns:
             dict mapping subagent names to configurations

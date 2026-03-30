@@ -827,9 +827,9 @@ class ClickableAttachmentPlaceholder(Static):
         if system == "Windows":
             os.startfile(temp_path)
         elif system == "Darwin":  # macOS
-            subprocess.run(["open", temp_path])
+            subprocess.run(["open", temp_path], stdin=subprocess.DEVNULL)
         else:  # Linux
-            subprocess.run(["xdg-open", temp_path])
+            subprocess.run(["xdg-open", temp_path], stdin=subprocess.DEVNULL)
 
         # Show notification with actual filename
         actual_filename = os.path.basename(temp_path)
@@ -867,9 +867,9 @@ class ClickableAttachmentPlaceholder(Static):
         if system == "Windows":
             os.startfile(temp_path)
         elif system == "Darwin":  # macOS
-            subprocess.run(["open", temp_path])
+            subprocess.run(["open", temp_path], stdin=subprocess.DEVNULL)
         else:  # Linux
-            subprocess.run(["xdg-open", temp_path])
+            subprocess.run(["xdg-open", temp_path], stdin=subprocess.DEVNULL)
 
         self.app.notify(f"Opening {self.filename}...", timeout=2)
 

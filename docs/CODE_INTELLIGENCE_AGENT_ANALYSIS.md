@@ -131,7 +131,7 @@ memory_context = MemoryManager.get_context_for_llm(include_episodic=True)
 ```python
 # NEW: Multi-tier context loading
 # Step 3a: ClarAIty Architectural Context (10% budget, ~400 tokens)
-clarity_context = get_component_context(task_keywords)
+claraity_context = get_component_context(task_keywords)
 # Returns: Component purpose, dependencies, key files
 
 # Step 3b: RAG Semantic Context (20% budget, ~800 tokens) ← Reduced from 30%
@@ -235,7 +235,7 @@ ALL_TOOLS = [
 
 **How ClarAIty Tools Were Integrated** (Phase 0):
 
-1. **Created tool classes** (`src/tools/clarity_tools.py`):
+1. **Created tool classes** (`src/tools/claraity_tools.py`):
    - `QueryComponentTool` - Query architectural components
    - `GetNextTaskTool` - Get next planned task
    - `UpdateComponentStatusTool` - Update component status
@@ -655,13 +655,13 @@ class ContextBuilder:
         memory_manager: MemoryManager,
         retriever: Optional[HybridRetriever] = None,
         lsp_manager: Optional[LSPClientManager] = None,  # NEW
-        clarity_db: Optional[ClarityDB] = None,          # NEW
+        claraity_db: Optional[ClaraityDB] = None,          # NEW
         max_context_tokens: int = 4096,
     ):
         self.memory = memory_manager
         self.retriever = retriever
         self.lsp_manager = lsp_manager      # NEW
-        self.clarity_db = clarity_db        # NEW
+        self.claraity_db = claraity_db        # NEW
         self.max_context_tokens = max_context_tokens
         self.optimizer = PromptOptimizer()
 
@@ -672,14 +672,14 @@ class ContextBuilder:
         language: str = "python",
         use_rag: bool = True,
         use_lsp: bool = True,              # NEW parameter
-        use_clarity: bool = True,          # NEW parameter
+        use_claraity: bool = True,          # NEW parameter
         available_chunks: Optional[List[CodeChunk]] = None,
         file_references: Optional[List[FileReference]] = None,
     ) -> List[Dict[str, str]]:
         # NEW token budget
         system_prompt_tokens = int(self.max_context_tokens * 0.15)  # 15%
         task_tokens = int(self.max_context_tokens * 0.10)           # 10%
-        clarity_tokens = int(self.max_context_tokens * 0.10)        # 10% NEW
+        claraity_tokens = int(self.max_context_tokens * 0.10)        # 10% NEW
         rag_tokens = int(self.max_context_tokens * 0.20)            # 20% (reduced)
         lsp_tokens = int(self.max_context_tokens * 0.20)            # 20% NEW
         memory_tokens = int(self.max_context_tokens * 0.25)         # 25% (reduced)
@@ -687,9 +687,9 @@ class ContextBuilder:
         # ... existing code ...
 
         # NEW: ClarAIty architectural context
-        clarity_context = ""
-        if use_clarity and self.clarity_db:
-            clarity_context = self._get_clarity_context(user_query, clarity_tokens)
+        claraity_context = ""
+        if use_claraity and self.claraity_db:
+            claraity_context = self._get_claraity_context(user_query, claraity_tokens)
 
         # NEW: LSP symbol context
         lsp_context = ""
@@ -708,10 +708,10 @@ class ContextBuilder:
         if file_references:
             # ... existing file reference code ...
 
-        if clarity_context:  # NEW
+        if claraity_context:  # NEW
             context.append({
                 "role": "system",
-                "content": f"<architectural_context>\n{clarity_context}\n</architectural_context>"
+                "content": f"<architectural_context>\n{claraity_context}\n</architectural_context>"
             })
 
         if rag_context:
@@ -755,7 +755,7 @@ class CodingAgent(AgentInterface):
             memory_manager=self.memory,
             retriever=self.retriever,
             lsp_manager=self.lsp_manager,      # NEW
-            clarity_db=self.clarity_db,        # NEW (get from clarity_hook)
+            claraity_db=self.claraity_db,        # NEW (get from claraity_hook)
             max_context_tokens=context_window,
         )
 
@@ -1123,7 +1123,7 @@ with Status("Initializing Python language server...", console=_console):
 ```python
 # Example: User asks "Add error handling to authentication"
 # Step 1: Query ClarAIty for AUTHENTICATION component
-component = clarity_db.get_component_by_name("AUTHENTICATION")
+component = claraity_db.get_component_by_name("AUTHENTICATION")
 # Returns:
 # - Purpose: "User authentication and authorization"
 # - Key files: ["auth.py", "login.py", "middleware.py"]

@@ -20,7 +20,7 @@
 3. Atomic Transaction ✅
 4. Batch Processing ✅
 
-**Recommendation:** Use **Parallel Instruction** prompt for best balance of clarity, conciseness, and code quality.
+**Recommendation:** Use **Parallel Instruction** prompt for best balance of claraity, conciseness, and code quality.
 
 ---
 

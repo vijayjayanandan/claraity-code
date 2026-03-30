@@ -14,7 +14,7 @@ webview-ui/GAP_ANALYSIS.md
 
 # Development files
 .vscode/**
-.clarity/**
+.claraity/**
 .gitignore
 esbuild.mjs
 

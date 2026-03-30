@@ -388,6 +388,58 @@ button, .toolbar-icon, .session-card, .mention-item, .tool-badge {
   color: var(--app-fg-muted);
 }
 
+/* ── Compaction Summary Card ── */
+
+.compaction-summary-card {
+  border: 1px solid var(--app-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  margin: var(--space-sm) 0;
+  box-shadow: var(--shadow-sm);
+  font-size: var(--font-size-sm);
+}
+
+.compaction-summary-card > summary {
+  padding: var(--space-xs) 10px;
+  background: var(--app-tool-bg);
+  cursor: pointer;
+  user-select: none;
+  color: var(--app-fg-muted);
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  list-style: none;
+}
+
+.compaction-summary-card > summary::-webkit-details-marker {
+  display: none;
+}
+
+.compaction-summary-card > summary::marker {
+  content: "";
+}
+
+.compaction-summary-card > summary::before {
+  content: "\25B6";
+  font-size: 0.65em;
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+.compaction-summary-card[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.compaction-summary-content {
+  max-height: 300px;
+  overflow-y: auto;
+  padding: var(--space-sm) 10px;
+  white-space: pre-wrap;
+  font-size: var(--font-size-sm);
+  color: var(--app-fg-muted);
+  border-top: 1px solid var(--app-border);
+}
+
 /* ── Tool Card ── */
 
 .tool-card {
@@ -890,6 +942,165 @@ button, .toolbar-icon, .session-card, .mention-item, .tool-badge {
   opacity: 0.6;
 }
 
+/* ── Background Task Panel ── */
+
+.bg-task-panel {
+  border-top: 1px solid var(--app-border);
+  font-size: var(--font-size-sm);
+}
+
+.bg-task-header {
+  display: flex;
+  justify-content: space-between;
+  padding: var(--space-xs) var(--space-sm);
+  cursor: pointer;
+  user-select: none;
+}
+
+.bg-task-summary {
+  color: var(--app-fg-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bg-task-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--vscode-progressBar-background);
+  animation: bg-dot-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes bg-dot-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.bg-task-list {
+  padding-bottom: var(--space-xs);
+}
+
+.bg-task-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 2px var(--space-sm);
+  font-size: var(--font-size-sm);
+}
+
+.bg-task-badge {
+  font-family: var(--font-mono);
+  font-size: 0.7em;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.bg-task-badge--running {
+  background: color-mix(in srgb, var(--vscode-progressBar-background) 20%, transparent);
+  color: var(--vscode-progressBar-background);
+  border: 1px solid color-mix(in srgb, var(--vscode-progressBar-background) 40%, transparent);
+}
+
+.bg-task-badge--completed {
+  background: color-mix(in srgb, var(--vscode-testing-iconPassed) 15%, transparent);
+  color: var(--vscode-testing-iconPassed);
+  border: 1px solid color-mix(in srgb, var(--vscode-testing-iconPassed) 35%, transparent);
+}
+
+.bg-task-badge--failed,
+.bg-task-badge--timed_out {
+  background: color-mix(in srgb, var(--app-danger) 15%, transparent);
+  color: var(--app-danger);
+  border: 1px solid color-mix(in srgb, var(--app-danger) 35%, transparent);
+}
+
+.bg-task-badge--cancelled {
+  background: color-mix(in srgb, var(--app-fg-muted) 15%, transparent);
+  color: var(--app-fg-muted);
+  border: 1px solid color-mix(in srgb, var(--app-fg-muted) 30%, transparent);
+}
+
+.bg-task-id {
+  font-family: var(--font-mono);
+  font-size: 1em;
+  color: var(--app-fg-muted);
+  flex-shrink: 0;
+}
+
+.bg-task-desc {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bg-task-elapsed {
+  color: var(--app-fg-muted);
+  font-family: var(--font-mono);
+  font-size: 1em;
+  flex-shrink: 0;
+}
+
+.bg-task-item.expandable {
+  cursor: pointer;
+}
+
+.bg-task-item.expandable:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.bg-task-cancel,
+.bg-task-dismiss {
+  background: none;
+  border: 1px solid var(--app-fg-muted);
+  color: var(--app-fg-muted);
+  font-size: var(--font-size-xs);
+  padding: 0 4px;
+  cursor: pointer;
+  border-radius: 2px;
+  line-height: 1.4;
+  flex-shrink: 0;
+}
+
+.bg-task-cancel:hover {
+  border-color: var(--app-danger);
+  color: var(--app-danger);
+}
+
+.bg-task-dismiss:hover {
+  border-color: var(--app-fg);
+  color: var(--app-fg);
+}
+
+.bg-task-output {
+  padding: 2px var(--space-sm) var(--space-xs);
+  padding-left: calc(var(--space-sm) + 20px + var(--space-sm));
+}
+
+.bg-task-output pre {
+  margin: 0;
+  padding: var(--space-xs);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 200px;
+  overflow-y: auto;
+  background: var(--vscode-textCodeBlock-background);
+  border-radius: 3px;
+}
+
+.bg-task-stderr {
+  color: var(--app-danger);
+  margin-top: 2px !important;
+}
+
 /* ── Auto-Approve Panel ── */
 
 .auto-approve-panel {
@@ -1156,6 +1367,31 @@ button, .toolbar-icon, .session-card, .mention-item, .tool-badge {
 .enrichment-preview {
   border-bottom: 1px solid var(--app-border);
   padding: var(--space-xs) var(--space-sm);
+}
+
+.enrichment-original {
+  margin-bottom: var(--space-xs);
+  padding: 6px 8px;
+  background: var(--vscode-editor-background);
+  border: 1px solid var(--app-border);
+  border-radius: 3px;
+}
+
+.enrichment-original-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--vscode-descriptionForeground);
+  margin-bottom: 3px;
+}
+
+.enrichment-original-text {
+  font-size: 12px;
+  color: var(--vscode-foreground);
+  opacity: 0.75;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .enrichment-preview-header {
@@ -1701,6 +1937,9 @@ button, .toolbar-icon, .session-card, .mention-item, .tool-badge {
 }
 
 .session-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
   padding: var(--space-sm);
   margin: var(--space-xs) 0;
   border: 1px solid var(--app-border);
@@ -1712,6 +1951,11 @@ button, .toolbar-icon, .session-card, .mention-item, .tool-badge {
 .session-card:hover {
   background: var(--vscode-list-hoverBackground);
   box-shadow: var(--shadow-sm);
+}
+
+.session-card-content {
+  flex: 1;
+  min-width: 0;
 }
 
 .session-title {
@@ -1726,6 +1970,61 @@ button, .toolbar-icon, .session-card, .mention-item, .tool-badge {
   font-size: var(--font-size-sm);
   opacity: 0.7;
   margin-top: 2px;
+}
+
+.session-delete-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 4px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--vscode-errorForeground);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, background-color 0.15s ease;
+}
+
+.session-card:hover .session-delete-btn,
+.session-card:focus-within .session-delete-btn {
+  opacity: 0.6;
+}
+
+.session-delete-btn:hover {
+  opacity: 1 !important;
+  background: var(--vscode-inputValidation-errorBackground, color-mix(in srgb, var(--vscode-errorForeground) 15%, transparent));
+}
+
+.session-delete-confirm {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.session-delete-confirm-yes,
+.session-delete-confirm-no {
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--app-border);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  background: transparent;
+}
+
+.session-delete-confirm-yes {
+  color: var(--vscode-errorForeground);
+  border-color: var(--vscode-errorForeground);
+}
+
+.session-delete-confirm-yes:hover {
+  background: var(--vscode-inputValidation-errorBackground, color-mix(in srgb, var(--vscode-errorForeground) 15%, transparent));
+}
+
+.session-delete-confirm-no:hover {
+  background: var(--vscode-list-hoverBackground);
 }
 
 /* ── Settings Panel Forms (shared by ConfigPanel + JiraPanel) ── */

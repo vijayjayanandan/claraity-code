@@ -51,7 +51,10 @@ class CheckBackgroundTaskTool(Tool):
 
         result = self._registry.get_result(task_id)
         if result is None:
-            # Still running
+            # Still running -- return a strong instruction to prevent polling loops.
+            # The agent will receive a [BACKGROUND TASK UPDATE] notification
+            # automatically when the task completes (via drain_completed in the
+            # tool loop, or via the stdio/TUI completion callback).
             import time
 
             elapsed = time.monotonic() - info.start_time
@@ -65,6 +68,13 @@ class CheckBackgroundTaskTool(Tool):
                         "command": info.command,
                         "description": info.description,
                         "elapsed_seconds": round(elapsed, 1),
+                        "instruction": (
+                            "Task is still running. "
+                            "DO NOT call check_background_task again. "
+                            "You will receive an automatic [BACKGROUND TASK UPDATE] "
+                            "notification when this task completes. "
+                            "Continue with other work or end your response."
+                        ),
                     },
                     indent=2,
                 ),

@@ -136,11 +136,11 @@ class ObservationStore:
         Initialize the observation store.
 
         Args:
-            db_path: Path to SQLite database. Defaults to .clarity/observations.db
+            db_path: Path to SQLite database. Defaults to .claraity/observations.db
             token_counter: Function to count tokens in text. Defaults to word-based estimate.
         """
         if db_path is None:
-            db_path = os.path.join(".clarity", "observations.db")
+            db_path = os.path.join(".claraity", "observations.db")
 
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)

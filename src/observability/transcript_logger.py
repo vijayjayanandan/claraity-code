@@ -100,7 +100,7 @@ class TranscriptLogger:
     Thread-safe, handles truncation and redaction automatically.
 
     Usage:
-        logger = TranscriptLogger(session_id="abc123", base_dir=Path(".clarity"))
+        logger = TranscriptLogger(session_id="abc123", base_dir=Path(".claraity"))
 
         # Log events
         logger.log_user_message("Hello, help me fix this bug")

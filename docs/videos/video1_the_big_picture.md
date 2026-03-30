@@ -50,7 +50,7 @@ Finally, we import the main classes - but notice `CodingAgent` uses a lazy impor
 
 "Now `main()` runs. Its first job is figuring out how to talk to the LLM.
 
-Think of configuration like a sandwich with three layers. The bottom slice is your YAML config file - `.clarity/config.yaml` - with defaults like model name, temperature, and API URL. The middle layer is environment variables - these override the YAML. And the top layer is CLI arguments you typed - these override everything.
+Think of configuration like a sandwich with three layers. The bottom slice is your YAML config file - `.claraity/config.yaml` - with defaults like model name, temperature, and API URL. The middle layer is environment variables - these override the YAML. And the top layer is CLI arguments you typed - these override everything.
 
 The function `resolve_llm_config()` at line 254 merges all three layers into one final config. If you passed `--model gpt-4` on the command line, that wins. Otherwise, it falls back to the env var, then the YAML."
 

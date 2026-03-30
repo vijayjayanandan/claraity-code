@@ -48,7 +48,7 @@ class MetricsCollector:
     Thread-safe for concurrent writes.
     """
 
-    def __init__(self, db_path: str = ".clarity/metrics.db"):
+    def __init__(self, db_path: str = ".claraity/metrics.db"):
         """
         Initialize metrics collector.
 

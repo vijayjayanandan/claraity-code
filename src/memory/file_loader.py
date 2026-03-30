@@ -2,9 +2,9 @@
 File-based hierarchical memory loader for ClarAIty agent.
 
 Supports 4-level hierarchy:
-1. Enterprise: /etc/clarity/memory.md (Linux/Mac) or C:/ProgramData/clarity/memory.md (Windows)
-2. User: ~/.clarity/memory.md
-3. Project: ./.clarity/memory.md (traverses upward from cwd)
+1. Enterprise: /etc/claraity/memory.md (Linux/Mac) or C:/ProgramData/claraity/memory.md (Windows)
+2. User: ~/.claraity/memory.md
+3. Project: ./.claraity/memory.md (traverses upward from cwd)
 4. Imports: @path/to/file.md (recursive, max 5 levels)
 
 Features:
@@ -38,7 +38,7 @@ class MemoryFileLoader:
     MEMORY_FILENAME = "memory.md"
 
     # Directory name
-    CONFIG_DIR = ".clarity"
+    CONFIG_DIR = ".claraity"
 
     # Maximum import depth (prevent infinite recursion)
     MAX_IMPORT_DEPTH = 5
@@ -52,9 +52,9 @@ class MemoryFileLoader:
         Load memory files from all hierarchy levels.
 
         Hierarchy (lowest to highest priority):
-        1. Enterprise: /etc/clarity/memory.md (Linux/Mac)
-        2. User: ~/.clarity/memory.md
-        3. Project: Traverse upward from starting_dir looking for .clarity/memory.md
+        1. Enterprise: /etc/claraity/memory.md (Linux/Mac)
+        2. User: ~/.claraity/memory.md
+        3. Project: Traverse upward from starting_dir looking for .claraity/memory.md
 
         Args:
             starting_dir: Directory to start search (default: cwd)
@@ -113,16 +113,16 @@ class MemoryFileLoader:
         system = platform.system()
 
         if system == "Linux" or system == "Darwin":  # macOS
-            return Path("/etc/clarity") / self.MEMORY_FILENAME
+            return Path("/etc/claraity") / self.MEMORY_FILENAME
         elif system == "Windows":
-            return Path("C:/ProgramData/clarity") / self.MEMORY_FILENAME
+            return Path("C:/ProgramData/claraity") / self.MEMORY_FILENAME
         return None
 
     def _load_project_hierarchy(self, starting_dir: Path) -> list[str]:
         """
         Traverse upward from starting_dir to find project memories.
 
-        Looks for .clarity/memory.md in each directory.
+        Looks for .claraity/memory.md in each directory.
         Stops at filesystem root.
         """
         memories = []
@@ -190,7 +190,7 @@ class MemoryFileLoader:
 
         Supports:
         - Relative: @./docs/architecture.md
-        - Home: @~/.clarity/preferences.md (restricted to ~/.clarity/)
+        - Home: @~/.claraity/preferences.md (restricted to ~/.claraity/)
         Note: Absolute path imports are blocked for security.
 
         Args:
@@ -246,7 +246,7 @@ class MemoryFileLoader:
         """
         Resolve import path to absolute path.
 
-        Security: Only allows .md files within the project root or ~/.clarity/.
+        Security: Only allows .md files within the project root or ~/.claraity/.
         Absolute path imports are blocked entirely.
 
         Args:
@@ -278,9 +278,9 @@ class MemoryFileLoader:
         else:
             resolved = (base_dir / import_path).resolve()
 
-        # Security: restrict imports to project root or user .clarity directory
+        # Security: restrict imports to project root or user .claraity directory
         project_root = Path.cwd().resolve()
-        user_clarity = Path.home().resolve() / ".clarity"
+        user_claraity = Path.home().resolve() / ".claraity"
 
         is_safe = False
         try:
@@ -291,7 +291,7 @@ class MemoryFileLoader:
 
         if not is_safe:
             try:
-                resolved.relative_to(user_clarity)
+                resolved.relative_to(user_claraity)
                 is_safe = True
             except ValueError:
                 pass
@@ -315,7 +315,7 @@ class MemoryFileLoader:
 
         Example:
             >>> loader.quick_add("Always use 2-space indent", "project")
-            PosixPath('/path/to/project/.clarity/memory.md')
+            PosixPath('/path/to/project/.claraity/memory.md')
         """
         if location == "project":
             path = Path.cwd() / self.CONFIG_DIR / self.MEMORY_FILENAME
@@ -370,7 +370,7 @@ class MemoryFileLoader:
         Initialize a new memory.md file with template.
 
         Args:
-            path: Path to create file (default: ./.clarity/memory.md)
+            path: Path to create file (default: ./.claraity/memory.md)
 
         Returns:
             Path to created file

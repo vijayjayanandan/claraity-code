@@ -1901,7 +1901,7 @@ User chats... agent streams responses...
     |
     v
 MemoryManager persists each turn to JSONL
-(.clarity/sessions/<session_id>.jsonl)
+(.claraity/sessions/<session_id>.jsonl)
     |
     v
 Extension disconnects (or user closes VS Code)
@@ -1918,7 +1918,7 @@ When the extension connects to the server:
 2. If no active session, creates a new one:
    - Generates UUID via `uuid.uuid4()`
    - Creates `MessageStore` instance
-   - Initializes JSONL file at `.clarity/sessions/<session_id>.jsonl`
+   - Initializes JSONL file at `.claraity/sessions/<session_id>.jsonl`
    - Wires `MemoryManager` to store
 3. Sends `session_info` message to client with session ID, model, and permission mode
 
@@ -1946,7 +1946,7 @@ When the extension sends `session_resume`:
 
 ### 9.4 Session Persistence Format
 
-Unchanged from existing format. The JSONL file at `.clarity/sessions/<session_id>.jsonl` contains one JSON object per line:
+Unchanged from existing format. The JSONL file at `.claraity/sessions/<session_id>.jsonl` contains one JSON object per line:
 
 ```jsonc
 {"role": "user", "meta": {"uuid": "...", "timestamp": "..."}, "content": "Add error handling"}
@@ -2190,7 +2190,7 @@ Manual checklist for each phase:
 7. Click Accept, verify file is created
 8. Verify context bar shows usage
 9. Click Interrupt during streaming, verify it stops
-10. Verify `.clarity/sessions/` contains JSONL file
+10. Verify `.claraity/sessions/` contains JSONL file
 
 ---
 

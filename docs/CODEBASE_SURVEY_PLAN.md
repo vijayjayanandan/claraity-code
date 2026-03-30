@@ -26,7 +26,7 @@ Build a codebase surveyor that scans the project and generates a persistent `cod
 
 ## Output Format
 
-The surveyor generates `.clarity/codebase_context.md`:
+The surveyor generates `.claraity/codebase_context.md`:
 
 ```markdown
 # Codebase Context: ai-coding-agent
@@ -143,7 +143,7 @@ tests/director/survey/
 **Exclusion patterns (hardcoded for MVP):**
 - `.git/`, `__pycache__/`, `.venv/`, `venv/`, `node_modules/`
 - `.eggs/`, `build/`, `dist/`, `.mypy_cache/`, `.pytest_cache/`
-- `.clarity/` (agent workspace — don't index ourselves)
+- `.claraity/` (agent workspace — don't index ourselves)
 - Binary extensions: `.pyc`, `.so`, `.db`, `.sqlite`, `.png`, `.jpg`
 
 **Test criteria:**
@@ -230,7 +230,7 @@ tests/director/survey/
 **What's in it:**
 - `SurveyManager` class
   - `survey(root_path)` -> SurveyResult (orchestrates scan + detect + generate)
-  - `save(root_path, result)` -> writes .clarity/codebase_context.md
+  - `save(root_path, result)` -> writes .claraity/codebase_context.md
   - `load(root_path)` -> reads existing context (returns None if missing)
   - `is_stale(root_path)` -> checks git diff since last survey commit
   - `_get_current_git_commit(root_path)` -> current HEAD short hash
@@ -244,7 +244,7 @@ tests/director/survey/
 
 **Test criteria:**
 - `survey()` produces a SurveyResult with all fields populated
-- `save()` writes markdown to .clarity/codebase_context.md
+- `save()` writes markdown to .claraity/codebase_context.md
 - `load()` returns content when file exists, None when missing
 - `is_stale()` returns True when git commit differs
 - `is_stale()` returns True when no context file exists
@@ -267,7 +267,7 @@ After each slice:
 2. `pytest tests/director/ -v` — no regressions on existing Director tests
 
 After all slices:
-1. Run survey on our own codebase — check `.clarity/codebase_context.md` output
+1. Run survey on our own codebase — check `.claraity/codebase_context.md` output
 2. `pytest tests/ -x --timeout=30` — no regressions anywhere
 
 ## Dependencies

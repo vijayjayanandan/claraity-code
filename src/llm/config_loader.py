@@ -1,7 +1,7 @@
 """
 Unified LLM configuration loader.
 
-Loads LLM settings from `.clarity/config.yaml` and resolves them
+Loads LLM settings from `.claraity/config.yaml` and resolves them
 against environment variables and CLI flags using a layered priority:
 
     Environment variables / CLI flags  (highest priority)
@@ -71,6 +71,20 @@ class AutoApproveConfig:
 
 
 @dataclass
+class PromptEnrichmentConfig:
+    """Configuration for the prompt enrichment feature.
+
+    model: LLM model to use for enrichment. Empty string means inherit
+           the main agent's model.
+    system_prompt: System prompt sent to the enrichment LLM. Empty string
+                   means use the built-in default defined in stdio_server.py.
+    """
+
+    model: str = ""
+    system_prompt: str = ""
+
+
+@dataclass
 class LimitsConfig:
     """Configurable limits for the tool execution loop.
 
@@ -111,6 +125,7 @@ class LLMConfigData:
     subagents: dict[str, SubAgentLLMOverride] = field(default_factory=dict)
     limits: LimitsConfig = field(default_factory=LimitsConfig)
     auto_approve: AutoApproveConfig = field(default_factory=AutoApproveConfig)
+    prompt_enrichment: PromptEnrichmentConfig = field(default_factory=PromptEnrichmentConfig)
 
 
 # =============================================================================
@@ -313,6 +328,15 @@ def load_llm_config(config_path: str = DEFAULT_CONFIG_PATH) -> LLMConfigData:
                 except (TypeError, ValueError):
                     _safe_stderr(f"Invalid value for auto_approve.{key}, ignoring")
 
+    # -- Prompt enrichment (top-level `prompt_enrichment:` section) --
+    pe_data = data.get("prompt_enrichment")
+    if isinstance(pe_data, dict):
+        pe = config.prompt_enrichment
+        if "model" in pe_data and pe_data["model"]:
+            pe.model = str(pe_data["model"])
+        if "system_prompt" in pe_data and pe_data["system_prompt"]:
+            pe.system_prompt = str(pe_data["system_prompt"])
+
     # Populate api_key from credential store (runtime only, never saved to YAML)
     try:
         from src.llm.credential_store import load_api_key
@@ -426,6 +450,17 @@ def save_llm_config(
         "knowledge_update": config.auto_approve.knowledge_update,
         "subagent": config.auto_approve.subagent,
     }
+
+    # Build prompt_enrichment section (top-level, only if non-default)
+    pe = config.prompt_enrichment
+    if pe.model or pe.system_prompt:
+        existing_data["prompt_enrichment"] = {
+            "model": pe.model,
+            "system_prompt": pe.system_prompt,
+        }
+    else:
+        # Remove the section if both fields are empty (clean YAML)
+        existing_data.pop("prompt_enrichment", None)
 
     # Write back
     try:

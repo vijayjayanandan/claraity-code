@@ -2,6 +2,7 @@
 
 import asyncio
 import platform
+import subprocess
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -280,3 +281,93 @@ class TestTimeout:
             if info.status != BackgroundTaskStatus.RUNNING:
                 break
         assert info.status == BackgroundTaskStatus.TIMED_OUT
+
+
+# ---------------------------------------------------------------------------
+# Subprocess safety flags (stdin, CREATE_NO_WINDOW, start_new_session)
+# ---------------------------------------------------------------------------
+
+class TestSubprocessSafetyFlags:
+    """Verify that _run_command passes critical subprocess flags.
+
+    These flags are documented invariants (CLAUDE.md):
+    - stdin=DEVNULL: prevents deadlock when stdin reader thread is active
+    - CREATE_NO_WINDOW: prevents console window flash on Windows
+    - start_new_session: isolates subprocess from parent terminal on Unix
+    """
+
+    @pytest.mark.asyncio
+    async def test_stdin_devnull_passed(self, registry):
+        """Child process must not inherit stdin (prevents stdio mode deadlock)."""
+        with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec, \
+             patch("asyncio.create_subprocess_shell", new_callable=AsyncMock) as mock_shell:
+            # Setup mock process
+            mock_proc = AsyncMock()
+            mock_proc.communicate = AsyncMock(return_value=(b"ok", b""))
+            mock_proc.returncode = 0
+            mock_proc.pid = 12345
+            mock_exec.return_value = mock_proc
+            mock_shell.return_value = mock_proc
+
+            task_id, _ = await registry.launch("echo test")
+            await _wait_until_not_running(registry, task_id, max_seconds=5)
+
+            # Check whichever was called (exec on Windows, shell on Unix)
+            if mock_exec.called:
+                call_kwargs = mock_exec.call_args
+            else:
+                call_kwargs = mock_shell.call_args
+
+            # stdin must be DEVNULL (either asyncio.subprocess.DEVNULL or subprocess.DEVNULL)
+            stdin_val = call_kwargs.kwargs.get("stdin") if call_kwargs.kwargs else None
+            assert stdin_val is not None, "stdin parameter must be explicitly set to DEVNULL"
+
+    @pytest.mark.asyncio
+    @pytest.mark.skipif(platform.system() != "Windows", reason="Windows-only")
+    async def test_create_no_window_on_windows(self, registry):
+        """On Windows, CREATE_NO_WINDOW must be set to avoid console flash."""
+        with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.communicate = AsyncMock(return_value=(b"ok", b""))
+            mock_proc.returncode = 0
+            mock_proc.pid = 12345
+            mock_exec.return_value = mock_proc
+
+            task_id, _ = await registry.launch("echo test")
+            await _wait_until_not_running(registry, task_id, max_seconds=5)
+
+            call_kwargs = mock_exec.call_args.kwargs if mock_exec.call_args else {}
+            flags = call_kwargs.get("creationflags", 0)
+            assert flags & subprocess.CREATE_NO_WINDOW, \
+                "CREATE_NO_WINDOW flag must be set on Windows"
+
+    @pytest.mark.asyncio
+    @pytest.mark.skipif(platform.system() == "Windows", reason="Unix-only")
+    async def test_start_new_session_on_unix(self, registry):
+        """On Unix, start_new_session must be set to isolate from parent terminal."""
+        with patch("asyncio.create_subprocess_shell", new_callable=AsyncMock) as mock_shell:
+            mock_proc = AsyncMock()
+            mock_proc.communicate = AsyncMock(return_value=(b"ok", b""))
+            mock_proc.returncode = 0
+            mock_proc.pid = 12345
+            mock_shell.return_value = mock_proc
+
+            task_id, _ = await registry.launch("echo test")
+            await _wait_until_not_running(registry, task_id, max_seconds=5)
+
+            call_kwargs = mock_shell.call_args.kwargs if mock_shell.call_args else {}
+            assert call_kwargs.get("start_new_session") is True, \
+                "start_new_session must be True on Unix"
+
+    @pytest.mark.asyncio
+    async def test_background_task_completes_with_bash(self, registry):
+        """Background task using bash should complete successfully with correct output."""
+        task_id, error = await registry.launch("echo bash-bg-test", description="bash bg test")
+        assert error is None
+
+        info = await _wait_until_not_running(registry, task_id)
+        assert info.status == BackgroundTaskStatus.COMPLETED
+
+        result = registry.get_result(task_id)
+        assert result is not None
+        assert "bash-bg-test" in result.get("stdout", "")

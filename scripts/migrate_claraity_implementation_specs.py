@@ -21,7 +21,7 @@ from datetime import datetime
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
-DB_PATH = Path(".clarity/ai-coding-agent.db")
+DB_PATH = Path(".claraity/ai-coding-agent.db")
 
 
 def verify_db_exists():

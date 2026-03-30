@@ -80,7 +80,7 @@ class JsonlEntry:
 
 
 def scan_jsonl_files(
-    log_dir: str = ".clarity/logs",
+    log_dir: str = ".claraity/logs",
     session_id: str | None = None,
     level: str | None = None,
     component: str | None = None,

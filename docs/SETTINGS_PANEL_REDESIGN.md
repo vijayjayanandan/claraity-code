@@ -49,7 +49,7 @@ settingsSearch: string;           // Search filter text
 
 ### AD-3: Settings persistence split
 Settings will be stored in TWO locations (matching current pattern):
-- **`.clarity/config.yaml`** -- LLM config, context limits, agent behavior (Python agent reads this)
+- **`.claraity/config.yaml`** -- LLM config, context limits, agent behavior (Python agent reads this)
 - **VS Code `settings.json`** -- Extension-specific settings (connection mode, UI preferences)
 - **VS Code `SecretStorage`** -- API keys (existing pattern, no change)
 
@@ -305,7 +305,7 @@ Max consecutive errors:       [slider 0-10, default: 3]
 
 ### Backend changes needed:
 ```python
-# .clarity/config.yaml additions:
+# .claraity/config.yaml additions:
 approval:
   auto_approve: false
   categories:
@@ -351,7 +351,7 @@ Compaction threshold:          [slider 50%-100%, default: 80%]
 
 ### Backend changes needed:
 ```python
-# .clarity/config.yaml additions:
+# .claraity/config.yaml additions:
 context:
   max_history_messages: 50
   auto_include_diagnostics: true
@@ -377,7 +377,7 @@ claraity-vscode/webview-ui/src/components/settings/ContextTab.tsx  -- New
 --- Custom Instructions ---
 Custom system instructions:    [textarea, 6 rows]
   Added to the system prompt for every conversation.
-  Instructions can also be placed in .clarity/instructions.md
+  Instructions can also be placed in .claraity/instructions.md
 
 --- Prompt Enhancement ---
 Prompt type:                   [dropdown: Enhance Prompt, Explain Code, Fix Issues, Improve Code]
@@ -391,7 +391,7 @@ Test input:                    [textarea for testing]
 
 ### Backend changes needed:
 ```python
-# .clarity/config.yaml additions:
+# .claraity/config.yaml additions:
 prompts:
   custom_instructions: ""
   enhancement_templates:
@@ -439,7 +439,7 @@ Background editing:            [checkbox, default: false]
   File edits happen without opening diff views.
 
 Enable custom tools:           [checkbox, default: false]
-  Load tools from .clarity/tools/ directory.
+  Load tools from .claraity/tools/ directory.
 
 Debug mode:                    [checkbox, default: false]
   Show raw API messages in conversation.
@@ -454,7 +454,7 @@ claraity-vscode/webview-ui/src/components/settings/ExperimentalTab.tsx -- New
 
 ### Backend changes needed:
 ```python
-# .clarity/config.yaml additions:
+# .claraity/config.yaml additions:
 ui:
   collapse_thinking: true
   ctrl_enter_send: false
@@ -761,7 +761,7 @@ Phase 7 (Search)
 | Settings CSS | `claraity-vscode/webview-ui/src/index.css` | 1349-1507 |
 | StatusBar gear icon | `claraity-vscode/webview-ui/src/components/StatusBar.tsx` | 26-28 |
 | Python config handler | `src/server/config_handler.py` | 1-253 |
-| Agent config file | `.clarity/config.yaml` | 1-36 |
+| Agent config file | `.claraity/config.yaml` | 1-36 |
 | Tool gating service | `src/core/tool_gating.py` | 1-289 |
 | Working memory | `src/memory/working_memory.py` | Full file |
 | System prompts | `src/prompts/system_prompts.py` | Full file |

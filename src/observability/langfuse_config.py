@@ -71,14 +71,9 @@ def initialize_langfuse() -> Langfuse | None:
     secret_key = os.getenv("LANGFUSE_SECRET_KEY")
     host = os.getenv("LANGFUSE_HOST", "http://localhost:3000")
 
-    # Use default keys for local development if not set
-    if not public_key:
-        public_key = "pk-lf-local-dev"
-        logger.info("Using default local development public key")
-
-    if not secret_key:
-        secret_key = "sk-lf-local-dev"
-        logger.info("Using default local development secret key")
+    if not public_key or not secret_key:
+        logger.debug("Langfuse keys not configured - tracing disabled")
+        return None
 
     try:
         _langfuse_client = Langfuse(public_key=public_key, secret_key=secret_key, host=host)

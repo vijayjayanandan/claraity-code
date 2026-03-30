@@ -81,34 +81,34 @@ def secure_open_for_write(file_path: Path, mode: str = "w", encoding: str = "utf
     return handle
 
 
-def secure_clarity_workspace(clarity_dir: Path) -> None:
-    """Apply restrictive permissions to the entire .clarity workspace.
+def secure_claraity_workspace(claraity_dir: Path) -> None:
+    """Apply restrictive permissions to the entire .claraity workspace.
 
     Called once at startup to ensure the workspace directory tree
     has proper permissions.
 
     Args:
-        clarity_dir: Path to the .clarity directory.
+        claraity_dir: Path to the .claraity directory.
     """
-    if not clarity_dir.exists():
+    if not claraity_dir.exists():
         return
 
     if not IS_POSIX:
         return
 
-    # Secure the root .clarity directory
-    secure_directory(clarity_dir)
+    # Secure the root .claraity directory
+    secure_directory(claraity_dir)
 
     # Secure sensitive subdirectories
     sensitive_dirs = ["sessions", "logs", "transcripts"]
     for subdir_name in sensitive_dirs:
-        subdir = clarity_dir / subdir_name
+        subdir = claraity_dir / subdir_name
         if subdir.exists():
             secure_directory(subdir)
 
     # Secure config file if it exists
-    config_file = clarity_dir / "config.yaml"
+    config_file = claraity_dir / "config.yaml"
     if config_file.exists():
         secure_file(config_file)
 
-    logger.info("[SECURITY] Applied restrictive permissions to .clarity/ workspace")
+    logger.info("[SECURITY] Applied restrictive permissions to .claraity/ workspace")

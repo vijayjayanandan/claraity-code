@@ -94,20 +94,20 @@ PLAN_MODE_TOOLS = frozenset(
 
 # Agent workspace directory — files under this path are agent-internal
 # (plan files, session logs, metrics) and bypass approval in all modes.
-AGENT_WORKSPACE_DIR = ".clarity"
+AGENT_WORKSPACE_DIR = ".claraity"
 
 
 def is_agent_internal_write(tool_name: str, tool_args: dict[str, Any]) -> bool:
     """
     Check if a tool call is an agent-internal file operation.
 
-    Writes targeting .clarity/ (plan files, sessions, logs) are internal
+    Writes targeting .claraity/ (plan files, sessions, logs) are internal
     to the agent's operation -- like MemoryManager writing session JSONL.
     These bypass approval in all permission modes.
 
     SECURITY: Uses resolved paths to prevent path traversal bypass.
     Only allows writes to safe subdirectories (sessions, plans, logs).
-    Config files (.clarity/config.yaml) always require approval.
+    Config files (.claraity/config.yaml) always require approval.
 
     Args:
         tool_name: Name of the tool being called
@@ -126,14 +126,14 @@ def is_agent_internal_write(tool_name: str, tool_args: dict[str, Any]) -> bool:
     try:
         # Resolve to absolute path to prevent traversal tricks
         resolved = Path(target).resolve()
-        clarity_dir = (Path.cwd() / AGENT_WORKSPACE_DIR).resolve()
+        claraity_dir = (Path.cwd() / AGENT_WORKSPACE_DIR).resolve()
 
-        # Must be under .clarity/ directory
-        if not resolved.is_relative_to(clarity_dir):
+        # Must be under .claraity/ directory
+        if not resolved.is_relative_to(claraity_dir):
             return False
 
         # Only allow writes to safe subdirectories (not config.yaml)
-        relative = resolved.relative_to(clarity_dir)
+        relative = resolved.relative_to(claraity_dir)
         SAFE_SUBDIRS = {"sessions", "plans", "logs", "transcripts"}
         first_part = relative.parts[0] if relative.parts else ""
         return first_part in SAFE_SUBDIRS
@@ -150,7 +150,7 @@ class PlanModeState:
 
         # Enter plan mode
         result = plan_state.enter(session_id)
-        # result = {"plan_path": ".clarity/plans/<session_id>.md"}
+        # result = {"plan_path": ".claraity/plans/<session_id>.md"}
 
         # Check if tool is allowed
         decision = plan_state.gate_tool("write_file", "/some/path.py")
@@ -164,15 +164,15 @@ class PlanModeState:
         plan_state.approve(plan_hash)
     """
 
-    def __init__(self, clarity_dir: Path = Path(".clarity")):
+    def __init__(self, claraity_dir: Path = Path(".claraity")):
         """
         Initialize plan mode state.
 
         Args:
-            clarity_dir: Base directory for clarity data (default: .clarity)
+            claraity_dir: Base directory for claraity data (default: .claraity)
         """
-        self.clarity_dir = clarity_dir
-        self.plans_dir = clarity_dir / "plans"
+        self.claraity_dir = claraity_dir
+        self.plans_dir = claraity_dir / "plans"
 
         # Current state
         self.is_active = False

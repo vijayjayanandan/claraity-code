@@ -65,6 +65,12 @@ def mock_tool_definitions():
         "web_search", "web_fetch",
         # Task tools
         "task_create", "task_update", "task_list", "task_get",
+        # Knowledge read tools
+        "knowledge_brief", "knowledge_query", "knowledge_module",
+        "knowledge_file", "knowledge_search", "knowledge_impact",
+        # Knowledge write tools
+        "knowledge_scan_files", "knowledge_update", "knowledge_set_metadata",
+        "knowledge_auto_layout", "knowledge_export",
         # Other
         "create_checkpoint", "clarify",
         # Excluded tools (should always be filtered out)
@@ -110,7 +116,7 @@ class TestBuiltinSubagentDiscovery:
     def test_builtin_count(self, all_configs):
         """Should have at least 7 subagents total (built-in or project overrides).
 
-        Project .clarity/agents/ files take priority over built-ins (by design),
+        Project .claraity/agents/ files take priority over built-ins (by design),
         so the source may be 'project' for forked built-ins.
         """
         # Count all configs that correspond to expected built-in names

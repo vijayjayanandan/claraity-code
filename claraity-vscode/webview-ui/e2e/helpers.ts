@@ -33,7 +33,7 @@ export async function injectMessage(
   page: Page,
   msg: ExtensionMessage,
 ): Promise<void> {
-  await page.evaluate((m) => window.__clarityInject(m), msg);
+  await page.evaluate((m) => window.__claraityInject(m), msg);
 }
 
 /** Inject a sequence of messages with optional inter-message delays. */
@@ -41,7 +41,7 @@ export async function injectSequence(
   page: Page,
   steps: Array<{ msg: ExtensionMessage; delayMs?: number }>,
 ): Promise<void> {
-  await page.evaluate((s) => window.__clarityInjectSequence(s), steps);
+  await page.evaluate((s) => window.__claraityInjectSequence(s), steps);
 }
 
 /** Inject a ServerMessage wrapped in the ExtensionMessage envelope. */

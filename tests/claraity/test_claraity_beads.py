@@ -1,13 +1,18 @@
 """Tests for ClarAIty Beads task tracker (claraity_beads.py)."""
 
 import json
+import sqlite3
 import tempfile
 import shutil
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 import pytest
 
-from src.claraity.claraity_beads import BeadStore, render_tasks_md
+from src.claraity.claraity_beads import (
+    BeadStore, render_tasks_md,
+    VALID_STATUSES, BLOCKING_DEP_TYPES, ASSOCIATION_DEP_TYPES,
+)
 
 
 @pytest.fixture
@@ -354,3 +359,516 @@ class TestRenderTasksMd:
         md = render_tasks_md(temp_beads)
         assert "2 tasks" in md
         assert "2 open" in md
+
+
+# =============================================================================
+# Phase 1 Schema Expansion Tests
+# =============================================================================
+
+
+class TestExpandedStatuses:
+    """Test the 7 statuses: open, in_progress, blocked, deferred, closed, pinned, hooked."""
+
+    def test_all_valid_statuses_accepted(self, temp_beads):
+        for status in VALID_STATUSES:
+            bid = temp_beads.add_bead(title=f"Task for {status}")
+            temp_beads.update_status(bid, status)
+            bead = temp_beads.get_bead(bid)
+            assert bead["status"] == status
+
+    def test_blocked_status(self, temp_beads):
+        bid = temp_beads.add_bead(title="Manually blocked")
+        temp_beads.update_status(bid, "blocked")
+        bead = temp_beads.get_bead(bid)
+        assert bead["status"] == "blocked"
+
+    def test_deferred_status(self, temp_beads):
+        bid = temp_beads.add_bead(title="Park this")
+        temp_beads.update_status(bid, "deferred")
+        bead = temp_beads.get_bead(bid)
+        assert bead["status"] == "deferred"
+
+    def test_pinned_status(self, temp_beads):
+        bid = temp_beads.add_bead(title="Always visible")
+        temp_beads.update_status(bid, "pinned")
+        bead = temp_beads.get_bead(bid)
+        assert bead["status"] == "pinned"
+
+    def test_hooked_status(self, temp_beads):
+        bid = temp_beads.add_bead(title="Claimed by worker")
+        temp_beads.update_status(bid, "hooked")
+        bead = temp_beads.get_bead(bid)
+        assert bead["status"] == "hooked"
+
+    def test_invalid_status_still_raises(self, temp_beads):
+        bid = temp_beads.add_bead(title="Bad status")
+        with pytest.raises(ValueError, match="Invalid status"):
+            temp_beads.update_status(bid, "completed")
+
+
+class TestNewBeadFields:
+    """Test new columns added to the beads table."""
+
+    def test_issue_type(self, temp_beads):
+        bid = temp_beads.add_bead(title="Login bug", issue_type="bug")
+        bead = temp_beads.get_bead(bid)
+        assert bead["issue_type"] == "bug"
+
+    def test_issue_type_default(self, temp_beads):
+        bid = temp_beads.add_bead(title="Default type")
+        bead = temp_beads.get_bead(bid)
+        assert bead["issue_type"] == "task"
+
+    def test_external_ref(self, temp_beads):
+        bid = temp_beads.add_bead(title="Jira linked", external_ref="jira-CC-42")
+        bead = temp_beads.get_bead(bid)
+        assert bead["external_ref"] == "jira-CC-42"
+
+    def test_due_at(self, temp_beads):
+        bid = temp_beads.add_bead(title="Has deadline", due_at="2026-04-15T00:00:00+00:00")
+        bead = temp_beads.get_bead(bid)
+        assert bead["due_at"] == "2026-04-15T00:00:00+00:00"
+
+    def test_defer_until(self, temp_beads):
+        bid = temp_beads.add_bead(title="Future work", defer_until="2026-05-01T00:00:00+00:00")
+        bead = temp_beads.get_bead(bid)
+        assert bead["defer_until"] == "2026-05-01T00:00:00+00:00"
+
+    def test_estimated_minutes(self, temp_beads):
+        bid = temp_beads.add_bead(title="Quick fix", estimated_minutes=30)
+        bead = temp_beads.get_bead(bid)
+        assert bead["estimated_minutes"] == 30
+
+    def test_metadata_json(self, temp_beads):
+        meta = {"complexity": "high", "files": ["agent.py", "app.py"]}
+        bid = temp_beads.add_bead(title="Rich metadata", metadata=meta)
+        bead = temp_beads.get_bead(bid)
+        assert json.loads(bead["metadata"]) == meta
+
+    def test_design_and_acceptance(self, temp_beads):
+        bid = temp_beads.add_bead(
+            title="Well-specified task",
+            design="Use compare-and-swap pattern",
+            acceptance_criteria="Concurrent claims must not both succeed",
+        )
+        bead = temp_beads.get_bead(bid)
+        assert bead["design"] == "Use compare-and-swap pattern"
+        assert bead["acceptance_criteria"] == "Concurrent claims must not both succeed"
+
+    def test_last_activity_set_on_create(self, temp_beads):
+        bid = temp_beads.add_bead(title="Track activity")
+        bead = temp_beads.get_bead(bid)
+        assert bead["last_activity"] is not None
+
+    def test_close_reason(self, temp_beads):
+        bid = temp_beads.add_bead(title="Close with reason")
+        temp_beads.update_status(bid, "closed", summary="Done", close_reason="wontfix")
+        bead = temp_beads.get_bead(bid)
+        assert bead["close_reason"] == "wontfix"
+        assert bead["summary"] == "Done"
+
+
+class TestAtomicClaim:
+    """Test compare-and-swap claim operation."""
+
+    def test_claim_unassigned(self, temp_beads):
+        bid = temp_beads.add_bead(title="Unclaimed task")
+        ok = temp_beads.claim(bid, "claraity:session-abc")
+        assert ok is True
+        bead = temp_beads.get_bead(bid)
+        assert bead["assignee"] == "claraity:session-abc"
+        assert bead["status"] == "in_progress"
+
+    def test_claim_idempotent(self, temp_beads):
+        bid = temp_beads.add_bead(title="Claim twice")
+        temp_beads.claim(bid, "claraity:session-abc")
+        ok = temp_beads.claim(bid, "claraity:session-abc")
+        assert ok is True  # idempotent, no error
+
+    def test_claim_rejected_if_taken(self, temp_beads):
+        bid = temp_beads.add_bead(title="Contested task")
+        temp_beads.claim(bid, "claraity:session-aaa")
+        ok = temp_beads.claim(bid, "claraity:session-bbb")
+        assert ok is False
+        # Original claimant still owns it
+        bead = temp_beads.get_bead(bid)
+        assert bead["assignee"] == "claraity:session-aaa"
+
+    def test_claim_nonexistent_raises(self, temp_beads):
+        with pytest.raises(ValueError, match="not found"):
+            temp_beads.claim("bd-nope", "agent")
+
+    def test_claim_records_event(self, temp_beads):
+        bid = temp_beads.add_bead(title="Event tracked claim")
+        temp_beads.claim(bid, "claraity:session-xyz")
+        events = temp_beads.get_events(bid)
+        claim_events = [e for e in events if e["event_type"] == "claimed"]
+        assert len(claim_events) == 1
+        assert claim_events[0]["new_value"] == "claraity:session-xyz"
+
+
+class TestReopen:
+    """Test reopening closed and deferred tasks."""
+
+    def test_reopen_closed(self, temp_beads):
+        bid = temp_beads.add_bead(title="Reopen me")
+        temp_beads.update_status(bid, "closed", summary="Done")
+        temp_beads.reopen(bid)
+        bead = temp_beads.get_bead(bid)
+        assert bead["status"] == "open"
+
+    def test_reopen_deferred(self, temp_beads):
+        bid = temp_beads.add_bead(title="Undefer me")
+        temp_beads.defer(bid, until="2026-12-31T00:00:00+00:00")
+        temp_beads.reopen(bid)
+        bead = temp_beads.get_bead(bid)
+        assert bead["status"] == "open"
+        assert bead["defer_until"] is None  # cleared
+
+    def test_reopen_nonexistent_raises(self, temp_beads):
+        with pytest.raises(ValueError, match="not found"):
+            temp_beads.reopen("bd-nope")
+
+    def test_reopen_records_event(self, temp_beads):
+        bid = temp_beads.add_bead(title="Event tracked reopen")
+        temp_beads.update_status(bid, "closed")
+        temp_beads.reopen(bid)
+        events = temp_beads.get_events(bid)
+        reopen_events = [e for e in events if e["event_type"] == "reopened"]
+        assert len(reopen_events) == 1
+        assert reopen_events[0]["old_value"] == "closed"
+        assert reopen_events[0]["new_value"] == "open"
+
+
+class TestDefer:
+    """Test defer operation with optional until date."""
+
+    def test_defer_without_date(self, temp_beads):
+        bid = temp_beads.add_bead(title="Park indefinitely")
+        temp_beads.defer(bid)
+        bead = temp_beads.get_bead(bid)
+        assert bead["status"] == "deferred"
+        assert bead["defer_until"] is None
+
+    def test_defer_with_date(self, temp_beads):
+        bid = temp_beads.add_bead(title="Park until April")
+        temp_beads.defer(bid, until="2026-04-15T00:00:00+00:00")
+        bead = temp_beads.get_bead(bid)
+        assert bead["status"] == "deferred"
+        assert bead["defer_until"] == "2026-04-15T00:00:00+00:00"
+
+    def test_defer_nonexistent_raises(self, temp_beads):
+        with pytest.raises(ValueError, match="not found"):
+            temp_beads.defer("bd-nope")
+
+
+class TestTypedDependencies:
+    """Test blocking and non-blocking dependency types."""
+
+    def test_blocking_dep_types(self, temp_beads):
+        a = temp_beads.add_bead(title="Blocker")
+        b = temp_beads.add_bead(title="Blocked")
+        for dep_type in BLOCKING_DEP_TYPES:
+            temp_beads.add_dependency(a, b, dep_type)
+        deps = temp_beads.get_dependencies(b)
+        assert len(deps["blockers"]) == len(BLOCKING_DEP_TYPES)
+
+    def test_non_blocking_dep_types(self, temp_beads):
+        a = temp_beads.add_bead(title="Source")
+        b = temp_beads.add_bead(title="Related")
+        temp_beads.add_dependency(a, b, "discovered-from")
+        temp_beads.add_dependency(a, b, "related")
+        deps = temp_beads.get_dependencies(b)
+        assert len(deps["blockers"]) == 0
+        assert len(deps["associations"]) == 2
+
+    def test_non_blocking_deps_dont_affect_ready(self, temp_beads):
+        a = temp_beads.add_bead(title="Source")
+        b = temp_beads.add_bead(title="Related task")
+        temp_beads.add_dependency(a, b, "related")
+        ready = temp_beads.get_ready()
+        ready_ids = {r["id"] for r in ready}
+        assert b in ready_ids  # non-blocking, so b is still ready
+
+    def test_conditional_blocks_affects_ready(self, temp_beads):
+        a = temp_beads.add_bead(title="Must fail first")
+        b = temp_beads.add_bead(title="Runs on failure")
+        temp_beads.add_dependency(a, b, "conditional-blocks")
+        ready = temp_beads.get_ready()
+        ready_ids = {r["id"] for r in ready}
+        assert a in ready_ids
+        assert b not in ready_ids
+
+    def test_dependency_created_by(self, temp_beads):
+        a = temp_beads.add_bead(title="A")
+        b = temp_beads.add_bead(title="B")
+        temp_beads.add_dependency(a, b, "blocks", created_by="claraity:session-xyz")
+        with temp_beads._cursor() as cur:
+            cur.execute("SELECT created_by FROM dependencies WHERE from_id=? AND to_id=?", (a, b))
+            row = cur.fetchone()
+            assert row["created_by"] == "claraity:session-xyz"
+
+    def test_dependency_metadata(self, temp_beads):
+        a = temp_beads.add_bead(title="Gate")
+        b = temp_beads.add_bead(title="Waiter")
+        temp_beads.add_dependency(a, b, "waits-for", metadata={"gate": "all-children"})
+        with temp_beads._cursor() as cur:
+            cur.execute("SELECT metadata FROM dependencies WHERE from_id=? AND to_id=?", (a, b))
+            row = cur.fetchone()
+            assert json.loads(row["metadata"])["gate"] == "all-children"
+
+
+class TestReadyQueueExpanded:
+    """Test ready queue with new features: defer_until, pinned, typed deps."""
+
+    def test_deferred_excluded_from_ready(self, temp_beads):
+        a = temp_beads.add_bead(title="Deferred task")
+        temp_beads.update_status(a, "deferred")
+        ready = temp_beads.get_ready()
+        assert a not in {r["id"] for r in ready}
+
+    def test_pinned_excluded_from_ready(self, temp_beads):
+        bid = temp_beads.add_bead(title="Pinned context")
+        temp_beads.update_status(bid, "pinned")
+        ready = temp_beads.get_ready()
+        assert bid not in {r["id"] for r in ready}
+
+    def test_future_defer_until_excluded(self, temp_beads):
+        future = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+        bid = temp_beads.add_bead(title="Future task", defer_until=future)
+        ready = temp_beads.get_ready()
+        assert bid not in {r["id"] for r in ready}
+
+    def test_past_defer_until_included(self, temp_beads):
+        past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+        bid = temp_beads.add_bead(title="Past deferred", defer_until=past)
+        ready = temp_beads.get_ready()
+        assert bid in {r["id"] for r in ready}
+
+
+class TestEvents:
+    """Test event audit trail."""
+
+    def test_status_change_records_event(self, temp_beads):
+        bid = temp_beads.add_bead(title="Track me")
+        temp_beads.update_status(bid, "in_progress")
+        events = temp_beads.get_events(bid)
+        # Should have 'created' + 'status_changed'
+        types = [e["event_type"] for e in events]
+        assert "created" in types
+        assert "status_changed" in types
+
+    def test_event_captures_old_and_new(self, temp_beads):
+        bid = temp_beads.add_bead(title="Transition me")
+        temp_beads.update_status(bid, "in_progress")
+        temp_beads.update_status(bid, "closed")
+        events = temp_beads.get_events(bid)
+        status_events = [e for e in events if e["event_type"] == "status_changed"]
+        assert status_events[0]["old_value"] == "open"
+        assert status_events[0]["new_value"] == "in_progress"
+        assert status_events[1]["old_value"] == "in_progress"
+        assert status_events[1]["new_value"] == "closed"
+
+    def test_get_events_empty(self, temp_beads):
+        # Bead that doesn't exist returns empty
+        events = temp_beads.get_events("bd-nope")
+        assert events == []
+
+    def test_add_event_public_api(self, temp_beads):
+        bid = temp_beads.add_bead(title="Manual event")
+        eid = temp_beads.add_event(bid, "custom_action", comment="Did something")
+        assert eid.startswith("ev-")
+        events = temp_beads.get_events(bid)
+        custom = [e for e in events if e["event_type"] == "custom_action"]
+        assert len(custom) == 1
+        assert custom[0]["comment"] == "Did something"
+
+
+class TestUpdateMetadata:
+    """Test metadata merge operation."""
+
+    def test_merge_metadata(self, temp_beads):
+        bid = temp_beads.add_bead(title="Meta task", metadata={"a": 1})
+        temp_beads.update_metadata(bid, {"b": 2})
+        bead = temp_beads.get_bead(bid)
+        meta = json.loads(bead["metadata"])
+        assert meta == {"a": 1, "b": 2}
+
+    def test_overwrite_metadata_key(self, temp_beads):
+        bid = temp_beads.add_bead(title="Overwrite", metadata={"x": "old"})
+        temp_beads.update_metadata(bid, {"x": "new"})
+        bead = temp_beads.get_bead(bid)
+        assert json.loads(bead["metadata"])["x"] == "new"
+
+    def test_metadata_nonexistent_raises(self, temp_beads):
+        with pytest.raises(ValueError, match="not found"):
+            temp_beads.update_metadata("bd-nope", {"a": 1})
+
+
+class TestJSONLRoundTrip:
+    """Test export/import preserves new columns."""
+
+    def test_round_trip_new_fields(self, temp_beads):
+        bid = temp_beads.add_bead(
+            title="Full featured",
+            issue_type="bug",
+            external_ref="jira-CC-99",
+            due_at="2026-06-01T00:00:00+00:00",
+            estimated_minutes=120,
+            metadata={"severity": "high"},
+            design="Use retry pattern",
+            acceptance_criteria="No data loss",
+        )
+        temp_beads.update_status(bid, "closed", summary="Fixed", close_reason="resolved")
+        temp_beads.add_event(bid, "reviewed", comment="LGTM")
+
+        # Export
+        jsonl_path = str(temp_beads.db_path.with_suffix(".jsonl"))
+        temp_beads.export_jsonl(jsonl_path)
+
+        # Import into new DB
+        new_db = str(temp_beads.db_path.parent / "reimported.db")
+        store2 = BeadStore.import_jsonl(jsonl_path, new_db)
+        try:
+            bead = store2.get_bead(bid)
+            assert bead["issue_type"] == "bug"
+            assert bead["external_ref"] == "jira-CC-99"
+            assert bead["due_at"] == "2026-06-01T00:00:00+00:00"
+            assert bead["estimated_minutes"] == 120
+            assert json.loads(bead["metadata"])["severity"] == "high"
+            assert bead["design"] == "Use retry pattern"
+            assert bead["acceptance_criteria"] == "No data loss"
+            assert bead["close_reason"] == "resolved"
+
+            events = store2.get_events(bid)
+            reviewed = [e for e in events if e["event_type"] == "reviewed"]
+            assert len(reviewed) == 1
+        finally:
+            store2.close()
+
+    def test_import_old_format_backward_compat(self, temp_beads):
+        """Old JSONL files without new columns should import with defaults."""
+        jsonl_path = str(temp_beads.db_path.parent / "old_format.jsonl")
+        # Write a minimal old-format record
+        with open(jsonl_path, "w") as f:
+            rec = {
+                "_t": "bead",
+                "id": "bd-oldstyle",
+                "title": "Old bead",
+                "description": "From old version",
+                "status": "open",
+                "priority": 3,
+                "parent_id": None,
+                "assignee": "agent",
+                "tags": "[]",
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+                "closed_at": None,
+                "summary": None,
+            }
+            f.write(json.dumps(rec) + "\n")
+
+        new_db = str(temp_beads.db_path.parent / "from_old.db")
+        store2 = BeadStore.import_jsonl(jsonl_path, new_db)
+        try:
+            bead = store2.get_bead("bd-oldstyle")
+            assert bead is not None
+            assert bead["title"] == "Old bead"
+            assert bead["issue_type"] == "task"  # default
+            assert bead["pinned"] == 0  # default
+            assert bead["metadata"] == "{}"  # default
+        finally:
+            store2.close()
+
+
+class TestMigration:
+    """Test that existing DBs get migrated with new columns."""
+
+    def test_old_db_gets_new_columns(self):
+        """Simulate an old DB (only original columns) and verify migration adds new ones."""
+        temp_dir = tempfile.mkdtemp()
+        try:
+            db_path = Path(temp_dir) / "old.db"
+            # Create DB with old schema only
+            conn = sqlite3.connect(str(db_path))
+            conn.execute("""
+                CREATE TABLE beads (
+                    id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT,
+                    status TEXT NOT NULL DEFAULT 'open', priority INTEGER NOT NULL DEFAULT 5,
+                    parent_id TEXT, assignee TEXT DEFAULT 'agent', tags TEXT DEFAULT '[]',
+                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                    closed_at TEXT, summary TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE dependencies (
+                    id TEXT PRIMARY KEY, from_id TEXT NOT NULL, to_id TEXT NOT NULL,
+                    dep_type TEXT NOT NULL DEFAULT 'blocks', created_at TEXT NOT NULL,
+                    UNIQUE(from_id, to_id, dep_type)
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE bead_refs (
+                    id TEXT PRIMARY KEY, bead_id TEXT NOT NULL,
+                    component_id TEXT NOT NULL, ref_type TEXT NOT NULL DEFAULT 'modifies'
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE notes (
+                    id TEXT PRIMARY KEY, bead_id TEXT NOT NULL, content TEXT NOT NULL,
+                    author TEXT DEFAULT 'agent', created_at TEXT NOT NULL
+                )
+            """)
+            # Insert an old-style bead
+            conn.execute(
+                "INSERT INTO beads (id, title, status, priority, tags, created_at, updated_at) "
+                "VALUES ('bd-old1', 'Old task', 'open', 3, '[]', '2026-01-01', '2026-01-01')"
+            )
+            conn.commit()
+            conn.close()
+
+            # Open with new BeadStore (should trigger migration)
+            store = BeadStore(str(db_path))
+            try:
+                bead = store.get_bead("bd-old1")
+                assert bead is not None
+                assert bead["title"] == "Old task"
+                # New columns should exist with defaults
+                assert bead["issue_type"] == "task"
+                assert bead["pinned"] == 0
+                assert bead["metadata"] == "{}"
+
+                # Should be able to use new features on old data
+                store.update_metadata("bd-old1", {"migrated": True})
+                bead = store.get_bead("bd-old1")
+                assert json.loads(bead["metadata"])["migrated"] is True
+            finally:
+                store.close()
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+class TestRenderExpanded:
+    """Test markdown renderer with new statuses and fields."""
+
+    def test_renders_deferred_section(self, temp_beads):
+        bid = temp_beads.add_bead(title="Parked task")
+        temp_beads.defer(bid, until="2026-06-01")
+        md = render_tasks_md(temp_beads)
+        assert "## Deferred" in md
+        assert "Parked task" in md
+        assert "2026-06-01" in md
+
+    def test_renders_issue_type_badge(self, temp_beads):
+        temp_beads.add_bead(title="Login crash", issue_type="bug", priority=1)
+        md = render_tasks_md(temp_beads)
+        assert "(bug)" in md
+
+    def test_renders_blocked_and_deferred_stats(self, temp_beads):
+        a = temp_beads.add_bead(title="A")
+        b = temp_beads.add_bead(title="B")
+        temp_beads.update_status(a, "blocked")
+        temp_beads.update_status(b, "deferred")
+        md = render_tasks_md(temp_beads)
+        assert "1 blocked" in md
+        assert "1 deferred" in md

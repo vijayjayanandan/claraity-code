@@ -9,6 +9,7 @@ interface SessionPanelProps {
   onBack: () => void;
   onNewSession: () => void;
   onResumeSession: (sessionId: string) => void;
+  onDeleteSession: (sessionId: string) => void;
 }
 
 function timeAgo(dateStr: string): string {
@@ -22,8 +23,9 @@ function timeAgo(dateStr: string): string {
   return `${days}d ago`;
 }
 
-export function SessionPanel({ sessions, onBack, onNewSession, onResumeSession }: SessionPanelProps) {
+export function SessionPanel({ sessions, onBack, onNewSession, onResumeSession, onDeleteSession }: SessionPanelProps) {
   const [search, setSearch] = useState("");
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const filtered = sessions.filter((s) =>
     s.first_message.toLowerCase().includes(search.toLowerCase()),
@@ -59,13 +61,55 @@ export function SessionPanel({ sessions, onBack, onNewSession, onResumeSession }
             <div
               key={session.session_id}
               className="session-card"
-              onClick={() => onResumeSession(session.session_id)}
+              onClick={() => {
+                if (confirmDeleteId === session.session_id) return;
+                onResumeSession(session.session_id);
+              }}
             >
-              <div className="session-title">{session.first_message}</div>
-              <div className="session-meta">
-                {timeAgo(session.updated_at)} - {session.message_count} msgs
-                {session.git_branch ? ` - ${session.git_branch}` : ""}
+              <div className="session-card-content">
+                <div className="session-title">{session.first_message}</div>
+                <div className="session-meta">
+                  {timeAgo(session.updated_at)} - {session.message_count} msgs
+                  {session.git_branch ? ` - ${session.git_branch}` : ""}
+                </div>
               </div>
+              {confirmDeleteId === session.session_id ? (
+                <div className="session-delete-confirm" onClick={(e) => e.stopPropagation()}>
+                  <span style={{ fontSize: 11, color: "var(--vscode-descriptionForeground)" }}>Delete?</span>
+                  <button
+                    className="session-delete-confirm-yes"
+                    title="Confirm delete"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteSession(session.session_id);
+                      setConfirmDeleteId(null);
+                    }}
+                  >
+                    Yes
+                  </button>
+                  <button
+                    className="session-delete-confirm-no"
+                    title="Cancel"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setConfirmDeleteId(null);
+                    }}
+                  >
+                    No
+                  </button>
+                </div>
+              ) : (
+                <button
+                  className="session-delete-btn"
+                  title="Delete session"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setConfirmDeleteId(session.session_id);
+                  }}
+                >
+                  <i className="codicon codicon-trash" />
+                </button>
+              )}
             </div>
           ))
         )}

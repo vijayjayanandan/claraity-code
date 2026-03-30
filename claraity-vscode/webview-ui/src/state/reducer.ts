@@ -150,6 +150,9 @@ export function appReducer(state: AppState, action: Action): AppState {
             markdownBuffer: "",
             currentThinking: null,
             currentCodeBlock: null,
+            isCompacting: false,
+            backgroundTasks: [],
+            _dismissedBgTasks: new Set<string>(),
           }
         : state;
 
@@ -191,6 +194,7 @@ export function appReducer(state: AppState, action: Action): AppState {
       const endState = {
         ...flushed,
         isStreaming: false,
+        isCompacting: false,  // safety reset: clears stuck state if context_compacted was missed
         lastTurnStats: action.tokens != null
           ? { tokens: action.tokens, durationMs: action.durationMs ?? 0 }
           : null,
@@ -326,6 +330,16 @@ export function appReducer(state: AppState, action: Action): AppState {
         }
         return state;
       }
+      // Compaction summary: add as a special timeline entry, not a regular message
+      if (!action.subagentId && action.data.is_compact_summary) {
+        return {
+          ...state,
+          timeline: [
+            ...state.timeline,
+            { type: "compaction_summary" as const, id: action.data.uuid, content: action.data.content },
+          ],
+        };
+      }
       if (action.data.role === "system" || action.data.role === "user" || action.data.role === "assistant") return state;
       const existing = state.messages.find((m) => m.id === action.data.uuid);
       if (existing) return state;
@@ -398,14 +412,25 @@ export function appReducer(state: AppState, action: Action): AppState {
         : state.toolCardOwners;
 
       let subagents = state.subagents;
-      if (subagentId && isNew && subagents[subagentId]) {
+      if (subagentId && subagents[subagentId]) {
         const sa = subagents[subagentId];
+        const tokenUpdate: Partial<typeof sa> = {};
+        // Update token stats from metadata (sent with every RUNNING tool_state)
+        if (action.data.cumulative_tokens != null) {
+          tokenUpdate.totalTokens = action.data.cumulative_tokens;
+        }
+        if (action.data.context_tokens != null) {
+          tokenUpdate.contextTokens = action.data.context_tokens;
+        }
         subagents = {
           ...subagents,
           [subagentId]: {
             ...sa,
-            toolCount: sa.toolCount + 1,
-            timeline: [...sa.timeline, { type: "tool" as const, callId }],
+            ...tokenUpdate,
+            ...(isNew ? {
+              toolCount: sa.toolCount + 1,
+              timeline: [...sa.timeline, { type: "tool" as const, callId }],
+            } : {}),
           },
         };
       }
@@ -502,8 +527,14 @@ export function appReducer(state: AppState, action: Action): AppState {
         contextLimit: action.limit,
         ...(action.iteration != null ? { lastIterations: action.iteration } : {}),
       };
+    case "CONTEXT_COMPACTING":
+      return { ...state, isCompacting: true };
+    case "CONTEXT_COMPACTED":
+      return { ...state, isCompacting: false };
 
     // ── Panels ──
+    case "SET_CHAT_DRAFT":
+      return { ...state, chatDraft: action.draft };
     case "SET_ACTIVE_PANEL":
       return { ...state, activePanel: action.panel };
     case "SET_SESSIONS":
@@ -578,6 +609,20 @@ export function appReducer(state: AppState, action: Action): AppState {
       return { ...state, autoApprove: { read: !!action.categories.read, edit: !!action.categories.edit, execute: !!action.categories.execute, browser: !!action.categories.browser, knowledge_update: !!action.categories.knowledge_update, subagent: !!action.categories.subagent } };
     case "TODOS_UPDATED":
       return { ...state, todos: action.todos };
+    case "BACKGROUND_TASKS_UPDATED": {
+      // Preserve client-side dismissals: don't re-add tasks the user dismissed
+      const dismissed = state._dismissedBgTasks;
+      const filtered = dismissed.size > 0
+        ? action.tasks.filter((t) => !dismissed.has(t.task_id))
+        : action.tasks;
+      return { ...state, backgroundTasks: filtered };
+    }
+    case "DISMISS_BACKGROUND_TASK":
+      return {
+        ...state,
+        backgroundTasks: state.backgroundTasks.filter((t) => t.task_id !== action.taskId),
+        _dismissedBgTasks: new Set([...state._dismissedBgTasks, action.taskId]),
+      };
     case "ADD_ATTACHMENT":
       return { ...state, attachments: [...state.attachments, action.attachment] };
     case "REMOVE_ATTACHMENT":
@@ -646,7 +691,11 @@ export function appReducer(state: AppState, action: Action): AppState {
       return { ...state, promptEnrichmentEnabled: action.enabled, enrichedPromptPreview: null, enrichedPromptOriginal: null, enrichmentLoading: false };
     case "SET_ENRICHMENT_LOADING":
       return { ...state, enrichmentLoading: action.loading };
-    case "SET_ENRICHED_PREVIEW":
+    case "ENRICHMENT_DELTA":
+      // First delta clears the loading spinner and starts accumulating live text
+      return { ...state, enrichmentLoading: false, enrichedPromptPreview: (state.enrichedPromptPreview ?? "") + action.delta };
+    case "ENRICHMENT_COMPLETE":
+      // Final message — replace accumulated preview with the canonical full text
       return { ...state, enrichedPromptPreview: action.enriched, enrichedPromptOriginal: action.original, enrichmentLoading: false };
     case "CLEAR_ENRICHED_PREVIEW":
       return { ...state, enrichedPromptPreview: null, enrichedPromptOriginal: null, enrichmentLoading: false };

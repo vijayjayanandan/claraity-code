@@ -302,7 +302,7 @@ from src.subagents import SubAgent, SubAgentConfig
 
 # SubAgent accepts AgentInterface (not CodingAgent)
 def create_code_reviewer(agent: AgentInterface) -> SubAgent:
-    config = SubAgentConfig.from_file(Path(".clarity/agents/code-reviewer.md"))
+    config = SubAgentConfig.from_file(Path(".claraity/agents/code-reviewer.md"))
     return SubAgent(config, agent)
 
 # Works with real agent

@@ -67,7 +67,7 @@ class TestPlanModeState:
     @pytest.fixture
     def plan_state(self, temp_dir):
         """Create a PlanModeState instance with temp directory."""
-        return PlanModeState(clarity_dir=temp_dir / ".clarity")
+        return PlanModeState(claraity_dir=temp_dir / ".claraity")
 
     def test_initial_state(self, plan_state):
         """Test initial state is inactive."""
@@ -230,13 +230,13 @@ class TestPlanModeGating:
     @pytest.fixture
     def plan_state(self, temp_dir):
         """Create a PlanModeState in active plan mode."""
-        state = PlanModeState(clarity_dir=temp_dir / ".clarity")
+        state = PlanModeState(claraity_dir=temp_dir / ".claraity")
         state.enter("test-session")
         return state
 
     def test_all_tools_allowed_when_not_active(self, temp_dir):
         """Test all tools allowed when not in plan mode."""
-        state = PlanModeState(clarity_dir=temp_dir / ".clarity")
+        state = PlanModeState(claraity_dir=temp_dir / ".claraity")
 
         assert state.gate_tool("write_file", "/some/path.py") == PlanGateDecision.ALLOW
         assert state.gate_tool("run_command") == PlanGateDecision.ALLOW

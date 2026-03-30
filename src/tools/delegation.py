@@ -194,10 +194,10 @@ Use this tool proactively when appropriate!"""
         session_id = str(uuid.uuid4())[:8]
         # transcript_path must also be absolute — after os.chdir in the subprocess
         # switches to the target project, a relative path would resolve there instead
-        # of in the agent's own .clarity directory.
+        # of in the agent's own .claraity directory.
         transcript_path = str(
             Path(working_directory)
-            / ".clarity"
+            / ".claraity"
             / "sessions"
             / "subagents"
             / f"{config.name}-{session_id}.jsonl"
@@ -330,6 +330,7 @@ Use this tool proactively when appropriate!"""
                 if event_type == IPCEventType.REGISTERED:
                     subagent_id = event.get("subagent_id", session_id)
                     model_name = event.get("model_name", "")
+                    context_window = event.get("context_window", 0)
                     # Register with TUI registry for SubAgentCard
                     if self._registry and parent_tool_call_id:
                         self._registry.register(
@@ -340,6 +341,7 @@ Use this tool proactively when appropriate!"""
                             instance=process,  # asyncio.Process for cancel
                             model_name=model_name,
                             subagent_name=subagent,  # Pass subagent type (knowledge-builder, planner, etc.)
+                            context_window=context_window,
                         )
 
                 elif event_type == IPCEventType.NOTIFICATION:

@@ -551,7 +551,7 @@ This separation allows:
 
 ## Review Questions for Other LLMs
 
-1. **Error message clarity:** Is the error message for large outputs clear and actionable?
+1. **Error message claraity:** Is the error message for large outputs clear and actionable?
 
 2. **Threshold selection:** Is 85% the right compaction threshold? Should it be configurable?
 

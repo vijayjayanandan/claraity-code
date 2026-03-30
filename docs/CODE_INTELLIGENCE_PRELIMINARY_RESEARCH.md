@@ -114,7 +114,7 @@ User → Host (Claude Code) → Client (MCP protocol) → Server (Code Intellige
 
 1. **Resources**: Contextual data (read-only)
    - URI-based access to data
-   - Examples: `file://documents/{name}`, `clarity://components/{id}`, `git://repo/{commit}`
+   - Examples: `file://documents/{name}`, `claraity://components/{id}`, `git://repo/{commit}`
    - Use case: Provide context without executing code
 
 2. **Tools**: Executable functions (write operations)
@@ -183,10 +183,10 @@ async def get_symbol_definition(file_path: str, line: int, column: int) -> dict:
     }
 
 # Define resource (read-only data)
-@mcp.resource("clarity://components/{component_id}")
+@mcp.resource("claraity://components/{component_id}")
 def get_component_details(component_id: str) -> str:
     """Get architectural component details from ClarAIty DB."""
-    return clarity_db.get_component_details_full(component_id)
+    return claraity_db.get_component_details_full(component_id)
 
 # Define prompt template
 @mcp.prompt()
@@ -233,7 +233,7 @@ async def app_lifespan(server: FastMCP):
 
     try:
         # Provide context to tools
-        yield {"lsp": lsp_manager, "db": clarity_db}
+        yield {"lsp": lsp_manager, "db": claraity_db}
     finally:
         # Shutdown: Cleanup resources
         await lsp_manager.shutdown_all()

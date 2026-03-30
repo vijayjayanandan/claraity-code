@@ -1,6 +1,6 @@
 """Built-in system prompts for subagents.
 
-These prompts mirror the .clarity/agents/*.md markdown config format.
+These prompts mirror the .claraity/agents/*.md markdown config format.
 They are loaded as highest-priority built-in prompts by SubAgentConfigLoader.
 """
 
@@ -70,6 +70,25 @@ After making changes, verify them:
 - If a tool fails, check the error message before retrying.
 - If the same approach fails 3 times, try a different approach.
 - If blocked after retries, state the blocker clearly and stop.
+
+## Knowledge DB (Check First)
+
+This project has a knowledge database that contains pre-scanned architecture \
+information: modules, components, files, dependencies, design decisions, and \
+invariants. **Query it before reading files** to understand context.
+
+Use `knowledge_query` with these parameters (all optional, combine them):
+
+- `show="brief"` -- compact architecture overview (use at task start)
+- `search="keyword"` -- full-text search with ranking (supports AND/OR/NOT, prefix*, "phrases")
+- `file_path="src/core/agent.py"` -- file's role, module, and applicable decisions
+- `module_id="mod-core"` -- detailed module info (components, files, dependencies)
+- `impact="comp-message-store"` -- blast radius analysis before modifying
+- `node_id="comp-x, comp-y"` -- detail for specific nodes (comma-separated)
+- `search="token", node_type="decision"` -- search filtered by type
+
+If the knowledge DB is empty or returns no results, fall back to reading \
+files directly. The DB may not exist for all projects.
 """
 
 # =============================================================================
@@ -94,7 +113,7 @@ You are an expert code reviewer with 15+ years of experience across multiple pro
 1. **Code Correctness:** Logic errors, edge cases, type safety
 2. **Security:** Vulnerabilities, injection attacks, authentication/authorization issues
 3. **Performance:** Algorithmic complexity, resource usage, bottlenecks
-4. **Maintainability:** Code clarity, naming, documentation, modularity
+4. **Maintainability:** Code claraity, naming, documentation, modularity
 5. **Best Practices:** Design patterns, SOLID principles, language idioms
 6. **Testing:** Test coverage, test quality, missing test cases
 
@@ -491,7 +510,7 @@ You are an expert technical writer specializing in software documentation. Your 
 
 ## Documentation Principles
 
-### 1. Clarity
+### 1. Claraity
 - Use simple, direct language
 - Avoid jargon unless necessary (then define it)
 - Provide concrete examples
@@ -861,13 +880,8 @@ KNOWLEDGE_BUILDER_TOOLS = [
     "glob",
     "get_file_outline",
     "analyze_code",
-    # Read existing knowledge (compare)
+    # Read/search existing knowledge (unified query tool)
     "knowledge_query",
-    "knowledge_brief",
-    "knowledge_module",
-    "knowledge_file",
-    "knowledge_search",
-    "knowledge_impact",
     # Write knowledge (batch create/update/delete)
     "knowledge_scan_files",
     "knowledge_update",
@@ -1123,6 +1137,21 @@ When delegated with a list of changed files:
 # TOOL ALLOWLISTS
 # =============================================================================
 
+# Knowledge DB read-only tools -- available to ALL subagents
+# knowledge_query is the unified tool (handles brief, module, file, search, impact)
+KNOWLEDGE_READ_TOOLS = [
+    "knowledge_query",
+]
+
+# Knowledge DB write tools -- restricted to knowledge-builder only
+KNOWLEDGE_WRITE_TOOLS = [
+    "knowledge_scan_files",
+    "knowledge_update",
+    "knowledge_set_metadata",
+    "knowledge_auto_layout",
+    "knowledge_export",
+]
+
 # Read-only exploration tools -- no write, execute, or git tools
 EXPLORE_TOOLS = [
     "read_file",
@@ -1133,6 +1162,7 @@ EXPLORE_TOOLS = [
     "glob",
     "get_file_outline",
     "get_symbol_context",
+    *KNOWLEDGE_READ_TOOLS,
 ]
 
 # Planner tools -- read-only exploration + web research

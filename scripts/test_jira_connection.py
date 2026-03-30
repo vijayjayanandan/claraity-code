@@ -8,7 +8,7 @@ Usage:
 
 Prerequisites:
     - uv / uvx installed (Python package manager)
-    - A Jira profile configured in .clarity/integrations/jira/<profile>.json
+    - A Jira profile configured in .claraity/integrations/jira/<profile>.json
 
 What happens:
     1. Loads the named profile config
@@ -52,7 +52,7 @@ async def test_connection(profile: str):
     conn = JiraConnection(profile=profile)
     if not conn.is_configured():
         print(f"[FAIL] Profile '{profile}' not configured.")
-        print(f"       Edit .clarity/integrations/jira/{profile}.json")
+        print(f"       Edit .claraity/integrations/jira/{profile}.json")
         sys.exit(1)
 
     config = conn.get_mcp_config()
@@ -206,7 +206,7 @@ async def main():
             print(f"Usage: python scripts/test_jira_connection.py <profile>")
         else:
             print("No Jira profiles configured.")
-            print("Create one at .clarity/integrations/jira/<profile>.json")
+            print("Create one at .claraity/integrations/jira/<profile>.json")
         sys.exit(1)
 
     profile = sys.argv[1]

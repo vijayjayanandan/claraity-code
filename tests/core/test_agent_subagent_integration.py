@@ -10,7 +10,7 @@ from src.subagents import SubAgentManager, SubAgentResult
 @pytest.fixture
 def temp_agent_dir(tmp_path):
     """Create temporary directory with subagent configs."""
-    agents_dir = tmp_path / ".clarity" / "agents"
+    agents_dir = tmp_path / ".claraity" / "agents"
     agents_dir.mkdir(parents=True)
 
     # Create a simple test subagent config
@@ -90,7 +90,7 @@ class TestGetAvailableSubagents:
 
     def test_get_available_subagents_empty(self, tmp_path):
         """Test with no subagents configured."""
-        # Create agent with no .clarity/agents directory
+        # Create agent with no .claraity/agents directory
         agent = CodingAgent(
             model_name="test-model",
             backend="ollama",

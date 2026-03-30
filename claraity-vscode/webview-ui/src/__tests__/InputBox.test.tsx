@@ -25,6 +25,8 @@ import type { FileAttachment, ImageAttachment } from "../types";
 // Helpers
 // ---------------------------------------------------------------------------
 
+import React, { useState } from "react";
+
 /** Default props that satisfy InputBoxProps with no-op callbacks. */
 function defaultProps(overrides: Partial<Parameters<typeof InputBox>[0]> = {}) {
   return {
@@ -44,11 +46,36 @@ function defaultProps(overrides: Partial<Parameters<typeof InputBox>[0]> = {}) {
     enrichmentEnabled: false,
     enrichmentLoading: false,
     enrichedPreview: null,
+    enrichedOriginal: null,
     onToggleEnrichment: vi.fn(),
     onRequestEnrichment: vi.fn(),
     onClearEnrichment: vi.fn(),
+    draft: "",
+    onDraftChange: vi.fn(),
     ...overrides,
   };
+}
+
+/**
+ * Renders InputBox with real draft state so that fireEvent.change updates
+ * are reflected in textarea.value (controlled component).
+ */
+function renderControlled(overrides: Partial<Parameters<typeof InputBox>[0]> = {}) {
+  const props = defaultProps(overrides);
+  function Wrapper() {
+    const [draft, setDraft] = useState(props.draft ?? "");
+    return (
+      <InputBox
+        {...props}
+        draft={draft}
+        onDraftChange={(v) => {
+          setDraft(v);
+          (props.onDraftChange as ReturnType<typeof vi.fn>)(v);
+        }}
+      />
+    );
+  }
+  return render(<Wrapper />);
 }
 
 // ============================================================================
@@ -85,7 +112,7 @@ describe("InputBox -- Rendering", () => {
 describe("InputBox -- Send and Interrupt", () => {
   test("clicking Send calls onSend with trimmed text", async () => {
     const onSend = vi.fn();
-    render(<InputBox {...defaultProps({ onSend })} />);
+    renderControlled({ onSend });
 
     const textarea = screen.getByRole("textbox");
     fireEvent.change(textarea, { target: { value: "  Hello agent  " } });
@@ -94,7 +121,7 @@ describe("InputBox -- Send and Interrupt", () => {
     fireEvent.click(sendBtn);
 
     expect(onSend).toHaveBeenCalledOnce();
-    expect(onSend).toHaveBeenCalledWith("Hello agent");
+    expect(onSend).toHaveBeenCalledWith("Hello agent", undefined, undefined);
   });
 
   test("clicking Stop calls onInterrupt instead of onSend", () => {
@@ -137,7 +164,7 @@ describe("InputBox -- Send and Interrupt", () => {
 
   test("text is cleared after a successful send", () => {
     const onSend = vi.fn();
-    render(<InputBox {...defaultProps({ onSend })} />);
+    renderControlled({ onSend });
 
     const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: "Hello" } });
@@ -157,14 +184,14 @@ describe("InputBox -- Send and Interrupt", () => {
 describe("InputBox -- Keyboard shortcuts", () => {
   test("Enter key sends message", () => {
     const onSend = vi.fn();
-    render(<InputBox {...defaultProps({ onSend })} />);
+    renderControlled({ onSend });
 
     const textarea = screen.getByRole("textbox");
     fireEvent.change(textarea, { target: { value: "via enter" } });
     fireEvent.keyDown(textarea, { key: "Enter", shiftKey: false });
 
     expect(onSend).toHaveBeenCalledOnce();
-    expect(onSend).toHaveBeenCalledWith("via enter");
+    expect(onSend).toHaveBeenCalledWith("via enter", undefined, undefined);
   });
 
   test("Shift+Enter does NOT send message", () => {
@@ -269,9 +296,7 @@ describe("InputBox -- Mention dropdown", () => {
   });
 
   test("clicking a mention item inserts it into the text", () => {
-    render(
-      <InputBox {...defaultProps({ mentionResults: mentionFiles })} />,
-    );
+    renderControlled({ mentionResults: mentionFiles });
 
     const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: "check @src" } });
@@ -349,9 +374,7 @@ describe("InputBox -- Mention dropdown", () => {
   });
 
   test("Enter key selects the highlighted mention item", () => {
-    render(
-      <InputBox {...defaultProps({ mentionResults: mentionFiles })} />,
-    );
+    renderControlled({ mentionResults: mentionFiles });
 
     const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: "see @app" } });
@@ -364,9 +387,7 @@ describe("InputBox -- Mention dropdown", () => {
   });
 
   test("Tab key selects the highlighted mention item", () => {
-    render(
-      <InputBox {...defaultProps({ mentionResults: mentionFiles })} />,
-    );
+    renderControlled({ mentionResults: mentionFiles });
 
     const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: "see @app" } });
@@ -565,6 +586,7 @@ describe("InputBox -- Image paste", () => {
     const clipboardData = {
       items: [
         {
+          kind: "file",
           type: "image/png",
           getAsFile: () => fakeFile,
         },
@@ -649,5 +671,160 @@ describe("InputBox -- Image paste", () => {
     fireEvent.paste(textarea, { clipboardData });
 
     expect(onAddImage).not.toHaveBeenCalled();
+  });
+});
+
+// ============================================================================
+// Prompt Enrichment
+// ============================================================================
+
+describe("InputBox -- Prompt Enrichment", () => {
+  test("when enrichment is enabled, clicking Send calls onRequestEnrichment instead of onSend", () => {
+    const onSend = vi.fn();
+    const onRequestEnrichment = vi.fn();
+    renderControlled({ onSend, onRequestEnrichment, enrichmentEnabled: true });
+
+    const textarea = screen.getByRole("textbox");
+    fireEvent.change(textarea, { target: { value: "fix the bug" } });
+
+    const sendBtn = screen.getByRole("button", { name: "Send" });
+    fireEvent.click(sendBtn);
+
+    expect(onRequestEnrichment).toHaveBeenCalledOnce();
+    expect(onRequestEnrichment).toHaveBeenCalledWith("fix the bug");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  test("when enrichmentLoading is true, clicking Send does not call onSend or onRequestEnrichment", () => {
+    const onSend = vi.fn();
+    const onRequestEnrichment = vi.fn();
+    renderControlled({
+      onSend,
+      onRequestEnrichment,
+      enrichmentEnabled: true,
+      enrichmentLoading: true,
+    });
+
+    const textarea = screen.getByRole("textbox");
+    fireEvent.change(textarea, { target: { value: "fix the bug" } });
+
+    const sendBtn = screen.getByRole("button", { name: "Send" });
+    fireEvent.click(sendBtn);
+
+    expect(onRequestEnrichment).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  test("when enrichedPreview is set, clicking Send calls onSend with enriched text", () => {
+    const onSend = vi.fn();
+    const onClearEnrichment = vi.fn();
+    renderControlled({
+      onSend,
+      onClearEnrichment,
+      enrichmentEnabled: true,
+      enrichedPreview: "Fix the null pointer bug in auth.py line 42.",
+    });
+
+    // Use title to disambiguate from the enrichment preview's "Send" button
+    const sendBtn = screen.getByTitle("Send");
+    fireEvent.click(sendBtn);
+
+    expect(onSend).toHaveBeenCalledOnce();
+    expect(onSend).toHaveBeenCalledWith(
+      "Fix the null pointer bug in auth.py line 42.",
+      undefined,
+      undefined,
+    );
+    expect(onClearEnrichment).toHaveBeenCalledOnce();
+  });
+
+  test("enrichment loading spinner renders when enrichmentLoading is true", () => {
+    render(<InputBox {...defaultProps({ enrichmentEnabled: true, enrichmentLoading: true })} />);
+
+    const spinner = document.querySelector(".enrichment-loading");
+    expect(spinner).toBeInTheDocument();
+    expect(spinner).toHaveTextContent("Enriching prompt...");
+  });
+
+  test("enrichment loading spinner is not rendered when enrichmentLoading is false", () => {
+    render(<InputBox {...defaultProps({ enrichmentEnabled: true, enrichmentLoading: false })} />);
+
+    const spinner = document.querySelector(".enrichment-loading");
+    expect(spinner).toBeNull();
+  });
+
+  test("enrichment preview area renders when enrichedPreview is set", () => {
+    render(
+      <InputBox
+        {...defaultProps({
+          enrichedPreview: "Enriched version of the prompt.",
+          enrichmentLoading: false,
+        })}
+      />,
+    );
+
+    const preview = document.querySelector(".enrichment-preview");
+    expect(preview).toBeInTheDocument();
+
+    const textarea = document.querySelector(".enrichment-preview-textarea") as HTMLTextAreaElement;
+    expect(textarea).toBeInTheDocument();
+    expect(textarea.value).toBe("Enriched version of the prompt.");
+  });
+
+  test("enrichment preview area is not shown when enrichedPreview is null", () => {
+    render(<InputBox {...defaultProps({ enrichedPreview: null, enrichmentLoading: false })} />);
+
+    const preview = document.querySelector(".enrichment-preview");
+    expect(preview).toBeNull();
+  });
+
+  test("enrichment preview area is not shown while loading (spinner shown instead)", () => {
+    render(
+      <InputBox
+        {...defaultProps({
+          enrichedPreview: "some text",
+          enrichmentLoading: true,
+        })}
+      />,
+    );
+
+    // Loading spinner visible, preview hidden
+    const spinner = document.querySelector(".enrichment-loading");
+    expect(spinner).toBeInTheDocument();
+
+    const preview = document.querySelector(".enrichment-preview");
+    expect(preview).toBeNull();
+  });
+
+  test("Cancel button in enrichment preview calls onClearEnrichment", () => {
+    const onClearEnrichment = vi.fn();
+    render(
+      <InputBox
+        {...defaultProps({
+          enrichedPreview: "Enriched text here.",
+          enrichmentLoading: false,
+          onClearEnrichment,
+        })}
+      />,
+    );
+
+    const cancelBtn = screen.getByRole("button", { name: "Cancel" });
+    fireEvent.click(cancelBtn);
+
+    expect(onClearEnrichment).toHaveBeenCalledOnce();
+  });
+
+  test("enrichment toggle button shows active style when enrichmentEnabled is true", () => {
+    render(<InputBox {...defaultProps({ enrichmentEnabled: true })} />);
+
+    const toggleBtn = screen.getByTitle("Prompt Enrichment ON");
+    expect(toggleBtn).toHaveClass("enrichment-active");
+  });
+
+  test("enrichment toggle button shows inactive style when enrichmentEnabled is false", () => {
+    render(<InputBox {...defaultProps({ enrichmentEnabled: false })} />);
+
+    const toggleBtn = screen.getByTitle("Prompt Enrichment OFF");
+    expect(toggleBtn).not.toHaveClass("enrichment-active");
   });
 });

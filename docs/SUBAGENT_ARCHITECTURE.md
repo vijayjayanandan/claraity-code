@@ -42,7 +42,7 @@ SubAgents are specialized LLM instances that operate with **independent context 
                     |                                 |
                     v                                 v
             Load Config                        Create SubAgent
-            (.clarity/agents/                   (if not cached)
+            (.claraity/agents/                   (if not cached)
              code-reviewer.md)
                     |                                 |
                     +----------------+----------------+
@@ -166,7 +166,7 @@ class SubAgentResult:
 ```python
 class SubAgentManager:
     def discover_subagents(self) -> Dict[str, SubAgentConfig]:
-        """Discover configs from ~/.clarity/agents and .clarity/agents."""
+        """Discover configs from ~/.claraity/agents and .claraity/agents."""
 
     def delegate(self, subagent_name: str, task_description: str, ...) -> SubAgentResult:
         """Delegate task to specific subagent."""
@@ -223,8 +223,8 @@ You are an expert code reviewer...
 
 **Hierarchical Loading:**
 
-1. User directory: `~/.clarity/agents/*.md` (lower priority)
-2. Project directory: `.clarity/agents/*.md` (higher priority, can override)
+1. User directory: `~/.claraity/agents/*.md` (lower priority)
+2. Project directory: `.claraity/agents/*.md` (higher priority, can override)
 
 ### 2.4 Tool Execution Flow
 
@@ -263,7 +263,7 @@ The main CodingAgent:
 
 **Step 1: Create configuration file**
 
-Create `.clarity/agents/your-agent.md`:
+Create `.claraity/agents/your-agent.md`:
 
 ```markdown
 ---
@@ -634,7 +634,7 @@ class ConfigWatcher:
         self.observer = Observer()
         self.observer.schedule(
             ConfigReloadHandler(manager),
-            path=".clarity/agents",
+            path=".claraity/agents",
             recursive=False
         )
 
@@ -852,7 +852,7 @@ SUBAGENT_TOOL_CALLS = Histogram(
 | Tool parser | `src/tools/tool_parser.py` |
 | Agent integration | `src/core/agent.py` |
 | Agent interface | `src/core/agent_interface.py` |
-| Subagent configs | `.clarity/agents/*.md` |
+| Subagent configs | `.claraity/agents/*.md` |
 
 ---
 

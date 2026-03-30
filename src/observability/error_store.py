@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 MAX_TRACEBACK_LENGTH = 32768
 
 # Default database path
-DEFAULT_DB_PATH = ".clarity/metrics.db"
+DEFAULT_DB_PATH = ".claraity/metrics.db"
 
 # Default retention period for old error cleanup
 DEFAULT_RETENTION_DAYS = 30

@@ -23,7 +23,7 @@ class TestEnterPlanModeTool:
     @pytest.fixture
     def plan_state(self, temp_dir):
         """Create a PlanModeState instance."""
-        return PlanModeState(clarity_dir=temp_dir / ".clarity")
+        return PlanModeState(claraity_dir=temp_dir / ".claraity")
 
     @pytest.fixture
     def enter_tool(self, plan_state):
@@ -114,7 +114,7 @@ class TestExitPlanModeTool:
     @pytest.fixture
     def plan_state(self, temp_dir):
         """Create a PlanModeState instance in active mode."""
-        state = PlanModeState(clarity_dir=temp_dir / ".clarity")
+        state = PlanModeState(claraity_dir=temp_dir / ".claraity")
         state.enter("test-session-123")
         return state
 
@@ -175,7 +175,7 @@ class TestExitPlanModeTool:
 
     def test_execute_fails_when_not_active(self, temp_dir):
         """Test execution fails when not in plan mode."""
-        state = PlanModeState(clarity_dir=temp_dir / ".clarity")
+        state = PlanModeState(claraity_dir=temp_dir / ".claraity")
         tool = RequestPlanApprovalTool(plan_mode_state=state)
 
         result = tool.execute()
@@ -203,7 +203,7 @@ class TestPlanModeToolIntegration:
 
     def test_enter_then_exit_workflow(self, temp_dir):
         """Test complete enter -> exit workflow."""
-        plan_state = PlanModeState(clarity_dir=temp_dir / ".clarity")
+        plan_state = PlanModeState(claraity_dir=temp_dir / ".claraity")
         enter_tool = EnterPlanModeTool(plan_mode_state=plan_state, session_id="test")
         exit_tool = RequestPlanApprovalTool(plan_mode_state=plan_state)
 
@@ -225,7 +225,7 @@ class TestPlanModeToolIntegration:
 
     def test_modify_plan_then_exit(self, temp_dir):
         """Test modifying plan before exit changes hash."""
-        plan_state = PlanModeState(clarity_dir=temp_dir / ".clarity")
+        plan_state = PlanModeState(claraity_dir=temp_dir / ".claraity")
         enter_tool = EnterPlanModeTool(plan_mode_state=plan_state, session_id="test")
         exit_tool = RequestPlanApprovalTool(plan_mode_state=plan_state)
 

@@ -25,7 +25,7 @@
 | `src/security/file_permissions.py` | POSIX file permission utilities |
 
 ### Files Modified (23 total)
-`agent.py`, `app.py`, `ws_protocol.py`, `config_handler.py`, `plan_mode.py`, `session_manager.py`, `transcript_logger.py`, `code_search.py`, `git_operations.py`, `lsp_tools.py`, `file_operations.py`, `delegation.py`, `ipc.py`, `writer.py`, `memory_store.py`, `logging_config.py`, `system_prompts.py`, `context_builder.py`, `embedder.py`, `failure_handler.py`, `cli.py`, `.gitignore`, `.clarity/config.yaml`
+`agent.py`, `app.py`, `ws_protocol.py`, `config_handler.py`, `plan_mode.py`, `session_manager.py`, `transcript_logger.py`, `code_search.py`, `git_operations.py`, `lsp_tools.py`, `file_operations.py`, `delegation.py`, `ipc.py`, `writer.py`, `memory_store.py`, `logging_config.py`, `system_prompts.py`, `context_builder.py`, `embedder.py`, `failure_handler.py`, `cli.py`, `.gitignore`, `.claraity/config.yaml`
 
 ---
 
@@ -61,7 +61,7 @@ These three issues combine into a realistic attack chain: a malicious file in a 
 | **S9** | API key exfiltration via attacker-controlled base_url | **HIGH** | MITIGATED | Auth blocks unauthenticated access (S1 fix) |
 | **S10** | SearchCodeTool and AnalyzeCodeTool lack path validation | **HIGH** | FIXED | Added `validate_path_security()` in `code_search.py` |
 | **S11** | LSP tool explicitly allows files outside workspace | **HIGH** | FIXED | Changed to `allow_files_outside_workspace=False` in `lsp_tools.py` |
-| **S12** | .clarity/ write bypass allows silent config poisoning | **HIGH** | FIXED | Resolved path + safe subdirs allowlist in `plan_mode.py` |
+| **S12** | .claraity/ write bypass allows silent config poisoning | **HIGH** | FIXED | Resolved path + safe subdirs allowlist in `plan_mode.py` |
 | **S13** | Indirect prompt injection via unsanitized tool results | **HIGH** | FIXED | Tool result framing in `agent.py` + system prompt in `system_prompts.py` |
 | **S14** | Context window poisoning persists across session resume | **HIGH** | MITIGATED | Tool result framing reduces injection efficacy |
 | **S15** | Old SessionManager path traversal (shutil.rmtree risk) | **HIGH** | FIXED | UUID format validation + path containment in `session_manager.py` |
@@ -147,7 +147,7 @@ running              (S1: no auth)         checking)
 ### Chain 4: Supply Chain Persistence via Config Poisoning (S12 + S4)
 ```
 Prompt injection    LLM writes to           Agent config         Next session
-in read file    ->  .clarity/config.yaml -> modified silently -> loads poisoned
+in read file    ->  .claraity/config.yaml -> modified silently -> loads poisoned
                     (S12: approval bypass)  (S4: no integrity)   config
 ```
 **Impact:** Persistent agent compromise across sessions
@@ -183,9 +183,9 @@ to WebSocket      ->  with attacker's     ->  to attacker's server
 - **Fix:** Implement a command blocklist for dangerous patterns (rm -rf, curl|bash, wget+chmod, credential access). Add a "safety floor" that AUTO mode cannot bypass.
 
 #### S4: API Key in Plaintext in Git-Tracked Config
-- **Files:** `.clarity/config.yaml:36`, `src/llm/credential_store.py:55-81`
+- **Files:** `.claraity/config.yaml:36`, `src/llm/credential_store.py:55-81`
 - **Description:** API key `sk-test-123` is in config.yaml which is tracked by git. When keyring is unavailable, real keys are written here.
-- **Fix:** Add `.clarity/config.yaml` and `.clarity/sessions/` to `.gitignore` immediately. Strip api_key from config YAML, always route through credential_store.
+- **Fix:** Add `.claraity/config.yaml` and `.claraity/sessions/` to `.gitignore` immediately. Strip api_key from config YAML, always route through credential_store.
 
 #### S5: API Keys Leaked Into Session JSONL Files
 - **Files:** `src/session/persistence/writer.py:312`
@@ -226,10 +226,10 @@ to WebSocket      ->  with attacker's     ->  to attacker's server
 - **Description:** `_read_implementation()` calls `validate_path_security(file_path, allow_files_outside_workspace=True)`.
 - **Fix:** Restrict to known-safe paths (e.g., Python site-packages) or remove the override.
 
-#### S12: .clarity/ Write Bypass Allows Silent Config Poisoning
+#### S12: .claraity/ Write Bypass Allows Silent Config Poisoning
 - **Files:** `src/core/plan_mode.py:101-128`
-- **Description:** `is_agent_internal_write()` uses string matching on unnormalized paths. Path traversal tricks can bypass approval. Also, ANY write to .clarity/ bypasses approval - including config.yaml modification.
-- **Fix:** Use `Path(target).resolve().is_relative_to(clarity_dir)` instead of string matching. Narrow bypass to specific safe files only.
+- **Description:** `is_agent_internal_write()` uses string matching on unnormalized paths. Path traversal tricks can bypass approval. Also, ANY write to .claraity/ bypasses approval - including config.yaml modification.
+- **Fix:** Use `Path(target).resolve().is_relative_to(claraity_dir)` instead of string matching. Narrow bypass to specific safe files only.
 
 #### S13: Indirect Prompt Injection via Unsanitized Tool Results
 - **Files:** `src/core/agent.py:2034-2078`
@@ -249,12 +249,12 @@ to WebSocket      ->  with attacker's     ->  to attacker's server
 #### S16: File Loader Imports Arbitrary Files
 - **Files:** `src/memory/file_loader.py:244-269`
 - **Description:** `_resolve_import_path()` supports absolute paths and `../` traversal with no restrictions.
-- **Fix:** Restrict imports to paths under project root and `~/.clarity/`. Block absolute path imports.
+- **Fix:** Restrict imports to paths under project root and `~/.claraity/`. Block absolute path imports.
 
 #### S17: No File Permissions on Sensitive Files
 - **Files:** `writer.py`, `credential_store.py`, `logging_config.py`, `transcript_logger.py`
 - **Description:** All sensitive files created with default permissions (644/666). On shared systems, other users can read API keys, sessions, and logs.
-- **Fix:** Set 600 (owner-only) on config.yaml, session JSONL, log files. Set 700 on .clarity/ directory.
+- **Fix:** Set 600 (owner-only) on config.yaml, session JSONL, log files. Set 700 on .claraity/ directory.
 
 #### P1: Blocking time.sleep() in Async Context
 - **Files:** `src/llm/failure_handler.py:282,287`
@@ -312,7 +312,7 @@ The audit also identified numerous well-implemented security patterns:
 | # | Fix | Effort | Impact |
 |---|-----|--------|--------|
 | S1 | Add WebSocket authentication (shared secret) | Medium | Mitigates S1, S2, S7, S8, S9, S24 |
-| S4 | Add .clarity/ to .gitignore, remove test API key | Trivial | Prevents credential leakage |
+| S4 | Add .claraity/ to .gitignore, remove test API key | Trivial | Prevents credential leakage |
 | S6 | Replace pickle.load with json in RAG embedder | Small | Prevents arbitrary code execution |
 | S3 | Add command blocklist with safety floor for AUTO | Medium | Prevents most shell injection |
 
@@ -324,7 +324,7 @@ The audit also identified numerous well-implemented security patterns:
 | S12 | Fix is_agent_internal_write to use resolved paths | Small | Prevents approval bypass |
 | S13 | Add tool result framing + system prompt instruction | Medium | First line of prompt injection defense |
 | S15 | Add UUID validation to old SessionManager | Small | Prevents path traversal |
-| S17 | Set restrictive file permissions on .clarity/ contents | Small | Protects on shared systems |
+| S17 | Set restrictive file permissions on .claraity/ contents | Small | Protects on shared systems |
 | P1 | Fix blocking time.sleep in async context | Medium | Prevents TUI freezes |
 
 ### Phase 3: Hardening (Before Production)

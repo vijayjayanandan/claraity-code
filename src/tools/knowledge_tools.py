@@ -8,7 +8,7 @@ and managing tasks via the Beads task tracker.
 from typing import Any
 
 from src.tools.base import Tool, ToolResult, ToolStatus
-from src.tools.clarityignore import is_blocked
+from src.tools.claraityignore import is_blocked
 
 
 class KnowledgeScanFilesTool(Tool):
@@ -26,10 +26,10 @@ class KnowledgeScanFilesTool(Tool):
         )
 
     def execute(self, root: str = "src", extensions: str = "", **kwargs: Any) -> ToolResult:
-        from src.claraity.claraity_db import ClarityStore, scan_files
+        from src.claraity.claraity_db import ClaraityStore, scan_files
 
         try:
-            with ClarityStore() as store:
+            with ClaraityStore() as store:
                 ext_list = (
                     [e.strip() for e in extensions.split(",") if e.strip()] if extensions else None
                 )
@@ -135,7 +135,7 @@ class KnowledgeUpdateTool(Tool):
 
     def execute(self, operations: str, summary: str = "", **kwargs: Any) -> ToolResult:
         import json
-        from src.claraity.claraity_db import ClarityStore
+        from src.claraity.claraity_db import ClaraityStore
 
         try:
             ops = json.loads(operations)
@@ -147,7 +147,7 @@ class KnowledgeUpdateTool(Tool):
                     error="'operations' must be a JSON array",
                 )
 
-            with ClarityStore() as store:
+            with ClaraityStore() as store:
                 result = store.batch_operations(ops)
 
             lines = [f"[OK] Batch: {result['succeeded']} succeeded, {result['failed']} failed"]
@@ -210,34 +210,60 @@ class KnowledgeUpdateTool(Tool):
 
 
 class KnowledgeQueryTool(Tool):
-    """Flexible query tool for reading the knowledge DB."""
+    """Unified query tool for reading the knowledge DB.
+
+    Consolidates: brief, module detail, file detail, search, impact, node detail.
+    All parameters optional -- combine them for compound queries.
+    """
 
     def __init__(self):
         super().__init__(
             name="knowledge_query",
             description=(
-                "Query the knowledge DB flexibly. Use to inspect nodes, edges, constraints, "
-                "metadata, or search by keyword. All parameters are optional -- combine them "
-                "to express your query. Returns markdown."
+                "Query the codebase knowledge DB. All parameters optional -- combine them. "
+                "Full-text search (search=), node detail (node_id=), module detail (module_id=), "
+                "file context (file_path=), blast radius (impact=), architecture overview (show='brief'). "
+                "Supports FTS5 syntax for search: boolean (AND/OR/NOT), prefix (stream*), "
+                'phrases ("message store"). Use node_id with comma-separated IDs to get '
+                "multiple nodes in one call."
             ),
         )
 
     def execute(
         self,
+        search: str = None,
         node_id: str = None,
         node_type: str = None,
+        module_id: str = None,
+        file_path: str = None,
+        impact: str = None,
         related_to: str = None,
         show: str = "detail",
         keyword: str = None,
         **kwargs: Any,
     ) -> ToolResult:
-        from src.claraity.claraity_db import ClarityStore
+        # Check .claraityignore for file_path queries
+        if file_path:
+            blocked, _pattern = is_blocked(file_path)
+            if blocked:
+                return ToolResult(
+                    tool_name=self.name,
+                    status=ToolStatus.ERROR,
+                    output=None,
+                    error="Access denied: file is blocked by user policy",
+                )
+
+        from src.claraity.claraity_db import ClaraityStore
 
         try:
-            with ClarityStore() as store:
+            with ClaraityStore() as store:
                 md = store.query(
+                    search=search,
                     node_id=node_id,
                     node_type=node_type,
+                    module_id=module_id,
+                    file_path=file_path,
+                    impact=impact,
                     related_to=related_to,
                     show=show,
                     keyword=keyword,
@@ -259,25 +285,52 @@ class KnowledgeQueryTool(Tool):
         return {
             "type": "object",
             "properties": {
+                "search": {
+                    "type": "string",
+                    "description": (
+                        "Full-text search (FTS5). Supports: keywords ('streaming'), "
+                        "boolean ('async AND NOT test'), prefix ('stream*'), "
+                        'phrases (\'"message store"\'). Results ranked by relevance with snippets.'
+                    ),
+                },
                 "node_id": {
                     "type": "string",
-                    "description": "Get detail for a specific node (e.g., 'comp-coding-agent', 'mod-core', 'dec-single-writer')",
+                    "description": (
+                        "Get detail for specific node(s). Supports comma-separated IDs for "
+                        "multi-node queries (e.g., 'comp-memory-manager, comp-message-store')"
+                    ),
                 },
                 "node_type": {
                     "type": "string",
-                    "description": "List all nodes of this type: 'module', 'component', 'system', 'decision', 'invariant', 'flow', 'file'",
+                    "description": (
+                        "Filter by node type: 'module', 'component', 'system', 'decision', "
+                        "'invariant', 'flow', 'file'. With search=, filters search results. "
+                        "Alone, lists all nodes of that type."
+                    ),
+                },
+                "module_id": {
+                    "type": "string",
+                    "description": "Module detail: components, files, dependencies (e.g., 'mod-core', 'mod-memory')",
+                },
+                "file_path": {
+                    "type": "string",
+                    "description": "File context: role, parent module, component, applicable decisions (e.g., 'src/core/agent.py')",
+                },
+                "impact": {
+                    "type": "string",
+                    "description": "Blast radius analysis for a component ID (e.g., 'comp-message-store')",
                 },
                 "related_to": {
                     "type": "string",
-                    "description": "Show all edges involving this node ID. Combine with show='constraints' to see decisions/invariants that apply.",
+                    "description": "Show all edges involving this node ID. Combine with show='constraints' for decisions/invariants.",
                 },
                 "show": {
                     "type": "string",
-                    "description": "What to return: 'detail' (default), 'edges', 'constraints', 'overview' (architecture narrative), 'metadata' (scan info)",
+                    "description": "Output mode: 'detail' (default), 'brief' (architecture overview), 'overview' (narrative), 'metadata', 'constraints', 'edges'",
                 },
                 "keyword": {
                     "type": "string",
-                    "description": "Search nodes by name or description keyword",
+                    "description": "Simple substring search (prefer 'search' for full-text with ranking)",
                 },
             },
             "required": [],
@@ -298,10 +351,10 @@ class KnowledgeSetMetadataTool(Tool):
         )
 
     def execute(self, key: str, value: str, **kwargs: Any) -> ToolResult:
-        from src.claraity.claraity_db import ClarityStore
+        from src.claraity.claraity_db import ClaraityStore
 
         try:
-            with ClarityStore() as store:
+            with ClaraityStore() as store:
                 store.set_metadata(key, value)
             preview = value[:100] + "..." if len(value) > 100 else value
             return ToolResult(
@@ -340,217 +393,6 @@ class KnowledgeSetMetadataTool(Tool):
                 },
             },
             "required": ["key", "value"],
-        }
-
-
-class KnowledgeBriefTool(Tool):
-    """Get compact architecture overview of the codebase."""
-
-    def __init__(self):
-        super().__init__(
-            name="knowledge_brief",
-            description="Get a compact architecture overview of the codebase: modules, dependencies, design decisions, and invariants. Use at session start or when you need to understand the overall structure.",
-        )
-
-    def execute(self, **kwargs: Any) -> ToolResult:
-        from src.claraity.claraity_db import ClarityStore, render_compact_briefing
-
-        try:
-            with ClarityStore() as store:
-                md = render_compact_briefing(store)
-            return ToolResult(
-                tool_name=self.name,
-                status=ToolStatus.SUCCESS,
-                output=md,
-                metadata={"source": "claraity_knowledge.db"},
-            )
-        except Exception as e:
-            return ToolResult(
-                tool_name=self.name,
-                status=ToolStatus.ERROR,
-                output=None,
-                error=f"Failed to query knowledge DB: {e}",
-            )
-
-    def _get_parameters(self) -> dict[str, Any]:
-        return {"type": "object", "properties": {}, "required": []}
-
-
-class KnowledgeModuleTool(Tool):
-    """Get detailed information about a specific module."""
-
-    def __init__(self):
-        super().__init__(
-            name="knowledge_module",
-            description="Get detailed information about a module: its components, files, dependencies, and relationships. Use when you need to understand or modify a specific module.",
-        )
-
-    def execute(self, module_id: str, **kwargs: Any) -> ToolResult:
-        from src.claraity.claraity_db import ClarityStore, render_module_detail
-
-        try:
-            with ClarityStore() as store:
-                md = render_module_detail(store, module_id)
-            return ToolResult(
-                tool_name=self.name,
-                status=ToolStatus.SUCCESS,
-                output=md,
-                metadata={"module_id": module_id},
-            )
-        except Exception as e:
-            return ToolResult(
-                tool_name=self.name,
-                status=ToolStatus.ERROR,
-                output=None,
-                error=f"Failed to query module: {e}",
-            )
-
-    def _get_parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "module_id": {
-                    "type": "string",
-                    "description": "Module ID (e.g., mod-core, mod-memory, mod-ui, mod-tools, mod-llm, mod-server, mod-session, mod-subagents, mod-director, mod-observability, mod-hooks, mod-integrations, mod-code-intel, mod-prompts, mod-platform)",
-                },
-            },
-            "required": ["module_id"],
-        }
-
-
-class KnowledgeFileTool(Tool):
-    """Get information about a specific file's role and context."""
-
-    def __init__(self):
-        super().__init__(
-            name="knowledge_file",
-            description="Get a file's role, parent module, component it defines, dependencies, and applicable design decisions. Use BEFORE reading a file to understand its context.",
-        )
-
-    def execute(self, file_path: str, **kwargs: Any) -> ToolResult:
-        # Check .clarityignore
-        blocked, _pattern = is_blocked(file_path)
-        if blocked:
-            return ToolResult(
-                tool_name=self.name,
-                status=ToolStatus.ERROR,
-                output=None,
-                error="Access denied: file is blocked by user policy",
-            )
-
-        from src.claraity.claraity_db import ClarityStore, render_file_detail
-
-        try:
-            with ClarityStore() as store:
-                md = render_file_detail(store, file_path)
-            return ToolResult(
-                tool_name=self.name,
-                status=ToolStatus.SUCCESS,
-                output=md,
-                metadata={"file_path": file_path},
-            )
-        except Exception as e:
-            return ToolResult(
-                tool_name=self.name,
-                status=ToolStatus.ERROR,
-                output=None,
-                error=f"Failed to query file: {e}",
-            )
-
-    def _get_parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "file_path": {
-                    "type": "string",
-                    "description": "File path relative to project root (e.g., src/core/agent.py)",
-                },
-            },
-            "required": ["file_path"],
-        }
-
-
-class KnowledgeSearchTool(Tool):
-    """Search the codebase knowledge base by keyword."""
-
-    def __init__(self):
-        super().__init__(
-            name="knowledge_search",
-            description="Search the codebase knowledge base by keyword. Returns matching components, modules, files, decisions, and their relationships. Use when you need to find relevant code for a task.",
-        )
-
-    def execute(self, keyword: str, **kwargs: Any) -> ToolResult:
-        from src.claraity.claraity_db import ClarityStore, render_search
-
-        try:
-            with ClarityStore() as store:
-                md = render_search(store, keyword)
-            return ToolResult(
-                tool_name=self.name,
-                status=ToolStatus.SUCCESS,
-                output=md,
-                metadata={"keyword": keyword},
-            )
-        except Exception as e:
-            return ToolResult(
-                tool_name=self.name,
-                status=ToolStatus.ERROR,
-                output=None,
-                error=f"Failed to search knowledge: {e}",
-            )
-
-    def _get_parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "keyword": {
-                    "type": "string",
-                    "description": "Search keyword (e.g., 'memory', 'auth', 'streaming', 'retry')",
-                },
-            },
-            "required": ["keyword"],
-        }
-
-
-class KnowledgeImpactTool(Tool):
-    """Analyze the impact of changing a component."""
-
-    def __init__(self):
-        super().__init__(
-            name="knowledge_impact",
-            description="Show what would be affected by changing a component. Returns direct and indirect dependents (blast radius). Use BEFORE modifying a component to understand risk.",
-        )
-
-    def execute(self, component_id: str, **kwargs: Any) -> ToolResult:
-        from src.claraity.claraity_db import ClarityStore, render_impact
-
-        try:
-            with ClarityStore() as store:
-                md = render_impact(store, component_id)
-            return ToolResult(
-                tool_name=self.name,
-                status=ToolStatus.SUCCESS,
-                output=md,
-                metadata={"component_id": component_id},
-            )
-        except Exception as e:
-            return ToolResult(
-                tool_name=self.name,
-                status=ToolStatus.ERROR,
-                output=None,
-                error=f"Failed to query impact: {e}",
-            )
-
-    def _get_parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "component_id": {
-                    "type": "string",
-                    "description": "Component ID (e.g., comp-coding-agent, comp-memory-mgr, comp-message-store, comp-tui-app)",
-                },
-            },
-            "required": ["component_id"],
         }
 
 
@@ -798,10 +640,10 @@ class KnowledgeAutoLayoutTool(Tool):
         )
 
     def execute(self, **kwargs: Any) -> ToolResult:
-        from src.claraity.claraity_db import ClarityStore
+        from src.claraity.claraity_db import ClaraityStore
 
         try:
-            with ClarityStore() as store:
+            with ClaraityStore() as store:
                 result = store.auto_layout()
             lines = [f"[OK] Updated layout for {result['modules_updated']} nodes"]
             ranks = result.get("ranks", {})
@@ -845,21 +687,21 @@ class KnowledgeExportTool(Tool):
         )
 
     def execute(self, **kwargs: Any) -> ToolResult:
-        from src.claraity.claraity_db import ClarityStore
+        from src.claraity.claraity_db import ClaraityStore
         from src.claraity.claraity_beads import BeadStore
 
         results = []
         try:
-            with ClarityStore() as store:
+            with ClaraityStore() as store:
                 count = store.export_jsonl()
-                results.append(f"Knowledge: {count} records -> .clarity/claraity_knowledge.jsonl")
+                results.append(f"Knowledge: {count} records -> .claraity/claraity_knowledge.jsonl")
         except Exception as e:
             results.append(f"Knowledge export failed: {e}")
 
         try:
             with BeadStore() as store:
                 count = store.export_jsonl()
-                results.append(f"Beads: {count} records -> .clarity/claraity_beads.jsonl")
+                results.append(f"Beads: {count} records -> .claraity/claraity_beads.jsonl")
         except Exception as e:
             results.append(f"Beads export failed: {e}")
 

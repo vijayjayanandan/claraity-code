@@ -18,6 +18,7 @@ import { StatusBar } from "./components/StatusBar";
 import { ContextBar } from "./components/ContextBar";
 import { ChatHistory } from "./components/ChatHistory";
 import { TodoPanel } from "./components/TodoPanel";
+import { BackgroundTaskPanel } from "./components/BackgroundTaskPanel";
 import { AutoApprovePanel } from "./components/AutoApprovePanel";
 import { StreamingStatus } from "./components/StreamingStatus";
 import { InputBox } from "./components/InputBox";
@@ -101,16 +102,30 @@ export function App() {
         postMessage({ type: "chatMessage", content: msg.content });
         break;
 
-      case "enrichedPrompt":
-        dispatch({ type: "SET_ENRICHED_PREVIEW", original: msg.original, enriched: msg.enriched });
+      case "enrichmentDelta":
+        dispatch({ type: "ENRICHMENT_DELTA", delta: msg.delta });
+        break;
+
+      case "enrichmentComplete":
+        dispatch({ type: "ENRICHMENT_COMPLETE", original: msg.original, enriched: msg.enriched });
         break;
 
       case "enrichmentError":
         dispatch({ type: "CLEAR_ENRICHED_PREVIEW" });
+        dispatch({ type: "ERROR", errorType: "enrichment_error", message: msg.message ?? "Prompt enrichment failed." });
         break;
 
       case "serverMessage":
         dispatchServerMessage(dispatch, msg.payload);
+
+        // Surface delete failures to the user
+        if (msg.payload.type === "session_deleted" && !msg.payload.success) {
+          dispatch({
+            type: "ERROR",
+            errorType: "session_delete_error",
+            message: msg.payload.message ?? "Failed to delete session.",
+          });
+        }
 
         // Handle session_info at top level (not in reducer)
         if (msg.payload.type === "session_info") {
@@ -174,6 +189,7 @@ export function App() {
           onBack={() => dispatch({ type: "SET_ACTIVE_PANEL", panel: "chat" })}
           onNewSession={() => postMessage({ type: "newSession" })}
           onResumeSession={(id) => postMessage({ type: "resumeSession", sessionId: id })}
+          onDeleteSession={(id) => postMessage({ type: "deleteSession", sessionId: id })}
         />
       </div>
     );
@@ -321,6 +337,7 @@ export function App() {
           undoCompleted={state.undoCompleted}
           lastTurnStats={state.lastTurnStats}
           onSendPrompt={(prompt) => handleSendMessage(prompt)}
+          onDismissPlan={() => dispatch({ type: "PLAN_APPROVAL_DISMISS" })}
           connected={state.connected}
           modelName={state.modelName}
           workingDirectory={state.workingDirectory}
@@ -342,8 +359,17 @@ export function App() {
         <TodoPanel todos={state.todos} />
       )}
 
+      {state.backgroundTasks.length > 0 && (
+        <BackgroundTaskPanel
+          tasks={state.backgroundTasks}
+          onCancel={(taskId) => postMessage({ type: "cancelBackgroundTask", taskId })}
+          onDismiss={(taskId) => dispatch({ type: "DISMISS_BACKGROUND_TASK", taskId })}
+        />
+      )}
+
       <StreamingStatus
         isStreaming={state.isStreaming}
+        isCompacting={state.isCompacting}
         currentThinking={state.currentThinking}
         toolCards={state.toolCards}
         todos={state.todos}
@@ -366,12 +392,21 @@ export function App() {
         enrichmentEnabled={state.promptEnrichmentEnabled}
         enrichmentLoading={state.enrichmentLoading}
         enrichedPreview={state.enrichedPromptPreview}
+        enrichedOriginal={state.enrichedPromptOriginal}
         onToggleEnrichment={(enabled) => dispatch({ type: "SET_ENRICHMENT_ENABLED", enabled })}
         onRequestEnrichment={(content) => {
           dispatch({ type: "SET_ENRICHMENT_LOADING", loading: true });
-          postMessage({ type: "enrichPrompt", content });
+          // Send the last 6 finalized user/assistant messages as context so the
+          // enrichment LLM understands what the conversation is already about.
+          const history = state.messages
+            .filter((m) => m.finalized && (m.role === "user" || m.role === "assistant"))
+            .slice(-6)
+            .map((m) => ({ role: m.role, content: m.content }));
+          postMessage({ type: "enrichPrompt", content, history: history.length > 0 ? history : undefined });
         }}
         onClearEnrichment={() => dispatch({ type: "CLEAR_ENRICHED_PREVIEW" })}
+        draft={state.chatDraft}
+        onDraftChange={(draft) => dispatch({ type: "SET_CHAT_DRAFT", draft })}
       />
 
       <BottomBar

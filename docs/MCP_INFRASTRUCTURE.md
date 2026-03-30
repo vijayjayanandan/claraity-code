@@ -166,7 +166,7 @@ LLM returns: {"name": "jira_search", "arguments": {"jql": "project = CC"}}
   SecretStore.set("jira_api_token_<profile>", token)
        |                                                   At connect time:
        v                                                         |
-  Config JSON (.clarity/integrations/jira/<profile>.json)        v
+  Config JSON (.claraity/integrations/jira/<profile>.json)        v
   Contains ONLY: jira_url, username, enabled              SecretStore.get()
   NEVER contains: api_token                                      |
                                                                  v
@@ -212,7 +212,7 @@ JIRA_BLOCKLIST = {"jira_deleteProject"}  # Never exposed to LLM
 
 - **Auth method**: API token (from id.atlassian.com), stored in SecretStore.
 - **Profiles**: Multiple named profiles (e.g. "personal", "corporate") for different Jira instances.
-- **Config dir**: `.clarity/integrations/jira/<profile>.json` (no secrets, just URL + username + enabled).
+- **Config dir**: `.claraity/integrations/jira/<profile>.json` (no secrets, just URL + username + enabled).
 - **TUI config**: Command palette "Configure Jira" or `/config-jira` opens a modal with profile management, connection status, and disconnect.
 - **Tools**: 32 discovered from mcp-atlassian (search, get/create/edit issues, manage sprints, etc.)
 - **Auto-reconnect**: Connecting to a different profile auto-disconnects the current one.

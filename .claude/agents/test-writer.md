@@ -77,7 +77,7 @@ When asked to write tests:
 
 ### 3. Implement Tests
 - Use appropriate testing framework for the language
-- Follow AAA pattern for clarity
+- Follow AAA pattern for claraity
 - Use fixtures for common setup/teardown
 - Mock external dependencies appropriately
 - Add clear, descriptive test names

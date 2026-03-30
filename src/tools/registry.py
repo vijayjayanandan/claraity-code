@@ -21,14 +21,9 @@ def get_stateless_tools() -> list:
         BeadReadyTool,
         BeadUpdateTool,
         KnowledgeAutoLayoutTool,
-        KnowledgeBriefTool,
         KnowledgeExportTool,
-        KnowledgeFileTool,
-        KnowledgeImpactTool,
-        KnowledgeModuleTool,
         KnowledgeQueryTool,
         KnowledgeScanFilesTool,
-        KnowledgeSearchTool,
         KnowledgeSetMetadataTool,
         KnowledgeUpdateTool,
     )
@@ -61,15 +56,10 @@ def get_stateless_tools() -> list:
         GetSymbolContextTool(),
         # Interactive
         ClarifyTool(),
-        # ClarAIty Knowledge DB
+        # ClarAIty Knowledge DB (knowledge_query is the unified read tool)
         KnowledgeScanFilesTool(),
         KnowledgeUpdateTool(),
         KnowledgeQueryTool(),
-        KnowledgeBriefTool(),
-        KnowledgeModuleTool(),
-        KnowledgeFileTool(),
-        KnowledgeSearchTool(),
-        KnowledgeImpactTool(),
         KnowledgeSetMetadataTool(),
         KnowledgeAutoLayoutTool(),
         KnowledgeExportTool(),

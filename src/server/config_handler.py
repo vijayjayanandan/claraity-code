@@ -73,7 +73,6 @@ def get_config_response(config_path: str) -> dict:
         "top_p": cfg.top_p,
         "thinking_budget": cfg.thinking_budget,
         "has_api_key": bool(cfg.api_key),
-        "api_key": cfg.api_key or "",
     }
 
     # Flatten subagent models to {name: model_str}
@@ -83,6 +82,15 @@ def get_config_response(config_path: str) -> dict:
         subagent_models[name] = override.model if override and override.model else ""
 
     config_dict["subagent_models"] = subagent_models
+
+    # Prompt enrichment config
+    from src.prompts.enrichment import ENRICHMENT_SYSTEM_PROMPT
+    pe = cfg.prompt_enrichment
+    config_dict["prompt_enrichment"] = {
+        "model": pe.model,
+        "system_prompt": pe.system_prompt,
+        "default_system_prompt": ENRICHMENT_SYSTEM_PROMPT,
+    }
 
     return {
         "type": "config_loaded",
@@ -119,6 +127,15 @@ def save_config_from_request(data: dict, config_path: str) -> dict:
             for name, model_str in sa_models.items():
                 if model_str and str(model_str).strip():
                     cfg.subagents[str(name)] = SubAgentLLMOverride(model=str(model_str).strip())
+
+        # Prompt enrichment overrides
+        from src.llm.config_loader import PromptEnrichmentConfig
+        pe_raw = raw.get("prompt_enrichment", {})
+        if isinstance(pe_raw, dict):
+            cfg.prompt_enrichment = PromptEnrichmentConfig(
+                model=str(pe_raw.get("model", "") or "").strip(),
+                system_prompt=str(pe_raw.get("system_prompt", "") or "").strip(),
+            )
 
         # Save API key if provided (non-empty)
         api_key = raw.get("api_key", "")

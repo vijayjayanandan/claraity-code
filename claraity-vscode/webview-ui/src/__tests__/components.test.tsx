@@ -14,9 +14,10 @@
  *
  * Total: 55 tests
  */
-import { describe, test, expect, vi, beforeEach } from "vitest";
+import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 
+import React from "react";
 import { MessageBubble } from "../components/MessageBubble";
 import { CodeBlock } from "../components/CodeBlock";
 import { ThinkingBlock } from "../components/ThinkingBlock";
@@ -26,9 +27,27 @@ import { StatusBar } from "../components/StatusBar";
 import { BottomBar } from "../components/BottomBar";
 import { TodoPanel } from "../components/TodoPanel";
 import { AutoApprovePanel } from "../components/AutoApprovePanel";
+import { SessionPanel } from "../components/SessionPanel";
 import { TOOL_ICONS, getPrimaryArg, formatDuration } from "../utils/tools";
+import { ChatContext } from "../state/ChatContext";
+import type { ChatContextValue } from "../state/ChatContext";
 
 import type { ChatMessage, ThinkingBlock as ThinkingBlockType, CodeBlock as CodeBlockType } from "../state/reducer";
+
+/** Wraps a component with ChatContext.Provider using test defaults. */
+function withChatContext(ui: React.ReactElement, overrides: Partial<ChatContextValue> = {}) {
+  const value: ChatContextValue = {
+    postMessage: vi.fn(),
+    toolCards: {},
+    toolOrder: [],
+    toolCardOwners: {},
+    subagents: {},
+    promotedApprovals: {},
+    onDismissApproval: vi.fn(),
+    ...overrides,
+  };
+  return <ChatContext.Provider value={value}>{ui}</ChatContext.Provider>;
+}
 
 // ============================================================================
 // MessageBubble
@@ -42,7 +61,7 @@ describe("MessageBubble", () => {
       content: "Hello agent",
       finalized: true,
     };
-    const { container } = render(<MessageBubble message={msg} />);
+    const { container } = render(withChatContext(<MessageBubble message={msg} />));
 
     expect(screen.getByText("Hello agent")).toBeInTheDocument();
     expect(container.querySelector(".role-icon")).not.toBeInTheDocument();
@@ -55,7 +74,7 @@ describe("MessageBubble", () => {
       content: "Hi there",
       finalized: true,
     };
-    const { container } = render(<MessageBubble message={msg} />);
+    const { container } = render(withChatContext(<MessageBubble message={msg} />));
 
     expect(screen.getByText("Hi there")).toBeInTheDocument();
     expect(container.querySelector(".role-icon")).not.toBeInTheDocument();
@@ -68,7 +87,7 @@ describe("MessageBubble", () => {
       content: "Test",
       finalized: true,
     };
-    const { container } = render(<MessageBubble message={msg} />);
+    const { container } = render(withChatContext(<MessageBubble message={msg} />));
 
     const messageDiv = container.querySelector(".message.user");
     expect(messageDiv).toBeInTheDocument();
@@ -81,7 +100,7 @@ describe("MessageBubble", () => {
       content: "Test",
       finalized: true,
     };
-    const { container } = render(<MessageBubble message={msg} />);
+    const { container } = render(withChatContext(<MessageBubble message={msg} />));
 
     const messageDiv = container.querySelector(".message.assistant");
     expect(messageDiv).toBeInTheDocument();
@@ -94,7 +113,7 @@ describe("MessageBubble", () => {
       content: "**bold text**",
       finalized: true,
     };
-    const { container } = render(<MessageBubble message={msg} />);
+    const { container } = render(withChatContext(<MessageBubble message={msg} />));
 
     // marked should render **bold text** as <strong>bold text</strong>
     const strong = container.querySelector("strong");
@@ -109,7 +128,7 @@ describe("MessageBubble", () => {
       content: "",
       finalized: true,
     };
-    const { container } = render(<MessageBubble message={msg} />);
+    const { container } = render(withChatContext(<MessageBubble message={msg} />));
 
     const contentDiv = container.querySelector(".content");
     expect(contentDiv).toBeInTheDocument();
@@ -123,7 +142,7 @@ describe("MessageBubble", () => {
       content: "System message",
       finalized: true,
     };
-    const { container } = render(<MessageBubble message={msg} />);
+    const { container } = render(withChatContext(<MessageBubble message={msg} />));
 
     expect(screen.getByText("System message")).toBeInTheDocument();
     const messageDiv = container.querySelector(".message.system");
@@ -919,7 +938,7 @@ describe("AutoApprovePanel", () => {
   test("summary does not have 'has-active' class when no categories active", () => {
     const { container } = render(
       <AutoApprovePanel
-        autoApprove={{ read: true, edit: false, execute: false, browser: false, knowledge_update: false, subagent: false }}
+        autoApprove={{ read: false, edit: false, execute: false, browser: false, knowledge_update: false, subagent: false }}
         onChange={vi.fn()}
         limits={{ iteration_limit_enabled: true, max_iterations: 50 }}
         onSaveLimits={vi.fn()}
@@ -980,7 +999,114 @@ describe("AutoApprovePanel", () => {
       edit: false,
       execute: true,
       browser: false,
+      knowledge_update: false,
+      subagent: false,
     });
+  });
+});
+
+// ============================================================================
+// Tool Utilities: TOOL_ICONS
+// ============================================================================
+
+describe("SessionPanel", () => {
+  const session = {
+    session_id: "session-20250328-143022-a3f1bc90",
+    first_message: "Hello agent",
+    message_count: 5,
+    updated_at: new Date().toISOString(),
+    git_branch: undefined,
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test("renders session titles", () => {
+    render(
+      <SessionPanel
+        sessions={[session]}
+        onBack={vi.fn()}
+        onNewSession={vi.fn()}
+        onResumeSession={vi.fn()}
+        onDeleteSession={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Hello agent")).toBeInTheDocument();
+  });
+
+  test("clicking card calls onResumeSession", () => {
+    const onResumeSession = vi.fn();
+    const { container } = render(
+      <SessionPanel
+        sessions={[session]}
+        onBack={vi.fn()}
+        onNewSession={vi.fn()}
+        onResumeSession={onResumeSession}
+        onDeleteSession={vi.fn()}
+      />
+    );
+
+    const card = container.querySelector(".session-card");
+    expect(card).toBeInTheDocument();
+    fireEvent.click(card!);
+
+    expect(onResumeSession).toHaveBeenCalledWith(session.session_id);
+  });
+
+  test("delete button does not call onResumeSession", () => {
+    const onResumeSession = vi.fn();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(
+      <SessionPanel
+        sessions={[session]}
+        onBack={vi.fn()}
+        onNewSession={vi.fn()}
+        onResumeSession={onResumeSession}
+        onDeleteSession={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByTitle("Delete session"));
+
+    expect(onResumeSession).not.toHaveBeenCalled();
+  });
+
+  test("delete button calls onDeleteSession after confirm", () => {
+    const onDeleteSession = vi.fn();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(
+      <SessionPanel
+        sessions={[session]}
+        onBack={vi.fn()}
+        onNewSession={vi.fn()}
+        onResumeSession={vi.fn()}
+        onDeleteSession={onDeleteSession}
+      />
+    );
+
+    fireEvent.click(screen.getByTitle("Delete session"));
+
+    expect(onDeleteSession).toHaveBeenCalledWith(session.session_id);
+  });
+
+  test("delete button does nothing when confirm is cancelled", () => {
+    const onDeleteSession = vi.fn();
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(
+      <SessionPanel
+        sessions={[session]}
+        onBack={vi.fn()}
+        onNewSession={vi.fn()}
+        onResumeSession={vi.fn()}
+        onDeleteSession={onDeleteSession}
+      />
+    );
+
+    fireEvent.click(screen.getByTitle("Delete session"));
+
+    expect(onDeleteSession).not.toHaveBeenCalled();
   });
 });
 

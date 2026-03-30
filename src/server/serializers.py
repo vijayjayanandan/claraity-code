@@ -199,6 +199,10 @@ def serialize_store_notification(notification: StoreNotification) -> dict | None
             data["requires_approval"] = metadata["requires_approval"]
         if "message" in metadata:
             data["message"] = metadata["message"]
+        if "cumulative_tokens" in metadata:
+            data["cumulative_tokens"] = metadata["cumulative_tokens"]
+        if "context_tokens" in metadata:
+            data["context_tokens"] = metadata["context_tokens"]
 
         return {
             "type": "store",
@@ -253,6 +257,10 @@ def serialize_store_notification(notification: StoreNotification) -> dict | None
                     },
                 }
 
+        # Suppress internal bookkeeping messages -- not useful to the webview
+        if msg.is_system and msg.meta and msg.meta.event_type == "compact_boundary":
+            return None
+
         content_type = type(msg.content).__name__
         logger.debug(
             "serialize_message_added",
@@ -268,15 +276,19 @@ def serialize_store_notification(notification: StoreNotification) -> dict | None
                 content_type=content_type,
             )
 
+        data: dict = {
+            "uuid": msg.uuid,
+            "role": msg.role,
+            "content": _content_to_str(msg.content),
+            "stream_id": getattr(msg.meta, "stream_id", None),
+        }
+        if getattr(msg.meta, "is_compact_summary", False):
+            data["is_compact_summary"] = True
+
         return {
             "type": "store",
             "event": "message_added",
-            "data": {
-                "uuid": msg.uuid,
-                "role": msg.role,
-                "content": _content_to_str(msg.content),
-                "stream_id": getattr(msg.meta, "stream_id", None),
-            },
+            "data": data,
         }
 
     elif event == StoreEvent.MESSAGE_UPDATED:

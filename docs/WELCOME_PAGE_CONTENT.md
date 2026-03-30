@@ -179,7 +179,7 @@ Structured JSONL logging, SQLite error tracking, session transcripts, and contex
 **Icon**: `$(extensions)` (codicon)
 
 - **MCP Protocol**: Connect external tools via the Model Context Protocol
-- **Custom sub-agents**: Define specialized agents in `.clarity/subagents/`
+- **Custom sub-agents**: Define specialized agents in `.claraity/subagents/`
 - **Jira integration**: Create and manage issues directly from chat
 - **Hot-swap config**: Change LLM settings without restarting
 

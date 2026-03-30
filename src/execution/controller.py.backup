@@ -288,7 +288,7 @@ class LongRunningController:
         next_task_result = None
         try:
             # Import here to avoid circular dependency
-            from src.tools.clarity_tools import GetNextTaskTool
+            from src.tools.claraity_tools import GetNextTaskTool
 
             tool = GetNextTaskTool()
             next_task_result = tool.execute()

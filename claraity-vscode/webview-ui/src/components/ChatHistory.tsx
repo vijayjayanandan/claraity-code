@@ -60,6 +60,7 @@ interface ChatHistoryProps {
   undoCompleted: boolean;
   lastTurnStats: { tokens: number; durationMs: number } | null;
   onSendPrompt?: (prompt: string) => void;
+  onDismissPlan?: () => void;
   connected?: boolean;
   modelName?: string;
   workingDirectory?: string;
@@ -78,6 +79,7 @@ export function ChatHistory({
   undoCompleted,
   lastTurnStats,
   onSendPrompt,
+  onDismissPlan,
   connected,
   modelName,
   workingDirectory,
@@ -289,6 +291,19 @@ export function ChatHistory({
               </div>
             );
 
+          case "compaction_summary":
+            return (
+              <details key={entry.id} className="compaction-summary-card">
+                <summary>
+                  <i className="codicon codicon-history" aria-hidden="true" />
+                  Conversation compacted
+                </summary>
+                <div className="compaction-summary-content">
+                  {entry.content.replace(/^\[Conversation summary[^\]]*\]\n\n/, "")}
+                </div>
+              </details>
+            );
+
           default:
             return null;
         }
@@ -364,6 +379,7 @@ export function ChatHistory({
           planPath={planApproval.planPath}
           isDirector={planApproval.isDirector}
           postMessage={postMessage}
+          onDismiss={onDismissPlan ?? (() => {})}
         />
       )}
 

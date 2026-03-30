@@ -994,7 +994,7 @@ When writing or modifying code, adhere to these standards:
 3. **Maintainability**
    - Follow existing code patterns in the project
    - Use consistent formatting and style
-   - Avoid clever tricks - prefer clarity
+   - Avoid clever tricks - prefer claraity
    - Write code that's easy to modify later
 
 4. **Error Handling**
@@ -1231,7 +1231,7 @@ class EnhancedSystemPrompts:
         """Get task-specific note."""
         notes = {
             "debug": "\n<task_focus>\nCurrent task: Debugging\n- Find root cause first\n- Explain what's wrong and why\n- Provide clear fix\n- Suggest prevention\n</task_focus>",
-            "refactor": "\n<task_focus>\nCurrent task: Refactoring\n- Preserve functionality\n- Improve structure and clarity\n- Follow existing patterns\n- Test changes\n</task_focus>",
+            "refactor": "\n<task_focus>\nCurrent task: Refactoring\n- Preserve functionality\n- Improve structure and claraity\n- Follow existing patterns\n- Test changes\n</task_focus>",
             "implement": "\n<task_focus>\nCurrent task: Implementation\n- Search for similar patterns first\n- Follow project conventions\n- Handle edge cases\n- Write clean, tested code\n</task_focus>",
             "review": "\n<task_focus>\nCurrent task: Code Review\n- Check correctness and logic\n- Assess code quality\n- Identify potential issues\n- Provide constructive feedback\n</task_focus>",
         }

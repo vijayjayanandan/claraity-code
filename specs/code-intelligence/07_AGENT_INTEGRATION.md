@@ -162,13 +162,13 @@ class CodingAgent:
             )
 
             # Initialize orchestrator
-            # (Pass clarity_db if available)
-            clarity_db = getattr(self, 'clarity_db', None)
+            # (Pass claraity_db if available)
+            claraity_db = getattr(self, 'claraity_db', None)
 
             self.orchestrator = CodeIntelligenceOrchestrator(
                 lsp_manager=self.lsp_manager,
                 rag_retriever=self.retriever,
-                clarity_db=clarity_db,
+                claraity_db=claraity_db,
                 config=config
             )
 
@@ -203,7 +203,7 @@ def _register_tools(self) -> None:
     # ... register other existing tools
 
     # Existing ClarAIty tools
-    from src.tools.clarity_tools import (
+    from src.tools.claraity_tools import (
         QueryComponentTool,
         GetNextTaskTool,
         # ... other ClarAIty tools

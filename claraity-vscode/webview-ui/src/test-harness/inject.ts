@@ -3,25 +3,25 @@
  * Playwright tests or the browser console.
  *
  * Exposes:
- *   window.__clarityInject(msg)          — inject a single ExtensionMessage
- *   window.__clarityInjectSequence(seq)  — inject a sequence with optional delays
+ *   window.__claraityInject(msg)          — inject a single ExtensionMessage
+ *   window.__claraityInjectSequence(seq)  — inject a sequence with optional delays
  */
 import type { ExtensionMessage } from "../types";
 
 declare global {
   interface Window {
-    __clarityInject: (msg: ExtensionMessage) => void;
-    __clarityInjectSequence: (
+    __claraityInject: (msg: ExtensionMessage) => void;
+    __claraityInjectSequence: (
       seq: Array<{ msg: ExtensionMessage; delayMs?: number }>,
     ) => Promise<void>;
   }
 }
 
-window.__clarityInject = (msg: ExtensionMessage) => {
+window.__claraityInject = (msg: ExtensionMessage) => {
   window.postMessage(msg, "*");
 };
 
-window.__clarityInjectSequence = async (
+window.__claraityInjectSequence = async (
   seq: Array<{ msg: ExtensionMessage; delayMs?: number }>,
 ) => {
   for (const { msg, delayMs } of seq) {

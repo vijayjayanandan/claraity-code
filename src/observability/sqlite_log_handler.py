@@ -82,7 +82,7 @@ class SQLiteLogHandler(logging.Handler):
 
     def __init__(
         self,
-        db_path: str = ".clarity/logs/logs.db",
+        db_path: str = ".claraity/logs/logs.db",
         queue_size: int = LOG_QUEUE_SIZE,
         batch_size: int = BATCH_SIZE,
     ):

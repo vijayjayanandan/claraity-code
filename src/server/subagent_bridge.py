@@ -50,6 +50,7 @@ class ServerSubagentBridge:
         instance: Any = None,
         model_name: str = "",
         subagent_name: str = "",
+        context_window: int = 0,
     ) -> None:
         """Track a newly launched subagent and notify the client."""
         self._active[subagent_id] = {
@@ -68,6 +69,7 @@ class ServerSubagentBridge:
                         "model_name": model_name,
                         "subagent_name": subagent_name,
                         "transcript_path": str(transcript_path),
+                        "context_window": context_window,
                     },
                 }
             )

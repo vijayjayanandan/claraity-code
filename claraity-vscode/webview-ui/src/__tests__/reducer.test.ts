@@ -112,6 +112,7 @@ describe("appReducer — Connection", () => {
     expect(s.markdownBuffer).toBe("");
     expect(s.currentThinking).toBeNull();
     expect(s.currentCodeBlock).toBeNull();
+    expect(s.isCompacting).toBe(false);
   });
 
   test("SET_SESSION_INFO does not reset state for same session", () => {
@@ -349,6 +350,9 @@ describe("appReducer — Messages", () => {
       active: true,
       messages: [],
       timeline: [],
+      totalTokens: 0,
+      contextTokens: 0,
+      contextWindow: 0,
     };
     let s = reduce({ type: "SUBAGENT_REGISTERED", data: saInfo });
     s = reduce({
@@ -384,6 +388,9 @@ describe("appReducer — Messages", () => {
       active: true,
       messages: ["Old text"],
       timeline: [{ type: "text" as const, index: 0 }],
+      totalTokens: 0,
+      contextTokens: 0,
+      contextWindow: 0,
     };
     let s = reduce({ type: "SUBAGENT_REGISTERED", data: saInfo });
     s = reduce({
@@ -503,6 +510,9 @@ describe("appReducer — Tools", () => {
       active: true,
       messages: [],
       timeline: [],
+      totalTokens: 0,
+      contextTokens: 0,
+      contextWindow: 0,
     };
     let s = reduce({ type: "SUBAGENT_REGISTERED", data: saInfo });
     const timelineLen = s.timeline.length;
@@ -531,6 +541,9 @@ describe("appReducer — Subagents", () => {
     active: true,
     messages: [],
     timeline: [],
+    totalTokens: 0,
+    contextTokens: 0,
+    contextWindow: 0,
   };
 
   test("SUBAGENT_REGISTERED adds subagent info with messages[] and timeline entry (GAP 6)", () => {
@@ -713,6 +726,58 @@ describe("appReducer — Context", () => {
     const s = reduce({ type: "CONTEXT_UPDATED", used: 50000, limit: 128000 });
     expect(s.contextUsed).toBe(50000);
     expect(s.contextLimit).toBe(128000);
+  });
+
+  test("CONTEXT_COMPACTING sets isCompacting to true", () => {
+    const s = reduce({ type: "CONTEXT_COMPACTING" });
+    expect(s.isCompacting).toBe(true);
+  });
+
+  test("CONTEXT_COMPACTED clears isCompacting", () => {
+    // Start compacting then complete
+    const s1 = reduce({ type: "CONTEXT_COMPACTING" });
+    const s2 = appReducer(s1, { type: "CONTEXT_COMPACTED" });
+    expect(s2.isCompacting).toBe(false);
+  });
+
+  test("STREAM_END clears isCompacting even if CONTEXT_COMPACTED was missed", () => {
+    // Simulate compaction starting but context_compacted never arriving (agent crash)
+    const s1 = reduce({ type: "CONTEXT_COMPACTING" });
+    expect(s1.isCompacting).toBe(true);
+    const s2 = appReducer(s1, { type: "STREAM_END" });
+    expect(s2.isCompacting).toBe(false);
+  });
+
+  test("MESSAGE_ADDED with is_compact_summary adds compaction_summary timeline entry", () => {
+    const s = reduce({
+      type: "MESSAGE_ADDED",
+      data: {
+        uuid: "summary-uuid-1",
+        role: "user",
+        content: "[Conversation summary - earlier messages were compacted to free context space]\n\nThe user asked about X.",
+        is_compact_summary: true,
+      },
+    });
+    const entry = s.timeline.find((e) => e.type === "compaction_summary");
+    expect(entry).toBeDefined();
+    expect(entry?.type).toBe("compaction_summary");
+    if (entry?.type === "compaction_summary") {
+      expect(entry.id).toBe("summary-uuid-1");
+      expect(entry.content).toContain("Conversation summary");
+    }
+  });
+
+  test("MESSAGE_ADDED with is_compact_summary does NOT add to messages array", () => {
+    const s = reduce({
+      type: "MESSAGE_ADDED",
+      data: {
+        uuid: "summary-uuid-2",
+        role: "user",
+        content: "[Conversation summary...]\n\nSummary text.",
+        is_compact_summary: true,
+      },
+    });
+    expect(s.messages.find((m) => m.id === "summary-uuid-2")).toBeUndefined();
   });
 });
 
@@ -1262,14 +1327,14 @@ describe("dispatchServerMessage", () => {
     });
   });
 
-  test("context_compacting does not dispatch", () => {
-    dispatchMsg({ type: "context_compacting" });
-    expect(dispatch).not.toHaveBeenCalled();
+  test("context_compacting dispatches CONTEXT_COMPACTING", () => {
+    dispatchMsg({ type: "context_compacting", tokens_before: 100000 });
+    expect(dispatch).toHaveBeenCalledWith({ type: "CONTEXT_COMPACTING" });
   });
 
-  test("context_compacted does not dispatch", () => {
-    dispatchMsg({ type: "context_compacted", old_tokens: 100000, new_tokens: 50000 });
-    expect(dispatch).not.toHaveBeenCalled();
+  test("context_compacted dispatches CONTEXT_COMPACTED", () => {
+    dispatchMsg({ type: "context_compacted", messages_removed: 10, tokens_before: 100000, tokens_after: 50000 });
+    expect(dispatch).toHaveBeenCalledWith({ type: "CONTEXT_COMPACTED" });
   });
 
   test("file_read does not dispatch", () => {

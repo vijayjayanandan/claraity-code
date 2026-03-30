@@ -2,7 +2,7 @@
 Safety-net integration tests for agent tool loop paths.
 
 These tests cover stream_response() - the async entry point used by the TUI.
-They use the real LLM API (via .clarity/config.yaml) with simple prompts
+They use the real LLM API (via .claraity/config.yaml) with simple prompts
 that produce deterministic behavior (short answers, known tool calls).
 
 Run with: pytest tests/core/test_tool_loop_integration.py -v
@@ -115,7 +115,7 @@ class TestStreamResponsePlanModeGate:
         # Activate plan mode with a plan file path
         agent.plan_mode_state.is_active = True
         agent.plan_mode_state.plan_file_path = (
-            agent.working_directory / ".clarity" / "plans" / "test.md"
+            agent.working_directory / ".claraity" / "plans" / "test.md"
         )
 
         ui = MockUIProtocol()
