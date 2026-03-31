@@ -3,10 +3,9 @@
  *
  * Sections:
  *   1. Hero — branding + tagline + connection status
- *   2. Capabilities — feature cards grid
- *   3. Quick prompts — categorized clickable chips
- *   4. Keyboard shortcuts — reference strip
- *   5. Architecture summary — collapsible for technical users
+ *   2. Capabilities — feature cards grid (8 cards)
+ *   3. Quick prompts — categorized clickable chips (5 tabs)
+ *   4. Collapsible — built-in tools, keyboard shortcuts, architecture
  */
 import { useState } from "react";
 
@@ -26,6 +25,15 @@ interface PromptCategory {
 }
 
 const PROMPT_CATEGORIES: PromptCategory[] = [
+  {
+    label: "Know",
+    icon: "codicon-database",
+    prompts: [
+      { text: "Scan this codebase and build a knowledge map", description: "Build architectural understanding" },
+      { text: "What are the key architectural decisions?", description: "Surface design constraints" },
+      { text: "What would break if I change the auth module?", description: "Impact analysis" },
+    ],
+  },
   {
     label: "Understand",
     icon: "codicon-book",
@@ -74,14 +82,24 @@ interface Feature {
 
 const FEATURES: Feature[] = [
   {
-    icon: "codicon-server",
-    title: "Any LLM",
-    description: "OpenAI, Claude, Ollama, DeepSeek, or any compatible API. Switch models mid-session.",
+    icon: "codicon-database",
+    title: "Knowledge Builder",
+    description: "Scans your codebase to map architecture, components, and decisions. The agent understands your code before you ask.",
   },
   {
     icon: "codicon-shield",
-    title: "Safe by Default",
-    description: "4-layer safety gating reviews every file change. You approve before anything is written.",
+    title: "Safety Gating",
+    description: "4-layer review: repeat detection, plan mode, approval categories, and auto-approve controls. You control what gets written.",
+  },
+  {
+    icon: "codicon-file-symlink-file",
+    title: ".claraityignore",
+    description: "Protect sensitive files with gitignore-style patterns. Blocked files can't be read, written, or passed to commands.",
+  },
+  {
+    icon: "codicon-server",
+    title: "Any LLM",
+    description: "OpenAI, Claude, DeepSeek, or any OpenAI-compatible API. Switch models mid-session.",
   },
   {
     icon: "codicon-organization",
@@ -89,9 +107,9 @@ const FEATURES: Feature[] = [
     description: "Specialized code-reviewer, test-writer, and doc-writer agents with their own context.",
   },
   {
-    icon: "codicon-tools",
-    title: "25+ Tools",
-    description: "File ops, search, web, LSP intelligence, and terminal execution with parallel processing.",
+    icon: "codicon-checklist",
+    title: "Task Tracking",
+    description: "Built-in Beads system: create, prioritize, and close tasks tied to agent work.",
   },
   {
     icon: "codicon-history",
@@ -99,9 +117,80 @@ const FEATURES: Feature[] = [
     description: "Every conversation is persisted. Resume any session with full context and history.",
   },
   {
-    icon: "codicon-diff",
-    title: "Diff Preview",
-    description: "Review proposed changes in VS Code's native diff editor. Undo any turn instantly.",
+    icon: "codicon-plug",
+    title: "MCP Servers",
+    description: "Extend with any MCP-compatible server. Add Jira, databases, APIs, or custom tools from the marketplace.",
+  },
+];
+
+/* ── Built-in tools ── */
+
+interface ToolGroup {
+  category: string;
+  icon: string;
+  tools: { name: string; description: string }[];
+}
+
+const TOOL_GROUPS: ToolGroup[] = [
+  {
+    category: "File Operations",
+    icon: "codicon-file-code",
+    tools: [
+      { name: "read_file", description: "Read file contents with line range support" },
+      { name: "write_file", description: "Create or overwrite files" },
+      { name: "edit_file", description: "Surgical find-and-replace edits" },
+      { name: "append_to_file", description: "Append content to existing files" },
+      { name: "list_directory", description: "List directory contents with tree view" },
+    ],
+  },
+  {
+    category: "Search",
+    icon: "codicon-search",
+    tools: [
+      { name: "grep", description: "Regex search across files with context" },
+      { name: "glob", description: "Find files by pattern matching" },
+      { name: "web_search", description: "Search the web for documentation and solutions" },
+      { name: "web_fetch", description: "Fetch and extract content from URLs" },
+    ],
+  },
+  {
+    category: "Code Intelligence",
+    icon: "codicon-symbol-class",
+    tools: [
+      { name: "get_file_outline", description: "Extract symbols, classes, and functions from a file" },
+      { name: "get_symbol_context", description: "Find references, definitions, and type info via LSP" },
+    ],
+  },
+  {
+    category: "Execution",
+    icon: "codicon-terminal",
+    tools: [
+      { name: "run_command", description: "Execute shell commands with timeout and streaming" },
+      { name: "check_background_task", description: "Monitor long-running background tasks" },
+    ],
+  },
+  {
+    category: "Knowledge & Tasks",
+    icon: "codicon-database",
+    tools: [
+      { name: "knowledge_scan_files", description: "Scan files into the knowledge database" },
+      { name: "knowledge_query", description: "Query architecture, components, and decisions" },
+      { name: "knowledge_update", description: "Update knowledge entries with new information" },
+      { name: "task_create", description: "Create a new task in the Beads system" },
+      { name: "task_update", description: "Update task status, priority, or notes" },
+      { name: "task_list", description: "List tasks by status, priority, or tag" },
+    ],
+  },
+  {
+    category: "Planning & Safety",
+    icon: "codicon-shield",
+    tools: [
+      { name: "enter_plan_mode", description: "Switch to plan mode for review before execution" },
+      { name: "request_plan_approval", description: "Request user approval for a proposed plan" },
+      { name: "clarify", description: "Ask the user a clarifying question" },
+      { name: "create_checkpoint", description: "Save a restoration point to undo changes" },
+      { name: "delegate_to_subagent", description: "Delegate work to a specialized sub-agent" },
+    ],
   },
 ];
 
@@ -138,12 +227,15 @@ export function WelcomeScreen({
   workingDirectory,
 }: WelcomeScreenProps) {
   const [activeCategory, setActiveCategory] = useState(0);
+  const [showTools, setShowTools] = useState(false);
   const [showArchitecture, setShowArchitecture] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
 
   const projectName = workingDirectory
     ? workingDirectory.split(/[/\\]/).filter(Boolean).pop() || "project"
     : null;
+
+  const totalTools = TOOL_GROUPS.reduce((sum, g) => sum + g.tools.length, 0);
 
   return (
     <div className="welcome-screen-v2">
@@ -153,7 +245,7 @@ export function WelcomeScreen({
           <i className="codicon codicon-sparkle welcome-logo-icon" />
         </div>
         <h1 className="welcome-heading">ClarAIty</h1>
-        <p className="welcome-subtitle">AI Coding Agent</p>
+        <p className="welcome-subtitle">Bringing clarity to AI coding.</p>
 
         {/* Connection status pill */}
         <div className="welcome-status">
@@ -224,6 +316,35 @@ export function WelcomeScreen({
 
       {/* ── Collapsible sections ── */}
       <div className="welcome-section">
+        {/* Built-in tools */}
+        <button
+          className="welcome-collapse-toggle"
+          onClick={() => setShowTools(!showTools)}
+        >
+          <i className={`codicon codicon-chevron-${showTools ? "down" : "right"}`} />
+          Built-in tools ({totalTools})
+        </button>
+        {showTools && (
+          <div className="tools-catalog">
+            {TOOL_GROUPS.map((group) => (
+              <div className="tool-group" key={group.category}>
+                <div className="tool-group-header">
+                  <i className={`codicon ${group.icon}`} />
+                  <span>{group.category}</span>
+                </div>
+                <div className="tool-group-list">
+                  {group.tools.map((t) => (
+                    <div className="tool-entry" key={t.name}>
+                      <code className="tool-name">{t.name}</code>
+                      <span className="tool-desc">{t.description}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Keyboard shortcuts */}
         <button
           className="welcome-collapse-toggle"

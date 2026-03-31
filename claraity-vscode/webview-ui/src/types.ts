@@ -45,6 +45,9 @@ export type ExtensionMessage =
   | { type: "sessionsList"; sessions: SessionSummary[] }
   | { type: "sessionHistory"; messages: ReplayMessage[] }
   | { type: "showSessionHistory" }
+  | { type: "showConfig" }
+  | { type: "showMcp" }
+  | { type: "showSubagents" }
   | { type: "fileSearchResults"; files: Array<{ path: string; name: string; relativePath: string }> }
   | { type: "undoAvailable"; turnId: string; files: string[] }
   | { type: "undoComplete"; turnId: string; restoredFiles: string[] }

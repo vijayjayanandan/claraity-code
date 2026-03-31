@@ -75,20 +75,20 @@ We use [Semantic Versioning](https://semver.org/):
 
 2. **Update version in pyproject.toml:**
    ```toml
-   version = "0.2.0"
+   version = "0.14.2"
    ```
 
 3. **Commit and tag:**
    ```bash
    git add pyproject.toml
-   git commit -m "Bump version to 0.2.0"
-   git tag -a v0.2.0 -m "Release v0.2.0: Description of changes"
+   git commit -m "Bump version to 0.14.2"
+   git tag -a v0.14.2 -m "Release v0.14.2: Description of changes"
    ```
 
 4. **Push:**
    ```bash
    git push origin main
-   git push origin v0.2.0
+   git push origin v0.14.2
    ```
 
 5. **GitHub Release is created automatically** via the release workflow.

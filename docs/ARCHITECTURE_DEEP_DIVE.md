@@ -3,8 +3,6 @@
 > **Purpose**: Complete architectural trace of ClarAIty from VS Code Extension (React) through every layer to persistence. Optimized for LLM consumption and usable as a training guide for building a cutting-edge coding agent.
 >
 > **Scope**: VS Code React webview -> Extension Host -> stdio transport -> Python server -> Agent core -> LLM -> Tools -> Memory -> Persistence -> Observability
->
-> **Out of scope**: TUI, CLI, WebSocket transport, inline HTML webview
 
 ---
 
@@ -13,7 +11,7 @@
 ```mermaid
 graph TB
     subgraph "VS Code Extension"
-        WV[React Webview<br/>22 components, 1215-line reducer]
+        WV[React Webview<br/>components + reducer state machine]
         EH[Extension Host<br/>extension.ts + sidebar-provider.ts]
         PM[postMessage API]
         WV <-->|ExtensionMessage / WebViewMessage| PM
@@ -28,9 +26,9 @@ graph TB
     end
 
     subgraph "Python Server"
-        STDIO[StdioProtocol<br/>stdio_server.py 1081 lines]
+        STDIO[StdioProtocol<br/>stdio_server.py]
         JRPC[jsonrpc.py<br/>envelope wrap/unwrap]
-        SER[serializers.py<br/>UIEvent <-> JSON]
+        SER[serializers.py<br/>UIEvent to JSON]
         CFG[config_handler.py<br/>LLM config CRUD]
         SAB[subagent_bridge.py<br/>subagent event relay]
         STDIN --> STDIO
@@ -42,7 +40,7 @@ graph TB
     end
 
     subgraph "Agent Core"
-        AGT[CodingAgent<br/>agent.py 3078 lines]
+        AGT[CodingAgent<br/>agent.py]
         TG[ToolGatingService<br/>4-layer permission]
         STH[SpecialToolHandlers<br/>clarify/plan/director]
         SP[StreamPhases<br/>context builders]
@@ -56,7 +54,7 @@ graph TB
     end
 
     subgraph "Tool System"
-        TE[ToolExecutor<br/>25+ tools]
+        TE[ToolExecutor<br/>30+ tools]
         FO[FileOperations<br/>read/write/edit/append]
         DEL[DelegationTool<br/>subprocess IPC]
         KT[KnowledgeTools<br/>KB manifest]
@@ -69,9 +67,9 @@ graph TB
 
     subgraph "LLM Backend"
         LLM[LLMBackend ABC]
-        OAI[OpenAIBackend<br/>1600 lines]
-        ANT[AnthropicBackend<br/>1400 lines]
-        OLL[OllamaBackend<br/>193 lines]
+        OAI[OpenAIBackend<br/>OpenAI/Azure/Groq/DashScope]
+        ANT[AnthropicBackend<br/>Claude + prompt caching]
+        OLL[OllamaBackend<br/>Local inference]
         FH[FailureHandler<br/>retry + backoff]
         CS[CredentialStore<br/>keyring + env]
         LLM --> OAI
@@ -121,7 +119,7 @@ graph TB
 
 **Entry**: `main.tsx` -> `App.tsx` -> central `useReducer(appReducer, initialState)`
 
-**State Machine**: `state/reducer.ts` (1,215 lines) — single source of truth for all UI state.
+**State Machine**: `state/reducer.ts` -- single source of truth for all UI state. The reducer logic is split across `state.ts`, `actions.ts`, and `dispatch.ts` for maintainability.
 
 ```
 AppState {
@@ -129,7 +127,7 @@ AppState {
   connected, sessionId, modelName, permissionMode, workingDirectory
   // Chat
   messages[], isStreaming, markdownBuffer
-  // Timeline (flat ordered array — core rendering abstraction)
+  // Timeline (flat ordered array -- core rendering abstraction)
   timeline: TimelineEntry[]  // user_message | assistant_text | tool | thinking | code | subagent | error
   // Tool Cards
   toolCards: Record<callId, ToolStateData>
@@ -149,21 +147,21 @@ AppState {
 
 **Timeline Pattern**: Text accumulates in `markdownBuffer`. Before any non-text entry (tool card, thinking block, code block, subagent), `commitMarkdownBuffer()` flushes accumulated text into a `assistant_text` timeline entry. This maintains correct interleaving of prose and structured content.
 
-**Silent Tools**: Internal tools (`task_*`, `plan`, `director_*`) are hidden from timeline (line 26-36).
+**Silent Tools**: Internal tools (`task_*`, `plan`, `director_*`) are hidden from timeline.
 
-**Components** (22 files):
+**Key Components**:
 
-| Component | Lines | Purpose |
-|-----------|-------|---------|
-| `ChatHistory` | 329 | Timeline renderer with auto-scroll gate (<40px from bottom) |
-| `InputBox` | 293 | Textarea + @mention + paste images + file attachments |
-| `ToolCard` | 100+ | Tool execution card with approval buttons, auto-diff-open |
-| `SubagentCard` | 98 | Nested tool cards with live status ticker |
-| `PauseWidget` | 80+ | Pause prompt with stats + continue/stop |
-| `ClarifyWidget` | 80+ | Dynamic questions (radio/checkbox/text) |
-| `PlanWidget` | 100+ | Plan approval with markdown preview |
-| `ConfigPanel` | 100+ | Full LLM config (backend, model, params, subagent overrides) |
-| `StreamingStatus` | 80+ | Real-time status line with elapsed timer |
+| Component | Purpose |
+|-----------|---------|
+| `ChatHistory` | Timeline renderer with auto-scroll gate (<40px from bottom) |
+| `InputBox` | Textarea + @mention + paste images + file attachments |
+| `ToolCard` | Tool execution card with approval buttons, auto-diff-open |
+| `SubagentCard` | Nested tool cards with live status ticker |
+| `PauseWidget` | Pause prompt with stats + continue/stop |
+| `ClarifyWidget` | Dynamic questions (radio/checkbox/text) |
+| `PlanWidget` | Plan approval with markdown preview |
+| `ConfigPanel` | Full LLM config (backend, model, params, subagent overrides) |
+| `StreamingStatus` | Real-time status line with elapsed timer |
 
 **Message Passing**: `useVSCode` hook wraps `acquireVsCodeApi()`. All communication via `postMessage()` / `window.addEventListener("message")`. 40+ bidirectional message types defined in `types.ts`.
 
@@ -171,7 +169,7 @@ AppState {
 
 ### 2.2 Extension Host (claraity-vscode/src/)
 
-**Entry**: `extension.ts:activate()` (line 24, 501 lines total)
+**Entry**: `extension.ts:activate()`
 
 **Activation sequence** (stdio mode):
 ```
@@ -179,27 +177,26 @@ activate()
   -> resolveLaunchConfig()     // python-env.ts: detect dev/installed/bundled
   -> new StdioConnection()     // stdio-connection.ts: subprocess + TCP
   -> new ClarAItySidebarProvider()  // sidebar-provider.ts: webview provider
-  -> wireConnection()          // extension.ts:102: attach event handlers
+  -> wireConnection()          // extension.ts: attach event handlers
   -> stdioConn.connect()       // spawn process, create TCP listener
 ```
 
 **Key Files**:
 
-| File | Lines | Purpose |
-|------|-------|---------|
-| `extension.ts` | 501 | Activation, commands (14), lifecycle, wireConnection() |
-| `sidebar-provider.ts` | 1900+ | WebviewViewProvider, message routing, diff editor, terminal queue |
-| `stdio-connection.ts` | 292 | Spawn Python process, stdin write, TCP read |
-| `jsonrpc.ts` | 48 | JSON-RPC 2.0 envelope (stdio only) |
-| `types.ts` | 380 | All wire protocol type definitions |
-| `server-manager.ts` | 219 | Python server spawn + health poll (WebSocket mode) |
-| `python-env.ts` | 200+ | Python/package detection + auto-upgrade |
-| `code-lens-provider.ts` | 100 | Inline Accept/Reject/View Diff at top of modified files |
-| `file-decoration-provider.ts` | 62 | "AI" badge on agent-modified files |
-| `undo-manager.ts` | 156 | File snapshot checkpoints (max 10), per-turn undo |
-| `workspace-detector.ts` | 200+ | Auto-detect language, framework, test runner |
+| File | Purpose |
+|------|---------|
+| `extension.ts` | Activation, commands (14), lifecycle, wireConnection() |
+| `sidebar-provider.ts` | WebviewViewProvider, message routing, diff editor, terminal queue |
+| `stdio-connection.ts` | Spawn Python process, stdin write, TCP read |
+| `jsonrpc.ts` | JSON-RPC 2.0 envelope (stdio only) |
+| `types.ts` | All wire protocol type definitions |
+| `python-env.ts` | Python/package detection + auto-upgrade |
+| `code-lens-provider.ts` | Inline Accept/Reject/View Diff at top of modified files |
+| `file-decoration-provider.ts` | "AI" badge on agent-modified files |
+| `undo-manager.ts` | File snapshot checkpoints (max 10), per-turn undo |
+| `workspace-detector.ts` | Auto-detect language, framework, test runner |
 
-**wireConnection()** (line 102-187) — the central nervous system:
+**wireConnection()** -- the central nervous system:
 ```
 conn.onMessage(msg):
   stream_start     -> undoManager.beginCheckpoint()
@@ -214,9 +211,9 @@ conn.onMessage(msg):
   session_info     -> clear all state (decorations, codeLens, undo)
 ```
 
-**Diff Editor** (sidebar-provider.ts:592-706): Uses virtual document content provider (`claraity-diff:` URI scheme). No temp files — content stored in memory, freed on approval/rejection.
+**Diff Editor**: Uses virtual document content provider (`claraity-diff:` URI scheme). No temp files -- content stored in memory, freed on approval/rejection.
 
-**Terminal Queue** (sidebar-provider.ts:60-235): Sequential command execution in persistent "[ClarAIty] Commands" terminal. Wraps commands with exit code detection, sends results back to agent.
+**Terminal Queue**: Sequential command execution in persistent "[ClarAIty] Commands" terminal. Wraps commands with exit code detection, sends results back to agent.
 
 **Secret Management**: API keys stored in VS Code `SecretStorage` (never written to config files). Injected via environment variables when spawning Python process.
 
@@ -228,7 +225,7 @@ conn.onMessage(msg):
 
 **Why TCP instead of stdout?** Windows libuv bug: stdout pipe `data` events don't fire reliably in VS Code Extension Host. TCP sockets use a different libuv code path that works.
 
-**StdioConnection.connect()** (stdio-connection.ts:113-223):
+**StdioConnection.connect()**:
 ```
 1. Create TCP server on random port (OS assigns)
 2. Resolve agent binary: bundled exe -> python -m src.server
@@ -240,7 +237,7 @@ conn.onMessage(msg):
 6. On process.exit: fire onDisconnected
 ```
 
-**JSON-RPC Envelope** (jsonrpc.ts, 48 lines):
+**JSON-RPC Envelope** (jsonrpc.ts):
 ```
 Internal: { type: "chat_message", content: "..." }
    -> wrapNotification()
@@ -253,7 +250,7 @@ Internal: { type: "chat_message", content: "..." }
 
 ### 2.4 Python Stdio Server (src/server/)
 
-**Entry**: `__main__.py` -> `run_stdio_server()` in `stdio_server.py` (1081 lines)
+**Entry**: `__main__.py` -> `run_stdio_server()` in `stdio_server.py`
 
 **StdioProtocol** extends `UIProtocol` (from `src/core/protocol.py`).
 
@@ -269,7 +266,7 @@ Background Thread (_stdin_reader_thread)
   |-- call_soon_threadsafe()  posts to _stdin_queue
 ```
 
-**Message dispatch** (receive_loop, lines 256-361):
+**Message dispatch** (receive_loop):
 
 | Message Type | Handler | Destination |
 |-------------|---------|-------------|
@@ -280,23 +277,23 @@ Background Thread (_stdin_reader_thread)
 | `get_jira_profiles` / `save_jira_config` / etc. | -> Jira handlers | Direct response |
 | Other (approval, interrupt, pause, clarify, plan) | -> `deserialize_action()` -> `submit_action()` | UIProtocol future resolution |
 
-**Streaming response flow** (lines 1043-1070):
+**Streaming response flow**:
 ```python
 async for event in agent.stream_response(user_input=content, ui=protocol, attachments=...):
     await protocol.send_event(event)  # serialize_event() -> wrap_notification() -> TCP
 ```
 
-**Hot-swap LLM config** (lines 382-405): After `save_config`, if successful, calls `agent.reconfigure_llm(cfg, api_key)` to switch model/backend without restart.
+**Hot-swap LLM config**: After `save_config`, if successful, calls `agent.reconfigure_llm(cfg, api_key)` to switch model/backend without restart.
 
-**Serialization** (serializers.py, 320 lines): Pure functions converting UIEvents and StoreNotifications to JSON. Maps class names to wire types (e.g., `StreamStart` -> `"stream_start"`, `TextDelta` -> `"text_delta"`). Handles tool state, messages, interactive events (clarify, plan approval), and subagent lifecycle.
+**Serialization** (serializers.py): Pure functions converting UIEvents and StoreNotifications to JSON. Maps class names to wire types (e.g., `StreamStart` -> `"stream_start"`, `TextDelta` -> `"text_delta"`). Handles tool state, messages, interactive events (clarify, plan approval), and subagent lifecycle.
 
 ---
 
 ### 2.5 Agent Core (src/core/)
 
-**CodingAgent** (`agent.py`, 3,078 lines) — the orchestrator.
+**CodingAgent** (`agent.py`) -- the orchestrator.
 
-**stream_response()** (line 1170) — the main loop:
+**`stream_response()`** -- the main loop:
 
 ```
 User Input
@@ -323,8 +320,8 @@ User Input
         -> If NEEDS_APPROVAL: wait_for_approval() via UIProtocol
 
       Phase B: EXECUTION
-        B1 (serial): Special tools (clarify, plan_approval) — pause for UI
-        B2 (parallel): Normal tools — asyncio.gather() for independence
+        B1 (serial): Special tools (clarify, plan_approval) -- pause for UI
+        B2 (parallel): Normal tools -- asyncio.gather() for independence
 
       Phase C: MERGE
         -> build_assistant_context_message() [tool_calls + content]
@@ -341,21 +338,21 @@ User Input
 
 **Supporting modules**:
 
-| Module | Lines | Purpose |
-|--------|-------|---------|
-| `tool_gating.py` | 350+ | 4-layer permission checks: repeat -> plan -> director -> approval |
-| `special_tool_handlers.py` | 417 | Async handlers that pause for UI interaction |
-| `stream_phases.py` | 174 | Pure functions for context assembly (no I/O) |
-| `tool_loop_state.py` | 87 | Dataclass: MAX_TOOL_CALLS=200, MAX_ITERATIONS=50, budgets |
-| `error_recovery.py` | 374 | SHA256 repeat detection, per-error-type budgets, approach history |
-| `tool_metadata.py` | 94 | Shared metadata builder (agent + subagent parity) |
-| `context_builder.py` | 469 | Token-budgeted context assembly with pressure levels |
-| `protocol.py` | 300+ | UIProtocol: bidirectional agent<->UI communication |
-| `events.py` | 300+ | UIEvent types: StreamStart, TextDelta, ToolCallStart, etc. |
-| `permission_mode.py` | 61 | NORMAL / AUTO / PLAN modes |
-| `plan_mode.py` | 400+ | Plan-then-execute workflow with SHA256 plan hash |
+| Module | Purpose |
+|--------|---------|
+| `tool_gating.py` | 4-layer permission checks: repeat -> plan -> director -> approval |
+| `special_tool_handlers.py` | Async handlers that pause for UI interaction |
+| `stream_phases.py` | Pure functions for context assembly (no I/O) |
+| `tool_loop_state.py` | Dataclass: MAX_TOOL_CALLS=200, MAX_ITERATIONS=50, budgets |
+| `error_recovery.py` | SHA256 repeat detection, per-error-type budgets, approach history |
+| `tool_metadata.py` | Shared metadata builder (agent + subagent parity) |
+| `context_builder.py` | Token-budgeted context assembly with pressure levels |
+| `protocol.py` | UIProtocol: bidirectional agent<->UI communication |
+| `events.py` | UIEvent types: StreamStart, TextDelta, ToolCallStart, etc. |
+| `permission_mode.py` | NORMAL / AUTO / PLAN modes |
+| `plan_mode.py` | Plan-then-execute workflow with SHA256 plan hash |
 
-**UIProtocol** — the bidirectional contract:
+**UIProtocol** -- the bidirectional contract:
 ```
 Agent -> UI:  yield UIEvent (StreamStart, TextDelta, ToolCallStart, ErrorEvent, etc.)
 UI -> Agent:  submit_action(UserAction)
@@ -376,7 +373,7 @@ UI -> Agent:  submit_action(UserAction)
 
 ### 2.6 Tool System (src/tools/)
 
-**ToolExecutor** manages registry of 25+ tools with timeout configuration:
+**ToolExecutor** manages registry of 30+ tools with timeout configuration:
 
 ```python
 DEFAULT_TIMEOUT = 120s
@@ -389,30 +386,30 @@ OVERRIDES = {
 }
 ```
 
-**File Operations** (`file_operations.py`, 400+ lines):
+**File Operations** (`file_operations.py`):
 - `ReadFileTool`: Streaming reads, line ranges, 2000-char line truncation, max 1000 lines default
 - `WriteFileTool`: Create only, parent dir creation
 - `EditFileTool`: Exact text find/replace, whitespace-sensitive
 - `AppendToFileTool`: Append or create, newline handling
 - Security: `validate_path_security()`, workspace boundary enforcement
 
-**Delegation** (`delegation.py`, 400+ lines):
+**Delegation** (`delegation.py`):
 - Subprocess-based subagent execution with JSON-line IPC
 - `MAX_DELEGATION_DEPTH = 2` (prevents infinite recursion)
 - Events: registered -> notification (tool state, messages) -> done
 - SubagentBridge relays events to VS Code via protocol
 
 **Subagent System** (src/subagents/):
-- `SubAgent` (1,174 lines): Independent context, own MessageStore, configurable LLM
-- `Runner` (393 lines): Subprocess entry point, bootstraps from stdin JSON
-- `Manager` (495 lines): Discovery from `.claraity/subagents/`, config loading
-- Tool subset: file ops, search, LSP, commands — no task tools, plan mode, nested delegation
+- `SubAgent`: Independent context, own MessageStore, configurable LLM
+- `Runner`: Subprocess entry point, bootstraps from stdin JSON
+- `Manager`: Discovery from `.claraity/subagents/`, config loading
+- Tool subset: file ops, search, LSP, commands -- no task tools, plan mode, nested delegation
 
 ---
 
 ### 2.7 LLM Backend (src/llm/)
 
-**Abstract interface** (`base.py`, 372 lines):
+**Abstract interface** (`base.py`):
 
 ```python
 class LLMBackend(ABC):
@@ -423,23 +420,23 @@ class LLMBackend(ABC):
     def list_models() -> list[str]
 ```
 
-**Key design**: `ProviderDelta` is the **canonical streaming contract**. All backends must emit `ProviderDelta` objects — providers MUST NOT parse markdown/code fences. The streaming pipeline downstream handles that.
+**Key design**: `ProviderDelta` is the **canonical streaming contract**. All backends must emit `ProviderDelta` objects -- providers MUST NOT parse markdown/code fences. The streaming pipeline downstream handles that.
 
 **Implementations**:
 
-| Backend | Lines | Features |
-|---------|-------|----------|
-| `OpenAIBackend` | 1600+ | OpenAI/Azure/Groq/DashScope/Together.ai, ThinkTagParser for `<think>` blocks |
-| `AnthropicBackend` | 1400+ | Native Claude API, extended thinking with signatures, prompt caching |
-| `OllamaBackend` | 193 | Local inference, model pull, approximate token counting |
+| Backend | Features |
+|---------|----------|
+| `OpenAIBackend` | OpenAI/Azure/Groq/DashScope/Together.ai, ThinkTagParser for `<think>` blocks |
+| `AnthropicBackend` | Native Claude API, extended thinking with signatures, prompt caching |
+| `OllamaBackend` | Local inference, model pull, approximate token counting |
 
-**FailureHandler** (813 lines):
+**FailureHandler**:
 - Exponential backoff: standard (2^n, cap 15s), rate limit (10s base, cap 30s)
 - Full jitter prevents thundering herd
 - Error classification: retryable (timeout, rate limit, 503) vs fatal (invalid key, context exceeded)
 - User feedback: countdown display for delays >= 10s
 
-**CredentialStore** (213 lines):
+**CredentialStore**:
 - Priority: keyring (OS credential store) -> config.yaml -> env var
 - Never silently drops credentials
 - VS Code extension injects via `CLARAITY_API_KEY` env var (highest priority)
@@ -448,23 +445,23 @@ class LLMBackend(ABC):
 
 ### 2.8 Memory & Context (src/memory/, src/core/context_builder.py)
 
-**MemoryManager** (1000+ lines) — **single writer** for all persistence:
+**MemoryManager** -- **single writer** for all persistence:
 
 ```
 Three Memory Layers:
-  WorkingMemory  — Recent conversation (LIFO, bounded, compaction via summarization)
-  EpisodicMemory — Compressed summaries of past episodes
-  ObservationStore — External storage for large tool outputs (pointer-based masking)
+  WorkingMemory  -- Recent conversation (LIFO, bounded, compaction via summarization)
+  EpisodicMemory -- Compressed summaries of past episodes
+  ObservationStore -- External storage for large tool outputs (pointer-based masking)
 ```
 
-**WorkingMemory compaction** (420 lines):
+**WorkingMemory compaction**:
 1. Keep system messages + last 2 messages always
 2. Group tool calls with their results (prevent orphaning)
 3. Evict oldest groups until under 90% budget
 4. Generate summary of evicted messages
 5. Store in `pending_continuation_summary` for next turn injection
 
-**ContextBuilder** (469 lines) — token-budgeted context assembly:
+**ContextBuilder** -- token-budgeted context assembly:
 
 ```
 Budget Allocation:
@@ -475,17 +472,17 @@ Budget Allocation:
   Buffer:           15%
 
 Pressure Levels:
-  GREEN  (<60%)  — plenty of headroom
-  YELLOW (60-80%) — warning in logs
-  ORANGE (80-90%) — consider compaction
-  RED    (>90%)  — critical, compaction triggered
+  GREEN  (<60%)  -- plenty of headroom
+  YELLOW (60-80%) -- warning in logs
+  ORANGE (80-90%) -- consider compaction
+  RED    (>90%)  -- critical, compaction triggered
 ```
 
 ---
 
 ### 2.9 Persistence (src/session/)
 
-**MessageStore** (400+ lines) — in-memory **projection** (not ledger):
+**MessageStore** -- in-memory **projection** (not ledger):
 
 ```
 JSONL file = source of truth (ledger)
@@ -498,9 +495,9 @@ MessageStore = derived view with indexes:
   _clarify_*:       call_id -> uuid          (interactive flow)
 ```
 
-**v2.1 Innovation**: Assistant messages collapsed by `stream_id` — multiple streaming updates to same message resolve to latest version. Prevents duplicates.
+**v2.1 Innovation**: Assistant messages collapsed by `stream_id` -- multiple streaming updates to same message resolve to latest version. Prevents duplicates.
 
-**SessionWriter** (150+ lines): Async JSONL writer with drain-on-close (up to 5s wait for pending writes). Binds to MessageStore via reactive subscription.
+**SessionWriter**: Async JSONL writer with drain-on-close (up to 5s wait for pending writes). Binds to MessageStore via reactive subscription.
 
 **StoreEvents**: MESSAGE_ADDED, MESSAGE_UPDATED, MESSAGE_FINALIZED, TOOL_STATE_UPDATED, BULK_LOAD_COMPLETE
 
@@ -520,7 +517,7 @@ structlog.get_logger()
         |-> SQLiteLogHandler (.claraity/metrics.db)
 ```
 
-**Context propagation**: `ContextVar` for run_id, session_id, stream_id, request_id, component, operation — async-safe across await boundaries.
+**Context propagation**: `ContextVar` for run_id, session_id, stream_id, request_id, component, operation -- async-safe across await boundaries.
 
 **Redaction**: Automatic pattern-based redaction of API keys (sk-*, Bearer, AKIA), database URIs, generic tokens. REDACT_MAX_LENGTH=500 for long strings.
 
@@ -544,7 +541,7 @@ sequenceDiagram
     participant MS as MessageStore
 
     WV->>EH: postMessage({type: "chatMessage", content, images})
-    EH->>EH: sendChatWithAttachments() — prepend projectContext, read files, base64 images
+    EH->>EH: sendChatWithAttachments() -- prepend projectContext, read files, base64 images
     EH->>SP: stdin: {type: "chat_message", content, images} (JSON-RPC wrapped)
     SP->>SP: receive_loop() -> _chat_queue.put()
     SP->>AG: agent.stream_response(user_input, ui=protocol, attachments)
@@ -670,59 +667,7 @@ stateDiagram-v2
 
 ---
 
-## 5. Dead Code, Duplication & Architectural Issues
-
-### 5.1 Dead Code
-
-| Issue | File | Impact |
-|-------|------|--------|
-| Unused imports `StreamEnd, StreamStart` | `src/server/app.py:22-23` | LOW |
-| `MockLanguageServer` class never instantiated | `src/code_intelligence/lsp_client_manager.py:957` | MEDIUM |
-| `_run_vitest()` and `_run_cargo()` stubbed, not implemented | `src/testing/test_runner.py` | LOW |
-
-### 5.2 Duplication
-
-| Issue | Files | Impact | Fix |
-|-------|-------|--------|-----|
-| **Duplicate StreamingState classes** | `core/streaming/state.py:40` vs `ui/store_adapter.py:67` | **HIGH** — two independent state machines for one concept | Use core version as canonical, remove from store_adapter |
-| Subagent name list hardcoded 3x | `ui/llm_config_screen.py:153`, `server/config_handler.py:14`, config_loader | MEDIUM | Extract to shared constant |
-| Error response formatting repeated 10+ times | `server/ws_protocol.py` (throughout) | MEDIUM | Extract `send_error()` helper |
-| Token counting re-implemented per backend | `ollama_backend.py`, `working_memory.py`, `context_builder.py` | MEDIUM | Shared TokenCounter utility |
-
-### 5.3 God Classes
-
-| Class | File | Lines | Responsibilities | Recommendation |
-|-------|------|-------|-----------------|----------------|
-| `WebSocketProtocol` | `ws_protocol.py` | 658 | Event serialization + action deserialization + chat + sessions + config + Jira + mode switching | Extract JiraHandler, ConfigHandler, SessionHandler |
-| `StdioProtocol` | `stdio_server.py` | 925 | Same as WebSocket + TCP management | Same extraction pattern |
-| `ClarAItySidebarProvider` | `sidebar-provider.ts` | 1900+ | Webview provider + message routing + diff editor + terminal + file picker | Extract DiffManager, TerminalQueue (already partial) |
-
-### 5.4 Architectural Smells
-
-| Smell | Location | Impact | Recommendation |
-|-------|----------|--------|----------------|
-| Circular import chain | `core.__init__ -> agent -> llm -> session -> events -> core.__init__` | LOW (mitigated with lazy `__getattr__`) | Move events.py outside core |
-| UIProtocol has 17+ methods | `protocol.py` | MEDIUM — all implementations tightly coupled | Split into ApprovalHandler, PauseHandler, ActionQueue interfaces |
-| No automatic compaction trigger | `working_memory.py` | MEDIUM — memory bloats if orchestrator forgets | Add token threshold check in add_message() |
-| Inconsistent state patterns | Various dataclasses vs implicit state | LOW | Document standard pattern |
-
-### 5.5 What I Would Do Differently as Lead Architect
-
-1. **Protocol multiplexing**: Both StdioProtocol and WebSocketProtocol duplicate 80% of their message handling logic. I'd extract a `MessageRouter` class that both protocols delegate to, keeping protocol-specific code limited to transport mechanics (TCP vs WebSocket read/write).
-
-2. **Command pattern for message dispatch**: The 175-line `receive_loop()` match statement should be a command registry. Each message type gets a registered handler class. This makes the system open for extension without modifying the core loop.
-
-3. **Streaming pipeline as first-class abstraction**: The `StreamingState` duplication signals a missing abstraction. I'd create a unified `StreamingPipeline` that both server serialization and TUI rendering consume. One pipeline, multiple consumers.
-
-4. **Tool system extensibility**: Tools are currently registered in a monolithic `_register_tools()` method. I'd use a plugin/registry pattern with auto-discovery (decorators or entry points), making it trivial to add tools without touching agent.py.
-
-5. **Context builder as pipeline**: Context assembly is procedural. I'd model it as a pipeline of `ContextStage` objects (system prompt stage, file refs stage, memory stage, etc.) that can be composed, reordered, and individually tested.
-
-6. **Separate wire protocol from domain events**: The current system mixes UIEvent types (domain) with their serialization (wire). I'd have clean domain events that are protocol-agnostic, with serializers being a separate concern that can be swapped (e.g., MessagePack for performance).
-
----
-
-## 6. Key Invariants & Constraints
+## 5. Key Invariants & Constraints
 
 These rules MUST be maintained for system correctness:
 
@@ -734,106 +679,12 @@ These rules MUST be maintained for system correctness:
 6. **Agent/Subagent parity**: Both must use `build_tool_metadata()`. Divergence breaks VS Code rendering.
 7. **Interrupt lifecycle**: `_interrupted` must be cleared after "Continue" on pause. Violation causes infinite pause loops.
 8. **stream_id collapse**: Assistant messages with same stream_id are merged (latest wins). Multiple consumers depend on this.
-9. **JSON-RPC envelope**: Only stdio transport uses JSON-RPC wrapping. WebSocket sends raw typed messages.
+9. **JSON-RPC envelope**: Stdio transport uses JSON-RPC wrapping.
 10. **Secret isolation**: API keys NEVER in config files. Keyring or env vars only. VS Code SecretStorage on the extension side.
 
 ---
 
-## 7. File Manifest
-
-### VS Code Extension (claraity-vscode/)
-```
-src/
-  extension.ts              501 lines  Entry point, commands, lifecycle
-  sidebar-provider.ts      1900 lines  WebviewViewProvider, routing, diff
-  stdio-connection.ts       292 lines  Subprocess + TCP transport
-  jsonrpc.ts                 48 lines  JSON-RPC 2.0 envelope
-  types.ts                  380 lines  All wire protocol types
-  agent-connection.ts       168 lines  WebSocket client (alt transport)
-  server-manager.ts         219 lines  Server health polling
-  python-env.ts             200 lines  Python/package detection
-  code-lens-provider.ts     100 lines  Accept/Reject/Diff CodeLens
-  file-decoration-provider.ts 62 lines  "AI" file badges
-  undo-manager.ts           156 lines  File snapshot checkpoints
-  workspace-detector.ts     200 lines  Project context detection
-
-webview-ui/src/
-  App.tsx                   250 lines  Root component
-  state/reducer.ts         1215 lines  Central state machine
-  hooks/useVSCode.ts         68 lines  postMessage bridge
-  components/ (22 files)   ~2500 lines  All React components
-  utils/ (3 files)          ~100 lines  Markdown, tools, text helpers
-  types.ts                  187 lines  Webview message types
-  index.css                 650 lines  Design system (VS Code tokens)
-```
-
-### Python Server (src/server/)
-```
-__main__.py                 155 lines  Entry point, mode dispatch
-stdio_server.py            1081 lines  StdioProtocol + main loop
-jsonrpc.py                   43 lines  JSON-RPC 2.0 utilities
-serializers.py              320 lines  UIEvent/Store -> JSON
-config_handler.py           253 lines  Config CRUD
-subagent_bridge.py          103 lines  Subagent event relay
-app.py                      666 lines  HTTP+WS server (reference)
-ws_protocol.py              650 lines  WebSocket protocol (reference)
-```
-
-### Agent Core (src/core/)
-```
-agent.py                   3078 lines  CodingAgent orchestrator
-tool_gating.py              350 lines  4-layer permission checks
-special_tool_handlers.py    417 lines  UI-pausing handlers
-stream_phases.py            174 lines  Context assembly helpers
-tool_loop_state.py           87 lines  Loop state dataclass
-error_recovery.py           374 lines  Repeat prevention + budgets
-tool_metadata.py             94 lines  Shared metadata builder
-context_builder.py          469 lines  Token-budgeted context
-protocol.py                 300 lines  UIProtocol (agent<->UI)
-events.py                   300 lines  UIEvent types
-permission_mode.py           61 lines  NORMAL/AUTO/PLAN
-plan_mode.py                400 lines  Plan-then-execute workflow
-```
-
-### LLM Backend (src/llm/)
-```
-base.py                     372 lines  Abstract base + ProviderDelta
-openai_backend.py          1600 lines  OpenAI-compatible APIs
-anthropic_backend.py       1400 lines  Native Claude API
-ollama_backend.py           193 lines  Local Ollama inference
-failure_handler.py          813 lines  Retry + exponential backoff
-credential_store.py         213 lines  Keyring + env fallback
-config_loader.py            476 lines  Layered configuration
-cache_tracker.py            109 lines  Prompt cache metrics
-```
-
-### Memory & Persistence (src/memory/, src/session/)
-```
-memory_manager.py          1000 lines  Single writer orchestrator
-working_memory.py           420 lines  Recent context + compaction
-episodic_memory.py          100 lines  Compressed history
-observation_store.py        150 lines  External tool output storage
-memory_store.py             400 lines  In-memory projection + indexes
-session_manager.py          150 lines  Session lifecycle
-scanner.py                  100 lines  Session discovery
-writer.py                   150 lines  Async JSONL with drain-on-close
-message.py                  200 lines  Unified message model (v2.1)
-```
-
-### Tools & Subagents (src/tools/, src/subagents/)
-```
-file_operations.py          400 lines  read/write/edit/append/list
-delegation.py               400 lines  Subprocess IPC
-knowledge_tools.py           ~  lines  KB manifest tools
-tool_schemas.py              ~  lines  Tool definitions
-subagent.py                1174 lines  Lightweight agent
-runner.py                   393 lines  Subprocess entry point
-manager.py                  495 lines  Discovery + lifecycle
-```
-
----
-
-## 8. How to Build a Coding Agent Like This
+## 6. How to Build a Coding Agent Like This
 
 ### Architecture Principles (derived from ClarAIty)
 
@@ -868,7 +719,7 @@ Phase 3: Safety
 
 Phase 4: UI Integration
   12. Event serialization (domain events -> wire format)
-  13. Transport layer (stdio/WebSocket/etc)
+  13. Transport layer (stdio + TCP)
   14. VS Code extension (webview provider, diff editor, undo)
   15. React webview (state machine, timeline rendering)
 

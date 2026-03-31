@@ -2,7 +2,7 @@
   "name": "claraity-vscode",
   "displayName": "ClarAIty",
   "description": "AI Coding Agent - VS Code Integration",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "publisher": "VijayJayanandan",
   "license": "MIT",
   "author": {
@@ -43,7 +43,7 @@
       "activitybar": [
         {
           "id": "claraity",
-          "title": "ClarAIty",
+          "title": "ClarAIty Code",
           "icon": "$(sparkle)"
         }
       ]
@@ -53,14 +53,15 @@
         {
           "type": "webview",
           "id": "claraity.chatView",
-          "name": "Chat"
+          "name": ""
         }
       ]
     },
     "commands": [
       {
         "command": "claraity.newChat",
-        "title": "ClarAIty: New Chat"
+        "title": "ClarAIty: New Chat",
+        "icon": "$(add)"
       },
       {
         "command": "claraity.interrupt",
@@ -68,7 +69,23 @@
       },
       {
         "command": "claraity.sessionHistory",
-        "title": "ClarAIty: Session History"
+        "title": "ClarAIty: Session History",
+        "icon": "$(history)"
+      },
+      {
+        "command": "claraity.showSubagents",
+        "title": "ClarAIty: Subagents",
+        "icon": "$(robot)"
+      },
+      {
+        "command": "claraity.showMcp",
+        "title": "ClarAIty: MCP Servers",
+        "icon": "$(extensions)"
+      },
+      {
+        "command": "claraity.showConfig",
+        "title": "ClarAIty: Settings",
+        "icon": "$(gear)"
       },
       {
         "command": "claraity.acceptChange",
@@ -114,6 +131,33 @@
       }
     ],
     "menus": {
+      "view/title": [
+        {
+          "command": "claraity.newChat",
+          "when": "view == claraity.chatView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "claraity.sessionHistory",
+          "when": "view == claraity.chatView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "claraity.showSubagents",
+          "when": "view == claraity.chatView",
+          "group": "navigation@3"
+        },
+        {
+          "command": "claraity.showMcp",
+          "when": "view == claraity.chatView",
+          "group": "navigation@4"
+        },
+        {
+          "command": "claraity.showConfig",
+          "when": "view == claraity.chatView",
+          "group": "navigation@5"
+        }
+      ],
       "editor/context": [
         {
           "submenu": "claraity.editorContext",

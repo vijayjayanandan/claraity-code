@@ -30,12 +30,12 @@ limits:
 auto_approve:
   read: true
   edit: false
-  execute: true
+  execute: false
   browser: false
   knowledge_update: false
   subagent: false
 prompt_enrichment:
-  model: claude-haiku-4-5-20251001
+  model: gpt-4.1-mini-canada
   system_prompt: 'You are a prompt enricher for a coding agent.
 
 

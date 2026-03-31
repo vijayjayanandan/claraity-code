@@ -199,6 +199,15 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('claraity.sessionHistory', () => {
             sidebarProvider.showSessionHistory();
         }),
+        vscode.commands.registerCommand('claraity.showConfig', () => {
+            sidebarProvider.showConfig();
+        }),
+        vscode.commands.registerCommand('claraity.showMcp', () => {
+            sidebarProvider.showMcp();
+        }),
+        vscode.commands.registerCommand('claraity.showSubagents', () => {
+            sidebarProvider.showSubagents();
+        }),
         vscode.commands.registerCommand('claraity.acceptChange', (callId: string) => {
             connection?.send({
                 type: 'approval_result',

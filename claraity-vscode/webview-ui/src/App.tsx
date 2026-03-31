@@ -14,7 +14,7 @@ import { ChatContext, type ChatContextValue } from "./state/ChatContext";
 import { setCurrentSessionId } from "./state/currentContext";
 import type { ExtensionMessage, FileAttachment, ImageAttachment } from "./types";
 
-import { StatusBar } from "./components/StatusBar";
+// StatusBar removed — icons now live in VS Code native view/title bar
 import { ContextBar } from "./components/ContextBar";
 import { ChatHistory } from "./components/ChatHistory";
 import { TodoPanel } from "./components/TodoPanel";
@@ -94,6 +94,19 @@ export function App() {
       case "showSessionHistory":
         postMessage({ type: "listSessions" });
         dispatch({ type: "SET_ACTIVE_PANEL", panel: "sessions" });
+        break;
+
+      case "showConfig":
+        dispatch({ type: "SET_ACTIVE_PANEL", panel: "config" });
+        break;
+
+      case "showMcp":
+        dispatch({ type: "SET_ACTIVE_PANEL", panel: "mcp" });
+        break;
+
+      case "showSubagents":
+        postMessage({ type: "listSubagents" });
+        dispatch({ type: "SET_ACTIVE_PANEL", panel: "subagents" });
         break;
 
       case "insertAndSend":
@@ -299,20 +312,6 @@ export function App() {
   // Main chat view
   return (
     <div className="app">
-      <StatusBar
-        onNewChat={() => postMessage({ type: "newSession" })}
-        onShowHistory={() => {
-          postMessage({ type: "listSessions" });
-          dispatch({ type: "SET_ACTIVE_PANEL", panel: "sessions" });
-        }}
-        onShowConfig={() => dispatch({ type: "SET_ACTIVE_PANEL", panel: "config" })}
-        onShowMcp={() => dispatch({ type: "SET_ACTIVE_PANEL", panel: "mcp" })}
-        onShowSubagents={() => {
-          postMessage({ type: "listSubagents" });
-          dispatch({ type: "SET_ACTIVE_PANEL", panel: "subagents" });
-        }}
-      />
-
       {state.contextLimit > 0 && (
         <ContextBar
           used={state.contextUsed}

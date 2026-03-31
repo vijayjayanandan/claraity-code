@@ -984,6 +984,18 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
         this.postToWebview({ type: 'showSessionHistory' });
     }
 
+    showConfig(): void {
+        this.postToWebview({ type: 'showConfig' });
+    }
+
+    showMcp(): void {
+        this.postToWebview({ type: 'showMcp' });
+    }
+
+    showSubagents(): void {
+        this.postToWebview({ type: 'showSubagents' });
+    }
+
 
     postToWebview(message: ExtensionMessage): void {
         this.view?.webview.postMessage(message);
