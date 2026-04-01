@@ -19,10 +19,10 @@ class CheckBackgroundTaskTool(Tool):
         super().__init__(
             name="check_background_task",
             description=(
-                "Check status or get full output of a background task. "
-                "Returns status, exit code, stdout, and stderr. "
-                "You will be automatically notified when background tasks complete, "
-                "then use this tool to retrieve the full output."
+                "Check the status of a background task that is currently still running. "
+                "Only call this for an early mid-run status check. "
+                "DO NOT call this after receiving a [BACKGROUND TASK UPDATE] notification — "
+                "the full output is already included in that notification."
             ),
         )
         self._registry = registry
@@ -65,16 +65,7 @@ class CheckBackgroundTaskTool(Tool):
                     {
                         "task_id": info.task_id,
                         "status": "running",
-                        "command": info.command,
-                        "description": info.description,
                         "elapsed_seconds": round(elapsed, 1),
-                        "instruction": (
-                            "Task is still running. "
-                            "DO NOT call check_background_task again. "
-                            "You will receive an automatic [BACKGROUND TASK UPDATE] "
-                            "notification when this task completes. "
-                            "Continue with other work or end your response."
-                        ),
                     },
                     indent=2,
                 ),

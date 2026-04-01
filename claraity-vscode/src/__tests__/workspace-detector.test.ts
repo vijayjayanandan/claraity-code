@@ -19,7 +19,7 @@ import { detectProjectContext, formatProjectContext, ProjectContext } from '../w
 
 // Access mocks
 const fsMock = vscode.workspace.fs;
-const findFilesMock = vscode.workspace.findFiles as jest.Mock;
+const findFilesMock = vscode.workspace.findFiles as vi.Mock;
 
 /** Helper: mock findFiles to return a match for specific config files. */
 function mockConfigFiles(files: string[]): void {
@@ -35,7 +35,7 @@ function mockConfigFiles(files: string[]): void {
 
 /** Helper: mock readFile for package.json with given content. */
 function mockPackageJson(content: Record<string, any>): void {
-    (fsMock.readFile as jest.Mock).mockImplementation((uri: any) => {
+    (fsMock.readFile as vi.Mock).mockImplementation((uri: any) => {
         const path = uri.fsPath || uri.path || '';
         if (path.includes('package.json')) {
             return Promise.resolve(Buffer.from(JSON.stringify(content)));
@@ -49,7 +49,7 @@ function mockPackageJson(content: Record<string, any>): void {
 
 /** Helper: mock readFile for pyproject.toml. */
 function mockPyprojectToml(content: string): void {
-    (fsMock.readFile as jest.Mock).mockImplementation((uri: any) => {
+    (fsMock.readFile as vi.Mock).mockImplementation((uri: any) => {
         const path = uri.fsPath || uri.path || '';
         if (path.includes('pyproject.toml')) {
             return Promise.resolve(Buffer.from(content));
@@ -61,14 +61,14 @@ function mockPyprojectToml(content: string): void {
 describe('workspace-detector', () => {
     beforeEach(() => {
         findFilesMock.mockReset();
-        (fsMock.readFile as jest.Mock).mockReset();
-        (fsMock.readDirectory as jest.Mock)?.mockReset?.();
+        (fsMock.readFile as vi.Mock).mockReset();
+        (fsMock.readDirectory as vi.Mock)?.mockReset?.();
         // Default: no files found
         findFilesMock.mockResolvedValue([]);
-        (fsMock.readFile as jest.Mock).mockRejectedValue(new Error('Not found'));
+        (fsMock.readFile as vi.Mock).mockRejectedValue(new Error('Not found'));
         // Mock readDirectory for top-level dirs
         if (fsMock.readDirectory) {
-            (fsMock.readDirectory as jest.Mock).mockResolvedValue([
+            (fsMock.readDirectory as vi.Mock).mockResolvedValue([
                 ['src', 2], // FileType.Directory = 2
                 ['tests', 2],
                 ['docs', 2],

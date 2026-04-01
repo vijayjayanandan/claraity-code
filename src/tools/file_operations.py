@@ -710,7 +710,8 @@ class RunCommandTool(Tool):
                 f"Background task launched: {task_id}\n"
                 f"Command: {command}\n"
                 f"Active background tasks: {active}\n"
-                "You will be notified when it completes."
+                "You will receive a [BACKGROUND TASK UPDATE] notification with full output when done. "
+                "Do NOT call check_background_task — continue with other work."
             ),
         )
 

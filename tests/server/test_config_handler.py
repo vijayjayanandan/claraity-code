@@ -40,12 +40,12 @@ class TestGetConfigResponse:
         assert result["subagent_names"] == list(SUBAGENT_NAMES)
 
     @patch("src.llm.config_loader.load_llm_config")
-    def test_api_key_included(self, mock_load):
+    def test_api_key_not_exposed(self, mock_load):
         mock_load.return_value = _make_config(api_key="sk-secret")
         result = get_config_response("/fake/config.yaml")
 
         cfg = result["config"]
-        assert cfg["api_key"] == "sk-secret"
+        assert "api_key" not in cfg
         assert cfg["has_api_key"] is True
 
     @patch("src.llm.config_loader.load_llm_config")
@@ -131,19 +131,13 @@ class TestSaveConfigFromRequest:
         assert saved_cfg.subagents["code-reviewer"].model == "gpt-3.5-turbo"
         assert "test-writer" not in saved_cfg.subagents
 
-    @patch("src.llm.credential_store.save_api_key")
     @patch("src.llm.config_loader.save_llm_config", return_value=True)
-    def test_api_key_saved_when_provided(self, mock_save, mock_save_key):
+    def test_api_key_passed_through_not_saved_to_disk(self, mock_save):
         data = {"config": {"api_key": "sk-new-key"}}
-        save_config_from_request(data, "/fake/config.yaml")
-        mock_save_key.assert_called_once_with("sk-new-key")
-
-    @patch("src.llm.config_loader.save_llm_config", return_value=True)
-    def test_api_key_not_saved_when_empty(self, mock_save):
-        data = {"config": {"api_key": ""}}
-        with patch("src.llm.credential_store.save_api_key") as mock_save_key:
-            save_config_from_request(data, "/fake/config.yaml")
-            mock_save_key.assert_not_called()
+        result = save_config_from_request(data, "/fake/config.yaml")
+        # API key should be in the response for runtime use
+        assert result["_api_key"] == "sk-new-key"
+        # But not written to YAML (save_llm_config never receives it)
 
     @patch("src.llm.config_loader.save_llm_config", return_value=False)
     def test_save_failure(self, mock_save):

@@ -96,7 +96,7 @@ describe('ClarAItyFileDecorationProvider', () => {
             expect(decoration!.badge).toBe('AI');
             expect(decoration!.tooltip).toBe('Modified by ClarAIty');
             expect(decoration!.color).toBeInstanceOf(vscode.ThemeColor);
-            expect((decoration!.color as vscode.ThemeColor).id).toBe('charts.green');
+            expect((decoration!.color as vscode.ThemeColor).id).toBe('gitDecoration.addedResourceForeground');
         });
 
         test('returns undefined for an unmarked file', () => {

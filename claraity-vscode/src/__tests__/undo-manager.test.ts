@@ -26,12 +26,12 @@ describe('UndoManager', () => {
     beforeEach(() => {
         manager = new UndoManager();
         // Reset fs mock defaults
-        (fsMock.readFile as jest.Mock).mockReset();
-        (fsMock.writeFile as jest.Mock).mockReset();
-        (fsMock.delete as jest.Mock).mockReset();
-        (fsMock.readFile as jest.Mock).mockRejectedValue(new Error('File not found'));
-        (fsMock.writeFile as jest.Mock).mockResolvedValue(undefined);
-        (fsMock.delete as jest.Mock).mockResolvedValue(undefined);
+        (fsMock.readFile as vi.Mock).mockReset();
+        (fsMock.writeFile as vi.Mock).mockReset();
+        (fsMock.delete as vi.Mock).mockReset();
+        (fsMock.readFile as vi.Mock).mockRejectedValue(new Error('File not found'));
+        (fsMock.writeFile as vi.Mock).mockResolvedValue(undefined);
+        (fsMock.delete as vi.Mock).mockResolvedValue(undefined);
     });
 
     afterEach(() => {
@@ -51,7 +51,7 @@ describe('UndoManager', () => {
 
         test('successive checkpoints get incrementing turn IDs', async () => {
             const fileContent = new Uint8Array([72, 101, 108, 108, 111]);
-            (fsMock.readFile as jest.Mock).mockResolvedValue(fileContent);
+            (fsMock.readFile as vi.Mock).mockResolvedValue(fileContent);
 
             // Turn 1
             manager.beginCheckpoint();
@@ -69,7 +69,7 @@ describe('UndoManager', () => {
 
         test('replaces any uncommitted checkpoint', async () => {
             const fileContent = new Uint8Array([1, 2, 3]);
-            (fsMock.readFile as jest.Mock).mockResolvedValue(fileContent);
+            (fsMock.readFile as vi.Mock).mockResolvedValue(fileContent);
 
             manager.beginCheckpoint();
             await manager.snapshotFile('/workspace/a.ts');
@@ -92,7 +92,7 @@ describe('UndoManager', () => {
     describe('snapshotFile()', () => {
         test('reads file content and stores snapshot', async () => {
             const fileContent = new Uint8Array([72, 101, 108, 108, 111]);
-            (fsMock.readFile as jest.Mock).mockResolvedValue(fileContent);
+            (fsMock.readFile as vi.Mock).mockResolvedValue(fileContent);
 
             manager.beginCheckpoint();
             await manager.snapshotFile('/workspace/file.ts');
@@ -109,7 +109,7 @@ describe('UndoManager', () => {
         });
 
         test('stores null content for non-existent files (new file)', async () => {
-            (fsMock.readFile as jest.Mock).mockRejectedValue(new Error('File not found'));
+            (fsMock.readFile as vi.Mock).mockRejectedValue(new Error('File not found'));
 
             manager.beginCheckpoint();
             await manager.snapshotFile('/workspace/new-file.ts');
@@ -122,7 +122,7 @@ describe('UndoManager', () => {
 
         test('deduplicates snapshots for the same file in one turn', async () => {
             const fileContent = new Uint8Array([1, 2, 3]);
-            (fsMock.readFile as jest.Mock).mockResolvedValue(fileContent);
+            (fsMock.readFile as vi.Mock).mockResolvedValue(fileContent);
 
             manager.beginCheckpoint();
             await manager.snapshotFile('/workspace/file.ts');
@@ -134,7 +134,7 @@ describe('UndoManager', () => {
 
         test('normalizes backslash paths for deduplication', async () => {
             const fileContent = new Uint8Array([1, 2, 3]);
-            (fsMock.readFile as jest.Mock).mockResolvedValue(fileContent);
+            (fsMock.readFile as vi.Mock).mockResolvedValue(fileContent);
 
             manager.beginCheckpoint();
             await manager.snapshotFile('C:\\Users\\Dev\\file.ts');
@@ -147,7 +147,7 @@ describe('UndoManager', () => {
         test('snapshots multiple different files', async () => {
             const content1 = new Uint8Array([1]);
             const content2 = new Uint8Array([2]);
-            (fsMock.readFile as jest.Mock)
+            (fsMock.readFile as vi.Mock)
                 .mockResolvedValueOnce(content1)
                 .mockResolvedValueOnce(content2);
 
@@ -181,7 +181,7 @@ describe('UndoManager', () => {
 
         test('returns committed checkpoint with files', async () => {
             const fileContent = new Uint8Array([1, 2, 3]);
-            (fsMock.readFile as jest.Mock).mockResolvedValue(fileContent);
+            (fsMock.readFile as vi.Mock).mockResolvedValue(fileContent);
 
             manager.beginCheckpoint();
             await manager.snapshotFile('/workspace/file.ts');
@@ -193,22 +193,22 @@ describe('UndoManager', () => {
             expect(cp!.timestamp).toBeLessThanOrEqual(Date.now());
         });
 
-        test('trims history beyond MAX_HISTORY (10)', async () => {
+        test('trims history beyond MAX_HISTORY (50)', async () => {
             const fileContent = new Uint8Array([1]);
-            (fsMock.readFile as jest.Mock).mockResolvedValue(fileContent);
+            (fsMock.readFile as vi.Mock).mockResolvedValue(fileContent);
 
-            // Create 12 checkpoints
-            for (let i = 0; i < 12; i++) {
+            // Create 52 checkpoints (2 over the limit of 50)
+            for (let i = 0; i < 52; i++) {
                 manager.beginCheckpoint();
                 await manager.snapshotFile(`/workspace/file-${i}.ts`);
                 manager.commitCheckpoint();
             }
 
             const all = manager.getAllCheckpoints();
-            expect(all.length).toBe(10);
+            expect(all.length).toBe(50);
             // First two should have been trimmed
             expect(all[0].turnId).toBe('turn-3');
-            expect(all[9].turnId).toBe('turn-12');
+            expect(all[49].turnId).toBe('turn-52');
         });
     });
 
@@ -217,7 +217,7 @@ describe('UndoManager', () => {
     describe('undo()', () => {
         test('restores existing file to original content', async () => {
             const originalContent = new Uint8Array([1, 2, 3]);
-            (fsMock.readFile as jest.Mock).mockResolvedValue(originalContent);
+            (fsMock.readFile as vi.Mock).mockResolvedValue(originalContent);
 
             manager.beginCheckpoint();
             await manager.snapshotFile('/workspace/file.ts');
@@ -228,12 +228,12 @@ describe('UndoManager', () => {
             expect(restored).toEqual(['/workspace/file.ts']);
             expect(fsMock.writeFile).toHaveBeenCalledTimes(1);
             // Verify the content was written back
-            const [uri, content] = (fsMock.writeFile as jest.Mock).mock.calls[0];
+            const [uri, content] = (fsMock.writeFile as vi.Mock).mock.calls[0];
             expect(content).toEqual(originalContent);
         });
 
         test('deletes file that did not exist before', async () => {
-            (fsMock.readFile as jest.Mock).mockRejectedValue(new Error('File not found'));
+            (fsMock.readFile as vi.Mock).mockRejectedValue(new Error('File not found'));
 
             manager.beginCheckpoint();
             await manager.snapshotFile('/workspace/new-file.ts');
@@ -248,7 +248,7 @@ describe('UndoManager', () => {
         test('restores multiple files in a single checkpoint', async () => {
             const content1 = new Uint8Array([1]);
             const content2 = new Uint8Array([2]);
-            (fsMock.readFile as jest.Mock)
+            (fsMock.readFile as vi.Mock)
                 .mockResolvedValueOnce(content1)
                 .mockResolvedValueOnce(content2);
 
@@ -263,9 +263,9 @@ describe('UndoManager', () => {
             expect(fsMock.writeFile).toHaveBeenCalledTimes(2);
         });
 
-        test('removes the undone checkpoint and all after it', async () => {
+        test('removes the undone checkpoint from history', async () => {
             const fileContent = new Uint8Array([1]);
-            (fsMock.readFile as jest.Mock).mockResolvedValue(fileContent);
+            (fsMock.readFile as vi.Mock).mockResolvedValue(fileContent);
 
             // Create 3 checkpoints
             manager.beginCheckpoint();
@@ -282,12 +282,13 @@ describe('UndoManager', () => {
 
             expect(manager.getAllCheckpoints()).toHaveLength(3);
 
-            // Undo turn-2 — should also remove turn-3
+            // Undo turn-2 — removes only turn-2, leaving turn-1 and turn-3
             await manager.undo('turn-2');
 
             const remaining = manager.getAllCheckpoints();
-            expect(remaining).toHaveLength(1);
+            expect(remaining).toHaveLength(2);
             expect(remaining[0].turnId).toBe('turn-1');
+            expect(remaining[1].turnId).toBe('turn-3');
         });
 
         test('returns empty array for nonexistent turnId', async () => {
@@ -297,14 +298,14 @@ describe('UndoManager', () => {
 
         test('handles file restore errors gracefully', async () => {
             const fileContent = new Uint8Array([1, 2, 3]);
-            (fsMock.readFile as jest.Mock).mockResolvedValue(fileContent);
+            (fsMock.readFile as vi.Mock).mockResolvedValue(fileContent);
 
             manager.beginCheckpoint();
             await manager.snapshotFile('/workspace/file.ts');
             manager.commitCheckpoint();
 
             // Make writeFile fail
-            (fsMock.writeFile as jest.Mock).mockRejectedValue(new Error('Permission denied'));
+            (fsMock.writeFile as vi.Mock).mockRejectedValue(new Error('Permission denied'));
 
             const restored = await manager.undo('turn-1');
             // File was not successfully restored
@@ -321,7 +322,7 @@ describe('UndoManager', () => {
 
         test('getLastCheckpoint returns the most recent', async () => {
             const fileContent = new Uint8Array([1]);
-            (fsMock.readFile as jest.Mock).mockResolvedValue(fileContent);
+            (fsMock.readFile as vi.Mock).mockResolvedValue(fileContent);
 
             manager.beginCheckpoint();
             await manager.snapshotFile('/workspace/a.ts');
@@ -336,7 +337,7 @@ describe('UndoManager', () => {
 
         test('getAllCheckpoints returns a copy', async () => {
             const fileContent = new Uint8Array([1]);
-            (fsMock.readFile as jest.Mock).mockResolvedValue(fileContent);
+            (fsMock.readFile as vi.Mock).mockResolvedValue(fileContent);
 
             manager.beginCheckpoint();
             await manager.snapshotFile('/workspace/a.ts');
@@ -354,7 +355,7 @@ describe('UndoManager', () => {
     describe('clear() / dispose()', () => {
         test('clear removes all checkpoints', async () => {
             const fileContent = new Uint8Array([1]);
-            (fsMock.readFile as jest.Mock).mockResolvedValue(fileContent);
+            (fsMock.readFile as vi.Mock).mockResolvedValue(fileContent);
 
             manager.beginCheckpoint();
             await manager.snapshotFile('/workspace/a.ts');
@@ -368,7 +369,7 @@ describe('UndoManager', () => {
 
         test('clear resets turn counter', async () => {
             const fileContent = new Uint8Array([1]);
-            (fsMock.readFile as jest.Mock).mockResolvedValue(fileContent);
+            (fsMock.readFile as vi.Mock).mockResolvedValue(fileContent);
 
             manager.beginCheckpoint();
             await manager.snapshotFile('/workspace/a.ts');
@@ -385,7 +386,7 @@ describe('UndoManager', () => {
 
         test('dispose is an alias for clear', async () => {
             const fileContent = new Uint8Array([1]);
-            (fsMock.readFile as jest.Mock).mockResolvedValue(fileContent);
+            (fsMock.readFile as vi.Mock).mockResolvedValue(fileContent);
 
             manager.beginCheckpoint();
             await manager.snapshotFile('/workspace/a.ts');
@@ -398,7 +399,7 @@ describe('UndoManager', () => {
 
         test('clear cancels any active checkpoint', async () => {
             const fileContent = new Uint8Array([1]);
-            (fsMock.readFile as jest.Mock).mockResolvedValue(fileContent);
+            (fsMock.readFile as vi.Mock).mockResolvedValue(fileContent);
 
             manager.beginCheckpoint();
             await manager.snapshotFile('/workspace/a.ts');

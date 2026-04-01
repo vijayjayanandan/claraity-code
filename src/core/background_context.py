@@ -9,8 +9,10 @@ from typing import Any
 
 from src.core.background_tasks import BackgroundTaskInfo, BackgroundTaskStatus
 
-# Preview limit for stdout/stderr in the notification
-OUTPUT_PREVIEW_CHARS = 500
+# Output limit for stdout/stderr in the notification.
+# Matches the inline limit used by the stdio and TUI paths so the agent
+# always receives the same amount of output regardless of delivery path.
+OUTPUT_PREVIEW_CHARS = 4096
 
 
 def inject_background_task_completions(
@@ -50,12 +52,12 @@ def inject_background_task_completions(
         if output:
             preview = output[:OUTPUT_PREVIEW_CHARS]
             if len(output) > OUTPUT_PREVIEW_CHARS:
-                preview += f"\n... ({len(output) - OUTPUT_PREVIEW_CHARS} more chars, use check_background_task for full output)"
-            parts.append(f"Output preview:\n{preview}")
+                preview += f"\n... ({len(output) - OUTPUT_PREVIEW_CHARS} more chars truncated)"
+            parts.append(f"Output:\n{preview}")
 
         parts.append("")  # blank line between tasks
 
-    parts.append("Use check_background_task(task_id) to get the full output if needed.")
+    parts.append("Full output is included above. No further action needed to retrieve results.")
 
     context.append(
         {

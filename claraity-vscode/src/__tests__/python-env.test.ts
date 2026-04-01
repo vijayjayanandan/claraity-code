@@ -24,12 +24,12 @@ import {
     LaunchConfig,
 } from '../python-env';
 
-jest.mock('child_process');
-jest.mock('fs');
+vi.mock('child_process');
+vi.mock('fs');
 
 // Type the mocked functions for convenience
-const mockExecFile = execFile as unknown as jest.Mock;
-const mockExistsSync = fs.existsSync as jest.Mock;
+const mockExecFile = execFile as unknown as vi.Mock;
+const mockExistsSync = fs.existsSync as vi.Mock;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -209,7 +209,7 @@ describe('checkInstalledPackage', () => {
 
         expect(mockExecFile).toHaveBeenCalledWith(
             '/usr/bin/python3',
-            ['-c', expect.stringContaining(PYPI_PACKAGE)],
+            ['-c', expect.stringContaining('importlib.metadata'), JSON.stringify(PYPI_PACKAGE)],
             expect.objectContaining({ timeout: 15_000 }),
             expect.any(Function),
         );
@@ -251,7 +251,7 @@ describe('resolveLaunchConfig', () => {
         expect(result).not.toBeNull();
         expect(result!.mode).toBe('dev');
         expect(result!.command).toBe(PYTHON);
-        expect(result!.args).toEqual(['-m', 'src.server', '--port', String(PORT)]);
+        expect(result!.args).toEqual(['-m', 'src.server']);
         expect(result!.cwd).toBe(WORKDIR);
     });
 
@@ -320,7 +320,7 @@ describe('resolveLaunchConfig', () => {
         expect(result!.mode).toBe('installed');
         expect(result!.command).toBe(PYTHON);
         expect(result!.args).toEqual([
-            '-m', 'src.server', '--port', String(PORT), '--workdir', WORKDIR,
+            '-m', 'src.server', '--workdir', WORKDIR,
         ]);
         expect(result!.cwd).toBe(WORKDIR);
         expect(result!.version).toBe(MIN_AGENT_VERSION);
@@ -348,9 +348,9 @@ describe('resolveLaunchConfig', () => {
         // First checkInstalledPackage: outdated
         mockExecFileOnce(null, '0.1.0\n');
         // promptUpgrade: user clicks "Upgrade"
-        (vscode.window.showWarningMessage as jest.Mock).mockResolvedValueOnce('Upgrade');
+        (vscode.window.showWarningMessage as vi.Mock).mockResolvedValueOnce('Upgrade');
         // runPipInTerminal: user clicks "Retry"
-        (vscode.window.showInformationMessage as jest.Mock).mockResolvedValueOnce('Retry');
+        (vscode.window.showInformationMessage as vi.Mock).mockResolvedValueOnce('Retry');
         // Second checkInstalledPackage after upgrade
         mockExecFileOnce(null, '0.14.0\n');
 
@@ -371,7 +371,7 @@ describe('resolveLaunchConfig', () => {
         // checkInstalledPackage: outdated
         mockExecFileOnce(null, '0.1.0\n');
         // promptUpgrade: user clicks "Continue Anyway"
-        (vscode.window.showWarningMessage as jest.Mock).mockResolvedValueOnce('Continue Anyway');
+        (vscode.window.showWarningMessage as vi.Mock).mockResolvedValueOnce('Continue Anyway');
 
         const result = await resolveLaunchConfig(
             PYTHON, PORT, WORKDIR, 'auto', true,
@@ -391,7 +391,7 @@ describe('resolveLaunchConfig', () => {
         // checkInstalledPackage: not installed
         mockExecFileOnce(new Error('not installed'));
         // promptInstall: user clicks "Install"
-        (vscode.window.showInformationMessage as jest.Mock)
+        (vscode.window.showInformationMessage as vi.Mock)
             .mockResolvedValueOnce('Install')  // promptInstall choice
             .mockResolvedValueOnce('Retry');    // runPipInTerminal retry
         // checkInstalledPackage after install succeeds
@@ -414,7 +414,7 @@ describe('resolveLaunchConfig', () => {
         // checkInstalledPackage: not installed
         mockExecFileOnce(new Error('not installed'));
         // promptInstall: user clicks "Cancel"
-        (vscode.window.showInformationMessage as jest.Mock)
+        (vscode.window.showInformationMessage as vi.Mock)
             .mockResolvedValueOnce('Cancel');
 
         const result = await resolveLaunchConfig(
@@ -487,7 +487,7 @@ describe('resolveLaunchConfig', () => {
         // checkInstalledPackage: not installed
         mockExecFileOnce(new Error('not installed'));
         // promptInstall: user clicks "Install"
-        (vscode.window.showInformationMessage as jest.Mock)
+        (vscode.window.showInformationMessage as vi.Mock)
             .mockResolvedValueOnce('Install')
             .mockResolvedValueOnce('Retry');
         // checkInstalledPackage after install: still fails

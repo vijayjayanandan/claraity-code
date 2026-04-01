@@ -2861,6 +2861,20 @@ class CodingAgentApp(App):
 
         # Show toast + queue for batched agent notification
         if completed_task is not None:
+            from src.core.background_tasks import BackgroundTaskStatus
+
+            # Guard: never notify for a task still running (defensive — _run_command
+            # finally block should prevent this, but this is a second line of defence).
+            if completed_task.status == BackgroundTaskStatus.RUNNING:
+                return
+
+            # Idempotency: drop duplicate deliveries (e.g. cancel()+finally double-fire).
+            if not hasattr(self, "_bg_delivered"):
+                self._bg_delivered: set = set()
+            if completed_task.task_id in self._bg_delivered:
+                return
+            self._bg_delivered.add(completed_task.task_id)
+
             status_label = completed_task.status.value
             desc = completed_task.description or completed_task.command[:80]
             exit_info = ""

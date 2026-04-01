@@ -12,11 +12,12 @@ logging:
 llm:
   backend_type: openai
   base_url: https://api.fuelix.ai/v1
-  model: claude-sonnet-4-6
+  model: claude-haiku-4-5-20251001
   context_window: 200000
   temperature: 0.2
   max_tokens: 16384
   top_p: 0.95
+  thinking_budget: 3500
   subagents:
     code-reviewer:
       model: gpt-5.4-2026-03-05
@@ -29,8 +30,8 @@ limits:
   max_iterations: 50
 auto_approve:
   read: true
-  edit: true
-  execute: true
+  edit: false
+  execute: false
   browser: false
   knowledge_update: false
   subagent: false

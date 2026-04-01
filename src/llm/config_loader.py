@@ -104,17 +104,15 @@ class LLMConfigData:
     switching to the config file is a no-op for users who haven't created
     one yet.
 
-    API keys are stored in the OS credential store (keyring), NOT in
-    config.yaml. The ``api_key`` field is runtime-only (populated from
-    keyring/env, never persisted to YAML).
+    API keys are NEVER stored in config.yaml. The ``api_key`` field is
+    runtime-only (populated from env var or OS keyring).
 
-    ``api_key_env`` stores the NAME of an env var as fallback when keyring
-    is unavailable.
+    ``api_key_env`` stores the NAME of an env var to check for the key.
     """
 
     backend_type: str = "openai"
     base_url: str = ""
-    api_key: str = ""  # Runtime only -- loaded from keyring/env, never saved to YAML
+    api_key: str = ""  # Runtime only -- loaded from env/keyring, never in YAML
     api_key_env: str = "OPENAI_API_KEY"
     model: str = ""
     context_window: int = 131072
@@ -148,47 +146,6 @@ def _validate_backend(backend: str, context: str) -> str | None:
         return lower
     _safe_stderr(f"Invalid backend_type '{backend}' in {context}, ignoring")
     return None
-
-
-def _migrate_api_key_to_keyring(api_key: str, config_path: str) -> None:
-    """One-time migration: move api_key from YAML to OS credential store.
-
-    Only removes the api_key from YAML if keyring is available and the save
-    succeeds. If keyring is unavailable, the key stays in config.yaml (which
-    is the intended fallback storage).
-    """
-    try:
-        from src.llm.credential_store import _get_keyring
-
-        kr = _get_keyring()
-        if kr is None:
-            # No keyring -- config.yaml IS the storage, don't remove it
-            return
-        kr.set_password("claraity", "api_key", api_key)
-        _safe_stderr("Migrated api_key from config.yaml to OS credential store")
-        _remove_api_key_from_yaml(config_path)
-    except Exception as e:
-        _safe_stderr(f"api_key migration to keyring failed, key remains in config.yaml: {e}")
-
-
-def _remove_api_key_from_yaml(config_path: str) -> None:
-    """Remove the api_key field from config.yaml after migration."""
-    try:
-        import yaml
-
-        path = Path(config_path)
-        if not path.exists():
-            return
-        raw = path.read_text(encoding="utf-8")
-        data = yaml.safe_load(raw)
-        if isinstance(data, dict) and isinstance(data.get("llm"), dict):
-            data["llm"].pop("api_key", None)
-            path.write_text(
-                yaml.dump(data, default_flow_style=False, sort_keys=False),
-                encoding="utf-8",
-            )
-    except Exception as e:
-        _safe_stderr(f"Failed to remove api_key from YAML: {e}")
 
 
 # =============================================================================
@@ -245,9 +202,9 @@ def load_llm_config(config_path: str = DEFAULT_CONFIG_PATH) -> LLMConfigData:
     if "base_url" in llm_data and llm_data["base_url"]:
         config.base_url = str(llm_data["base_url"])
 
-    # -- api_key: if present in YAML and keyring is available, migrate --
+    # -- api_key in YAML is not supported -- warn and ignore --
     if "api_key" in llm_data and llm_data["api_key"]:
-        _migrate_api_key_to_keyring(str(llm_data["api_key"]), config_path)
+        _safe_stderr("api_key in config.yaml is not supported. Use environment variable or OS credential store.")
 
     # -- api_key_env (env var name, fallback) --
     if "api_key_env" in llm_data and llm_data["api_key_env"]:
@@ -405,8 +362,7 @@ def save_llm_config(
     if config.thinking_budget is not None:
         llm_section["thinking_budget"] = config.thinking_budget
 
-    # api_key is saved via credential_store.py (keyring > config.yaml fallback)
-    # It is NOT written here to avoid double-writing
+    # api_key is saved via credential_store.py (keyring/env only, never to YAML)
 
     # Only write api_key_env if non-default
     if config.api_key_env and config.api_key_env != "OPENAI_API_KEY":

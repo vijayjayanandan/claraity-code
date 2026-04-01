@@ -2349,6 +2349,8 @@ async def run_stdio_server(
     # Pending completions accumulate here until the debounce timer fires.
     _bg_pending: list = []
     _bg_debounce_handle: list = [None]  # mutable container so closure can reassign
+    # Idempotency: track task_ids already delivered so double-fire (cancel()+finally) is a no-op.
+    _bg_delivered: set = set()
 
     def _flush_bg_pending() -> None:
         """Build one batched notification from all pending completions and enqueue it."""
@@ -2403,6 +2405,23 @@ async def run_stdio_server(
 
         if completed_task is None:
             return  # Launch event, not a completion
+
+        # Guard: never notify for a task that is still running (defensive against
+        # premature callback fires — the finally block in _run_command should prevent
+        # this, but this is a second line of defence).
+        from src.core.background_tasks import BackgroundTaskStatus
+        if completed_task.status == BackgroundTaskStatus.RUNNING:
+            logger.warning(
+                "stdio_bg_notification_skipped_still_running",
+                task_id=completed_task.task_id,
+            )
+            return
+
+        # Idempotency: drop duplicate deliveries (e.g. cancel() fires callback then
+        # _run_command's finally block fires it again for the same task).
+        if completed_task.task_id in _bg_delivered:
+            return
+        _bg_delivered.add(completed_task.task_id)
 
         # Accumulate and remove from completed queue immediately (not in
         # flush) so drain_completed() in the tool loop can't re-deliver

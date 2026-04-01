@@ -442,12 +442,11 @@ class ConfigLLMScreen(ModalScreen[LLMConfigData | None]):
             subagents=subagents,
         )
 
-        # Save API key to OS credential store (not config.yaml)
+        # Set API key as env var for current process
         if api_key:
-            from src.llm.credential_store import save_api_key
+            import os
 
-            if not save_api_key(api_key):
-                logger.warning("Failed to save API key to credential store")
+            os.environ["CLARAITY_API_KEY"] = api_key
 
         success = save_llm_config(config, self._config_path)
         if success:

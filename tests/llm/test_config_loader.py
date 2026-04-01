@@ -23,14 +23,11 @@ _mock_keyring_store = {}
 
 @pytest.fixture(autouse=True)
 def mock_keyring():
-    """Prevent tests from touching the real OS credential store."""
-    _mock_keyring_store.clear()
-    with patch("src.llm.credential_store._get_keyring") as mock_get_kr:
-        mock_kr = MagicMock()
-        mock_kr.get_password.side_effect = lambda svc, usr: _mock_keyring_store.get((svc, usr))
-        mock_kr.set_password.side_effect = lambda svc, usr, val: _mock_keyring_store.update({(svc, usr): val})
-        mock_get_kr.return_value = mock_kr
-        yield mock_kr
+    """Prevent tests from reading real API keys from env vars."""
+    with patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("CLARAITY_API_KEY", None)
+        os.environ.pop("OPENAI_API_KEY", None)
+        yield
 
 
 # ---------------------------------------------------------------------------
@@ -157,42 +154,22 @@ class TestLoadLLMConfig:
         assert config.model == ""
 
     @patch("src.llm.credential_store.load_api_key", return_value="")
-    def test_api_key_migrated_from_yaml_to_keyring(self, mock_load, config_dir):
-        """api_key in config.yaml should be migrated to keyring and removed from YAML."""
-        mock_kr = MagicMock()
+    def test_api_key_in_yaml_is_ignored(self, mock_load, config_dir):
+        """api_key in config.yaml should be ignored (not loaded into config)."""
         path = config_dir / "config.yaml"
         path.write_text(
             "llm:\n  api_key: test-secret-key-123\n  model: gpt-4o\n",
             encoding="utf-8",
         )
-        with patch("src.llm.credential_store._get_keyring", return_value=mock_kr):
-            load_llm_config(str(path))
-        # Should have called keyring to migrate
-        mock_kr.set_password.assert_called_once_with("claraity", "api_key", "test-secret-key-123")
-        # api_key should be removed from the YAML file
-        import yaml
-        reloaded_yaml = yaml.safe_load(path.read_text(encoding="utf-8"))
-        assert "api_key" not in reloaded_yaml.get("llm", {})
+        config = load_llm_config(str(path))
+        # api_key should NOT be populated from YAML
+        assert config.api_key == ""
+        # Other fields should still load normally
+        assert config.model == "gpt-4o"
 
-    @patch("src.llm.credential_store.load_api_key", return_value="")
-    def test_api_key_stays_in_yaml_without_keyring(self, mock_load, config_dir):
-        """api_key should stay in config.yaml when keyring is unavailable."""
-        path = config_dir / "config.yaml"
-        path.write_text(
-            "llm:\n  api_key: test-secret-key-123\n  model: gpt-4o\n",
-            encoding="utf-8",
-        )
-        with patch("src.llm.credential_store._get_keyring", return_value=None):
-            load_llm_config(str(path))
-        # api_key should remain in the YAML file
-        import yaml
-        reloaded_yaml = yaml.safe_load(path.read_text(encoding="utf-8"))
-        assert reloaded_yaml["llm"]["api_key"] == "test-secret-key-123"
-
-    @patch("src.llm.credential_store.save_api_key", return_value=True)
     @patch("src.llm.credential_store.load_api_key", return_value="my-secret-key")
-    def test_api_key_loaded_from_keyring(self, mock_load, mock_save, config_dir):
-        """api_key should be populated from keyring at load time."""
+    def test_api_key_loaded_from_env(self, mock_load, config_dir):
+        """api_key should be populated from env vars at load time."""
         path = config_dir / "config.yaml"
         path.write_text(
             "llm:\n  model: gpt-4o\n",

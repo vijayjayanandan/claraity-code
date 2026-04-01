@@ -255,8 +255,9 @@ RUN_COMMAND_TOOL = ToolDefinition(
                 "type": "boolean",
                 "description": (
                     "Set true to run in background (non-blocking). Returns immediately with a task ID. "
-                    "You will be automatically notified via a [BACKGROUND TASK UPDATE] message when the "
-                    "task completes. Use for long-running operations like test suites, builds, or linters "
+                    "DO NOT call check_background_task after launching — you will automatically receive "
+                    "a [BACKGROUND TASK UPDATE] notification with the full output when the task completes. "
+                    "Use for long-running operations like test suites, builds, or linters "
                     "while you continue other work."
                 ),
             },

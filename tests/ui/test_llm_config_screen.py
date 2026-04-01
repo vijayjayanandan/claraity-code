@@ -8,19 +8,13 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-# Mock keyring for all tests in this module (avoid real OS credential store)
-_mock_keyring_store = {}
-
 @pytest.fixture(autouse=True)
-def mock_keyring():
-    """Prevent tests from touching the real OS credential store."""
-    _mock_keyring_store.clear()
-    with patch("src.llm.credential_store._get_keyring") as mock_get_kr:
-        mock_kr = MagicMock()
-        mock_kr.get_password.side_effect = lambda svc, usr: _mock_keyring_store.get((svc, usr))
-        mock_kr.set_password.side_effect = lambda svc, usr, val: _mock_keyring_store.update({(svc, usr): val})
-        mock_get_kr.return_value = mock_kr
-        yield mock_kr
+def mock_api_env():
+    """Prevent tests from reading real API keys from env vars."""
+    with patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("CLARAITY_API_KEY", None)
+        os.environ.pop("OPENAI_API_KEY", None)
+        yield
 
 from src.llm.config_loader import LLMConfigData, SubAgentLLMOverride, save_llm_config
 from src.ui.llm_config_screen import ConfigLLMScreen

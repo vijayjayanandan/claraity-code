@@ -1,5 +1,5 @@
 /**
- * Comprehensive mock of the VS Code API for Jest unit tests.
+ * Comprehensive mock of the VS Code API for Vitest unit tests.
  *
  * This mock provides enough of the VS Code API surface for testing
  * extension.ts, agent-connection.ts, server-manager.ts, python-env.ts,
@@ -34,7 +34,7 @@ class EventEmitter {
 // ── CancellationTokenSource mock ──
 class CancellationTokenSource {
     constructor() {
-        this.token = { isCancellationRequested: false, onCancellationRequested: jest.fn() };
+        this.token = { isCancellationRequested: false, onCancellationRequested: vi.fn() };
     }
     cancel() { this.token.isCancellationRequested = true; }
     dispose() {}
@@ -89,9 +89,9 @@ function createStatusBarItem(alignment, priority) {
         text: '',
         tooltip: '',
         command: undefined,
-        show: jest.fn(),
-        hide: jest.fn(),
-        dispose: jest.fn(),
+        show: vi.fn(),
+        hide: vi.fn(),
+        dispose: vi.fn(),
     };
 }
 
@@ -99,12 +99,12 @@ function createStatusBarItem(alignment, priority) {
 function createOutputChannel(name) {
     return {
         name,
-        append: jest.fn(),
-        appendLine: jest.fn(),
-        clear: jest.fn(),
-        show: jest.fn(),
-        hide: jest.fn(),
-        dispose: jest.fn(),
+        append: vi.fn(),
+        appendLine: vi.fn(),
+        clear: vi.fn(),
+        show: vi.fn(),
+        hide: vi.fn(),
+        dispose: vi.fn(),
     };
 }
 
@@ -112,9 +112,9 @@ function createOutputChannel(name) {
 function createTerminal(name) {
     return {
         name,
-        show: jest.fn(),
-        sendText: jest.fn(),
-        dispose: jest.fn(),
+        show: vi.fn(),
+        sendText: vi.fn(),
+        dispose: vi.fn(),
     };
 }
 
@@ -123,23 +123,23 @@ const FileType = { Unknown: 0, File: 1, Directory: 2, SymbolicLink: 64 };
 
 // ── Workspace FS mock ──
 const workspaceFs = {
-    readFile: jest.fn().mockRejectedValue(new Error('File not found')),
-    writeFile: jest.fn().mockResolvedValue(undefined),
-    stat: jest.fn().mockRejectedValue(new Error('File not found')),
-    delete: jest.fn().mockResolvedValue(undefined),
-    readDirectory: jest.fn().mockResolvedValue([]),
+    readFile: vi.fn().mockRejectedValue(new Error('File not found')),
+    writeFile: vi.fn().mockResolvedValue(undefined),
+    stat: vi.fn().mockRejectedValue(new Error('File not found')),
+    delete: vi.fn().mockResolvedValue(undefined),
+    readDirectory: vi.fn().mockResolvedValue([]),
 };
 
 // ── Configuration mock ──
 const configValues = {};
 function createConfig() {
     return {
-        get: jest.fn((key, defaultValue) => {
+        get: vi.fn((key, defaultValue) => {
             return configValues[key] !== undefined ? configValues[key] : defaultValue;
         }),
-        update: jest.fn().mockResolvedValue(undefined),
-        has: jest.fn((key) => key in configValues),
-        inspect: jest.fn(() => undefined),
+        update: vi.fn().mockResolvedValue(undefined),
+        has: vi.fn((key) => key in configValues),
+        inspect: vi.fn(() => undefined),
     };
 }
 
@@ -192,53 +192,53 @@ const vscode = {
 
     // Window
     window: {
-        showInformationMessage: jest.fn().mockResolvedValue(undefined),
-        showWarningMessage: jest.fn().mockResolvedValue(undefined),
-        showErrorMessage: jest.fn().mockResolvedValue(undefined),
-        createStatusBarItem: jest.fn(createStatusBarItem),
-        createOutputChannel: jest.fn(createOutputChannel),
-        createTerminal: jest.fn(createTerminal),
-        registerWebviewViewProvider: jest.fn(() => new Disposable(() => {})),
-        registerFileDecorationProvider: jest.fn(() => new Disposable(() => {})),
+        showInformationMessage: vi.fn().mockResolvedValue(undefined),
+        showWarningMessage: vi.fn().mockResolvedValue(undefined),
+        showErrorMessage: vi.fn().mockResolvedValue(undefined),
+        createStatusBarItem: vi.fn(createStatusBarItem),
+        createOutputChannel: vi.fn(createOutputChannel),
+        createTerminal: vi.fn(createTerminal),
+        registerWebviewViewProvider: vi.fn(() => new Disposable(() => {})),
+        registerFileDecorationProvider: vi.fn(() => new Disposable(() => {})),
         activeTextEditor: undefined,
-        showTextDocument: jest.fn().mockResolvedValue(undefined),
+        showTextDocument: vi.fn().mockResolvedValue(undefined),
         terminals: [],
     },
 
     // Workspace
     workspace: {
-        getConfiguration: jest.fn(() => createConfig()),
+        getConfiguration: vi.fn(() => createConfig()),
         workspaceFolders: [{ uri: Uri.file('/test/workspace'), name: 'test', index: 0 }],
-        onDidChangeConfiguration: jest.fn(() => new Disposable(() => {})),
-        registerTextDocumentContentProvider: jest.fn(() => new Disposable(() => {})),
-        findFiles: jest.fn().mockResolvedValue([]),
+        onDidChangeConfiguration: vi.fn(() => new Disposable(() => {})),
+        registerTextDocumentContentProvider: vi.fn(() => new Disposable(() => {})),
+        findFiles: vi.fn().mockResolvedValue([]),
         fs: workspaceFs,
     },
 
     // Commands
     commands: {
-        registerCommand: jest.fn((id, callback) => new Disposable(() => {})),
-        executeCommand: jest.fn().mockResolvedValue(undefined),
+        registerCommand: vi.fn((id, callback) => new Disposable(() => {})),
+        executeCommand: vi.fn().mockResolvedValue(undefined),
     },
 
     // Environment
     env: {
         clipboard: {
-            writeText: jest.fn().mockResolvedValue(undefined),
-            readText: jest.fn().mockResolvedValue(''),
+            writeText: vi.fn().mockResolvedValue(undefined),
+            readText: vi.fn().mockResolvedValue(''),
         },
         uriScheme: 'vscode',
     },
 
     // Languages
     languages: {
-        registerCodeLensProvider: jest.fn(() => new Disposable(() => {})),
-        registerHoverProvider: jest.fn(() => new Disposable(() => {})),
+        registerCodeLensProvider: vi.fn(() => new Disposable(() => {})),
+        registerHoverProvider: vi.fn(() => new Disposable(() => {})),
     },
 
     // Extensions
     extensions: {
-        getExtension: jest.fn(() => undefined),
+        getExtension: vi.fn(() => undefined),
     },
 
     // Test helpers (not part of real API)

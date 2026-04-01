@@ -101,9 +101,6 @@ a = Analysis(
         "httpx",
         "pydantic",
         "yaml",
-        "keyring",
-        "keyring.backends",
-        "keyring.backends.Windows",
         # tiktoken encoding registry (PyInstaller misses the plugin-style import)
         "tiktoken",
         "tiktoken_ext",

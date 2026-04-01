@@ -7,8 +7,8 @@
  *   routing (all message types), showSessionHistory, connection event forwarding
  *
  * Mock strategy:
- * - vscode module: mocked via __mocks__/vscode.js (configured in jest.config.js)
- * - StdioConnection: manually mocked with EventEmitter-based events and jest.fn() methods
+ * - vscode module: mocked via __mocks__/vscode.js (configured in vitest.config.ts)
+ * - StdioConnection: manually mocked with EventEmitter-based events and vi.fn() methods
  */
 
 import * as vscode from 'vscode';
@@ -33,14 +33,14 @@ function createMockConnection() {
     const onDisconnectedEmitter = new vscode.EventEmitter<void>();
 
     const connection = {
-        send: jest.fn(),
-        disconnect: jest.fn(),
+        send: vi.fn(),
+        disconnect: vi.fn(),
         isConnected: false,
         // StdioConnection-specific methods
-        setApiKey: jest.fn(),
-        setTavilyKey: jest.fn(),
-        connect: jest.fn(),
-        updateUrl: jest.fn(), // no-op stub for interface compat
+        setApiKey: vi.fn(),
+        setTavilyKey: vi.fn(),
+        connect: vi.fn(),
+        updateUrl: vi.fn(), // no-op stub for interface compat
         onMessage: onMessageEmitter.event,
         onConnected: onConnectedEmitter.event,
         onDisconnected: onDisconnectedEmitter.event,
@@ -70,8 +70,8 @@ function createMockWebviewView() {
         options: {} as any,
         html: '',
         onDidReceiveMessage: messageEmitter.event,
-        postMessage: jest.fn().mockResolvedValue(true),
-        asWebviewUri: jest.fn((uri: any) => uri),
+        postMessage: vi.fn().mockResolvedValue(true),
+        asWebviewUri: vi.fn((uri: any) => uri),
         cspSource: 'mock-csp-source',
     };
     return {
@@ -249,7 +249,7 @@ describe('ClarAItySidebarProvider', () => {
     function resolveView() {
         const mockView = createMockWebviewView();
         const context = {} as vscode.WebviewViewResolveContext;
-        const token = { isCancellationRequested: false, onCancellationRequested: jest.fn() } as any;
+        const token = { isCancellationRequested: false, onCancellationRequested: vi.fn() } as any;
 
         provider.resolveWebviewView(
             mockView as any,
@@ -1011,7 +1011,7 @@ describe('handleWebviewMessage subagent routing', () => {
         provider.resolveWebviewView(
             mockView as any,
             {} as vscode.WebviewViewResolveContext,
-            { isCancellationRequested: false, onCancellationRequested: jest.fn() } as any,
+            { isCancellationRequested: false, onCancellationRequested: vi.fn() } as any,
         );
         return {
             webview: mockView.webview,
@@ -1156,7 +1156,7 @@ describe('handleServerMessage subagent routing', () => {
         provider.resolveWebviewView(
             mockView as any,
             {} as vscode.WebviewViewResolveContext,
-            { isCancellationRequested: false, onCancellationRequested: jest.fn() } as any,
+            { isCancellationRequested: false, onCancellationRequested: vi.fn() } as any,
         );
         return {
             webview: mockView.webview,

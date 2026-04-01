@@ -400,6 +400,12 @@ class BackgroundTaskRegistry:
             )
         finally:
             info.end_time = time.monotonic()
+            # Guard: if status is still RUNNING here, something bypassed all except handlers
+            # (e.g. BaseException subclass like KeyboardInterrupt). Treat as FAILED so the
+            # notification system never sees a RUNNING task as "completed".
+            if info.status == BackgroundTaskStatus.RUNNING:
+                info.status = BackgroundTaskStatus.FAILED
+                info.error = info.error or "Task terminated unexpectedly"
             # Only queue and notify if not already cancelled (cancel() handles its own queueing)
             if info.status != BackgroundTaskStatus.CANCELLED:
                 self._completed_queue.append(info)

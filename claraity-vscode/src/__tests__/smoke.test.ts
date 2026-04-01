@@ -1,10 +1,10 @@
 /**
- * Smoke test to verify Jest infrastructure works with VS Code mock.
+ * Smoke test to verify Vitest infrastructure works with VS Code mock.
  */
 
 import * as vscode from 'vscode';
 
-describe('Jest infrastructure', () => {
+describe('Vitest infrastructure', () => {
     test('vscode mock is loaded', () => {
         expect(vscode).toBeDefined();
         expect(vscode.window).toBeDefined();

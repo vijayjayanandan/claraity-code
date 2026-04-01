@@ -247,21 +247,19 @@
     "compile": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
     "typecheck": "tsc -p ./ --noEmit",
-    "test": "jest",
-    "test:coverage": "jest --coverage",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "build:webview": "cd webview-ui && npm run build",
     "package": "vsce package --no-dependencies",
     "publish": "vsce publish --no-dependencies"
   },
   "devDependencies": {
-    "@types/jest": "^30.0.0",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
     "@vscode/codicons": "^0.0.44",
     "@vscode/vsce": "^3.0.0",
     "esbuild": "^0.27.4",
-    "jest": "^30.2.0",
-    "ts-jest": "^29.4.6",
-    "typescript": "^5.3.0"
+    "typescript": "^5.3.0",
+    "vitest": "^3.1.0"
   }
 }

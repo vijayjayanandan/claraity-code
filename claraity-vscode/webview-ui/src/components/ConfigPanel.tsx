@@ -511,18 +511,16 @@ export function ConfigPanel({
             />
           </Field>
 
-          {/* Thinking Budget: only relevant for Anthropic (Claude extended thinking) */}
-          {backend === "anthropic" && (
-            <Field label="Thinking Budget (tokens)">
-              <input
-                className="form-input"
-                type="text"
-                value={thinkingBudget}
-                onChange={(e) => setThinkingBudget(e.target.value)}
-                placeholder="(leave empty for default)"
-              />
-            </Field>
-          )}
+          {/* Thinking Budget: supported by Anthropic and OpenAI-compatible backends */}
+          <Field label="Thinking Budget (tokens)">
+            <input
+              className="form-input"
+              type="text"
+              value={thinkingBudget}
+              onChange={(e) => setThinkingBudget(e.target.value)}
+              placeholder="(leave empty to disable)"
+            />
+          </Field>
 
           {/* Web Search */}
           <div className="settings-section">

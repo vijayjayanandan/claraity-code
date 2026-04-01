@@ -137,12 +137,8 @@ def save_config_from_request(data: dict, config_path: str) -> dict:
                 system_prompt=str(pe_raw.get("system_prompt", "") or "").strip(),
             )
 
-        # Save API key if provided (non-empty)
+        # API key is handled by VS Code SecretStorage (injected as env var)
         api_key = raw.get("api_key", "")
-        if api_key:
-            from src.llm.credential_store import save_api_key
-
-            save_api_key(str(api_key))
 
         ok = save_llm_config(cfg, config_path)
         if ok:

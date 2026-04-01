@@ -15,12 +15,12 @@ import { activate, deactivate } from '../extension';
 
 // ── Module mocks ────────────────────────────────────────────────────────────
 
-jest.mock('../stdio-connection');
-jest.mock('../sidebar-provider');
-jest.mock('../python-env');
-jest.mock('../file-decoration-provider');
-jest.mock('../code-lens-provider');
-jest.mock('../undo-manager');
+vi.mock('../stdio-connection');
+vi.mock('../sidebar-provider');
+vi.mock('../python-env');
+vi.mock('../file-decoration-provider');
+vi.mock('../code-lens-provider');
+vi.mock('../undo-manager');
 
 import { StdioConnection } from '../stdio-connection';
 import { ClarAItySidebarProvider } from '../sidebar-provider';
@@ -32,47 +32,47 @@ import { UndoManager } from '../undo-manager';
 // ── Types for mock instances ────────────────────────────────────────────────
 
 interface MockStdioConnection {
-    connect: jest.Mock;
-    send: jest.Mock;
-    dispose: jest.Mock;
-    disconnect: jest.Mock;
-    restart: jest.Mock;
-    setApiKey: jest.Mock;
-    setTavilyKey: jest.Mock;
-    onConnected: jest.Mock;
-    onDisconnected: jest.Mock;
-    onMessage: jest.Mock;
+    connect: vi.Mock;
+    send: vi.Mock;
+    dispose: vi.Mock;
+    disconnect: vi.Mock;
+    restart: vi.Mock;
+    setApiKey: vi.Mock;
+    setTavilyKey: vi.Mock;
+    onConnected: vi.Mock;
+    onDisconnected: vi.Mock;
+    onMessage: vi.Mock;
     isConnected: boolean;
 }
 
 interface MockSidebarProvider {
-    showSessionHistory: jest.Mock;
-    setSecrets: jest.Mock;
-    setConnection: jest.Mock;
-    postToWebview: jest.Mock;
-    openDiffFromCommand: jest.Mock;
+    showSessionHistory: vi.Mock;
+    setSecrets: vi.Mock;
+    setConnection: vi.Mock;
+    postToWebview: vi.Mock;
+    openDiffFromCommand: vi.Mock;
 }
 
 interface MockFileDecorationProvider {
-    markModified: jest.Mock;
-    clear: jest.Mock;
-    dispose: jest.Mock;
+    markModified: vi.Mock;
+    clear: vi.Mock;
+    dispose: vi.Mock;
 }
 
 interface MockCodeLensProvider {
-    addPendingChange: jest.Mock;
-    removePendingChange: jest.Mock;
-    clear: jest.Mock;
-    dispose: jest.Mock;
+    addPendingChange: vi.Mock;
+    removePendingChange: vi.Mock;
+    clear: vi.Mock;
+    dispose: vi.Mock;
 }
 
 interface MockUndoManager {
-    beginCheckpoint: jest.Mock;
-    commitCheckpoint: jest.Mock;
-    snapshotFile: jest.Mock;
-    undo: jest.Mock;
-    clear: jest.Mock;
-    dispose: jest.Mock;
+    beginCheckpoint: vi.Mock;
+    commitCheckpoint: vi.Mock;
+    snapshotFile: vi.Mock;
+    undo: vi.Mock;
+    clear: vi.Mock;
+    dispose: vi.Mock;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -85,13 +85,13 @@ function createMockContext(): vscode.ExtensionContext {
         subscriptions: [],
         extensionUri: vscode.Uri.file('/mock/extension'),
         extensionPath: '/mock/extension',
-        globalState: { get: jest.fn(), update: jest.fn(), keys: jest.fn(() => []), setKeysForSync: jest.fn() } as any,
-        workspaceState: { get: jest.fn(), update: jest.fn(), keys: jest.fn(() => []) } as any,
+        globalState: { get: vi.fn(), update: vi.fn(), keys: vi.fn(() => []), setKeysForSync: vi.fn() } as any,
+        workspaceState: { get: vi.fn(), update: vi.fn(), keys: vi.fn(() => []) } as any,
         secrets: {
-            get: jest.fn().mockResolvedValue(undefined),
-            store: jest.fn().mockResolvedValue(undefined),
-            delete: jest.fn().mockResolvedValue(undefined),
-            onDidChange: jest.fn(),
+            get: vi.fn().mockResolvedValue(undefined),
+            store: vi.fn().mockResolvedValue(undefined),
+            delete: vi.fn().mockResolvedValue(undefined),
+            onDidChange: vi.fn(),
         } as any,
         storagePath: '/mock/storage',
         globalStoragePath: '/mock/global-storage',
@@ -100,7 +100,7 @@ function createMockContext(): vscode.ExtensionContext {
         storageUri: vscode.Uri.file('/mock/storage'),
         globalStorageUri: vscode.Uri.file('/mock/global-storage'),
         logUri: vscode.Uri.file('/mock/logs'),
-        asAbsolutePath: jest.fn((p: string) => `/mock/extension/${p}`),
+        asAbsolutePath: vi.fn((p: string) => `/mock/extension/${p}`),
         environmentVariableCollection: {} as any,
         extension: {} as any,
         languageModelAccessInformation: {} as any,
@@ -123,64 +123,64 @@ function setupMocks() {
     connectionCallbacks = {};
 
     mockStdioInstance = {
-        connect: jest.fn(),
-        send: jest.fn(),
-        dispose: jest.fn(),
-        disconnect: jest.fn(),
-        restart: jest.fn(),
-        setApiKey: jest.fn(),
-        setTavilyKey: jest.fn(),
-        onConnected: jest.fn((cb: Function) => {
+        connect: vi.fn(),
+        send: vi.fn(),
+        dispose: vi.fn(),
+        disconnect: vi.fn(),
+        restart: vi.fn(),
+        setApiKey: vi.fn(),
+        setTavilyKey: vi.fn(),
+        onConnected: vi.fn((cb: Function) => {
             connectionCallbacks['connected'] = cb;
-            return { dispose: jest.fn() };
+            return { dispose: vi.fn() };
         }),
-        onDisconnected: jest.fn((cb: Function) => {
+        onDisconnected: vi.fn((cb: Function) => {
             connectionCallbacks['disconnected'] = cb;
-            return { dispose: jest.fn() };
+            return { dispose: vi.fn() };
         }),
-        onMessage: jest.fn((cb: Function) => {
+        onMessage: vi.fn((cb: Function) => {
             connectionCallbacks['message'] = cb;
-            return { dispose: jest.fn() };
+            return { dispose: vi.fn() };
         }),
         isConnected: false,
     };
 
     mockSidebarInstance = {
-        showSessionHistory: jest.fn(),
-        setSecrets: jest.fn(),
-        setConnection: jest.fn(),
-        postToWebview: jest.fn(),
-        openDiffFromCommand: jest.fn(),
+        showSessionHistory: vi.fn(),
+        setSecrets: vi.fn(),
+        setConnection: vi.fn(),
+        postToWebview: vi.fn(),
+        openDiffFromCommand: vi.fn(),
     };
 
     mockFileDecorationInstance = {
-        markModified: jest.fn(),
-        clear: jest.fn(),
-        dispose: jest.fn(),
+        markModified: vi.fn(),
+        clear: vi.fn(),
+        dispose: vi.fn(),
     };
 
     mockCodeLensInstance = {
-        addPendingChange: jest.fn(),
-        removePendingChange: jest.fn(),
-        clear: jest.fn(),
-        dispose: jest.fn(),
+        addPendingChange: vi.fn(),
+        removePendingChange: vi.fn(),
+        clear: vi.fn(),
+        dispose: vi.fn(),
     };
 
     mockUndoManagerInstance = {
-        beginCheckpoint: jest.fn(),
-        commitCheckpoint: jest.fn().mockReturnValue(null),
-        snapshotFile: jest.fn(),
-        undo: jest.fn().mockResolvedValue([]),
-        clear: jest.fn(),
-        dispose: jest.fn(),
+        beginCheckpoint: vi.fn(),
+        commitCheckpoint: vi.fn().mockReturnValue(null),
+        snapshotFile: vi.fn(),
+        undo: vi.fn().mockResolvedValue([]),
+        clear: vi.fn(),
+        dispose: vi.fn(),
     };
 
-    (StdioConnection as jest.Mock).mockImplementation(() => mockStdioInstance);
-    (ClarAItySidebarProvider as unknown as jest.Mock).mockImplementation(() => mockSidebarInstance);
-    (ClarAItyFileDecorationProvider as jest.Mock).mockImplementation(() => mockFileDecorationInstance);
-    (ClarAItyCodeLensProvider as jest.Mock).mockImplementation(() => mockCodeLensInstance);
-    (UndoManager as jest.Mock).mockImplementation(() => mockUndoManagerInstance);
-    (resolveLaunchConfig as jest.Mock).mockResolvedValue(null);
+    (StdioConnection as vi.Mock).mockImplementation(() => mockStdioInstance);
+    (ClarAItySidebarProvider as unknown as vi.Mock).mockImplementation(() => mockSidebarInstance);
+    (ClarAItyFileDecorationProvider as vi.Mock).mockImplementation(() => mockFileDecorationInstance);
+    (ClarAItyCodeLensProvider as vi.Mock).mockImplementation(() => mockCodeLensInstance);
+    (UndoManager as vi.Mock).mockImplementation(() => mockUndoManagerInstance);
+    (resolveLaunchConfig as vi.Mock).mockResolvedValue(null);
 }
 
 /**
@@ -194,7 +194,7 @@ function setWorkspaceFolders(folders: any[] | undefined) {
  * Find a registered command callback by command ID.
  */
 function findCommandCallback(commandId: string): Function | undefined {
-    const calls = (vscode.commands.registerCommand as jest.Mock).mock.calls;
+    const calls = (vscode.commands.registerCommand as vi.Mock).mock.calls;
     const match = calls.find((c: any[]) => c[0] === commandId);
     return match ? match[1] : undefined;
 }
@@ -203,12 +203,17 @@ function findCommandCallback(commandId: string): Function | undefined {
 
 describe('extension.ts', () => {
     beforeEach(() => {
-        jest.clearAllMocks();
+        vi.clearAllMocks();
+        vi.useRealTimers(); // Ensure real timers for each test (guards against leaked fake timers)
         setupMocks();
         // Default: workspace folder exists
         setWorkspaceFolders([
             { uri: vscode.Uri.file('/test/workspace'), name: 'test', index: 0 },
         ]);
+    });
+
+    afterEach(() => {
+        vi.useRealTimers(); // Always restore real timers after each test
     });
 
     // ──────────────────────────────────────────────────────────────────────
@@ -230,7 +235,7 @@ describe('extension.ts', () => {
                 const ctx = createMockContext();
                 activate(ctx);
 
-                const channel = (vscode.window.createOutputChannel as jest.Mock).mock.results[0].value;
+                const channel = (vscode.window.createOutputChannel as vi.Mock).mock.results[0].value;
                 expect(ctx.subscriptions).toContain(channel);
             });
 
@@ -238,7 +243,7 @@ describe('extension.ts', () => {
                 const ctx = createMockContext();
                 activate(ctx);
 
-                const channel = (vscode.window.createOutputChannel as jest.Mock).mock.results[0].value;
+                const channel = (vscode.window.createOutputChannel as vi.Mock).mock.results[0].value;
                 expect(channel.appendLine).toHaveBeenCalledWith(
                     '[ClarAIty] Extension activating...',
                 );
@@ -298,7 +303,7 @@ describe('extension.ts', () => {
                 const ctx = createMockContext();
                 activate(ctx);
 
-                const channel = (vscode.window.createOutputChannel as jest.Mock).mock.results[0].value;
+                const channel = (vscode.window.createOutputChannel as vi.Mock).mock.results[0].value;
                 expect(UndoManager).toHaveBeenCalledWith(channel);
             });
         });
@@ -319,7 +324,7 @@ describe('extension.ts', () => {
                 const ctx = createMockContext();
                 activate(ctx);
 
-                const disposable = (vscode.window.registerWebviewViewProvider as jest.Mock)
+                const disposable = (vscode.window.registerWebviewViewProvider as vi.Mock)
                     .mock.results[0].value;
                 expect(ctx.subscriptions).toContain(disposable);
             });
@@ -396,7 +401,7 @@ describe('extension.ts', () => {
                     args: ['-m', 'src.server'],
                     cwd: '/test/workspace',
                 };
-                (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
+                (resolveLaunchConfig as vi.Mock).mockResolvedValue(launchConfig);
                 mockStdioInstance.isConnected = true;
 
                 const ctx = createMockContext();
@@ -416,7 +421,7 @@ describe('extension.ts', () => {
                     args: ['-m', 'src.server'],
                     cwd: '/test/workspace',
                 };
-                (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
+                (resolveLaunchConfig as vi.Mock).mockResolvedValue(launchConfig);
                 mockStdioInstance.isConnected = false;
 
                 const ctx = createMockContext();
@@ -436,7 +441,7 @@ describe('extension.ts', () => {
                     args: ['-m', 'src.server'],
                     cwd: '/test/workspace',
                 };
-                (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
+                (resolveLaunchConfig as vi.Mock).mockResolvedValue(launchConfig);
                 mockStdioInstance.isConnected = false;
 
                 const ctx = createMockContext();
@@ -464,7 +469,7 @@ describe('extension.ts', () => {
                 const ctx = createMockContext();
                 activate(ctx);
 
-                const disposables = (vscode.commands.registerCommand as jest.Mock)
+                const disposables = (vscode.commands.registerCommand as vi.Mock)
                     .mock.results.map((r: any) => r.value);
                 for (const d of disposables) {
                     expect(ctx.subscriptions).toContain(d);
@@ -487,7 +492,7 @@ describe('extension.ts', () => {
                 const ctx = createMockContext();
                 activate(ctx);
 
-                const statusBar = (vscode.window.createStatusBarItem as jest.Mock)
+                const statusBar = (vscode.window.createStatusBarItem as vi.Mock)
                     .mock.results[0].value;
                 expect(statusBar.command).toBe('claraity.newChat');
             });
@@ -496,7 +501,7 @@ describe('extension.ts', () => {
                 const ctx = createMockContext();
                 activate(ctx);
 
-                const statusBar = (vscode.window.createStatusBarItem as jest.Mock)
+                const statusBar = (vscode.window.createStatusBarItem as vi.Mock)
                     .mock.results[0].value;
                 expect(statusBar.show).toHaveBeenCalled();
             });
@@ -505,7 +510,7 @@ describe('extension.ts', () => {
                 const ctx = createMockContext();
                 activate(ctx);
 
-                const statusBar = (vscode.window.createStatusBarItem as jest.Mock)
+                const statusBar = (vscode.window.createStatusBarItem as vi.Mock)
                     .mock.results[0].value;
                 expect(ctx.subscriptions).toContain(statusBar);
             });
@@ -545,7 +550,7 @@ describe('extension.ts', () => {
             const ctx = createMockContext();
             activate(ctx);
 
-            const statusBar = (vscode.window.createStatusBarItem as jest.Mock)
+            const statusBar = (vscode.window.createStatusBarItem as vi.Mock)
                 .mock.results[0].value;
             expect(statusBar.text).toBe('$(loading~spin) ClarAIty (checking...)');
             expect(statusBar.tooltip).toBe('ClarAIty - Detecting environment...');
@@ -558,7 +563,7 @@ describe('extension.ts', () => {
                 args: ['-m', 'src.server'],
                 cwd: '/test/workspace',
             };
-            (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
+            (resolveLaunchConfig as vi.Mock).mockResolvedValue(launchConfig);
 
             const ctx = createMockContext();
             activate(ctx);
@@ -583,10 +588,10 @@ describe('extension.ts', () => {
                 args: ['-m', 'src.server'],
                 cwd: '/test/workspace',
             };
-            (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
+            (resolveLaunchConfig as vi.Mock).mockResolvedValue(launchConfig);
 
             const ctx = createMockContext();
-            (ctx.secrets.get as jest.Mock).mockImplementation((key: string) => {
+            (ctx.secrets.get as vi.Mock).mockImplementation((key: string) => {
                 if (key === 'claraity.apiKey') { return Promise.resolve('sk-test-key'); }
                 return Promise.resolve(undefined);
             });
@@ -604,10 +609,10 @@ describe('extension.ts', () => {
                 args: ['-m', 'src.server'],
                 cwd: '/test/workspace',
             };
-            (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
+            (resolveLaunchConfig as vi.Mock).mockResolvedValue(launchConfig);
 
             const ctx = createMockContext();
-            (ctx.secrets.get as jest.Mock).mockImplementation((key: string) => {
+            (ctx.secrets.get as vi.Mock).mockImplementation((key: string) => {
                 if (key === 'claraity.tavilyKey') { return Promise.resolve('tvly-test-key'); }
                 return Promise.resolve(undefined);
             });
@@ -625,7 +630,7 @@ describe('extension.ts', () => {
                 args: ['-m', 'src.server'],
                 cwd: '/test/workspace',
             };
-            (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
+            (resolveLaunchConfig as vi.Mock).mockResolvedValue(launchConfig);
 
             const ctx = createMockContext();
             // secrets.get returns undefined by default
@@ -643,7 +648,7 @@ describe('extension.ts', () => {
                 args: ['-m', 'src.server'],
                 cwd: '/test/workspace',
             };
-            (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
+            (resolveLaunchConfig as vi.Mock).mockResolvedValue(launchConfig);
 
             const ctx = createMockContext();
             activate(ctx);
@@ -666,7 +671,7 @@ describe('extension.ts', () => {
                 args: ['-m', 'src.server'],
                 cwd: '/test/workspace',
             };
-            (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
+            (resolveLaunchConfig as vi.Mock).mockResolvedValue(launchConfig);
 
             const ctx = createMockContext();
             activate(ctx);
@@ -683,7 +688,7 @@ describe('extension.ts', () => {
                 args: ['-m', 'src.server'],
                 cwd: '/test/workspace',
             };
-            (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
+            (resolveLaunchConfig as vi.Mock).mockResolvedValue(launchConfig);
 
             const ctx = createMockContext();
             activate(ctx);
@@ -700,14 +705,14 @@ describe('extension.ts', () => {
                 args: ['-m', 'src.server'],
                 cwd: '/test/workspace',
             };
-            (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
+            (resolveLaunchConfig as vi.Mock).mockResolvedValue(launchConfig);
 
             const ctx = createMockContext();
             activate(ctx);
 
             await flushPromises();
 
-            const statusBar = (vscode.window.createStatusBarItem as jest.Mock)
+            const statusBar = (vscode.window.createStatusBarItem as vi.Mock)
                 .mock.results[0].value;
             expect(statusBar.text).toBe('$(loading~spin) ClarAIty (starting...)');
             expect(statusBar.tooltip).toContain('Starting');
@@ -716,21 +721,21 @@ describe('extension.ts', () => {
         });
 
         test('shows not-installed status when resolveLaunchConfig returns null', async () => {
-            (resolveLaunchConfig as jest.Mock).mockResolvedValue(null);
+            (resolveLaunchConfig as vi.Mock).mockResolvedValue(null);
 
             const ctx = createMockContext();
             activate(ctx);
 
             await flushPromises();
 
-            const statusBar = (vscode.window.createStatusBarItem as jest.Mock)
+            const statusBar = (vscode.window.createStatusBarItem as vi.Mock)
                 .mock.results[0].value;
             expect(statusBar.text).toBe('$(error) ClarAIty (not installed)');
             expect(statusBar.tooltip).toBe('ClarAIty - Agent not found');
         });
 
         test('does not create StdioConnection when resolveLaunchConfig returns null', async () => {
-            (resolveLaunchConfig as jest.Mock).mockResolvedValue(null);
+            (resolveLaunchConfig as vi.Mock).mockResolvedValue(null);
 
             const ctx = createMockContext();
             activate(ctx);
@@ -741,7 +746,7 @@ describe('extension.ts', () => {
         });
 
         test('handles resolveLaunchConfig rejection gracefully', async () => {
-            (resolveLaunchConfig as jest.Mock).mockRejectedValue(
+            (resolveLaunchConfig as vi.Mock).mockRejectedValue(
                 new Error('Python not found'),
             );
 
@@ -750,28 +755,28 @@ describe('extension.ts', () => {
 
             await flushPromises();
 
-            const statusBar = (vscode.window.createStatusBarItem as jest.Mock)
+            const statusBar = (vscode.window.createStatusBarItem as vi.Mock)
                 .mock.results[0].value;
             expect(statusBar.text).toBe('$(error) ClarAIty (error)');
             expect(statusBar.tooltip).toBe('ClarAIty - Python not found');
         });
 
         test('handles non-Error rejection gracefully', async () => {
-            (resolveLaunchConfig as jest.Mock).mockRejectedValue('string error');
+            (resolveLaunchConfig as vi.Mock).mockRejectedValue('string error');
 
             const ctx = createMockContext();
             activate(ctx);
 
             await flushPromises();
 
-            const statusBar = (vscode.window.createStatusBarItem as jest.Mock)
+            const statusBar = (vscode.window.createStatusBarItem as vi.Mock)
                 .mock.results[0].value;
             expect(statusBar.text).toBe('$(error) ClarAIty (error)');
             expect(statusBar.tooltip).toBe('ClarAIty - string error');
         });
 
         test('logs error when resolveLaunchConfig rejects', async () => {
-            (resolveLaunchConfig as jest.Mock).mockRejectedValue(
+            (resolveLaunchConfig as vi.Mock).mockRejectedValue(
                 new Error('Unexpected failure'),
             );
 
@@ -780,7 +785,7 @@ describe('extension.ts', () => {
 
             await flushPromises();
 
-            const channel = (vscode.window.createOutputChannel as jest.Mock)
+            const channel = (vscode.window.createOutputChannel as vi.Mock)
                 .mock.results[0].value;
             expect(channel.appendLine).toHaveBeenCalledWith(
                 '[ERROR] Stdio launch failed: Unexpected failure',
@@ -808,7 +813,7 @@ describe('extension.ts', () => {
             const ctx = createMockContext();
             activate(ctx);
 
-            const statusBar = (vscode.window.createStatusBarItem as jest.Mock)
+            const statusBar = (vscode.window.createStatusBarItem as vi.Mock)
                 .mock.results[0].value;
             expect(statusBar.text).toBe('$(sparkle) ClarAIty (offline)');
             expect(statusBar.tooltip).toBe('ClarAIty - No workspace folder');
@@ -854,7 +859,7 @@ describe('extension.ts', () => {
                 args: ['-m', 'src.server'],
                 cwd: '/test/workspace',
             };
-            (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
+            (resolveLaunchConfig as vi.Mock).mockResolvedValue(launchConfig);
 
             const ctx = createMockContext();
             activate(ctx);
@@ -865,7 +870,7 @@ describe('extension.ts', () => {
         test('updates status bar text on connected event', async () => {
             await activateWithConnection();
 
-            const statusBar = (vscode.window.createStatusBarItem as jest.Mock)
+            const statusBar = (vscode.window.createStatusBarItem as vi.Mock)
                 .mock.results[0].value;
 
             expect(connectionCallbacks['connected']).toBeDefined();
@@ -878,7 +883,7 @@ describe('extension.ts', () => {
         test('updates status bar to reconnecting immediately on disconnected event', async () => {
             await activateWithConnection();
 
-            const statusBar = (vscode.window.createStatusBarItem as jest.Mock)
+            const statusBar = (vscode.window.createStatusBarItem as vi.Mock)
                 .mock.results[0].value;
 
             expect(connectionCallbacks['disconnected']).toBeDefined();
@@ -889,40 +894,42 @@ describe('extension.ts', () => {
         });
 
         test('updates status bar to offline after 15s if still disconnected', async () => {
-            jest.useFakeTimers({ doNotFake: ['setImmediate'] });
+            // Enable fake timers BEFORE activating so setTimeout is captured.
+            vi.useFakeTimers();
             await activateWithConnection();
 
-            const statusBar = (vscode.window.createStatusBarItem as jest.Mock)
+            const statusBar = (vscode.window.createStatusBarItem as vi.Mock)
                 .mock.results[0].value;
 
             // isConnected stays false (default) — simulates failed reconnect
             mockStdioInstance.isConnected = false;
             connectionCallbacks['disconnected']();
 
-            jest.advanceTimersByTime(15_000);
+            vi.advanceTimersByTime(15_000);
 
             expect(statusBar.text).toBe('$(error) ClarAIty (offline)');
             expect(statusBar.tooltip).toBe('ClarAIty - Disconnected. Use "New Chat" to reconnect.');
 
-            jest.useRealTimers();
+            vi.useRealTimers();
         });
 
         test('does not update status bar to offline if reconnected within 15s', async () => {
-            jest.useFakeTimers({ doNotFake: ['setImmediate'] });
+            // Enable fake timers BEFORE activating so setTimeout is captured.
+            vi.useFakeTimers();
             await activateWithConnection();
 
-            const statusBar = (vscode.window.createStatusBarItem as jest.Mock)
+            const statusBar = (vscode.window.createStatusBarItem as vi.Mock)
                 .mock.results[0].value;
 
             // Simulate reconnect before timeout fires
             mockStdioInstance.isConnected = true;
             connectionCallbacks['disconnected']();
 
-            jest.advanceTimersByTime(15_000);
+            vi.advanceTimersByTime(15_000);
 
             expect(statusBar.text).not.toBe('$(error) ClarAIty (offline)');
 
-            jest.useRealTimers();
+            vi.useRealTimers();
         });
 
         test('handles stream_start message by beginning undo checkpoint', async () => {
@@ -1055,7 +1062,7 @@ describe('extension.ts', () => {
                 args: ['-m', 'src.server'],
                 cwd: '/test/workspace',
             };
-            (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
+            (resolveLaunchConfig as vi.Mock).mockResolvedValue(launchConfig);
 
             const ctx = createMockContext();
             activate(ctx);
@@ -1095,7 +1102,7 @@ describe('extension.ts', () => {
                 args: ['-m', 'src.server'],
                 cwd: '/test/workspace',
             };
-            (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
+            (resolveLaunchConfig as vi.Mock).mockResolvedValue(launchConfig);
 
             const ctx = createMockContext();
             activate(ctx);
@@ -1121,7 +1128,7 @@ describe('extension.ts', () => {
                 args: ['-m', 'src.server'],
                 cwd: '/test/workspace',
             };
-            (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
+            (resolveLaunchConfig as vi.Mock).mockResolvedValue(launchConfig);
 
             const ctx = createMockContext();
             activate(ctx);
@@ -1184,7 +1191,7 @@ describe('extension.ts', () => {
                     end: { line: 9, character: 0 },
                 },
                 document: {
-                    getText: jest.fn(() => text),
+                    getText: vi.fn(() => text),
                     fileName,
                     languageId,
                 },
@@ -1266,7 +1273,7 @@ describe('extension.ts', () => {
 
             (vscode.window as any).activeTextEditor = {
                 selection: { isEmpty: true },
-                document: { getText: jest.fn(), fileName: 'test.ts', languageId: 'typescript' },
+                document: { getText: vi.fn(), fileName: 'test.ts', languageId: 'typescript' },
             };
 
             const callback = findCommandCallback('claraity.explainCode');
@@ -1314,7 +1321,7 @@ describe('extension.ts', () => {
 
     describe('setApiKey command', () => {
         test('stores key in SecretStorage when user provides one', async () => {
-            (vscode.window as any).showInputBox = jest.fn().mockResolvedValue('sk-my-key');
+            (vscode.window as any).showInputBox = vi.fn().mockResolvedValue('sk-my-key');
 
             const ctx = createMockContext();
             activate(ctx);
@@ -1327,7 +1334,7 @@ describe('extension.ts', () => {
         });
 
         test('does nothing when user cancels input', async () => {
-            (vscode.window as any).showInputBox = jest.fn().mockResolvedValue(undefined);
+            (vscode.window as any).showInputBox = vi.fn().mockResolvedValue(undefined);
 
             const ctx = createMockContext();
             activate(ctx);
@@ -1345,25 +1352,21 @@ describe('extension.ts', () => {
 
     describe('deactivate()', () => {
         test('disposes connection when active', async () => {
-            jest.useFakeTimers({ doNotFake: ['setImmediate'] });
             const launchConfig = {
                 mode: 'dev' as const,
                 command: 'python',
                 args: ['-m', 'src.server'],
                 cwd: '/test/workspace',
             };
-            (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
+            (resolveLaunchConfig as vi.Mock).mockResolvedValue(launchConfig);
 
             const ctx = createMockContext();
             activate(ctx);
             await flushPromises();
 
-            const deactivatePromise = deactivate();
-            jest.runAllTimers();
-            await deactivatePromise;
+            await deactivate();
 
             expect(mockStdioInstance.dispose).toHaveBeenCalled();
-            jest.useRealTimers();
         });
 
         test('does not throw when called without prior activation', () => {
@@ -1380,7 +1383,7 @@ describe('extension.ts', () => {
                 args: ['-m', 'src.server'],
                 cwd: '/test/workspace',
             };
-            (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
+            (resolveLaunchConfig as vi.Mock).mockResolvedValue(launchConfig);
 
             const ctx = createMockContext();
             activate(ctx);
@@ -1405,7 +1408,16 @@ describe('extension.ts', () => {
 
 /**
  * Flush all pending microtasks (resolved promises).
+ * Uses chained Promise.resolve() ticks -- compatible with Vitest's fake timers.
  */
 function flushPromises(): Promise<void> {
-    return new Promise((resolve) => setImmediate(resolve));
+    return new Promise<void>((resolve) => {
+        // Drain the microtask queue with multiple ticks to handle
+        // promise chains of arbitrary depth (e.g. async mock chains).
+        Promise.resolve()
+            .then(() => Promise.resolve())
+            .then(() => Promise.resolve())
+            .then(() => Promise.resolve())
+            .then(() => resolve());
+    });
 }
