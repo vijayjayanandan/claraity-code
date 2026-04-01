@@ -29,7 +29,6 @@ from src.llm import LLMBackend, LLMBackendType, LLMConfig, OllamaBackend, OpenAI
 from src.llm.base import ProviderDelta
 from src.llm.failure_handler import LLMError, RateLimitError, TimeoutError
 from src.memory import MemoryManager, TaskContext
-from src.prompts import PromptLibrary, TaskType
 from src.tools import (
     AppendToFileTool,
     CreateCheckpointTool,

@@ -36,6 +36,7 @@ interface MockStdioConnection {
     send: jest.Mock;
     dispose: jest.Mock;
     disconnect: jest.Mock;
+    restart: jest.Mock;
     setApiKey: jest.Mock;
     setTavilyKey: jest.Mock;
     onConnected: jest.Mock;
@@ -126,6 +127,7 @@ function setupMocks() {
         send: jest.fn(),
         dispose: jest.fn(),
         disconnect: jest.fn(),
+        restart: jest.fn(),
         setApiKey: jest.fn(),
         setTavilyKey: jest.fn(),
         onConnected: jest.fn((cb: Function) => {
@@ -309,6 +311,7 @@ describe('extension.ts', () => {
                 expect(vscode.window.registerWebviewViewProvider).toHaveBeenCalledWith(
                     'claraity.chatView',
                     mockSidebarInstance,
+                    { webviewOptions: { retainContextWhenHidden: true } },
                 );
             });
 
@@ -363,16 +366,17 @@ describe('extension.ts', () => {
                 );
             });
 
-            test('registers all 12 commands', () => {
+            test('registers all 15 commands', () => {
                 const ctx = createMockContext();
                 activate(ctx);
 
-                // newChat, interrupt, sessionHistory, acceptChange, rejectChange,
-                // viewDiff, undoTurn, explainCode, fixCode, refactorCode, addToChat, setApiKey
-                expect(vscode.commands.registerCommand).toHaveBeenCalledTimes(12);
+                // newChat, interrupt, sessionHistory, showConfig, showMcp, showSubagents,
+                // acceptChange, rejectChange, viewDiff, undoTurn,
+                // explainCode, fixCode, refactorCode, addToChat, setApiKey
+                expect(vscode.commands.registerCommand).toHaveBeenCalledTimes(15);
             });
 
-            test('newChat command focuses the chat view', () => {
+            test('newChat command always focuses the chat view', () => {
                 const ctx = createMockContext();
                 activate(ctx);
 
@@ -383,6 +387,66 @@ describe('extension.ts', () => {
                 expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
                     'claraity.chatView.focus',
                 );
+            });
+
+            test('newChat sends new_session when agent is connected', async () => {
+                const launchConfig = {
+                    mode: 'dev' as const,
+                    command: 'python',
+                    args: ['-m', 'src.server'],
+                    cwd: '/test/workspace',
+                };
+                (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
+                mockStdioInstance.isConnected = true;
+
+                const ctx = createMockContext();
+                activate(ctx);
+                await flushPromises();
+
+                const callback = findCommandCallback('claraity.newChat');
+                callback!();
+
+                expect(mockStdioInstance.send).toHaveBeenCalledWith({ type: 'new_session' });
+            });
+
+            test('newChat restarts agent when disconnected', async () => {
+                const launchConfig = {
+                    mode: 'dev' as const,
+                    command: 'python',
+                    args: ['-m', 'src.server'],
+                    cwd: '/test/workspace',
+                };
+                (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
+                mockStdioInstance.isConnected = false;
+
+                const ctx = createMockContext();
+                activate(ctx);
+                await flushPromises();
+
+                const callback = findCommandCallback('claraity.newChat');
+                callback!();
+
+                expect(mockStdioInstance.restart).toHaveBeenCalled();
+            });
+
+            test('newChat does not send new_session when agent is disconnected', async () => {
+                const launchConfig = {
+                    mode: 'dev' as const,
+                    command: 'python',
+                    args: ['-m', 'src.server'],
+                    cwd: '/test/workspace',
+                };
+                (resolveLaunchConfig as jest.Mock).mockResolvedValue(launchConfig);
+                mockStdioInstance.isConnected = false;
+
+                const ctx = createMockContext();
+                activate(ctx);
+                await flushPromises();
+
+                const callback = findCommandCallback('claraity.newChat');
+                callback!();
+
+                expect(mockStdioInstance.send).not.toHaveBeenCalledWith({ type: 'new_session' });
             });
 
             test('sessionHistory command calls showSessionHistory on sidebar provider', () => {
@@ -811,7 +875,7 @@ describe('extension.ts', () => {
             expect(statusBar.tooltip).toBe('ClarAIty - Connected');
         });
 
-        test('updates status bar text on disconnected event', async () => {
+        test('updates status bar to reconnecting immediately on disconnected event', async () => {
             await activateWithConnection();
 
             const statusBar = (vscode.window.createStatusBarItem as jest.Mock)
@@ -820,8 +884,45 @@ describe('extension.ts', () => {
             expect(connectionCallbacks['disconnected']).toBeDefined();
             connectionCallbacks['disconnected']();
 
-            expect(statusBar.text).toBe('$(sparkle) ClarAIty (offline)');
-            expect(statusBar.tooltip).toBe('ClarAIty - Disconnected');
+            expect(statusBar.text).toBe('$(loading~spin) ClarAIty (reconnecting...)');
+            expect(statusBar.tooltip).toBe('ClarAIty - Reconnecting...');
+        });
+
+        test('updates status bar to offline after 15s if still disconnected', async () => {
+            jest.useFakeTimers({ doNotFake: ['setImmediate'] });
+            await activateWithConnection();
+
+            const statusBar = (vscode.window.createStatusBarItem as jest.Mock)
+                .mock.results[0].value;
+
+            // isConnected stays false (default) — simulates failed reconnect
+            mockStdioInstance.isConnected = false;
+            connectionCallbacks['disconnected']();
+
+            jest.advanceTimersByTime(15_000);
+
+            expect(statusBar.text).toBe('$(error) ClarAIty (offline)');
+            expect(statusBar.tooltip).toBe('ClarAIty - Disconnected. Use "New Chat" to reconnect.');
+
+            jest.useRealTimers();
+        });
+
+        test('does not update status bar to offline if reconnected within 15s', async () => {
+            jest.useFakeTimers({ doNotFake: ['setImmediate'] });
+            await activateWithConnection();
+
+            const statusBar = (vscode.window.createStatusBarItem as jest.Mock)
+                .mock.results[0].value;
+
+            // Simulate reconnect before timeout fires
+            mockStdioInstance.isConnected = true;
+            connectionCallbacks['disconnected']();
+
+            jest.advanceTimersByTime(15_000);
+
+            expect(statusBar.text).not.toBe('$(error) ClarAIty (offline)');
+
+            jest.useRealTimers();
         });
 
         test('handles stream_start message by beginning undo checkpoint', async () => {
@@ -1244,6 +1345,7 @@ describe('extension.ts', () => {
 
     describe('deactivate()', () => {
         test('disposes connection when active', async () => {
+            jest.useFakeTimers({ doNotFake: ['setImmediate'] });
             const launchConfig = {
                 mode: 'dev' as const,
                 command: 'python',
@@ -1256,9 +1358,12 @@ describe('extension.ts', () => {
             activate(ctx);
             await flushPromises();
 
-            deactivate();
+            const deactivatePromise = deactivate();
+            jest.runAllTimers();
+            await deactivatePromise;
 
             expect(mockStdioInstance.dispose).toHaveBeenCalled();
+            jest.useRealTimers();
         });
 
         test('does not throw when called without prior activation', () => {

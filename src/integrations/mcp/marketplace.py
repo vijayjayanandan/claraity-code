@@ -128,10 +128,14 @@ def _parse_official_entry(raw: dict[str, Any]) -> McpMarketplaceEntry:
         prefix_parts = parts[0].split(".")
         author = prefix_parts[-1] if len(prefix_parts) >= 2 else ""
     # Fall back to GitHub URL
-    if not author and "github.com/" in repo_url:
-        github_parts = repo_url.rstrip("/").split("/")
-        if len(github_parts) >= 4:
-            author = github_parts[-2]
+    if not author and repo_url:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(repo_url)
+        if parsed.hostname == "github.com":
+            path_parts = parsed.path.strip("/").split("/")
+            if len(path_parts) >= 2:
+                author = path_parts[0]
 
     # Get install info from packages (stdio servers)
     packages = server.get("packages", [])

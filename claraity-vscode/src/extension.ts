@@ -187,10 +187,12 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('claraity.newChat', () => {
             // Focus the chat view
             vscode.commands.executeCommand('claraity.chatView.focus');
-            // Verify agent is alive — if dead, attempt restart
+            // Verify agent is alive — if dead, attempt restart; otherwise start a new session
             if (connection && !connection.isConnected) {
                 log.appendLine('[ClarAIty] Agent is dead on newChat — restarting');
                 connection.restart();
+            } else {
+                connection?.send({ type: 'new_session' });
             }
         }),
         vscode.commands.registerCommand('claraity.interrupt', () => {

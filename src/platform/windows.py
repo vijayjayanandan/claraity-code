@@ -324,11 +324,6 @@ def remove_emojis(text: str) -> str:
     CRITICAL: Windows cp1252 crashes on emoji characters.
     Use this for log output, print statements, subprocess output.
 
-    This pattern covers comprehensive Unicode emoji ranges including:
-    - Common emojis (faces, objects, flags)
-    - Symbols (checkmarks, warnings, arrows)
-    - Extended emoji sets
-
     Args:
         text: Text potentially containing emojis
 
@@ -338,30 +333,9 @@ def remove_emojis(text: str) -> str:
     if not text:
         return ""
 
-    import re
+    import emoji
 
-    # Comprehensive emoji pattern covering all Unicode emoji ranges
-    # Based on Unicode TR51 (Emoji specification)
-    emoji_pattern = re.compile(
-        "["
-        "\U0001f600-\U0001f64f"  # emoticons
-        "\U0001f300-\U0001f5ff"  # symbols & pictographs
-        "\U0001f680-\U0001f6ff"  # transport & map symbols
-        "\U0001f1e0-\U0001f1ff"  # flags (iOS)
-        "\U0001f900-\U0001f9ff"  # supplemental symbols (includes fire emoji)
-        "\U00002600-\U000026ff"  # miscellaneous symbols (includes checkmark, cross, warning)
-        "\U00002700-\U000027bf"  # dingbats
-        "\U00002b00-\U00002bff"  # miscellaneous symbols and arrows
-        "\U0001fa00-\U0001fa6f"  # chess symbols
-        "\U0001fa70-\U0001faff"  # symbols and pictographs extended
-        "\U000024c2-\U0001f251"  # enclosed characters
-        "\U0000fe00-\U0000fe0f"  # variation selectors
-        "\U0001f200-\U0001f2ff"  # enclosed ideographic supplement
-        "]+",
-        flags=re.UNICODE,
-    )
-
-    return emoji_pattern.sub("", text)
+    return emoji.replace_emoji(text, replace="")
 
 
 def safe_print(text: str, **kwargs) -> None:

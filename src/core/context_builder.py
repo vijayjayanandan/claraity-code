@@ -214,7 +214,7 @@ class ContextBuilder:
 
         # 1. Build system prompt using gold-standard prompts (based on Claude Code)
         system_prompt = get_system_prompt(
-            language=language, task_type=task_type, context_size=self.max_context_tokens
+            language=language, task_type=task_type
         )
 
         # Inject plan mode context if active

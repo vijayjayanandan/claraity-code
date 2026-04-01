@@ -93,6 +93,8 @@ a = Analysis(
         # Testing
         "src.testing.test_runner",
         # Third-party hidden imports
+        "bs4",
+        "emoji",
         "aiohttp",
         "aiohttp.web",
         "openai",

@@ -805,32 +805,18 @@ class WebFetchTool(Tool):
 
         Strips script/style tags, collapses whitespace, preserves structure.
         """
-        # Remove script and style elements
-        html = re.sub(r"<script[^>]*>.*?</script>", "", html, flags=re.DOTALL | re.IGNORECASE)
-        html = re.sub(r"<style[^>]*>.*?</style>", "", html, flags=re.DOTALL | re.IGNORECASE)
+        from bs4 import BeautifulSoup
 
-        # Remove HTML comments
-        html = re.sub(r"<!--.*?-->", "", html, flags=re.DOTALL)
-
-        # Replace block elements with newlines
-        html = re.sub(r"<(br|hr|p|div|h[1-6]|li|tr)[^>]*>", "\n", html, flags=re.IGNORECASE)
-
-        # Remove remaining HTML tags
-        html = re.sub(r"<[^>]+>", "", html)
-
-        # Decode common HTML entities
-        html = html.replace("&nbsp;", " ")
-        html = html.replace("&amp;", "&")
-        html = html.replace("&lt;", "<")
-        html = html.replace("&gt;", ">")
-        html = html.replace("&quot;", '"')
-        html = html.replace("&#39;", "'")
+        soup = BeautifulSoup(html, "html.parser")
+        for tag in soup(["script", "style"]):
+            tag.decompose()
+        text = soup.get_text(separator="\n")
 
         # Collapse multiple whitespace
-        html = re.sub(r"[ \t]+", " ", html)
-        html = re.sub(r"\n\s*\n", "\n\n", html)
+        text = re.sub(r"[ \t]+", " ", text)
+        text = re.sub(r"\n\s*\n", "\n\n", text)
 
-        return html.strip()
+        return text.strip()
 
     def _get_parameters(self) -> dict[str, Any]:
         """Get parameter schema for LLM."""

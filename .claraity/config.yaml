@@ -29,8 +29,8 @@ limits:
   max_iterations: 50
 auto_approve:
   read: true
-  edit: false
-  execute: false
+  edit: true
+  execute: true
   browser: false
   knowledge_update: false
   subagent: false

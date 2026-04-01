@@ -217,9 +217,13 @@ def _build_run_command_description() -> str:
         "\nGit safety:\n"
         "- Never run destructive git commands (push --force, reset --hard, checkout ., clean -f, branch -D) "
         "without explicit user request.\n"
+        "- Never update git config.\n"
         "- Never skip hooks (--no-verify) unless the user explicitly asks.\n"
+        "- Never use -i flag (git rebase -i, git add -i) -- interactive input not supported.\n"
         "- Prefer creating new commits over amending existing ones.\n"
         "- When staging files, prefer specific file names over 'git add -A' or 'git add .'.\n"
+        "- Use HEREDOC for multi-line commit messages:\n"
+        '  git commit -m "$(cat <<\'EOF\'\\nMessage\\n\\nCo-Authored-By: AI Coding Agent <agent@example.com>\\nEOF\\n)"\n'
     )
 
     return base + shell_section + dont_use + paths + multi_cmd + background + guardrails + git_safety
@@ -404,7 +408,14 @@ GET_SYMBOL_CONTEXT_TOOL = ToolDefinition(
 
 DELEGATE_TO_SUBAGENT_TOOL = ToolDefinition(
     name="delegate_to_subagent",
-    description="Delegate a task to a specialized subagent for focused execution. Subagents have independent context (no pollution of main conversation). Available: code-writer, code-reviewer, test-writer, doc-writer, explore, planner, general-purpose.",
+    description=(
+        "Delegate a task to a specialized subagent for focused execution. Subagents have "
+        "independent context (no pollution of main conversation). "
+        "Available: code-writer, code-reviewer, test-writer, doc-writer, explore, planner, general-purpose.\n\n"
+        "Proactively delegate to code-reviewer after: changes touching 3+ files, async/concurrency code, "
+        "auth/security code, agent control loop or persistence changes.\n"
+        "Proactively delegate to test-writer after: new features, bug fixes, refactoring critical paths."
+    ),
     parameters={
         "type": "object",
         "properties": {
@@ -450,7 +461,12 @@ CREATE_CHECKPOINT_TOOL = ToolDefinition(
 
 WEB_SEARCH_TOOL = ToolDefinition(
     name="web_search",
-    description="Search the web for current information. Returns results with citations. Use for: documentation, error messages, library versions, best practices, current events.",
+    description=(
+        "Search the web for current information. Returns results with citations. "
+        "Use for: documentation, error messages, library versions, best practices. "
+        "Don't search for fundamental concepts you already know or repeat the same query in a session. "
+        "Always cite sources in your response."
+    ),
     parameters={
         "type": "object",
         "properties": {
@@ -530,7 +546,12 @@ EXIT_PLAN_MODE_TOOL = ToolDefinition(
 
 CLARIFY_TOOL = ToolDefinition(
     name="clarify",
-    description="Ask the user clarifying questions before proceeding with ambiguous tasks. Use this when the task is unclear, has multiple valid approaches, or requires user preference. Provides a structured interview interface with 1-4 questions.",
+    description=(
+        "Ask the user clarifying questions before proceeding with ambiguous tasks. "
+        "Use when the task has multiple valid approaches and user preference matters. "
+        "Do NOT use when: user gave explicit instructions, only one reasonable approach exists, "
+        "or codebase conventions make the choice obvious. Max 4 focused questions."
+    ),
     parameters={
         "type": "object",
         "properties": {
@@ -754,7 +775,7 @@ BACKGROUND_TOOLS = [
 
 KNOWLEDGE_SCAN_FILES_TOOL = ToolDefinition(
     name="knowledge_scan_files",
-    description="Auto-discover source files and add as layer 4 nodes. Language-agnostic. Run as first step when building knowledge for a new repo.",
+    description="Auto-discover source files and add as layer 4 nodes. Language-agnostic. Run as first step when building a Knowledge DB for a new repo.",
     parameters={
         "type": "object",
         "properties": {
@@ -770,7 +791,9 @@ KNOWLEDGE_UPDATE_TOOL = ToolDefinition(
     description=(
         "Execute multiple knowledge DB write operations in one call. "
         "Accepts a JSON array of operations (add_node, update_node, add_edge, remove_node, remove_edge). "
-        "All operations run in a single DB transaction."
+        "All operations run in a single DB transaction.\n\n"
+        "When to update: at natural milestones (task complete, feature done, session end). "
+        "Do NOT update after every individual file edit -- batch changes for efficiency."
     ),
     parameters={
         "type": "object",
@@ -804,7 +827,9 @@ KNOWLEDGE_QUERY_TOOL = ToolDefinition(
     description=(
         "Unified knowledge DB query. All params optional -- combine them. "
         "FTS search (search=), node detail (node_id=), module (module_id=), "
-        "file context (file_path=), blast radius (impact=), overview (show='brief')."
+        "file context (file_path=), blast radius (impact=), overview (show='brief').\n\n"
+        "Use to ORIENT yourself in unfamiliar areas, check constraints before risky changes, "
+        "or find the right file to read. Skip when you already know which file to edit."
     ),
     parameters={
         "type": "object",
@@ -856,7 +881,12 @@ TASK_LIST_TOOL = ToolDefinition(
 
 TASK_CREATE_TOOL = ToolDefinition(
     name="task_create",
-    description="Create a new task with title, description, priority, and optional tags.",
+    description=(
+        "Create a new task with title, description, priority, and optional tags.\n\n"
+        "Create tasks for the OVERALL work item, not each sub-step. Use task_update with "
+        "action='note' for progress within a task. Only create separate tasks for genuinely "
+        "independent work items. Skip task management entirely for single-step or trivial operations."
+    ),
     parameters={
         "type": "object",
         "properties": {
@@ -909,7 +939,7 @@ KNOWLEDGE_AUTO_LAYOUT_TOOL = ToolDefinition(
 
 KNOWLEDGE_EXPORT_TOOL = ToolDefinition(
     name="knowledge_export",
-    description="Export knowledge DB and beads DB to JSONL files for git tracking. Call after finishing modifications to the knowledge base.",
+    description="Export knowledge DB and beads DB to JSONL files for git tracking. Call at session end or after a batch of knowledge_update operations -- not after every individual update.",
     parameters={
         "type": "object",
         "properties": {},

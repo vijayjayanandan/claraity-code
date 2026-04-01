@@ -113,6 +113,7 @@ live-*-logs/
 live-*-workspace/
 test-*-logs/
 test-*-workspace/
+test-ai-engineer-workspace/
 
 # Checkpoints (session data)
 .checkpoints/
@@ -224,6 +225,9 @@ claraity-vscode/webview-ui/test-results/
 /IMPLEMENTATION_PLAN_NEXT_SESSION.md
 /SESSION_SUMMARY.md
 
-# Examples dir: ignore generated logs
-examples/*.log
-examples/__pycache__/
+# Examples dir: demo/scratch scripts, not part of product
+examples/
+
+# CodeQL (generated)
+codeql-db/
+*.sarif
