@@ -380,7 +380,7 @@ Write the tests following the project's patterns:
 ```python
 def test_user_registration_creates_account(self):
     # Arrange: Set up test data
-    user_data = {"email": "test@example.com", "password": "SecurePass123!"}
+    user_data = {"email": "test@example.com", "password": "placeholder_password"}
 
     # Act: Execute the code being tested
     result = register_user(user_data)

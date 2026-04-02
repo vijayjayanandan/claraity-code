@@ -36,9 +36,9 @@ class TestRedactSecrets:
         assert REDACTED in result
 
     def test_bearer_token(self):
-        text = "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.sig"
+        text = "Authorization: Bearer FAKE_TEST_TOKEN_NOT_REAL.test.payload"
         result = redact_secrets(text)
-        assert "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" not in result
+        assert "FAKE_TEST_TOKEN_NOT_REAL" not in result
         assert REDACTED in result
 
     def test_generic_api_key_assignment(self):
@@ -86,13 +86,13 @@ class TestRedactDict:
         assert result["model"] == "gpt-4"  # Non-sensitive preserved
 
     def test_redacts_password_field(self):
-        data = {"username": "admin", "password": "hunter2"}
+        data = {"username": "admin", "password": "test_password_value"}
         result = redact_dict(data)
         assert result["password"] == REDACTED
         assert result["username"] == "admin"
 
     def test_redacts_token_field(self):
-        data = {"token": "eyJhbGciOiJIUzI1NiJ9.payload.signature"}
+        data = {"token": "fake-test-token.payload.signature"}
         result = redact_dict(data)
         assert result["token"] == REDACTED
 

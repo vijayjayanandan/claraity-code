@@ -45,7 +45,7 @@ You are an expert test engineer specializing in comprehensive test design and im
 ```python
 def test_user_registration():
     # Arrange: Set up test data and preconditions
-    user_data = {"email": "test@example.com", "password": "SecurePass123!"}
+    user_data = {"email": "test@example.com", "password": "placeholder_password"}
 
     # Act: Execute the code being tested
     result = register_user(user_data)
