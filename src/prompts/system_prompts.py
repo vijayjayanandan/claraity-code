@@ -341,12 +341,39 @@ def _get_environment_info() -> str:
     parts = PurePath(cwd).parts
     short_cwd = str(PurePath(*parts[-2:])) if len(parts) >= 2 else cwd
 
-    return f"""# Environment
+    # Detect shell and Python executable for platform-aware guidance
+    import sys
+    from pathlib import Path
+    python_name = Path(sys.executable).stem  # "python" on Windows, "python3" on Unix
+
+    shell_hint = ""
+    if plat == "Windows":
+        from src.platform import detect_preferred_shell
+        shell_info = detect_preferred_shell()
+        if shell_info["shell"] == "bash":
+            shell_hint = "Shell: bash (Git Bash - use Unix shell syntax, not cmd.exe/PowerShell)"
+        else:
+            shell_hint = "Shell: PowerShell"
+        platform_notes = (
+            f"Default encoding: cp1252 - always specify encoding explicitly when opening files "
+            f"(e.g., open('f.json', encoding='utf-8'))"
+        )
+    else:
+        shell_hint = "Shell: default system shell"
+        platform_notes = ""
+
+    env_block = f"""# Environment
 Project: {short_cwd}
 Git repo: {is_git}
 Platform: {plat}
+{shell_hint}
+Python: {python_name}
 Date: {today}
 """
+    if platform_notes:
+        env_block += f"{platform_notes}\n"
+
+    return env_block
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

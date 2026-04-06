@@ -796,11 +796,22 @@ class RunCommandTool(Tool):
             # CREATE_NO_WINDOW / start_new_session isolate subprocess from parent terminal,
             # preventing tools like npx from writing escape sequences directly to the TUI
             if platform.system() == "Windows":
+                # PYTHONIOENCODING=utf-8 aligns child Python's stdout/stderr
+                # encoding with how we read the pipe (encoding="utf-8" below).
+                # Without this, child Python defaults to cp1252 on Windows and
+                # crashes on any non-cp1252 character in print(). Only affects
+                # stdin/stdout/stderr — does NOT change file I/O defaults.
+                def _ensure_pythonioencoding(env: dict | None) -> dict:
+                    e = env if env is not None else os.environ.copy()
+                    e.setdefault("PYTHONIOENCODING", "utf-8")
+                    return e
+
                 if shell_info["shell"] == "bash":
                     # Git Bash: reliable exit codes, Unix syntax.
                     # get_bash_env() ensures Git tools (tail, grep, etc.) are on
                     # PATH even when spawned from VS Code's system PATH.
                     bash_env = get_bash_env(shell_info["path"])
+                    bash_env = _ensure_pythonioencoding(bash_env)
                     result = subprocess.run(
                         [shell_info["path"], "-c", command],
                         cwd=cwd,
@@ -815,6 +826,7 @@ class RunCommandTool(Tool):
                     )
                 else:
                     # PowerShell fallback
+                    ps_env = _ensure_pythonioencoding(None)
                     result = subprocess.run(
                         ["powershell", "-NoProfile", "-Command", command],
                         cwd=cwd,
@@ -825,6 +837,7 @@ class RunCommandTool(Tool):
                         errors="replace",
                         stdin=subprocess.DEVNULL,
                         creationflags=subprocess.CREATE_NO_WINDOW,
+                        env=ps_env,
                     )
             else:
                 # On Unix-like systems, use the default shell
