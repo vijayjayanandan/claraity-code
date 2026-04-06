@@ -189,7 +189,7 @@ SAFETY_INVARIANTS = """# Safety Invariants (Never Bypass)
 | Same approach failing | 3 | Switch to different approach |
 | Different approaches failing | 2 | Ask user for guidance |
 | Permission errors | 1 | Ask user immediately |
-| LSP tool failures | 1 | Fall back to read_file immediately |
+| Tool not found | 1 | Fall back to alternative tool immediately |
 
 ## 4) Fail-Fast
 When blocked after retries:
@@ -330,8 +330,6 @@ already has the answer. This avoids redundant file reads and prevents violating 
 | Tool | When to Use |
 |------|-------------|
 | `analyze_code` | Get AST structure (imports, classes) |
-| `get_file_outline` | Get symbol hierarchy (may fail, fall back to read_file) |
-| `get_symbol_context` | Get symbol details (may fail, fall back to grep + read_file) |
 
 ## File Reading Strategy
 
@@ -356,11 +354,6 @@ already has the answer. This avoids redundant file reads and prevents violating 
    → >5000 lines: Ask user "Need summary or full content?"
 ```
 
-## LSP Tool Fallback
-If `get_file_outline` or `get_symbol_context` fails:
-1. DO NOT retry
-2. Fall back to `read_file` immediately
-3. Analyze the content yourself
 """
 
 # ---------------------------------------------------------------------------
@@ -807,7 +800,7 @@ ERROR_RECOVERY = """# Error Handling and Recovery
 ## When Tools Fail
 1. Check error message for cause
 2. If permission error → ask user immediately
-3. If LSP failure → fall back to read_file (no retry)
+3. If tool not found → fall back to alternative tool
 4. If network/timeout → retry up to 3x with backoff
 5. If still failing → switch approach or fail fast
 

@@ -284,44 +284,6 @@ class TestListDirectoryIntegration:
         FileOperationTool._workspace_root = None
 
 
-# ---------- LSP Tool Integration ----------
-
-
-class TestLSPToolIntegration:
-    def test_get_file_outline_blocked(self, workspace):
-        """GetFileOutlineTool should block files matched by .claraityignore."""
-        from src.tools.lsp_tools import GetFileOutlineTool
-
-        (workspace / "secret.py").write_text("class Secret: pass")
-        _write_ignore(workspace, "secret.py")
-
-        tool = GetFileOutlineTool()
-        # Call _execute_async directly to avoid needing a running LSP server
-        import asyncio
-
-        result = asyncio.get_event_loop().run_until_complete(
-            tool._execute_async("secret.py")
-        )
-        assert result.status.value == "error"
-        assert "user policy" in result.error
-
-    def test_get_file_outline_allowed(self, workspace):
-        """GetFileOutlineTool should allow files not in .claraityignore."""
-        from src.tools.lsp_tools import GetFileOutlineTool
-
-        (workspace / "app.py").write_text("class App: pass")
-        _write_ignore(workspace, "*.env")
-
-        tool = GetFileOutlineTool()
-        import asyncio
-
-        result = asyncio.get_event_loop().run_until_complete(
-            tool._execute_async("app.py")
-        )
-        # Won't succeed (no LSP server) but should NOT be "user policy" error
-        assert "user policy" not in (result.error or "")
-
-
 # ---------- Knowledge Tool Integration ----------
 
 

@@ -65,18 +65,6 @@ class TestListModels:
         assert models == ["gpt-4o", "gpt-3.5-turbo"]
         mock_instance.list_models.assert_called_once()
 
-    @patch("src.llm.ollama_backend.OllamaBackend")
-    def test_list_models_ollama(self, mock_backend_cls):
-        """Should create an Ollama backend and call list_models()."""
-        mock_instance = MagicMock()
-        mock_instance.list_models.return_value = ["llama3:8b", "codellama:7b"]
-        mock_backend_cls.return_value = mock_instance
-
-        models = ConfigLLMScreen._list_models(
-            "ollama", "http://localhost:11434", ""
-        )
-        assert models == ["llama3:8b", "codellama:7b"]
-        mock_instance.list_models.assert_called_once()
 
 
 class TestSubagentNames:

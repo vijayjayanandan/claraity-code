@@ -36,7 +36,6 @@ def get_stateless_tools() -> list:
         RunCommandTool,
         WriteFileTool,
     )
-    from src.tools.lsp_tools import GetFileOutlineTool, GetSymbolContextTool
     from src.tools.search_tools import GlobTool, GrepTool
     from src.tools.web_tools import WebFetchTool, WebSearchTool
 
@@ -51,9 +50,6 @@ def get_stateless_tools() -> list:
         # Search
         GrepTool(),
         GlobTool(),
-        # LSP
-        GetFileOutlineTool(),
-        GetSymbolContextTool(),
         # Interactive
         ClarifyTool(),
         # ClarAIty Knowledge DB (knowledge_query is the unified read tool)

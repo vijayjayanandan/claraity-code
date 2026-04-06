@@ -10,7 +10,6 @@ from .base import (
     ToolParameter,
 )
 from .model_config import ModelConfig, get_model_config
-from .ollama_backend import OllamaBackend
 from .openai_backend import OpenAIBackend
 
 # Lazy import: AnthropicBackend requires `anthropic` SDK (optional dependency)
@@ -27,7 +26,6 @@ __all__ = [
     "ToolDefinition",
     "ToolCall",
     "ToolParameter",
-    "OllamaBackend",
     "OpenAIBackend",
     "AnthropicBackend",
     "ModelConfig",

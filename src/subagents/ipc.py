@@ -58,6 +58,7 @@ class SubprocessInput:
     web_search_limit: int = 2
     web_fetch_limit: int = 3
     iteration_limit_enabled: bool = True
+    trace_enabled: bool = False
 
     def __repr__(self) -> str:
         """Redact api_key from repr to prevent leakage in tracebacks/logs."""

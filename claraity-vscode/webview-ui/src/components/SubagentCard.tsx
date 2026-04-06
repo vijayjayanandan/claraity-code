@@ -50,9 +50,6 @@ export function SubagentCard({ info, toolCards: toolCardsList, postMessage }: Su
     return map;
   }, [toolCardsList]);
 
-  // Auto-expand when a child tool is awaiting approval
-  const hasAwaitingApproval = toolCardsList.some((t) => t.status === "awaiting_approval");
-
   // Current running tool for status line
   const currentTool = toolCardsList.find((t) => t.status === "running" || t.status === "pending");
   const currentToolName = currentTool?.tool_name ?? "";
@@ -87,8 +84,8 @@ export function SubagentCard({ info, toolCards: toolCardsList, postMessage }: Su
 
   return (
     <div className={`tool-card${info.active ? " subagent-active" : ""}`}>
-      <details open={info.active || hasAwaitingApproval}>
-        <summary className="tool-header" style={{ cursor: "pointer" }} aria-expanded={info.active || hasAwaitingApproval}>
+      <details>
+        <summary className="tool-header" style={{ cursor: "pointer" }}>
           <span className="tool-icon">SA</span>
           <span className="tool-name">
             {info.subagentName}

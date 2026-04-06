@@ -55,7 +55,27 @@ export type ExtensionMessage =
   | { type: "insertAndSend"; content: string }
   | { type: "enrichmentDelta"; delta: string }
   | { type: "enrichmentComplete"; original: string; enriched: string }
-  | { type: "enrichmentError"; message: string };
+  | { type: "enrichmentError"; message: string }
+  | { type: "traceData"; steps: TraceStepData[] }
+  | { type: "traceEnabled"; enabled: boolean };
+
+/** A single trace event from the agent pipeline .trace.jsonl file. */
+export interface TraceStepData {
+  id: number;
+  from: string;
+  to: string;
+  label: string;
+  type: string;
+  data: string;
+  durationMs: number;
+  timestamp?: number;
+  sections?: Record<string, string>;
+  thinking?: string;
+  /** Subagent name (only on steps inlined from a subagent trace) */
+  _subagent?: string;
+  /** True for steps that belong to a subagent's trace */
+  _isSubagentStep?: boolean;
+}
 
 // ============================================================================
 // Webview -> Extension (postMessage)
@@ -105,6 +125,10 @@ export type WebViewMessage =
   // ClarAIty Knowledge & Beads
   | { type: "getBeads" }
   | { type: "getArchitecture" }
+  | { type: "getTrace"; sessionId: string | null }
+  | { type: "getTraceEnabled" }
+  | { type: "setTraceEnabled"; enabled: boolean }
+  | { type: "clearTrace"; sessionId: string | null }
   | { type: "approveKnowledge"; approvedBy: string; status: string; comments: string }
   | { type: "exportKnowledge" }
   // Subagents panel

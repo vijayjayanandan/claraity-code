@@ -134,7 +134,7 @@ export interface AppState {
   chatDraft: string;
 
   // Panels
-  activePanel: "chat" | "config" | "jira" | "sessions" | "mcp" | "architecture" | "beads" | "subagents" | null;
+  activePanel: "chat" | "config" | "jira" | "sessions" | "mcp" | "architecture" | "beads" | "subagents" | "trace" | null;
   sessions: SessionSummary[];
 
   // Context
@@ -186,6 +186,10 @@ export interface AppState {
   // ClarAIty Knowledge & Beads
   beadsData: BeadsResponse | null;
   architectureData: ArchitectureResponse | null;
+
+  // Trace
+  traceSteps: import('../types').TraceStepData[] | null;
+  traceEnabled: boolean;
 
   // Subagents panel
   subagentsList: SubAgentInfo[];
@@ -278,6 +282,8 @@ export const initialState: AppState = {
 
   beadsData: null,
   architectureData: null,
+  traceSteps: null,
+  traceEnabled: false,
 
   subagentsList: [],
   subagentsAvailableTools: [],

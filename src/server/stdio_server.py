@@ -243,6 +243,8 @@ class StdioProtocol(UIProtocol):
         "get_auto_approve": "_handle_get_auto_approve",
         "get_limits": "_handle_get_limits",
         "save_limits": "_handle_save_limits",
+        "set_trace_enabled": "_handle_set_trace_enabled",
+        "get_trace_enabled": "_handle_get_trace_enabled",
         "new_session": "_handle_new_session",
         "list_sessions": "_handle_list_sessions",
         "resume_session": "_handle_resume_session",
@@ -554,6 +556,8 @@ class StdioProtocol(UIProtocol):
         bridge = ServerSubagentBridge(self)
         delegation_tool.set_registry(bridge)
         delegation_tool.set_ui_protocol(self)
+        if hasattr(self._agent, "_trace"):
+            delegation_tool.set_trace(self._agent._trace)
         logger.info("stdio_delegation_tool_wired")
 
     # -- Receiving (Client -> Agent) via stdin ------------------------------
@@ -760,6 +764,28 @@ class StdioProtocol(UIProtocol):
             confirmed = self._agent.set_limits(response["limits"])
             response["limits"] = confirmed
         await self._send_json(response)
+
+    # -----------------------------------------------------------------
+    # Trace capture toggle
+    # -----------------------------------------------------------------
+
+    async def _handle_get_trace_enabled(self, data: dict) -> None:
+        enabled = self._agent._trace.enabled if self._agent else False
+        await self._send_json({"type": "trace_enabled", "enabled": enabled})
+
+    async def _handle_set_trace_enabled(self, data: dict) -> None:
+        from src.llm.config_loader import save_trace_enabled
+
+        enabled = bool(data.get("enabled", False))
+        if self._agent:
+            self._agent._trace.set_enabled(enabled)
+            # If enabling mid-session and no emitter yet, init now
+            if enabled and self._agent._trace._emitter is None and self._agent._session_id:
+                sessions_dir = Path(self._working_directory) / ".claraity" / "sessions"
+                self._agent._trace.init_session(self._agent._session_id, sessions_dir)
+        # Persist to config.yaml
+        save_trace_enabled(enabled, self._config_path)
+        await self._send_json({"type": "trace_enabled", "enabled": enabled})
 
     # -----------------------------------------------------------------
     # Session management handlers
@@ -1834,8 +1860,6 @@ class StdioProtocol(UIProtocol):
         "grep",
         "glob",
         "run_command",
-        "get_file_outline",
-        "get_symbol_context",
         "clarify",
     ]
 
@@ -2090,7 +2114,7 @@ class StdioProtocol(UIProtocol):
         if not pe.model or pe.model == self._agent.llm.config.model_name:
             return self._agent.llm
 
-        from src.llm import LLMBackendType, LLMConfig, OllamaBackend, OpenAIBackend
+        from src.llm import LLMBackendType, LLMConfig, OpenAIBackend
 
         llm_config = LLMConfig(
             backend_type=LLMBackendType(cfg.backend_type),
@@ -2104,8 +2128,7 @@ class StdioProtocol(UIProtocol):
         if cfg.backend_type == "anthropic":
             from src.llm.anthropic_backend import AnthropicBackend
             return AnthropicBackend(llm_config, api_key=cfg.api_key)
-        elif cfg.backend_type == "ollama":
-            return OllamaBackend(llm_config)
+
         else:
             return OpenAIBackend(llm_config, api_key=cfg.api_key)
 
@@ -2287,6 +2310,7 @@ async def run_stdio_server(
     sys.stderr.flush()
 
     # Load config and create agent
+    from src.llm.config_loader import load_trace_enabled
     llm_config = load_llm_config(config_path)
     sys.stderr.write(f"[STDIO] Model: {llm_config.model}\n")
     sys.stderr.flush()
@@ -2297,6 +2321,8 @@ async def run_stdio_server(
         permission_mode=permission_mode,
         api_key=api_key,
     )
+    # Apply trace capture setting from config (default: off)
+    agent._trace.set_enabled(load_trace_enabled(config_path))
     session_id = agent.session_id
     message_store = agent.message_store
 

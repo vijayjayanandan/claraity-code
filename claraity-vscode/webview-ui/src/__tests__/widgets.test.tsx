@@ -456,9 +456,11 @@ describe("PauseWidget", () => {
 
 describe("ClarifyWidget", () => {
   let postMessage: ReturnType<typeof vi.fn>;
+  let onDismiss: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     postMessage = vi.fn();
+    onDismiss = vi.fn();
   });
 
   function renderClarifyWidget(
@@ -468,6 +470,7 @@ describe("ClarifyWidget", () => {
       callId: "clarify-1",
       questions: [],
       postMessage,
+      onDismiss,
       ...overrides,
     };
     return render(<ClarifyWidget {...props} />);
@@ -582,26 +585,22 @@ describe("ClarifyWidget", () => {
     });
   });
 
-  test("after submit, shows '[Clarification submitted]'", async () => {
+  test("after submit, calls onDismiss to clear the widget", async () => {
     renderClarifyWidget();
 
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Submit" }));
 
-    expect(screen.getByText("[Clarification submitted]")).toBeInTheDocument();
-    // Original form elements are gone
-    expect(
-      screen.queryByRole("button", { name: "Submit" })
-    ).not.toBeInTheDocument();
+    expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 
-  test("after cancel, shows '[Clarification cancelled]'", async () => {
+  test("after cancel, calls onDismiss to clear the widget", async () => {
     renderClarifyWidget();
 
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Cancel" }));
 
-    expect(screen.getByText("[Clarification cancelled]")).toBeInTheDocument();
+    expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 
   test("multi-choice checkboxes toggle selections correctly", async () => {
@@ -660,18 +659,20 @@ describe("ClarifyWidget", () => {
     });
   });
 
-  test("renders questions using label as fallback id and question text", () => {
+  test("renders question text and options using id-first schema", () => {
     renderClarifyWidget({
       questions: [
         {
-          label: "Framework Choice",
-          options: ["React", "Vue"],
+          id: "framework",
+          question: "Which framework?",
+          options: [{ id: "React" }, { id: "Vue" }],
         },
       ],
     });
 
-    // label is used as question text when question field is missing
-    expect(screen.getByText("Framework Choice")).toBeInTheDocument();
+    expect(screen.getByText("Which framework?")).toBeInTheDocument();
+    expect(screen.getByText("React")).toBeInTheDocument();
+    expect(screen.getByText("Vue")).toBeInTheDocument();
   });
 });
 

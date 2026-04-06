@@ -9,6 +9,7 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
 import { StdioConnection } from './stdio-connection';
 import { ServerMessage, ExtensionMessage, ClientMessage, WebViewMessage, FileAttachment, ImageAttachment } from './types';
 
@@ -281,6 +282,9 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
         }
         if (msg.type === 'session_deleted') {
             this.postToWebview({ type: 'serverMessage', payload: msg });
+        }
+        if (msg.type === 'trace_enabled') {
+            this.postToWebview({ type: 'traceEnabled', enabled: msg.enabled });
         }
 
         // Handle VS Code terminal execution
@@ -619,6 +623,71 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
 
             case 'getArchitecture':
                 this.connection?.send({ type: 'get_architecture' });
+                break;
+
+            case 'getTrace': {
+                // Read trace file directly from disk (no round-trip to Python server)
+                const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+                const sid = msg.sessionId;
+                if (!wsRoot || !sid) {
+                    this.postToWebview({ type: 'traceData', steps: [] });
+                    break;
+                }
+                // Path traversal guard: ensure resolved path stays inside sessions dir
+                const sessionsDir = path.join(wsRoot, '.claraity', 'sessions');
+                const tracePath = path.join(sessionsDir, `${sid}.trace.jsonl`);
+                const resolved = path.resolve(tracePath);
+                if (!resolved.startsWith(path.resolve(sessionsDir) + path.sep) && resolved !== path.resolve(sessionsDir)) {
+                    console.error('[ClarAIty] getTrace: path traversal blocked for sessionId:', sid);
+                    this.postToWebview({ type: 'traceData', steps: [] });
+                    break;
+                }
+                try {
+                    if (fs.existsSync(tracePath)) {
+                        const raw = fs.readFileSync(tracePath, 'utf-8');
+                        const steps = raw.trim().split('\n')
+                            .filter(Boolean)
+                            .map((line: string) => JSON.parse(line));
+                        // Inline subagent traces: scan for subagent_start events,
+                        // read their trace files, and insert steps after the bookend.
+                        const expanded = this.inlineSubagentTraces(steps, sessionsDir);
+                        this.postToWebview({ type: 'traceData', steps: expanded });
+                    } else {
+                        this.postToWebview({ type: 'traceData', steps: [] });
+                    }
+                } catch (err) {
+                    console.error('[ClarAIty] Failed to read trace file:', err);
+                    this.postToWebview({ type: 'traceData', steps: [] });
+                }
+                break;
+            }
+
+            case 'clearTrace': {
+                const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+                const sid = msg.sessionId;
+                if (!wsRoot || !sid) break;
+                const sessionsDir = path.join(wsRoot, '.claraity', 'sessions');
+                const tracePath = path.join(sessionsDir, `${sid}.trace.jsonl`);
+                const resolved = path.resolve(tracePath);
+                if (!resolved.startsWith(path.resolve(sessionsDir) + path.sep) && resolved !== path.resolve(sessionsDir)) break;
+                const answer = await vscode.window.showWarningMessage(
+                    'Clear trace data for this session? This cannot be undone.',
+                    { modal: true },
+                    'Clear'
+                );
+                if (answer === 'Clear') {
+                    try { fs.unlinkSync(tracePath); } catch { /* ignore if already gone */ }
+                    this.postToWebview({ type: 'traceData', steps: [] });
+                }
+                break;
+            }
+
+            case 'setTraceEnabled':
+                this.connection?.send({ type: 'set_trace_enabled', enabled: msg.enabled } as any);
+                break;
+
+            case 'getTraceEnabled':
+                this.connection?.send({ type: 'get_trace_enabled' } as any);
                 break;
 
             case 'approveKnowledge':
@@ -999,6 +1068,55 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
 
     postToWebview(message: ExtensionMessage): void {
         this.view?.webview.postMessage(message);
+    }
+
+    /**
+     * Scan parent trace steps for subagent_start events, read the referenced
+     * subagent .trace.jsonl files, and inline their steps after the bookend.
+     * Each inlined step is tagged with _subagent and _isSubagentStep.
+     * IDs are renumbered sequentially so the timeline stays contiguous.
+     */
+    private inlineSubagentTraces(steps: any[], sessionsDir: string): any[] {
+        const result: any[] = [];
+        for (const step of steps) {
+            result.push(step);
+            if (step.type === 'subagent_start' && step.sections?.trace_path) {
+                // Construct the subagent trace path from sessionsDir + filename only.
+                // The trace_path in JSONL was written by Python (different source than
+                // VS Code's wsRoot), so absolute paths may not match (case, symlinks).
+                // Using only the filename from the Python path and building the rest
+                // from sessionsDir keeps both sides derived from VS Code.
+                const pythonTracePath = step.sections.trace_path;
+                const traceFilename = path.basename(pythonTracePath);
+
+                // Validate filename: must end with .trace.jsonl, no path separators
+                if (!traceFilename.endsWith('.trace.jsonl') || traceFilename.includes('..')) {
+                    console.error('[ClarAIty] inlineSubagentTraces: invalid filename:', traceFilename);
+                    continue;
+                }
+
+                const subTracePath = path.join(sessionsDir, 'subagents', traceFilename);
+                try {
+                    if (fs.existsSync(subTracePath)) {
+                        const subRaw = fs.readFileSync(subTracePath, 'utf-8');
+                        const subSteps = subRaw.trim().split('\n')
+                            .filter(Boolean)
+                            .map((line: string) => JSON.parse(line));
+                        const subName = step.sections.subagent_name || 'subagent';
+                        for (const subStep of subSteps) {
+                            subStep._subagent = subName;
+                            subStep._isSubagentStep = true;
+                        }
+                        result.push(...subSteps);
+                    }
+                } catch (err) {
+                    console.error('[ClarAIty] Failed to read subagent trace:', err);
+                }
+            }
+        }
+        // Renumber IDs sequentially
+        result.forEach((s, i) => { s.id = i + 1; });
+        return result;
     }
 
     private getHtmlForWebview(webview: vscode.Webview): string {

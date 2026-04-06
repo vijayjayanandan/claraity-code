@@ -51,6 +51,7 @@ class DelegateToSubagentTool(Tool):
         self.subagent_manager = subagent_manager
         self._registry = None  # SubagentRegistry for TUI visibility
         self._ui_protocol = None  # UIProtocol for TUI approval relay
+        self._trace = None  # TraceIntegration for subagent bookend events
 
         # Generate dynamic description with available subagents
         description = self._generate_description()
@@ -72,6 +73,14 @@ class DelegateToSubagentTool(Tool):
         """
         self._ui_protocol = protocol
         logger.info("DelegateToSubagentTool: UIProtocol wired")
+
+    def set_trace(self, trace) -> None:
+        """Wire up TraceIntegration for emitting subagent bookend events.
+
+        Called alongside set_registry/set_ui_protocol during wiring.
+        """
+        self._trace = trace
+        logger.info("DelegateToSubagentTool: Trace wired")
 
     def refresh_description(self) -> None:
         """Regenerate and apply the tool description from current subagent configs.
@@ -229,6 +238,16 @@ Use this tool proactively when appropriate!"""
         # immediately — use 200 (same as MAX_TOOL_CALLS safety cap).
         effective_max_iterations = max_iterations if iteration_limit_enabled else 200
 
+        # Subagent trace file path (parallel to transcript, different extension)
+        subagent_trace_path = str(
+            Path(transcript_path).with_suffix(".trace.jsonl")
+        )
+
+        # Determine if trace is enabled on the parent
+        trace_enabled = (
+            self._trace and self._trace.enabled
+        )
+
         subprocess_input = SubprocessInput(
             config=asdict(config),
             llm_config=llm_config_dict,
@@ -244,6 +263,7 @@ Use this tool proactively when appropriate!"""
             web_search_limit=web_search_limit,
             web_fetch_limit=web_fetch_limit,
             iteration_limit_enabled=iteration_limit_enabled,
+            trace_enabled=trace_enabled,
         )
 
         # Launch subprocess
@@ -258,6 +278,10 @@ Use this tool proactively when appropriate!"""
         else:
             # Normal Python
             cmd = [sys.executable, "-m", "src.subagents.runner"]
+
+        # Emit trace bookend: subagent starting
+        if self._trace:
+            self._trace.on_subagent_start(subagent, task.strip(), subagent_trace_path)
 
         process = await asyncio.create_subprocess_exec(
             *cmd,
@@ -296,6 +320,8 @@ Use this tool proactively when appropriate!"""
         # Read stdout events asynchronously (on event loop - no blocking!)
         result = None
         subagent_id = None
+        sa_execution_time = 0.0
+        sa_success = False
 
         try:
             async for line in process.stdout:
@@ -358,6 +384,8 @@ Use this tool proactively when appropriate!"""
                 elif event_type == IPCEventType.DONE:
                     result_data = event.get("result", {})
                     sa_result = deserialize_result(result_data)
+                    sa_execution_time = sa_result.execution_time
+                    sa_success = sa_result.success
                     result = self._build_tool_result(subagent, sa_result)
                     break  # Got result, stop reading
 
@@ -398,6 +426,12 @@ Use this tool proactively when appropriate!"""
             )
 
         finally:
+            # Emit trace bookend: subagent finished
+            if self._trace:
+                self._trace.on_subagent_end(
+                    subagent, subagent_trace_path, sa_success, sa_execution_time,
+                )
+
             # Close stdin (signals EOF to child if still waiting for approval)
             if not process.stdin.is_closing():
                 process.stdin.close()

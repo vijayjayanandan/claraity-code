@@ -360,51 +360,6 @@ GLOB_TOOL = ToolDefinition(
     },
 )
 
-# LSP-Based Semantic Code Analysis Tools
-
-GET_FILE_OUTLINE_TOOL = ToolDefinition(
-    name="get_file_outline",
-    description="Get file structure (classes, functions, methods) using LSP semantic analysis. WARNING: May fail for unsupported languages (Java, C++, etc.) - if it fails, fall back to read_file immediately (do NOT retry). For most tasks, read_file is sufficient and more reliable.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "file_path": {
-                "type": "string",
-                "description": "Path to file to analyze (e.g., 'src/core/agent.py', 'lib/utils.ts')",
-            }
-        },
-        "required": ["file_path"],
-    },
-)
-
-GET_SYMBOL_CONTEXT_TOOL = ToolDefinition(
-    name="get_symbol_context",
-    description="Get complete symbol details by name using LSP. WARNING: LSP may not support all languages - if it fails, use grep + read_file instead. Returns signature, docstring, implementation, and references.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "symbol_name": {
-                "type": "string",
-                "description": "Symbol name to search for (e.g., 'authenticate', 'User', 'parse_config', 'LSPClientManager')",
-            },
-            "file_hint": {
-                "type": "string",
-                "description": "Optional file path hint to narrow search (e.g., 'auth.py', 'src/core/', 'models/user.py'). Use when symbol appears in multiple files.",
-            },
-            "include_references": {
-                "type": "boolean",
-                "description": "Include where symbol is used/called (default: true). Set false for faster queries.",
-            },
-            "include_implementation": {
-                "type": "boolean",
-                "description": "Include actual code implementation (default: true). Set false if you only need signature/location.",
-            },
-        },
-        "required": ["symbol_name"],
-    },
-)
-
-
 # Delegation Tool
 
 DELEGATE_TO_SUBAGENT_TOOL = ToolDefinition(
@@ -566,11 +521,7 @@ CLARIFY_TOOL = ToolDefinition(
                     "properties": {
                         "id": {
                             "type": "string",
-                            "description": "Unique identifier for this question (e.g., 'approach', 'framework')",
-                        },
-                        "label": {
-                            "type": "string",
-                            "description": "Short tab label (max 12 chars, e.g., 'Approach', 'Framework')",
+                            "description": "Unique identifier AND display label for this question (e.g., 'approach', 'framework'). Used as the tab label and response key.",
                         },
                         "question": {
                             "type": "string",
@@ -579,40 +530,32 @@ CLARIFY_TOOL = ToolDefinition(
                         "options": {
                             "type": "array",
                             "minItems": 1,
-                            "description": "Available answer options",
+                            "description": "Available answer options. Omit for free-text questions.",
                             "items": {
                                 "type": "object",
                                 "properties": {
                                     "id": {
                                         "type": "string",
-                                        "description": "Unique identifier for this option",
-                                    },
-                                    "label": {
-                                        "type": "string",
-                                        "description": "Short option label",
+                                        "description": "Unique identifier AND display label for this option (e.g., 'TypeScript', 'Full feature'). Used as the response value.",
                                     },
                                     "description": {
                                         "type": "string",
-                                        "description": "Detailed description of this option",
+                                        "description": "Optional longer description shown below the option label",
                                     },
                                     "recommended": {
                                         "type": "boolean",
-                                        "description": "Mark this option as recommended (shows '(Recommended)' tag)",
+                                        "description": "Mark this option as recommended",
                                     },
                                 },
-                                "required": ["id", "label"],
+                                "required": ["id"],
                             },
                         },
                         "multi_select": {
                             "type": "boolean",
                             "description": "Allow multiple options to be selected (default: false)",
                         },
-                        "allow_custom": {
-                            "type": "boolean",
-                            "description": "Allow user to type a custom response (default: false)",
-                        },
                     },
-                    "required": ["id", "label", "question", "options"],
+                    "required": ["id", "question"],
                 },
             },
             "context": {
@@ -973,8 +916,6 @@ ALL_TOOLS = [
     RUN_COMMAND_TOOL,
     GREP_TOOL,
     GLOB_TOOL,
-    GET_FILE_OUTLINE_TOOL,
-    GET_SYMBOL_CONTEXT_TOOL,
     DELEGATE_TO_SUBAGENT_TOOL,
     # Task tools (task_create/task_update/task_list/task_block) are backed by BeadStore
     # and registered dynamically via tool_executor, not listed here
@@ -1013,8 +954,6 @@ FILE_TOOLS = [
 CODE_TOOLS = [
     GREP_TOOL,
     GLOB_TOOL,
-    GET_FILE_OUTLINE_TOOL,
-    GET_SYMBOL_CONTEXT_TOOL,
 ]
 
 EXECUTION_TOOLS = [

@@ -221,8 +221,7 @@ export function ConfigPanel({
   // ── Backend change ───────────────────────────────────────────────────────────
   const handleBackendChange = useCallback((val: string) => {
     setBackend(val);
-    if (val === "ollama") setBaseUrl("http://localhost:11434");
-    else if (val === "anthropic") setBaseUrl("");
+    if (val === "anthropic") setBaseUrl("");
   }, []);
 
   // ── Fetch models ─────────────────────────────────────────────────────────────
@@ -394,7 +393,6 @@ export function ConfigPanel({
           <Field label="Backend">
             <select className="form-input" value={backend} onChange={(e) => handleBackendChange(e.target.value)}>
               <option value="openai">OpenAI-compatible</option>
-              <option value="ollama">Ollama</option>
               <option value="anthropic">Anthropic</option>
             </select>
           </Field>

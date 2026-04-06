@@ -4,16 +4,16 @@
  * Renders dynamic questions with radio/checkbox/text options.
  * Supports single-choice, multi-choice, and open-ended questions.
  */
-import { useState, useCallback } from "react";
+import { useCallback } from "react";
+import { useState } from "react";
 import type { WebViewMessage } from "../types";
 
 interface ClarifyQuestion {
   id?: string;
-  label?: string;
   question?: string;
   type?: string;
   multi_select?: boolean;
-  options?: Array<string | { id?: string; label?: string }>;
+  options?: Array<string | { id?: string; label?: string; description?: string; recommended?: boolean }>;
 }
 
 interface ClarifyWidgetProps {
@@ -21,6 +21,7 @@ interface ClarifyWidgetProps {
   questions: unknown[];
   context?: string;
   postMessage: (msg: WebViewMessage) => void;
+  onDismiss: () => void;
 }
 
 export function ClarifyWidget({
@@ -28,13 +29,13 @@ export function ClarifyWidget({
   questions: rawQuestions,
   context,
   postMessage,
+  onDismiss,
 }: ClarifyWidgetProps) {
   const questions = rawQuestions as ClarifyQuestion[];
-  const [dismissedAs, setDismissedAs] = useState<"submitted" | "cancelled" | null>(null);
   const [responses, setResponses] = useState<Record<string, string | string[]>>(() => {
     const init: Record<string, string | string[]> = {};
-    for (const q of questions) {
-      const qId = q.id || q.label || `q${questions.indexOf(q)}`;
+    for (const [index, q] of questions.entries()) {
+      const qId = q.id || `q${index}`;
       const isMulti = q.multi_select === true || q.type === "multi_choice";
       init[qId] = isMulti ? [] : "";
     }
@@ -48,8 +49,8 @@ export function ClarifyWidget({
       submitted: true,
       responses: responses as Record<string, unknown>,
     });
-    setDismissedAs("submitted");
-  }, [callId, responses, postMessage]);
+    onDismiss();
+  }, [callId, responses, postMessage, onDismiss]);
 
   const handleCancel = useCallback(() => {
     postMessage({
@@ -58,18 +59,8 @@ export function ClarifyWidget({
       submitted: false,
       responses: null,
     });
-    setDismissedAs("cancelled");
-  }, [callId, postMessage]);
-
-  if (dismissedAs) {
-    return (
-      <div className="interactive-widget clarify-widget">
-        <div className="widget-body" style={{ fontSize: 12, color: "var(--vscode-descriptionForeground)" }}>
-          [Clarification {dismissedAs}]
-        </div>
-      </div>
-    );
-  }
+    onDismiss();
+  }, [callId, postMessage, onDismiss]);
 
   return (
     <div className="interactive-widget clarify-widget">
@@ -77,20 +68,20 @@ export function ClarifyWidget({
       <div className="widget-body">
         {context && <div className="context-text">{context}</div>}
 
-        {questions.map((q) => {
-          const qId = q.id || q.label || `q${questions.indexOf(q)}`;
+        {questions.map((q, index) => {
+          const qId = q.id || `q${index}`;
           const isMulti = q.multi_select === true || q.type === "multi_choice";
           const hasOptions = q.options && q.options.length > 0;
 
           return (
             <div key={qId} className="question-group">
-              <div className="question-label">{q.question || q.label || ""}</div>
+              <div className="question-label">{q.question || q.id || ""}</div>
 
               {hasOptions ? (
                 <>
                   {q.options!.map((opt) => {
-                    const optValue = typeof opt === "string" ? opt : (opt.id || opt.label || "");
-                    const optLabel = typeof opt === "string" ? opt : (opt.label || opt.id || "");
+                    const optValue = typeof opt === "string" ? opt : (opt.id || "");
+                    const optLabel = typeof opt === "string" ? opt : (opt.id || opt.label || "");
                     return (
                       <div key={optValue} className="option-row">
                         <input

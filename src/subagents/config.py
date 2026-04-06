@@ -7,7 +7,7 @@ Subagent configurations are stored as Markdown files with YAML frontmatter:
 LLM configuration is nested under an ``llm:`` key::
 
     llm:
-      backend_type: openai        # "openai", "ollama" (omit to inherit)
+      backend_type: openai        # "openai", "anthropic" (omit to inherit)
       model: gpt-4o              # model name (omit or "inherit" to inherit)
       base_url: https://...      # API endpoint (omit to inherit)
       context_window: 128000     # context size (omit to inherit)
@@ -33,7 +33,7 @@ import yaml
 logger = logging.getLogger(__name__)
 
 
-VALID_BACKEND_TYPES = {"openai", "ollama", "vllm", "localai", "llamacpp"}
+VALID_BACKEND_TYPES = {"openai", "vllm", "localai", "llamacpp"}
 
 
 @dataclass
@@ -41,7 +41,7 @@ class SubAgentLLMConfig:
     """LLM overrides for a subagent. None fields inherit from main agent.
 
     Attributes:
-        backend_type: LLM backend type, e.g. "openai", "ollama" (None = inherit)
+        backend_type: LLM backend type, e.g. "openai" (None = inherit)
         model: Model name, e.g. "gpt-4o", "claude-sonnet-4-20250514" (None = inherit)
         base_url: API endpoint URL (None = inherit from main agent)
         api_key: API credentials (None = inherit from main agent)
@@ -287,7 +287,7 @@ name: {name}
 description: {description}
 tools: Read, Write, Edit  # Comma-separated list of allowed tools (optional)
 llm:
-  # backend_type: openai  # "openai", "ollama", etc. (omit to inherit from main agent)
+  # backend_type: openai  # "openai", "anthropic", etc. (omit to inherit from main agent)
   model: inherit           # Model name or 'inherit' (inherit from main agent)
   # base_url: null         # API endpoint (omit to inherit from main agent)
   # context_window: null   # Context window size (omit to inherit from main agent)

@@ -202,6 +202,10 @@ class SubAgent:
         # Transcript writer (opened during execute())
         self._transcript_writer: SyncJSONLWriter | None = None
 
+        # Trace integration (default no-op; replaced by set_trace in subprocess mode)
+        from src.core.trace_integration import TraceIntegration
+        self._trace = TraceIntegration(enabled=False)
+
         # Store subscription unsubscribe function
         self._store_unsubscribe: Callable[[], None] | None = None
 
@@ -256,13 +260,12 @@ class SubAgent:
 
         Supported backend types:
         - "openai" (and OpenAI-compatible: "vllm", "localai", "llamacpp")
-        - "ollama"
 
         Returns:
             LLMBackend instance with overrides applied, or None on failure.
         """
         try:
-            from src.llm import LLMConfig, OllamaBackend, OpenAIBackend
+            from src.llm import LLMConfig, OpenAIBackend
 
             llm_overrides = self.config.llm
             main_llm = self._llm_source
@@ -292,8 +295,6 @@ class SubAgent:
                     config=override_config,
                     api_key=api_key,
                 )
-            elif backend_type == "ollama":
-                override_llm = OllamaBackend(config=override_config)
             else:
                 logger.warning(
                     f"SubAgent [{self.config.name}]: Unsupported backend_type "
@@ -341,6 +342,13 @@ class SubAgent:
         """Signal cancellation to stop execution."""
         logger.info(f"SubAgent [{self.config.name}]: Cancel requested")
         self._cancel_token.cancel()
+
+    def set_trace(self, trace) -> None:
+        """Replace the default no-op TraceIntegration with an active one.
+
+        Called by runner.py in subprocess mode when trace_enabled=True.
+        """
+        self._trace = trace
 
     def get_session_info(self) -> "SubAgentSessionInfo":
         """Return public session info for registry/UI wiring.
@@ -390,6 +398,9 @@ class SubAgent:
             # Check cancellation before starting
             self._cancel_token.check_cancelled()
 
+            # Trace: subagent receives task
+            self._trace.on_request(task_description)
+
             # Build fresh context with specialized system prompt
             messages, last_uuid = self._build_context(task_description)
 
@@ -422,6 +433,9 @@ class SubAgent:
                 tool_calls=tool_calls,
                 execution_time=execution_time,
             )
+
+            # Trace: subagent finished
+            self._trace.on_response_sent()
 
             # Track in history
             self.execution_history.append(result)
@@ -854,6 +868,10 @@ class SubAgent:
                 f"SubAgent [{self.config.name}]: Iteration {iteration + 1}/{max_iterations}"
             )
 
+            # Trace: context ready + LLM call
+            self._trace.on_context_ready(current_context, iteration)
+            self._trace.on_llm_call(current_context, subagent_tools, iteration)
+
             # Native function calling with this subagent's LLM
             llm_response = self.llm.generate_with_tools(
                 messages=current_context, tools=subagent_tools, tool_choice="auto"
@@ -865,6 +883,11 @@ class SubAgent:
 
             response_content = llm_response.content or ""
             tool_calls = llm_response.tool_calls
+
+            # Trace: LLM response
+            self._trace.on_llm_response(
+                tool_calls, response_content, None, iteration,
+            )
 
             if not tool_calls:
                 # No tool calls - done
@@ -955,7 +978,12 @@ class SubAgent:
                     continue
 
                 # --- Approval gate: ask user before executing risky tools ---
-                if self._needs_approval(tool_name, tool_args):
+                needs_approval = self._needs_approval(tool_name, tool_args)
+                gate_action = "NEEDS_APPROVAL" if needs_approval else "ALLOW"
+                self._trace.on_gate_check(tool_name, gate_action, None, iteration)
+
+                if needs_approval:
+                    self._trace.on_approval_request(tool_name, tool_args, "Write operation", iteration)
                     self._message_store.update_tool_state(
                         tool_call_id=tool_call_id,
                         status=ToolStatus.AWAITING_APPROVAL,
@@ -972,6 +1000,8 @@ class SubAgent:
                     else:
                         # No callback (shouldn't happen) - safe default: reject
                         approved, feedback = False, None
+
+                    self._trace.on_approval_result(tool_name, approved, feedback, iteration)
 
                     if not approved:
                         rejection_msg = (
@@ -1055,6 +1085,7 @@ class SubAgent:
                             f"for run_command (subagents use foreground execution)"
                         )
 
+                    self._trace.on_tool_dispatch(tool_name, tool_args, iteration)
                     result = self._tool_executor.execute_tool(tool_name, **tool_args)
 
                     if result.is_success():
@@ -1138,6 +1169,9 @@ class SubAgent:
                         error=str(e),
                         tool_name=tool_name,
                     )
+
+            # Trace: tools complete
+            self._trace.on_tools_complete(tool_messages, iteration)
 
             # Add tool messages to context (role: "tool")
             current_context.extend(tool_messages)

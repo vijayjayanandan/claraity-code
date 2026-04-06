@@ -56,7 +56,7 @@ def _create_llm_backend(llm_config_dict, api_key):
     Returns:
         LLMBackend instance
     """
-    from src.llm import LLMConfig, OllamaBackend, OpenAIBackend
+    from src.llm import LLMConfig, OpenAIBackend
 
     config = LLMConfig.model_validate(llm_config_dict)
     backend_type = config.backend_type
@@ -64,8 +64,6 @@ def _create_llm_backend(llm_config_dict, api_key):
     OPENAI_COMPATIBLE = {"openai", "vllm", "localai", "llamacpp"}
     if backend_type in OPENAI_COMPATIBLE:
         return OpenAIBackend(config=config, api_key=api_key)
-    elif backend_type == "ollama":
-        return OllamaBackend(config=config)
     else:
         raise ValueError(f"Unsupported backend_type: {backend_type}")
 
@@ -307,6 +305,21 @@ def main():
             pause_callback=pause_cb,
             max_wall_time=max_wall_time,
         )
+
+        # 5b. Wire trace integration if enabled
+        if input_data.trace_enabled:
+            from src.core.trace_integration import TraceIntegration
+
+            trace = TraceIntegration(enabled=True)
+            # Derive trace session ID from transcript filename stem
+            # e.g., "code-reviewer-abc12345" from the transcript path
+            trace_session_id = Path(input_data.transcript_path).stem
+            trace_sessions_dir = Path(input_data.transcript_path).parent
+            trace.init_session(trace_session_id, trace_sessions_dir)
+            subagent.set_trace(trace)
+            logger.info(
+                f"Runner: Trace enabled (session={trace_session_id})"
+            )
 
         # 6. Set up cancellation signal handler
         def _on_sigterm(signum, frame):

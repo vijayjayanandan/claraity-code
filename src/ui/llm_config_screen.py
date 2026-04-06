@@ -42,7 +42,6 @@ logger = get_logger("ui.llm_config_screen")
 BACKEND_CHOICES = [
     ("openai", "openai"),
     ("anthropic", "anthropic"),
-    ("ollama", "ollama"),
 ]
 
 
@@ -292,12 +291,9 @@ class ConfigLLMScreen(ModalScreen[LLMConfigData | None]):
             known_defaults = {
                 "",
                 "http://localhost:8000/v1",
-                "http://localhost:11434",
             }
             if current in known_defaults:
-                if backend == "ollama":
-                    url_input.value = "http://localhost:11434"
-                elif backend == "anthropic":
+                if backend == "anthropic":
                     url_input.value = ""  # SDK defaults to api.anthropic.com
                 else:
                     url_input.value = "http://localhost:8000/v1"

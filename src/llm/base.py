@@ -18,7 +18,6 @@ from src.session.models.message import ToolCall
 class LLMBackendType(str, Enum):
     """Supported LLM backend types."""
 
-    OLLAMA = "ollama"
     VLLM = "vllm"
     LOCALAI = "localai"
     LLAMACPP = "llamacpp"

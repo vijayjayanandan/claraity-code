@@ -43,9 +43,6 @@ TOOL_TIMEOUT_OVERRIDES = {
     "run_command": 600,  # 10 minutes
     # Subagent delegation: None disables outer timeout (internal pause handles limits)
     "delegate_to_subagent": None,
-    # LSP tools need extra time for server startup (jedi-language-server ~25s)
-    "get_file_outline": 90,
-    "get_symbol_context": 90,
     # File operations are usually fast, but large files need some buffer
     "write_file": 60,
     "read_file": 30,

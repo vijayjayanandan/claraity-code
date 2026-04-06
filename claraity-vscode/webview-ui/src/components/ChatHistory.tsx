@@ -60,6 +60,7 @@ interface ChatHistoryProps {
   undoCompleted: boolean;
   lastTurnStats: { tokens: number; durationMs: number } | null;
   onSendPrompt?: (prompt: string) => void;
+  onDismissClarify?: () => void;
   onDismissPlan?: () => void;
   connected?: boolean;
   modelName?: string;
@@ -79,6 +80,7 @@ export function ChatHistory({
   undoCompleted,
   lastTurnStats,
   onSendPrompt,
+  onDismissClarify,
   onDismissPlan,
   connected,
   modelName,
@@ -363,10 +365,12 @@ export function ChatHistory({
 
       {clarifyRequest && (
         <ClarifyWidget
+          key={clarifyRequest.callId}
           callId={clarifyRequest.callId}
           questions={clarifyRequest.questions}
           context={clarifyRequest.context}
           postMessage={postMessage}
+          onDismiss={onDismissClarify ?? (() => {})}
         />
       )}
 

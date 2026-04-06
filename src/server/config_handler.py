@@ -203,20 +203,7 @@ def _list_models(backend: str, base_url: str, api_key: str) -> list[str]:
     """
     from src.llm.base import LLMBackendType, LLMConfig
 
-    if backend == "ollama":
-        from src.llm.ollama_backend import OllamaBackend
-
-        config = LLMConfig(
-            backend_type=LLMBackendType.OLLAMA,
-            model_name="temp",
-            base_url=base_url,
-            temperature=0.2,
-            max_tokens=1024,
-            top_p=0.95,
-            context_window=4096,
-        )
-        return OllamaBackend(config).list_models()
-    elif backend == "anthropic":
+    if backend == "anthropic":
         from src.llm.anthropic_backend import KNOWN_CLAUDE_MODELS
 
         return list(KNOWN_CLAUDE_MODELS)

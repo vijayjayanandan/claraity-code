@@ -138,9 +138,9 @@ class _QuestionPanel(Static):
 
             if self._multi_select:
                 check = "[x]" if i in self._checked else "[ ]"
-                label_str = f"{prefix}{i + 1}. {check} {opt.get('label', '')}"
+                label_str = f"{prefix}{i + 1}. {check} {opt.get('id', opt.get('label', ''))}"
             else:
-                label_str = f"{prefix}{i + 1}. {opt.get('label', '')}"
+                label_str = f"{prefix}{i + 1}. {opt.get('id', opt.get('label', ''))}"
 
             label_style = "bold white" if is_selected else "white"
             t.append(label_str + "\n", style=label_style)
@@ -220,7 +220,7 @@ class _QuestionPanel(Static):
                     else:
                         for opt in question.get("options", []):
                             if opt.get("id") == aid:
-                                labels.append(opt.get("label", aid))
+                                labels.append(opt.get("id", opt.get("label", aid)))
                                 break
                         else:
                             labels.append(aid)
@@ -233,7 +233,7 @@ class _QuestionPanel(Static):
                 else:
                     for opt in question.get("options", []):
                         if opt.get("id") == answer:
-                            label = opt.get("label", answer)
+                            label = opt.get("id", opt.get("label", answer))
                             break
                 t.append(f"    -> {label}\n", style="bold cyan")
 
@@ -331,7 +331,7 @@ class ClarifyWidget(Container, can_focus=True):
         self.option_indices: dict[int, int] = {}  # tab_index -> current option index
 
         # Tab labels: one per question + "Submit"
-        self._tab_labels = [q.get("label", f"Q{i + 1}") for i, q in enumerate(questions)]
+        self._tab_labels = [q.get("id", q.get("label", f"Q{i + 1}")) for i, q in enumerate(questions)]
         self._tab_labels.append("Submit")
         self._tab_count = len(self._tab_labels)
         self._completed_tabs: set[int] = set()

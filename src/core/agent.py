@@ -25,7 +25,7 @@ from src.core.permission_mode import PermissionManager, PermissionMode
 
 # Plan mode (Claude Code-style planning workflow)
 from src.core.plan_mode import PlanGateDecision, PlanModeState
-from src.llm import LLMBackend, LLMBackendType, LLMConfig, OllamaBackend, OpenAIBackend
+from src.llm import LLMBackend, LLMBackendType, LLMConfig, OpenAIBackend
 from src.llm.base import ProviderDelta
 from src.llm.failure_handler import LLMError, RateLimitError, TimeoutError
 from src.memory import MemoryManager, TaskContext
@@ -35,8 +35,6 @@ from src.tools import (
     DelegateToSubagentTool,
     EditFileTool,
     EnterPlanModeTool,
-    GetFileOutlineTool,
-    GetSymbolContextTool,
     GlobTool,
     GrepTool,
     ListDirectoryTool,
@@ -331,9 +329,7 @@ class CodingAgent(AgentInterface):
             thinking_budget=thinking_budget,
         )
 
-        if backend == "ollama":
-            self.llm: LLMBackend = OllamaBackend(llm_config)
-        elif backend == "openai":
+        if backend == "openai":
             self.llm: LLMBackend = OpenAIBackend(
                 llm_config, api_key=api_key, api_key_env=api_key_env
             )
@@ -387,6 +383,10 @@ class CodingAgent(AgentInterface):
         # Session ID for plan mode (will be set when session starts)
         self._session_id: str | None = None
 
+        # Trace integration — initialized when session ID is set
+        from src.core.trace_integration import TraceIntegration
+        self._trace = TraceIntegration()
+
         # Initialize director adapter (disciplined workflow mode)
         from src.director.adapter import DirectorAdapter
 
@@ -424,6 +424,7 @@ class CodingAgent(AgentInterface):
             max_context_tokens=context_window,
             project_root=Path(self.working_directory),
         )
+        self.context_builder.set_trace(self._trace)
 
         # Initialize file reference parser
         self.file_reference_parser = FileReferenceParser(
@@ -642,10 +643,8 @@ class CodingAgent(AgentInterface):
         resolved_key = api_key or config.api_key or None
         api_key_env = config.api_key_env
 
-        if config.backend_type == "ollama":
-            new_backend: LLMBackend = OllamaBackend(new_llm_config)
-        elif config.backend_type == "openai":
-            new_backend = OpenAIBackend(
+        if config.backend_type == "openai":
+            new_backend: LLMBackend = OpenAIBackend(
                 new_llm_config, api_key=resolved_key, api_key_env=api_key_env
             )
         elif config.backend_type == "anthropic":
@@ -716,6 +715,9 @@ class CodingAgent(AgentInterface):
                            If False, preserve existing state (for resumed sessions).
         """
         self._session_id = session_id
+
+        # Initialize trace for this session
+        self._trace.init_session(session_id, self.working_directory / ".claraity" / "sessions")
 
         # Reset plan mode state for new sessions to avoid stale state
         if is_new_session and hasattr(self, "plan_mode_state"):
@@ -876,10 +878,6 @@ class CodingAgent(AgentInterface):
         # Search tools (ripgrep-like)
         self.tool_executor.register_tool(GrepTool())
         self.tool_executor.register_tool(GlobTool())
-
-        # LSP-based semantic code analysis
-        self.tool_executor.register_tool(GetFileOutlineTool())
-        self.tool_executor.register_tool(GetSymbolContextTool())
 
         # System operations
         self.tool_executor.register_tool(RunCommandTool(registry=self._bg_registry))
@@ -1621,9 +1619,13 @@ class CodingAgent(AgentInterface):
             )
             self.memory.set_task_context(task_context)
 
+            # Trace: request received (before save — request arrives, then is persisted)
+            self._trace.on_request(user_input)
+
             # Add user message to memory with attachments
             # MemoryManager will build multimodal content and store it in MessageStore
             self.memory.add_user_message(user_input, attachments=attachments)
+            self._trace.on_store_write("user_message", f"Saved user message ({len(user_input)} chars)")
             bind_context(turn=self.memory._current_turn_id)
 
             # Parse and load file references
@@ -1666,6 +1668,7 @@ class CodingAgent(AgentInterface):
                 agent_state=_todo_state if _todo_state.get("todos") else None,
                 plan_mode_state=self.plan_mode_state,
                 director_adapter=self.director_adapter,
+                iteration=0,
             )
             logger.debug(
                 "stream_response_phase",
@@ -1812,6 +1815,9 @@ class CodingAgent(AgentInterface):
                         elapsed_ms=round((time.monotonic() - _t0) * 1000),
                     )
 
+                    self._trace.on_context_ready(current_context, iteration)
+                    self._trace.on_llm_call(current_context, self._get_tools(), iteration)
+
                     # 2. Get LLM stream - yields ProviderDelta objects
                     _llm_kwargs = {}
                     if self.llm.config.thinking_budget:
@@ -1891,6 +1897,13 @@ class CodingAgent(AgentInterface):
                         if finalized_message and finalized_message.meta
                         else None
                     )
+                    self._trace.on_llm_response(tool_calls, response_content, response_thinking, iteration)
+                    tc_count = len(tool_calls) if tool_calls else 0
+                    self._trace.on_store_write(
+                        "assistant_message",
+                        f"Saved assistant response ({len(response_content)} chars, {tc_count} tool calls)",
+                        iteration,
+                    )
 
                     # Emit context usage update with real token count from LLM
                     if (
@@ -1950,6 +1963,7 @@ class CodingAgent(AgentInterface):
                                         else None,
                                         plan_mode_state=self.plan_mode_state,
                                         director_adapter=self.director_adapter,
+                                        iteration=iteration,
                                     )
                             except Exception as compact_err:
                                 logger.error(f"[COMPACTION] Failed: {compact_err}", exc_info=True)
@@ -2147,6 +2161,7 @@ class CodingAgent(AgentInterface):
 
                 tool_messages = []
                 user_rejected = False
+                # Trace: per-tool gate/dispatch events emitted inside the loop below
 
                 # ----------------------------------------------------------
                 # Phase A: Gate, Approve, Classify
@@ -2163,6 +2178,10 @@ class CodingAgent(AgentInterface):
 
                     # --- Gating checks ---
                     gate_result = self._gating.evaluate(tc.function.name, tool_args)
+                    self._trace.on_gate_check(
+                        tc.function.name, gate_result.action.value,
+                        gate_result.message, iteration,
+                    )
 
                     if gate_result.action == GateAction.BLOCKED_REPEAT:
                         blocked_calls.append(gate_result.call_summary)
@@ -2258,12 +2277,20 @@ class CodingAgent(AgentInterface):
                             self.memory.message_store.update_tool_state(
                                 call_id, CoreToolStatus.AWAITING_APPROVAL
                             )
+                        self._trace.on_approval_request(
+                            tc.function.name, tool_args,
+                            gate_result.safety_reason, iteration,
+                        )
                         try:
                             approval_result = await ui.wait_for_approval(
                                 call_id,
                                 tc.function.name,
                                 timeout=None,
                                 force_approval=is_safety_approval,
+                            )
+                            self._trace.on_approval_result(
+                                tc.function.name, approval_result.approved,
+                                approval_result.feedback, iteration,
                             )
 
                             if not approval_result.approved:
@@ -2380,6 +2407,7 @@ class CodingAgent(AgentInterface):
                             self._awaiting_approval = False
 
                     # --- Classify into interactive vs executable ---
+                    self._trace.on_tool_dispatch(tc.function.name, tool_args, iteration)
                     if self._special_handlers.handles(tc.function.name):
                         interactive.append((idx, call_id, tc, tool_args))
                     else:
@@ -2692,6 +2720,12 @@ class CodingAgent(AgentInterface):
                 # Sort resolved by original index
                 resolved.sort(key=lambda x: x[0])
                 tool_messages = [msg for _, _, _, msg in resolved]
+                self._trace.on_tools_complete(tool_messages, iteration)
+                self._trace.on_store_write(
+                    "tool_results",
+                    f"Saved {len(tool_messages)} tool result(s)",
+                    iteration,
+                )
 
                 # If user rejected, fill skipped results for unprocessed calls
                 if user_rejected:
@@ -2777,6 +2811,10 @@ class CodingAgent(AgentInterface):
 
             # Yield error as text with proper formatting
             yield TextDelta(content=f"\n\n[Error: {formatted_error}]")
+
+        # Trace: persist + response delivered
+        self._trace.on_persist(self._session_id)
+        self._trace.on_response_sent()
 
         # Yield StreamEnd to signal completion
         yield StreamEnd()

@@ -163,8 +163,15 @@ class ContextBuilder:
             os.getenv("RESERVED_TOOL_SCHEMA_TOKENS", "3000")
         )
 
+        # Trace integration (set via set_trace, optional)
+        self._trace: Any = None
+
         # Store last assembly report for inspection
         self.last_report: ContextAssemblyReport | None = None
+
+    def set_trace(self, trace: Any) -> None:
+        """Set TraceIntegration for emitting context source events."""
+        self._trace = trace
 
     def build_context(
         self,
@@ -176,6 +183,7 @@ class ContextBuilder:
         plan_mode_state: Any | None = None,
         director_adapter: Any | None = None,
         log_report: bool = True,
+        iteration: int = 0,
     ) -> list[dict[str, str]]:
         """
         Build complete context for LLM.
@@ -212,6 +220,14 @@ class ContextBuilder:
         # Calculate token budgets (percentages for compression decisions)
         system_prompt_budget = int(self.max_context_tokens * 0.15)  # 15%
 
+        # Should we emit detailed source events?
+        # First build: show all 5 sources. Subsequent: condensed.
+        _emit_sources = (
+            self._trace is not None
+            and self._trace._ok
+            and self._trace.is_first_build
+        )
+
         # 1. Build system prompt using gold-standard prompts (based on Claude Code)
         system_prompt = get_system_prompt(
             language=language, task_type=task_type
@@ -232,6 +248,11 @@ class ContextBuilder:
             if director_injection:
                 system_prompt = system_prompt + "\n\n" + director_injection
 
+        if _emit_sources:
+            self._trace.on_context_source(
+                "System Prompt", system_prompt, True, iteration,
+            )
+
         logger.debug(
             "build_context_phase",
             phase="system_prompt_built",
@@ -248,6 +269,14 @@ class ContextBuilder:
                 + project_instructions
             )
 
+        if _emit_sources:
+            self._trace.on_context_source(
+                "CLARAITY.md",
+                project_instructions if project_instructions else "(not found)",
+                bool(project_instructions),
+                iteration,
+            )
+
         # Inject architecture brief from knowledge DB (if available)
         knowledge_brief = self._load_knowledge_brief()
         if knowledge_brief:
@@ -257,11 +286,30 @@ class ContextBuilder:
                 + "# Project Architecture (auto-loaded from knowledge DB)\n\n"
                 + knowledge_brief
             )
+
+        if _emit_sources:
+            self._trace.on_context_source(
+                "Knowledge DB",
+                knowledge_brief if knowledge_brief else "(no database found)",
+                bool(knowledge_brief),
+                iteration,
+            )
+
         logger.debug(
             "build_context_phase",
             phase="knowledge_loaded",
             elapsed_ms=round((time.monotonic() - _t0) * 1000),
         )
+
+        # Emit memory files source (loaded once at startup, cached in MemoryManager)
+        if _emit_sources:
+            mem_files = self.memory.file_memory_content if hasattr(self.memory, "file_memory_content") else ""
+            self._trace.on_context_source(
+                "Memory Files",
+                mem_files if mem_files else "(no memory files loaded)",
+                bool(mem_files),
+                iteration,
+            )
 
         # Compress if needed
         if self.optimizer.count_tokens(system_prompt) > system_prompt_budget:
@@ -290,6 +338,26 @@ class ContextBuilder:
             elapsed_ms=round((time.monotonic() - _t0) * 1000),
             memory_messages=len(memory_context),
         )
+
+        # Emit Store fetch/return trace events
+        if _emit_sources:
+            roles: dict[str, int] = {}
+            for msg in memory_context:
+                r = msg.get("role", "?")
+                roles[r] = roles.get(r, 0) + 1
+            self._trace.on_context_store_fetch(
+                len(memory_context), roles, iteration,
+            )
+            # Estimate tokens for the return event
+            store_tokens = 0
+            for msg in memory_context:
+                c = msg.get("content", "")
+                if isinstance(c, str):
+                    store_tokens += self.optimizer.count_tokens(c)
+            self._trace.on_context_store_return(
+                len(memory_context), store_tokens, iteration,
+            )
+            self._trace.mark_build_complete()
 
         # Count memory tokens by type
         for msg in memory_context:

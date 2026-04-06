@@ -111,7 +111,7 @@ def scan_sessions(sessions_dir: Path, limit: int = 50) -> list[SessionDisplay]:
             if item.is_dir():
                 jsonl_path = item / "session.jsonl"
                 session_id = item.name
-            elif item.suffix == ".jsonl":
+            elif item.suffix == ".jsonl" and not item.name.endswith(".trace.jsonl"):
                 jsonl_path = item
                 session_id = item.stem
             else:

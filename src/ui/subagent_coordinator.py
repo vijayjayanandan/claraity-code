@@ -93,6 +93,8 @@ class SubagentCoordinator:
             if delegation_tool and hasattr(delegation_tool, "set_registry"):
                 delegation_tool.set_registry(registry)
                 delegation_tool.set_ui_protocol(ui_protocol)
+                if hasattr(agent, "_trace"):
+                    delegation_tool.set_trace(agent._trace)
                 ui_protocol.set_pause_requested_callback(pause_callback)
                 logger.info(
                     "Wired SubagentRegistry, UIProtocol, and pause callback to delegation tool"

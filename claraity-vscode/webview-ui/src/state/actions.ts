@@ -83,6 +83,8 @@ export type Action =
   // ClarAIty Knowledge & Beads
   | { type: "BEADS_LOADED"; data: BeadsResponse }
   | { type: "ARCHITECTURE_LOADED"; data: ArchitectureResponse }
+  | { type: "TRACE_LOADED"; steps: import('../types').TraceStepData[] }
+  | { type: "TRACE_ENABLED"; enabled: boolean }
   // Subagents panel
   | { type: "SUBAGENTS_LIST"; subagents: SubAgentInfo[]; availableTools: string[] }
   | { type: "SUBAGENT_NOTIFICATION"; success: boolean; message: string }

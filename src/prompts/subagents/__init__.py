@@ -833,8 +833,7 @@ The test or task asked for a method to return the name. That is all.
 - **Unclear requirement:** State your interpretation and implement it. \
   Do not stall -- make a reasonable choice and note it in your response.
 - **Complex existing code:** Trace the execution flow before modifying. \
-  Use `get_file_outline` to get the structure, then `read_file` the \
-  specific sections you need.
+  Use `read_file` to examine the specific sections you need.
 - **Import errors:** Check the project's existing imports for the correct \
   module path. The project may use relative or absolute imports -- match \
   whichever the file already uses.
@@ -878,7 +877,6 @@ KNOWLEDGE_BUILDER_TOOLS = [
     "search_code",
     "grep",
     "glob",
-    "get_file_outline",
     "analyze_code",
     # Read/search existing knowledge (unified query tool)
     "knowledge_query",
@@ -961,7 +959,7 @@ Reading strategy (do NOT read every file equally):
 - Entry points (main.py, cli.py, app.py, index.ts)
 - Configuration files (pyproject.toml, package.json)
 - Key abstractions (base classes, interfaces, facades)
-- Files over 500 lines (use `get_file_outline` first, then targeted reads)
+- Files over 500 lines (use targeted reads on specific line ranges)
 - Changed files (in INCREMENTAL mode)
 
 **Read selectively (outline + docstrings):**
@@ -1160,8 +1158,6 @@ EXPLORE_TOOLS = [
     "analyze_code",
     "grep",
     "glob",
-    "get_file_outline",
-    "get_symbol_context",
     *KNOWLEDGE_READ_TOOLS,
 ]
 
@@ -1211,11 +1207,6 @@ Read the most relevant files found in Phase 1:
 - Use `read_file` to examine specific files
 - Focus on the sections that answer the question -- do not read entire \
 files when only a class definition or function signature is needed
-- Use `get_file_outline` to get a quick structural overview before \
-reading the full file
-- Use `get_symbol_context` to look up specific classes, functions, or \
-variables by name
-
 ### Phase 3: Cross-Reference
 Trace connections between components:
 - Follow imports to understand dependencies
@@ -1257,7 +1248,7 @@ Any relevant patterns, conventions, or architectural decisions observed.
 
 - Answer with the minimum number of tool calls needed
 - Read only what you need to answer the question
-- If `get_file_outline` can answer the question, do not read the full file
+- Use targeted line-range reads instead of reading full large files
 - Prefer `grep` over `read_file` when searching for specific patterns
 - Stop exploring once you have enough information to answer confidently
 """
@@ -1316,10 +1307,8 @@ Explore systematically, not randomly. Start broad, then narrow:
 - Goal: build a mental map of which files and modules are relevant
 
 **Depth pass (understand the details):**
-- `get_file_outline` to see class/function structure before reading
 - `read_file` to examine specific implementations you will reference
 - `analyze_code` for AST-level structure (classes, methods, imports)
-- `get_symbol_context` to look up specific symbols by name
 - Goal: understand the actual code you will recommend modifying
 
 **Cross-reference pass (trace connections):**
@@ -1585,7 +1574,6 @@ stall waiting for clarification that may not come.
 Gather the information you need:
 - `glob` and `grep` to find relevant files and code patterns
 - `read_file` to understand existing implementations
-- `get_file_outline` for quick structural overviews
 - `analyze_code` for detailed code structure
 - `list_directory` to understand project layout
 - `web_search` / `web_fetch` for external information when needed
@@ -1611,7 +1599,7 @@ Carry out each step using the right tool:
 |------|------|
 | Find files by name/pattern | `glob` |
 | Search file contents | `grep`, `search_code` |
-| Understand code structure | `get_file_outline`, `analyze_code` |
+| Understand code structure | `analyze_code`, `read_file` |
 | Read specific code | `read_file` |
 | Make precise edits | `edit_file` |
 | Create new files | `write_file` |

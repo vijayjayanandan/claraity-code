@@ -30,6 +30,7 @@ import { MCPPanel } from "./components/MCPPanel";
 import { BeadsPanel } from "./components/BeadsPanel";
 import { ArchitecturePanel } from "./components/ArchitecturePanel";
 import { SubagentsPanel } from "./components/SubagentsPanel";
+import { TracePanel } from "./components/TracePanel";
 
 export function App() {
   const [state, dispatch] = useReducer(appReducer, initialState);
@@ -126,6 +127,14 @@ export function App() {
       case "enrichmentError":
         dispatch({ type: "CLEAR_ENRICHED_PREVIEW" });
         dispatch({ type: "ERROR", errorType: "enrichment_error", message: msg.message ?? "Prompt enrichment failed." });
+        break;
+
+      case "traceData":
+        dispatch({ type: "TRACE_LOADED", steps: msg.steps });
+        break;
+
+      case "traceEnabled":
+        dispatch({ type: "TRACE_ENABLED", enabled: msg.enabled });
         break;
 
       case "serverMessage":
@@ -280,6 +289,21 @@ export function App() {
     );
   }
 
+  // Trace panel view
+  if (state.activePanel === "trace") {
+    return (
+      <div className="app">
+        <TracePanel
+          onBack={() => dispatch({ type: "SET_ACTIVE_PANEL", panel: "chat" })}
+          steps={state.traceSteps}
+          traceEnabled={state.traceEnabled}
+          onToggleTrace={(enabled) => postMessage({ type: "setTraceEnabled", enabled })}
+          onClearTrace={() => postMessage({ type: "clearTrace", sessionId: state.sessionId })}
+        />
+      </div>
+    );
+  }
+
   // Subagents panel view
   if (state.activePanel === "subagents") {
     return (
@@ -336,6 +360,7 @@ export function App() {
           undoCompleted={state.undoCompleted}
           lastTurnStats={state.lastTurnStats}
           onSendPrompt={(prompt) => handleSendMessage(prompt)}
+          onDismissClarify={() => dispatch({ type: "CLARIFY_DISMISS" })}
           onDismissPlan={() => dispatch({ type: "PLAN_APPROVAL_DISMISS" })}
           connected={state.connected}
           modelName={state.modelName}
@@ -420,6 +445,11 @@ export function App() {
         onShowBeads={() => {
           postMessage({ type: "getBeads" });
           dispatch({ type: "SET_ACTIVE_PANEL", panel: "beads" });
+        }}
+        onShowTrace={() => {
+          postMessage({ type: "getTrace", sessionId: state.sessionId });
+          postMessage({ type: "getTraceEnabled" });
+          dispatch({ type: "SET_ACTIVE_PANEL", panel: "trace" });
         }}
         beadsReadyCount={state.beadsData?.ready.length}
         onDisconnect={() => postMessage({ type: "disconnectServer" })}

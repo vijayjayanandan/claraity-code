@@ -35,8 +35,8 @@ def agent_with_subagents(temp_agent_dir):
     """Create CodingAgent with subagent support in temp directory."""
     agent = CodingAgent(
         model_name="test-model",
-        backend="ollama",
-        base_url="http://localhost:11434",
+        backend="openai",
+        base_url="http://localhost:8000/v1",
         context_window=8192,
         api_key="test-key",
         working_directory=str(temp_agent_dir),
@@ -52,7 +52,7 @@ class TestAgentSubAgentManagerInitialization:
         """Test that SubAgentManager is initialized in CodingAgent.__init__()."""
         agent = CodingAgent(
             model_name="test-model",
-            backend="ollama",
+            backend="openai",
             base_url="http://localhost:11434",
             context_window=8192,
             api_key="test-key",
@@ -93,7 +93,7 @@ class TestGetAvailableSubagents:
         # Create agent with no .claraity/agents directory
         agent = CodingAgent(
             model_name="test-model",
-            backend="ollama",
+            backend="openai",
             base_url="http://localhost:11434",
             context_window=8192,
             api_key="test-key",

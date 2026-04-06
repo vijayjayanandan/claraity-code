@@ -272,15 +272,15 @@ class TestLLMOverride:
         """Setting base_url should override the main agent's endpoint."""
         config = make_config(llm=make_llm_config(
             model="llama3",
-            base_url="http://ollama-server:11434",
-            backend_type="ollama",
+            base_url="http://local-server:8000/v1",
+            backend_type="openai",
         ))
 
-        with patch('src.llm.OllamaBackend') as MockBackend:
+        with patch('src.llm.OpenAIBackend') as MockBackend:
             mock_instance = Mock()
             mock_instance.config = Mock()
             mock_instance.config.model_name = "llama3"
-            mock_instance.config.backend_type = "ollama"
+            mock_instance.config.backend_type = "openai"
             MockBackend.return_value = mock_instance
 
             subagent = SubAgent(config, mock_main_agent)
@@ -288,8 +288,8 @@ class TestLLMOverride:
             MockBackend.assert_called_once()
             llm_config = MockBackend.call_args.kwargs.get("config") or MockBackend.call_args.args[0]
             assert llm_config.model_name == "llama3"
-            assert llm_config.base_url == "http://ollama-server:11434"
-            assert llm_config.backend_type == "ollama"
+            assert llm_config.base_url == "http://local-server:8000/v1"
+            assert llm_config.backend_type == "openai"
 
     def test_custom_api_key_per_subagent(self, mock_main_agent):
         """Setting api_key should use subagent-specific credentials."""
@@ -380,28 +380,6 @@ class TestBackendType:
 
                 MockBackend.assert_called_once(), f"OpenAIBackend not called for {backend}"
                 assert subagent._override_llm is mock_instance
-
-    def test_ollama_backend_uses_ollama_class(self, mock_main_agent):
-        """backend_type='ollama' should create OllamaBackend."""
-        config = make_config(llm=make_llm_config(
-            backend_type="ollama",
-            model="llama3",
-            base_url="http://localhost:11434",
-        ))
-
-        with patch('src.llm.OllamaBackend') as MockBackend:
-            mock_instance = Mock()
-            mock_instance.config = Mock()
-            mock_instance.config.model_name = "llama3"
-            mock_instance.config.backend_type = "ollama"
-            MockBackend.return_value = mock_instance
-
-            subagent = SubAgent(config, mock_main_agent)
-
-            MockBackend.assert_called_once()
-            # OllamaBackend should NOT receive api_key
-            call_kwargs = MockBackend.call_args
-            assert "api_key" not in call_kwargs.kwargs
 
     def test_invalid_backend_type_rejected_at_config(self):
         """Invalid backend_type should raise ValueError during config creation."""
@@ -604,7 +582,7 @@ class TestSubAgentLLMConfig:
 
     def test_has_overrides_with_backend_type(self):
         """Setting backend_type alone should return has_overrides=True."""
-        llm = SubAgentLLMConfig(backend_type="ollama")
+        llm = SubAgentLLMConfig(backend_type="vllm")
         assert llm.has_overrides is True
 
     def test_has_overrides_with_base_url(self):
@@ -614,7 +592,7 @@ class TestSubAgentLLMConfig:
 
     def test_valid_backend_types(self):
         """All recognized backend types should be accepted."""
-        for bt in ["openai", "ollama", "vllm", "localai", "llamacpp"]:
+        for bt in ["openai", "vllm", "localai", "llamacpp"]:
             llm = SubAgentLLMConfig(backend_type=bt)
             assert llm.backend_type == bt
 

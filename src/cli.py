@@ -127,7 +127,7 @@ def main() -> None:
     parser.add_argument(
         "--backend",
         default=None,
-        choices=["ollama", "openai"],
+        choices=["openai", "anthropic"],
         help="LLM backend (from .env: LLM_BACKEND, or .claraity/config.yaml)",
     )
 

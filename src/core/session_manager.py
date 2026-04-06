@@ -325,6 +325,12 @@ class SessionManager:
         # Delete directory
         shutil.rmtree(session_dir)
 
+        # Also delete trace file if it exists (flat file alongside session dir)
+        trace_file = session_dir.parent / f"{full_id}.trace.jsonl"
+        if trace_file.exists():
+            trace_file.unlink()
+            logger.debug(f"Deleted trace file: {trace_file.name}")
+
         logger.info(f"Deleted session: {session_id[:8]}")
         return True
 

@@ -147,6 +147,7 @@ export function appReducer(state: AppState, action: Action): AppState {
             undoAvailable: null,
             undoCompleted: false,
             lastTurnStats: null,
+            traceSteps: null,
             markdownBuffer: "",
             currentThinking: null,
             currentCodeBlock: null,
@@ -671,6 +672,10 @@ export function appReducer(state: AppState, action: Action): AppState {
       return { ...state, beadsData: action.data };
     case "ARCHITECTURE_LOADED":
       return { ...state, architectureData: action.data };
+    case "TRACE_LOADED":
+      return { ...state, traceSteps: action.steps };
+    case "TRACE_ENABLED":
+      return { ...state, traceEnabled: action.enabled };
 
     // ── Subagents panel ──
     case "SUBAGENTS_LIST":

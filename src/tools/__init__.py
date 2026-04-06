@@ -12,7 +12,6 @@ from .file_operations import (
     RunCommandTool,
     WriteFileTool,
 )
-from .lsp_tools import GetFileOutlineTool, GetSymbolContextTool
 from .plan_mode_tools import EnterPlanModeTool, RequestPlanApprovalTool
 from .search_tools import GlobTool, GrepTool
 from .tool_schemas import (
@@ -47,8 +46,6 @@ __all__ = [
     "RunCommandTool",
     "GrepTool",
     "GlobTool",
-    "GetFileOutlineTool",
-    "GetSymbolContextTool",
     "DelegateToSubagentTool",
     "CreateCheckpointTool",
     "ClarifyTool",

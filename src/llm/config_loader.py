@@ -32,7 +32,7 @@ SYSTEM_CONFIG_PATH = os.path.join(SYSTEM_CONFIG_DIR, "config.yaml")
 
 DEFAULT_CONFIG_PATH = SYSTEM_CONFIG_PATH
 
-VALID_BACKEND_TYPES = {"openai", "ollama", "vllm", "localai", "llamacpp", "anthropic"}
+VALID_BACKEND_TYPES = {"openai", "vllm", "localai", "llamacpp", "anthropic"}
 
 
 # =============================================================================
@@ -535,3 +535,49 @@ def is_llm_configured(config_path: str = DEFAULT_CONFIG_PATH) -> bool:
 
     config = load_llm_config(config_path)
     return bool(config.model)
+
+
+# =============================================================================
+# TRACE CONFIG
+# =============================================================================
+
+
+def load_trace_enabled(config_path: str = DEFAULT_CONFIG_PATH) -> bool:
+    """Read trace_enabled from config.yaml. Default: False."""
+    path = Path(config_path)
+    if not path.exists():
+        return False
+    try:
+        import yaml
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return bool(data.get("trace_enabled", False))
+    except Exception:
+        pass
+    return False
+
+
+def save_trace_enabled(enabled: bool, config_path: str = DEFAULT_CONFIG_PATH) -> bool:
+    """Write trace_enabled to config.yaml (YAML merge — preserves other keys)."""
+    try:
+        import yaml
+    except ImportError:
+        return False
+
+    path = Path(config_path)
+    existing: dict = {}
+    if path.exists():
+        try:
+            existing = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            if not isinstance(existing, dict):
+                existing = {}
+        except Exception:
+            existing = {}
+
+    existing["trace_enabled"] = enabled
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(yaml.dump(existing, default_flow_style=False, sort_keys=False), encoding="utf-8")
+        return True
+    except Exception:
+        return False

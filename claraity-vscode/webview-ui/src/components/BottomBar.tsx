@@ -11,6 +11,7 @@ interface BottomBarProps {
   onSetMode: (mode: string) => void;
   onShowArchitecture: () => void;
   onShowBeads: () => void;
+  onShowTrace: () => void;
   beadsReadyCount?: number;
   onDisconnect: () => void;
   onReconnect: () => void;
@@ -23,6 +24,7 @@ export const BottomBar = memo(function BottomBar({
   onSetMode,
   onShowArchitecture,
   onShowBeads,
+  onShowTrace,
   beadsReadyCount,
   onDisconnect,
   onReconnect,
@@ -62,6 +64,14 @@ export const BottomBar = memo(function BottomBar({
             {beadsReadyCount != null && beadsReadyCount > 0 && (
               <span className="beads-badge">{beadsReadyCount}</span>
             )}
+          </button>
+          <button
+            className="bottom-view-btn"
+            onClick={onShowTrace}
+            title="Behind the Scenes"
+            aria-label="Behind the Scenes"
+          >
+            <i className="codicon codicon-pulse" />
           </button>
         </div>
         <div className="mode-toggle-group" role="radiogroup" aria-label="Agent mode">

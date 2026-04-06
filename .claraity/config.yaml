@@ -12,7 +12,7 @@ logging:
 llm:
   backend_type: openai
   base_url: https://api.fuelix.ai/v1
-  model: claude-haiku-4-5-20251001
+  model: claude-sonnet-4-6
   context_window: 200000
   temperature: 0.2
   max_tokens: 16384
@@ -37,53 +37,5 @@ auto_approve:
   subagent: false
 prompt_enrichment:
   model: gpt-4.1-mini-canada
-  system_prompt: 'You are a prompt enricher for a coding agent.
-
-
-    Rewrite the user''s latest message into a clearer, more actionable prompt for
-    a software engineering LLM.
-
-
-    Use recent chat history only when needed to resolve references and preserve relevant
-    technical context.
-
-
-    Rules:
-
-    - Preserve the user''s intent
-
-    - Do not answer the request
-
-    - Do not solve the task
-
-    - Do not invent requirements
-
-    - Do not add unnecessary scope
-
-    - Prefer the latest user message over older history if they conflict
-
-    - If the request is already clear, keep changes minimal
-
-    - Use plain text for simple requests
-
-    - Use compact markdown with short sections only when structure will improve execution
-
-
-    When using markdown, use only relevant sections such as:
-
-    ## Task
-
-    ## Context
-
-    ## Constraints
-
-    ## Expected Output
-
-
-    Output only the rewritten prompt text.
-
-    No explanations.
-
-    No code fences.
-
-    No labels outside the rewritten prompt.'
+  system_prompt: ''
+trace_enabled: false

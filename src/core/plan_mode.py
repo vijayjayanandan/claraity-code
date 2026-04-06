@@ -62,8 +62,6 @@ READ_ONLY_TOOLS = frozenset(
         "glob",
         # Analysis tools (read-only)
         "analyze_code",
-        "get_file_outline",
-        "get_symbol_context",
         # Web tools (read-only)
         "web_fetch",
         "web_search",

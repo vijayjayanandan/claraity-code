@@ -1243,14 +1243,6 @@ def populate(store: ClaraityStore):
         properties={"flow_rank": 0, "flow_col": 5},
     )
     store.add_node(
-        id="sys-lsp",
-        type="system",
-        layer=1,
-        name="Language Server (LSP)",
-        description="jedi-language-server for Python code intelligence",
-        properties={"server": "jedi-language-server", "flow_rank": 0, "flow_col": 6},
-    )
-    store.add_node(
         id="sys-mcp",
         type="system",
         layer=1,
@@ -1276,7 +1268,7 @@ def populate(store: ClaraityStore):
     # Row 2: core, director (orchestration hub)
     # Row 3: tools, memory, llm, subagents (capabilities used by core)
     # Row 4: session, hooks, prompts (support layers)
-    # Row 5: observability, code_intelligence, integrations, platform (infrastructure)
+    # Row 5: observability, integrations, platform (infrastructure)
 
     modules = [
         (
@@ -1459,20 +1451,6 @@ def populate(store: ClaraityStore):
             },
         ),
         (
-            "mod-code-intel",
-            "module",
-            "src/code_intelligence/",
-            "LSP-based code analysis and symbol context",
-            5,
-            2000,
-            "low",
-            {
-                "key_files": ["lsp_client_manager.py", "lsp_runtime.py"],
-                "flow_rank": 5,
-                "flow_col": 1,
-            },
-        ),
-        (
             "mod-integrations",
             "module",
             "src/integrations/",
@@ -1524,7 +1502,6 @@ def populate(store: ClaraityStore):
         ("mod-ui", "mod-session", "uses", "Reads from MessageStore via StoreAdapter"),
         ("mod-ui", "mod-observability", "uses", "Structured logging"),
         ("mod-tools", "mod-core", "uses", "Tool base classes, agent interface"),
-        ("mod-tools", "mod-code-intel", "uses", "LSP tools call code intelligence"),
         ("mod-llm", "mod-observability", "uses", "Structured logging"),
         ("mod-server", "mod-core", "uses", "Serializes UIEvents for VS Code"),
         ("mod-server", "mod-session", "uses", "Reads store for notifications"),
@@ -1551,7 +1528,6 @@ def populate(store: ClaraityStore):
         ("sys-vscode", "mod-server", "communicates", "stdio+TCP protocol"),
         ("mod-llm", "sys-llm-api", "calls", "HTTP API requests"),
         ("mod-tools", "sys-filesystem", "reads_writes", "File operations"),
-        ("mod-code-intel", "sys-lsp", "queries", "Symbol/outline requests"),
         ("mod-integrations", "sys-mcp", "connects", "MCP protocol"),
         ("mod-tools", "sys-web", "fetches", "Web search/fetch"),
     ]
@@ -1913,16 +1889,6 @@ def populate(store: ClaraityStore):
             "low",
             {},
         ),
-        (
-            "comp-lsp-tools",
-            "component",
-            "LSPTools",
-            "Code intelligence tools: get_file_outline, get_symbol_context",
-            "src/tools/lsp_tools.py",
-            650,
-            "low",
-            {},
-        ),
         # -- LLM --
         (
             "comp-openai-backend",
@@ -2011,17 +1977,6 @@ def populate(store: ClaraityStore):
             "low",
             {"features": ["QueueHandler", "JSONL rotation", "redaction", "context_vars"]},
         ),
-        # -- Code Intelligence --
-        (
-            "comp-lsp-client",
-            "component",
-            "LSPClientManager",
-            "Manages jedi-language-server lifecycle and request/response",
-            "src/code_intelligence/lsp_client_manager.py",
-            964,
-            "low",
-            {},
-        ),
         # -- Hooks --
         (
             "comp-hook-mgr",
@@ -2091,7 +2046,6 @@ def populate(store: ClaraityStore):
         ("mod-tools", "comp-delegation"),
         ("mod-tools", "comp-search-tools"),
         ("mod-tools", "comp-web-tools"),
-        ("mod-tools", "comp-lsp-tools"),
         ("mod-llm", "comp-openai-backend"),
         ("mod-llm", "comp-anthropic-backend"),
         ("mod-llm", "comp-failure-handler"),
@@ -2100,7 +2054,6 @@ def populate(store: ClaraityStore):
         ("mod-subagents", "comp-subagent-mgr"),
         ("mod-director", "comp-director-adapter"),
         ("mod-observability", "comp-logging"),
-        ("mod-code-intel", "comp-lsp-client"),
         ("mod-hooks", "comp-hook-mgr"),
         ("mod-integrations", "comp-mcp-mgr"),
     ]
@@ -2492,7 +2445,6 @@ def scan_files(store: ClaraityStore, root: str = "src", extensions: list[str] = 
         "src/prompts/": "mod-prompts",
         "src/subagents/": "mod-subagents",
         "src/director/": "mod-director",
-        "src/code_intelligence/": "mod-code-intel",
         "src/integrations/": "mod-integrations",
         "src/platform/": "mod-platform",
         "src/hooks/": "mod-hooks",

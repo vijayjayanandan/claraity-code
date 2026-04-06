@@ -228,7 +228,8 @@ export type ExtensionMessage =
     | { type: 'insertAndSend'; content: string }
     | { type: 'enrichmentDelta'; delta: string }
     | { type: 'enrichmentComplete'; original: string; enriched: string }
-    | { type: 'enrichmentError'; message: string };
+    | { type: 'enrichmentError'; message: string }
+    | { type: 'traceData'; steps: Array<{ id: number; from: string; to: string; label: string; type: string; data: string; durationMs: number; timestamp?: number; sections?: Record<string, string>; thinking?: string }> };
 
 export type WebViewMessage =
     | { type: 'chatMessage'; content: string; attachments?: FileAttachment[]; images?: ImageAttachment[]; systemContext?: string }
@@ -273,6 +274,7 @@ export type WebViewMessage =
     // ClarAIty Knowledge & Beads
     | { type: 'getBeads' }
     | { type: 'getArchitecture' }
+    | { type: 'getTrace'; sessionId: string | null }
     | { type: 'approveKnowledge'; approvedBy: string }
     | { type: 'exportKnowledge' }
     // Subagent management
