@@ -554,19 +554,19 @@ class GrepTool(Tool):
                 "output_mode": {
                     "type": "string",
                     "enum": ["content", "files_with_matches", "count"],
-                    "description": "Output mode: 'content' (show lines), 'files_with_matches' (file paths only), 'count' (match counts)",
+                    "description": "Output mode: 'content' (show matching lines), 'files_with_matches' (file paths only), 'count' (match counts). Defaults to 'files_with_matches'.",
                 },
                 "context_before": {
                     "type": "number",
-                    "description": "Number of lines before match to show (like -B)",
+                    "description": "Number of lines before match to show (like -B). Requires output_mode: 'content', ignored otherwise.",
                 },
                 "context_after": {
                     "type": "number",
-                    "description": "Number of lines after match to show (like -A)",
+                    "description": "Number of lines after match to show (like -A). Requires output_mode: 'content', ignored otherwise.",
                 },
                 "context": {
                     "type": "number",
-                    "description": "Number of lines before AND after match (like -C)",
+                    "description": "Number of lines before AND after match (like -C). Requires output_mode: 'content', ignored otherwise.",
                 },
                 "case_insensitive": {
                     "type": "boolean",

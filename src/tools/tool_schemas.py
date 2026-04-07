@@ -14,15 +14,15 @@ from src.llm.base import ToolDefinition
 READ_FILE_TOOL = ToolDefinition(
     name="read_file",
     description=(
-        "Read file contents with streaming line-range support. Returns content with line numbers (cat -n format). "
-        "THIS IS YOUR PRIMARY TOOL for understanding any file.\n\n"
-        "IMPORTANT: You MUST read a file before making claims about it or editing it. "
+        "Read file contents with line-range support. Returns content with line numbers (cat -n format). "
+        "Reads up to 1000 lines by default (max 2000 per call).\n\n"
+        "THIS IS YOUR PRIMARY TOOL for understanding any file. "
+        "You MUST read a file before making claims about it or editing it. "
         "Do NOT use run_command with cat/head/tail to read files -- use this tool instead.\n\n"
-        "Strategy:\n"
-        "- <1000 lines: read completely\n"
-        "- 1000-5000 lines: read first 200 + grep for patterns, then targeted reads\n"
-        "- >5000 lines: use start_line/end_line to read specific sections\n"
-        "- If file is already in <referenced_files> context, do NOT re-read it"
+        "For large files, use start_line/end_line to read specific sections rather than "
+        "reading the whole file. If you don't know where to look, read the first chunk to "
+        "orient, then target subsequent reads.\n"
+        "If file is already in <referenced_files> context, do NOT re-read it."
     ),
     parameters={
         "type": "object",
@@ -91,7 +91,7 @@ EDIT_FILE_TOOL = ToolDefinition(
             "file_path": {"type": "string", "description": "Path to the file to edit"},
             "old_text": {
                 "type": "string",
-                "description": "Exact text to find and replace (must match exactly including whitespace)",
+                "description": "Exact text to find and replace. Must match exactly including whitespace. Must be unique in the file -- if multiple matches exist, the edit will fail. Provide more surrounding context to disambiguate.",
             },
             "new_text": {"type": "string", "description": "New text to replace the old text with"},
         },
@@ -275,7 +275,8 @@ GREP_TOOL = ToolDefinition(
         "Advanced regex search across files with file type filters, context lines, and "
         "multiple output modes. Use for finding code patterns, error handling, TODOs, etc.\n\n"
         "Use this instead of run_command with grep/rg/findstr/Select-String.\n"
-        "Supports full regex syntax (e.g., 'log.*Error', 'function\\s+\\w+'). "
+        "Uses Python regex (re module), not shell grep. Use '|' for alternation (not '\\|'). "
+        "Examples: 'Key|key', 'log.*Error', 'function\\s+\\w+'. "
         "For cross-line patterns, enable multiline mode."
     ),
     parameters={
@@ -826,19 +827,25 @@ TASK_LIST_TOOL = ToolDefinition(
 TASK_CREATE_TOOL = ToolDefinition(
     name="task_create",
     description=(
-        "Create a new task with title, description, priority, and optional tags.\n\n"
+        "Create a new task with title, description, priority, type, and optional deps.\n\n"
         "Create tasks for the OVERALL work item, not each sub-step. Use task_update with "
-        "action='note' for progress within a task. Only create separate tasks for genuinely "
-        "independent work items. Skip task management entirely for single-step or trivial operations."
+        "action='note' for progress within a task. Always provide a meaningful description. "
+        "Use deps to link back to the task you were working on (e.g., 'discovered-from:bd-a1b2')."
     ),
     parameters={
         "type": "object",
         "properties": {
             "title": {"type": "string", "description": "Task title"},
-            "description": {"type": "string", "description": "Task description"},
-            "priority": {"type": "integer", "description": "Priority (0=highest, 5=default)"},
+            "description": {"type": "string", "description": "Why this issue exists and what needs to be done"},
+            "priority": {"type": "integer", "description": "Priority (0=highest, 5=default, 9=lowest)"},
             "parent_id": {"type": "string", "description": "Parent task ID for subtasks"},
             "tags": {"type": "string", "description": "Comma-separated tags"},
+            "issue_type": {"type": "string", "enum": ["bug", "feature", "task", "epic", "chore", "decision"]},
+            "external_ref": {"type": "string", "description": "External reference (e.g., jira-CC-42)"},
+            "design": {"type": "string", "description": "Technical design notes"},
+            "acceptance_criteria": {"type": "string", "description": "Definition of done"},
+            "estimated_minutes": {"type": "integer", "description": "Effort estimate in minutes"},
+            "deps": {"type": "string", "description": "Dependencies: 'type:id,...' (e.g., 'discovered-from:bd-a1b2')"},
         },
         "required": ["title"],
     },
@@ -846,30 +853,37 @@ TASK_CREATE_TOOL = ToolDefinition(
 
 TASK_UPDATE_TOOL = ToolDefinition(
     name="task_update",
-    description="Update a task's status (start/close) or add a note.",
+    description="Update a task's lifecycle: start, close, note, defer, reopen, or claim.",
     parameters={
         "type": "object",
         "properties": {
             "bead_id": {"type": "string", "description": "Task ID (e.g., bd-a1b2)"},
-            "action": {"type": "string", "enum": ["start", "close", "note"], "description": "Action to take"},
+            "action": {"type": "string", "enum": ["start", "close", "note", "defer", "reopen", "claim"]},
             "summary": {"type": "string", "description": "For close: what was done. For note: content."},
+            "close_reason": {"type": "string", "description": "For close: why (resolved, wontfix, duplicate)"},
+            "defer_until": {"type": "string", "description": "For defer: ISO8601 date to reappear"},
+            "claimant": {"type": "string", "description": "For claim: identity of claimer"},
         },
         "required": ["bead_id", "action"],
     },
 )
 
-TASK_BLOCK_TOOL = ToolDefinition(
-    name="task_block",
-    description="Add a blocking dependency: blocker must complete before blocked can start.",
+TASK_LINK_TOOL = ToolDefinition(
+    name="task_link",
+    description="Add a typed dependency between tasks. Default: blocks (from must complete before to can start).",
     parameters={
         "type": "object",
         "properties": {
-            "blocker_id": {"type": "string", "description": "Task that must complete first"},
-            "blocked_id": {"type": "string", "description": "Task that cannot start until blocker completes"},
+            "from_id": {"type": "string", "description": "Source task ID"},
+            "to_id": {"type": "string", "description": "Target task ID"},
+            "dep_type": {"type": "string", "enum": ["blocks", "conditional-blocks", "waits-for", "related", "discovered-from", "caused-by", "tracks", "validates", "supersedes", "duplicates"]},
         },
-        "required": ["blocker_id", "blocked_id"],
+        "required": ["from_id", "to_id"],
     },
 )
+
+# Backward compatibility alias
+TASK_BLOCK_TOOL = TASK_LINK_TOOL
 
 KNOWLEDGE_AUTO_LAYOUT_TOOL = ToolDefinition(
     name="knowledge_auto_layout",
@@ -899,7 +913,7 @@ KNOWLEDGE_TOOLS = [
     TASK_LIST_TOOL,
     TASK_CREATE_TOOL,
     TASK_UPDATE_TOOL,
-    TASK_BLOCK_TOOL,
+    TASK_LINK_TOOL,
     KNOWLEDGE_AUTO_LAYOUT_TOOL,
     KNOWLEDGE_EXPORT_TOOL,
 ]
