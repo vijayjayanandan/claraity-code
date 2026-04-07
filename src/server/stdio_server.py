@@ -268,6 +268,7 @@ class StdioProtocol(UIProtocol):
         "get_architecture": "_handle_get_architecture",
         "approve_knowledge": "_handle_approve_knowledge",
         "export_knowledge": "_handle_export_knowledge",
+        "import_knowledge": "_handle_import_knowledge",
         # Subagent management
         "list_subagents": "_handle_list_subagents",
         "save_subagent": "_handle_save_subagent",
@@ -291,6 +292,12 @@ class StdioProtocol(UIProtocol):
         self._store = message_store
         self._agent = agent
         self._config_path = config_path
+        # Save to project-level config if it exists (keeps project overrides
+        # self-contained), otherwise fall back to system-level so new folders
+        # share settings without creating per-project files.
+        from src.llm.config_loader import SYSTEM_CONFIG_PATH
+        project_config = os.path.join(working_directory, ".claraity", "config.yaml") if working_directory else ""
+        self._save_config_path = project_config if project_config and os.path.isfile(project_config) else SYSTEM_CONFIG_PATH
         self._data_port = data_port
         self._working_directory = working_directory
         self._send_lock = asyncio.Lock()
@@ -644,7 +651,7 @@ class StdioProtocol(UIProtocol):
     async def _handle_save_config(self, data: dict) -> None:
         from src.server.config_handler import save_config_from_request
 
-        response = save_config_from_request(data, self._config_path)
+        response = save_config_from_request(data, self._save_config_path)
 
         # Hot-swap the LLM backend if agent is available
         cfg = response.pop("_config", None)
@@ -724,12 +731,12 @@ class StdioProtocol(UIProtocol):
         try:
             from src.llm.config_loader import load_llm_config, save_llm_config
 
-            cfg = load_llm_config(self._config_path)
+            cfg = load_llm_config(self._save_config_path)
             cfg.auto_approve.read = categories.get("read", cfg.auto_approve.read)
             cfg.auto_approve.edit = categories.get("edit", cfg.auto_approve.edit)
             cfg.auto_approve.execute = categories.get("execute", cfg.auto_approve.execute)
             cfg.auto_approve.browser = categories.get("browser", cfg.auto_approve.browser)
-            save_llm_config(cfg, self._config_path)
+            save_llm_config(cfg, self._save_config_path)
         except Exception as e:
             logger.warning("auto_approve_persist_error", error=str(e))
 
@@ -758,7 +765,7 @@ class StdioProtocol(UIProtocol):
     async def _handle_save_limits(self, data: dict) -> None:
         from src.server.config_handler import save_limits_from_request
 
-        response = save_limits_from_request(data, self._config_path)
+        response = save_limits_from_request(data, self._save_config_path)
         # Apply to running agent immediately (hot-swap)
         if response.get("success") and self._agent and response.get("limits"):
             confirmed = self._agent.set_limits(response["limits"])
@@ -784,7 +791,7 @@ class StdioProtocol(UIProtocol):
                 sessions_dir = Path(self._working_directory) / ".claraity" / "sessions"
                 self._agent._trace.init_session(self._agent._session_id, sessions_dir)
         # Persist to config.yaml
-        save_trace_enabled(enabled, self._config_path)
+        save_trace_enabled(enabled, self._save_config_path)
         await self._send_json({"type": "trace_enabled", "enabled": enabled})
 
     # -----------------------------------------------------------------
@@ -1591,7 +1598,11 @@ class StdioProtocol(UIProtocol):
     # -----------------------------------------------------------------
 
     async def _handle_get_beads(self, data: dict) -> None:
-        """Query the beads DB and send grouped task data to the client."""
+        """Query the beads DB and send grouped task data to the client.
+
+        Groups beads into: in_progress, ready, blocked, deferred, pinned, closed.
+        Includes new schema fields: issue_type, assignee, notes, external_ref, etc.
+        """
         try:
             from src.claraity.claraity_beads import BeadStore
 
@@ -1604,11 +1615,15 @@ class StdioProtocol(UIProtocol):
                             "ready": [],
                             "in_progress": [],
                             "blocked": [],
+                            "deferred": [],
+                            "pinned": [],
                             "closed": [],
                             "stats": {
                                 "total": 0,
                                 "open": 0,
                                 "in_progress": 0,
+                                "blocked": 0,
+                                "deferred": 0,
                                 "closed": 0,
                                 "dependencies": 0,
                             },
@@ -1624,12 +1639,30 @@ class StdioProtocol(UIProtocol):
                 stats = store.get_stats()
                 all_blockers = store.get_all_blockers()
 
-                ready, in_progress, blocked, closed = [], [], [], []
+                # Pre-fetch notes for in-progress beads (avoid N+1)
+                ip_ids = {b["id"] for b in all_beads if b["status"] == "in_progress"}
+                notes_by_bead = {}
+                for bid in ip_ids:
+                    notes = store.get_notes(bid)
+                    if notes:
+                        # Send latest 3 notes
+                        notes_by_bead[bid] = [
+                            {
+                                "content": n["content"],
+                                "author": n.get("author", "agent"),
+                                "created_at": n.get("created_at", ""),
+                            }
+                            for n in notes[-3:]
+                        ]
+
+                import json as _json
+
+                ready, in_progress, blocked, deferred, pinned, closed = (
+                    [], [], [], [], [], [],
+                )
                 for bead in all_beads:
                     tags = []
                     if bead.get("tags"):
-                        import json as _json
-
                         try:
                             tags = _json.loads(bead["tags"])
                         except (ValueError, TypeError):
@@ -1649,11 +1682,28 @@ class StdioProtocol(UIProtocol):
                         "closed_at": bead.get("closed_at"),
                         "summary": bead.get("summary"),
                         "blockers": blockers,
+                        # New fields
+                        "issue_type": bead.get("issue_type", "task"),
+                        "assignee": bead.get("assignee"),
+                        "notes": notes_by_bead.get(bead["id"], []),
+                        "external_ref": bead.get("external_ref"),
+                        "due_at": bead.get("due_at"),
+                        "defer_until": bead.get("defer_until"),
+                        "estimated_minutes": bead.get("estimated_minutes"),
+                        "close_reason": bead.get("close_reason"),
+                        "last_activity": bead.get("last_activity"),
+                        "design": bead.get("design"),
+                        "acceptance_criteria": bead.get("acceptance_criteria"),
                     }
 
-                    if bead["status"] == "closed":
+                    status = bead["status"]
+                    if status == "closed":
                         closed.append(item)
-                    elif bead["status"] == "in_progress":
+                    elif status == "deferred":
+                        deferred.append(item)
+                    elif status == "pinned" or bead.get("pinned"):
+                        pinned.append(item)
+                    elif status == "in_progress":
                         in_progress.append(item)
                     elif bead["id"] in ready_ids:
                         ready.append(item)
@@ -1668,11 +1718,15 @@ class StdioProtocol(UIProtocol):
                             "ready": ready,
                             "in_progress": in_progress,
                             "blocked": blocked,
+                            "deferred": deferred,
+                            "pinned": pinned,
                             "closed": closed,
                             "stats": {
                                 "total": stats.get("total", 0),
                                 "open": by_status.get("open", 0),
                                 "in_progress": by_status.get("in_progress", 0),
+                                "blocked": by_status.get("blocked", 0),
+                                "deferred": by_status.get("deferred", 0),
                                 "closed": by_status.get("closed", 0),
                                 "dependencies": stats.get("dependencies", 0),
                             },
@@ -2061,45 +2115,72 @@ class StdioProtocol(UIProtocol):
             await self._send_json({"type": "subagents_list", "subagents": []})
 
     async def _handle_export_knowledge(self, data: dict) -> None:
-        """Export both knowledge and beads DBs to JSONL."""
+        """Export knowledge DB to JSONL. Accepts optional 'path' for Save As."""
         try:
             from src.claraity.claraity_db import ClaraityStore
-            from src.claraity.claraity_beads import BeadStore
 
-            results = []
-            kb_path = os.path.join(self._working_directory, ".claraity", "claraity_knowledge.db")
-            if os.path.exists(kb_path):
-                store = ClaraityStore(kb_path)
-                try:
-                    count = store.export_jsonl(
-                        os.path.join(
-                            self._working_directory, ".claraity", "claraity_knowledge.jsonl"
-                        )
-                    )
-                    results.append(f"Knowledge: {count} records")
-                finally:
-                    store.close()
+            kb_path = os.path.join(
+                self._working_directory, ".claraity", "claraity_knowledge.db"
+            )
+            if not os.path.exists(kb_path):
+                await self._send_error("export_error", "No knowledge database to export")
+                return
 
-            bd_path = os.path.join(self._working_directory, ".claraity", "claraity_beads.db")
-            if os.path.exists(bd_path):
-                store = BeadStore(bd_path)
-                try:
-                    count = store.export_jsonl(
-                        os.path.join(self._working_directory, ".claraity", "claraity_beads.jsonl")
-                    )
-                    results.append(f"Beads: {count} records")
-                finally:
-                    store.close()
+            export_path = data.get("path") or os.path.join(
+                self._working_directory, ".claraity", "claraity_knowledge.jsonl"
+            )
+
+            store = ClaraityStore(kb_path)
+            try:
+                count = store.export_jsonl(export_path)
+            finally:
+                store.close()
 
             await self._send_json(
                 {
                     "type": "export_complete",
-                    "data": {"message": "Exported: " + ", ".join(results)},
+                    "data": {"message": f"Exported {count} records to {export_path}"},
                 }
             )
         except Exception as e:
             logger.warning("stdio_export_knowledge_error", error=str(e))
             await self._send_error("export_error", f"Failed to export: {e}")
+
+    async def _handle_import_knowledge(self, data: dict) -> None:
+        """Import knowledge DB from JSONL content and send back architecture data."""
+        import tempfile
+
+        content = data.get("content", "")
+        if not content:
+            await self._send_error("import_error", "No JSONL content provided")
+            return
+
+        try:
+            from src.claraity.claraity_db import ClaraityStore
+
+            db_path = os.path.join(
+                self._working_directory, ".claraity", "claraity_knowledge.db"
+            )
+
+            # Write content to a temp file for import_jsonl
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".jsonl", encoding="utf-8", delete=False
+            ) as tmp:
+                tmp.write(content)
+                tmp_path = tmp.name
+
+            try:
+                store = ClaraityStore.import_jsonl(tmp_path, db_path)
+                store.close()
+            finally:
+                os.unlink(tmp_path)
+
+            # Send back refreshed architecture data
+            await self._handle_get_architecture({})
+
+        except Exception as e:
+            logger.warning("stdio_import_knowledge_error", error=str(e))
+            await self._send_error("import_error", f"Failed to import: {e}")
 
     # -----------------------------------------------------------------
     # Prompt Enrichment

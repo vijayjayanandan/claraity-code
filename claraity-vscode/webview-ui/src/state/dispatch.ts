@@ -171,7 +171,6 @@ export function dispatchServerMessage(
             active: true,
             messages: [],
             timeline: [],
-            totalTokens: 0,
             contextTokens: 0,
             contextWindow: msg.data.context_window ?? 0,
           },

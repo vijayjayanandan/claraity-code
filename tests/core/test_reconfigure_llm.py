@@ -48,8 +48,6 @@ def mock_agent():
     agent.memory.total_context_tokens = 131072
     agent.memory.working_memory = MagicMock()
     agent.memory.working_memory.max_tokens = int(131072 * 0.4)
-    agent.memory.episodic_memory = MagicMock()
-    agent.memory.episodic_memory.max_tokens = int(131072 * 0.2)
 
     # Mock context builder
     agent.context_builder = MagicMock()
@@ -153,7 +151,6 @@ class TestReconfigureLlm:
         assert mock_agent.context_window == 65536
         assert mock_agent.memory.total_context_tokens == 65536
         assert mock_agent.memory.working_memory.max_tokens == int(65536 * 0.4)
-        assert mock_agent.memory.episodic_memory.max_tokens == int(65536 * 0.2)
         assert mock_agent.context_builder.max_context_tokens == 65536
         assert "Context: 131072 -> 65536" in summary
 

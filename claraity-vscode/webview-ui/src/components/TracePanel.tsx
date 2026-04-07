@@ -1043,6 +1043,9 @@ export function TracePanel({ onBack, steps: externalSteps, traceEnabled = false,
             agent pipeline — context assembly, LLM calls, tool execution, approvals — will
             be recorded and visualized here.
           </div>
+          <div style={{ fontSize: 10, opacity: 0.3, maxWidth: 300, lineHeight: 1.5 }}>
+            Trace data is stored locally in your project's .claraity/sessions/ folder. Nothing is sent to any server.
+          </div>
           <button
             onClick={() => onToggleTrace?.(true)}
             style={{

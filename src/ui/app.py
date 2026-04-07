@@ -102,6 +102,8 @@ SILENT_TOOLS = {
     "task_create",
     "task_update",
     "task_list",
+    "task_show",
+    "task_link",
     "task_block",
     "enter_plan_mode",
     "director_complete_understand",

@@ -199,6 +199,11 @@
         "mac": "cmd+shift+."
       },
       {
+        "command": "claraity.interrupt",
+        "key": "escape",
+        "when": "claraity.isStreaming"
+      },
+      {
         "command": "claraity.sessionHistory",
         "key": "ctrl+shift+;",
         "mac": "cmd+shift+;"

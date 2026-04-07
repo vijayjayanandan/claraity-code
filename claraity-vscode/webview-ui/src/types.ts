@@ -131,6 +131,7 @@ export type WebViewMessage =
   | { type: "clearTrace"; sessionId: string | null }
   | { type: "approveKnowledge"; approvedBy: string; status: string; comments: string }
   | { type: "exportKnowledge" }
+  | { type: "importKnowledge" }
   // Subagents panel
   | { type: "listSubagents" }
   | { type: "saveSubagent"; name: string; description: string; systemPrompt: string; tools?: string[] | null; isFork?: boolean }

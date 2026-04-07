@@ -76,8 +76,6 @@ export interface SubagentInfo {
   messages: string[];
   /** Chronological ordering of text messages and tool cards within the card. */
   timeline: SubagentTimelineEntry[];
-  /** Cumulative tokens consumed across all LLM calls. */
-  totalTokens: number;
   /** Prompt tokens from the most recent LLM call (current context size). */
   contextTokens: number;
   /** Model's context window limit. */

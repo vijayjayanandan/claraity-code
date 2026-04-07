@@ -41,8 +41,6 @@ class TestLongRunningController:
         agent.memory = Mock()
         agent.memory.working_memory = Mock()
         agent.memory.working_memory.messages = []
-        agent.memory.episodic_memory = Mock()
-        agent.memory.episodic_memory.compressed_history = []
         agent.memory.task_context = Mock()
         agent.memory.task_context.project_type = "Test Project"
         agent.memory.task_context.key_files = []

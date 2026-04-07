@@ -13,7 +13,6 @@ Session Storage Structure:
         <session-id>/
           metadata.json               # Session info
           working_memory.json         # Current conversation
-          episodic_memory.json        # Conversation history
           task_context.json           # Current task
           file_memories.txt           # Loaded CLAUDE.md content
 """
@@ -135,7 +134,6 @@ class SessionManager:
             name: Optional human-readable name
             state: Complete session state dictionary containing:
                   - working_memory: Current conversation
-                  - episodic_memory: Conversation history
                   - task_context: Current task info
                   - file_memories: Loaded CLAUDE.md content
                   - model_name: LLM model name
@@ -150,7 +148,6 @@ class SessionManager:
         Example:
             >>> state = {
             ...     "working_memory": {...},
-            ...     "episodic_memory": {...},
             ...     "task_context": {...},
             ...     "file_memories": "...",
             ...     "model_name": "qwen3-coder:30b",
@@ -191,10 +188,6 @@ class SessionManager:
         if "working_memory" in state:
             with open(session_dir / "working_memory.json", "w") as f:
                 json.dump(state["working_memory"], f, indent=2)
-
-        if "episodic_memory" in state:
-            with open(session_dir / "episodic_memory.json", "w") as f:
-                json.dump(state["episodic_memory"], f, indent=2)
 
         if "task_context" in state:
             with open(session_dir / "task_context.json", "w") as f:
@@ -247,11 +240,6 @@ class SessionManager:
         if working_memory_path.exists():
             with open(working_memory_path) as f:
                 state["working_memory"] = json.load(f)
-
-        episodic_memory_path = session_dir / "episodic_memory.json"
-        if episodic_memory_path.exists():
-            with open(episodic_memory_path) as f:
-                state["episodic_memory"] = json.load(f)
 
         task_context_path = session_dir / "task_context.json"
         if task_context_path.exists():

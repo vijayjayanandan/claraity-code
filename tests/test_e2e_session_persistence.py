@@ -94,12 +94,7 @@ class TestE2ESessionPersistence:
         assert "JWT authentication" in new_manager.working_memory.messages[2].content
         assert new_manager.working_memory.messages[0].content == "Hello, can you help me implement a feature?"
 
-        # 2. Episodic memory turns
-        assert len(new_manager.episodic_memory.conversation_turns) == 3
-        first_turn = new_manager.episodic_memory.conversation_turns[0]
-        assert "help me implement" in first_turn.user_message.content.lower()
-
-        # 3. Task context
+        # 2. Task context
         restored_task = new_manager.working_memory.task_context
         assert restored_task is not None
         assert restored_task.task_id == "jwt-auth-implementation"
@@ -126,7 +121,6 @@ class TestE2ESessionPersistence:
 
         # Clear and create Session 2: Database feature
         memory_manager.clear_working_memory()
-        memory_manager.clear_episodic_memory()
 
         memory_manager.add_user_message("Optimize database queries")
         memory_manager.add_assistant_message("Let's optimize the database")
@@ -234,16 +228,8 @@ class TestE2ESessionPersistence:
         )
         new_manager.load_session(session_id)
 
-        # Check tool calls in episodic memory
-        assert len(new_manager.episodic_memory.conversation_turns) == 2
-
-        first_turn = new_manager.episodic_memory.conversation_turns[0]
-        assert len(first_turn.tool_calls) == 2
-        assert first_turn.tool_calls[0]["tool"] == "read_file"
-
-        second_turn = new_manager.episodic_memory.conversation_turns[1]
-        assert len(second_turn.tool_calls) == 2
-        assert second_turn.tool_calls[0]["tool"] == "write_file"
+        # Verify working memory was restored
+        assert len(new_manager.working_memory.messages) > 0
 
     # ==================== Session Management Integration ====================
 
@@ -252,7 +238,6 @@ class TestE2ESessionPersistence:
         # Create 3 sessions
         for i in range(3):
             memory_manager.clear_working_memory()
-            memory_manager.clear_episodic_memory()
 
             memory_manager.add_user_message(f"Task {i}")
             memory_manager.add_assistant_message(f"Response {i}")
@@ -348,7 +333,6 @@ class TestE2ESessionPersistence:
         new_manager.load_session(session_id)
 
         assert len(new_manager.working_memory.messages) == 0
-        assert len(new_manager.episodic_memory.conversation_turns) == 0
 
     def test_session_with_only_user_messages(self, memory_manager):
         """Test session with only user messages (no assistant responses)."""
@@ -368,8 +352,6 @@ class TestE2ESessionPersistence:
         new_manager.load_session(session_id)
 
         assert len(new_manager.working_memory.messages) == 2
-        # No turns created since no assistant responses
-        assert len(new_manager.episodic_memory.conversation_turns) == 0
 
     def test_very_long_conversation(self, memory_manager):
         """Test session with many messages."""
@@ -391,7 +373,6 @@ class TestE2ESessionPersistence:
         new_manager.load_session(session_id)
 
         assert len(new_manager.working_memory.messages) == 100
-        assert len(new_manager.episodic_memory.conversation_turns) == 50
 
     def test_session_with_special_characters(self, memory_manager):
         """Test session with special characters in content."""

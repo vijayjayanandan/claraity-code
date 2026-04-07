@@ -60,7 +60,6 @@ class ExecutionCheckpoint:
     Attributes:
         metadata: Checkpoint metadata
         working_memory: Recent conversation messages (last 10-20)
-        episodic_memory: Compressed summaries of older conversations
         task_context: Project type, key files, key concepts
         tool_execution_history: Complete history of tool calls
         files_modified: list of files created/modified
@@ -71,7 +70,6 @@ class ExecutionCheckpoint:
 
     metadata: CheckpointMetadata
     working_memory: list[dict[str, Any]]  # Recent messages
-    episodic_memory: list[str]  # Compressed summaries
     task_context: dict[str, Any]  # Project context
     tool_execution_history: list[dict[str, Any]]  # All tool calls
     files_modified: list[str]  # File paths
@@ -84,7 +82,6 @@ class ExecutionCheckpoint:
         return {
             "metadata": asdict(self.metadata),
             "working_memory": self.working_memory,
-            "episodic_memory": self.episodic_memory,
             "task_context": self.task_context,
             "tool_execution_history": self.tool_execution_history,
             "files_modified": self.files_modified,
@@ -100,7 +97,6 @@ class ExecutionCheckpoint:
         return cls(
             metadata=metadata,
             working_memory=data["working_memory"],
-            episodic_memory=data["episodic_memory"],
             task_context=data["task_context"],
             tool_execution_history=data["tool_execution_history"],
             files_modified=data["files_modified"],
@@ -209,17 +205,6 @@ class CheckpointManager:
             # Agent might not have proper memory structure
             pass
 
-        # Extract episodic memory (compressed summaries)
-        episodic_memory_summaries = []
-        try:
-            if hasattr(agent, "memory") and hasattr(agent.memory, "episodic_memory"):
-                if hasattr(agent.memory.episodic_memory, "compressed_history"):
-                    episodic_memory_summaries = (
-                        agent.memory.episodic_memory.compressed_history.copy()
-                    )
-        except (TypeError, AttributeError):
-            pass
-
         # Extract task context
         task_context = {}
         try:
@@ -293,7 +278,6 @@ class CheckpointManager:
         checkpoint = ExecutionCheckpoint(
             metadata=metadata,
             working_memory=working_memory_messages,
-            episodic_memory=episodic_memory_summaries,
             task_context=task_context,
             tool_execution_history=tool_execution_history,
             files_modified=files_modified,
@@ -371,11 +355,6 @@ class CheckpointManager:
 
                 message = Message(role=role, content=msg_dict["content"], timestamp=timestamp)
                 agent.memory.working_memory.messages.append(message)
-
-        # Restore episodic memory
-        if hasattr(agent, "memory") and hasattr(agent.memory, "episodic_memory"):
-            if hasattr(agent.memory.episodic_memory, "compressed_history"):
-                agent.memory.episodic_memory.compressed_history = checkpoint.episodic_memory.copy()
 
         # Restore task context
         if hasattr(agent, "memory") and hasattr(agent.memory, "task_context"):

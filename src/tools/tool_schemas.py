@@ -824,6 +824,18 @@ TASK_LIST_TOOL = ToolDefinition(
     parameters={"type": "object", "properties": {}, "required": []},
 )
 
+TASK_SHOW_TOOL = ToolDefinition(
+    name="task_show",
+    description="Get full detail for a specific task: description, design, acceptance criteria, notes, dependencies. Use when picking up a task.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "bead_id": {"type": "string", "description": "Task ID (e.g., bd-a1b2)"},
+        },
+        "required": ["bead_id"],
+    },
+)
+
 TASK_CREATE_TOOL = ToolDefinition(
     name="task_create",
     description=(
@@ -911,6 +923,7 @@ KNOWLEDGE_TOOLS = [
     KNOWLEDGE_QUERY_TOOL,
     KNOWLEDGE_SET_METADATA_TOOL,
     TASK_LIST_TOOL,
+    TASK_SHOW_TOOL,
     TASK_CREATE_TOOL,
     TASK_UPDATE_TOOL,
     TASK_LINK_TOOL,

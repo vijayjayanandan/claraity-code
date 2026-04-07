@@ -350,7 +350,6 @@ describe("appReducer — Messages", () => {
       active: true,
       messages: [],
       timeline: [],
-      totalTokens: 0,
       contextTokens: 0,
       contextWindow: 0,
     };
@@ -388,7 +387,6 @@ describe("appReducer — Messages", () => {
       active: true,
       messages: ["Old text"],
       timeline: [{ type: "text" as const, index: 0 }],
-      totalTokens: 0,
       contextTokens: 0,
       contextWindow: 0,
     };
@@ -510,7 +508,6 @@ describe("appReducer — Tools", () => {
       active: true,
       messages: [],
       timeline: [],
-      totalTokens: 0,
       contextTokens: 0,
       contextWindow: 0,
     };
@@ -541,7 +538,6 @@ describe("appReducer — Subagents", () => {
     active: true,
     messages: [],
     timeline: [],
-    totalTokens: 0,
     contextTokens: 0,
     contextWindow: 0,
   };

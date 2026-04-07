@@ -10,8 +10,9 @@ from pathlib import Path
 import pytest
 
 from src.claraity.claraity_beads import (
-    BeadStore, render_tasks_md,
-    VALID_STATUSES, BLOCKING_DEP_TYPES, ASSOCIATION_DEP_TYPES,
+    BeadStore, render_tasks_md, render_bead_detail,
+    VALID_STATUSES, VALID_ISSUE_TYPES, VALID_DEP_TYPES,
+    BLOCKING_DEP_TYPES, ASSOCIATION_DEP_TYPES,
 )
 
 
@@ -233,6 +234,45 @@ class TestReadyQueue:
         temp_beads.update_status(a, "closed")
         ready = temp_beads.get_ready()
         assert len(ready) == 0
+
+    def test_circular_dependency_excludes_both(self, temp_beads):
+        """A blocks B and B blocks A. Neither should be ready."""
+        a = temp_beads.add_bead(title="Circular A")
+        b = temp_beads.add_bead(title="Circular B")
+        temp_beads.add_dependency(a, b, "blocks")
+        temp_beads.add_dependency(b, a, "blocks")
+        ready = temp_beads.get_ready()
+        ready_ids = {r["id"] for r in ready}
+        assert a not in ready_ids
+        assert b not in ready_ids
+
+
+# =============================================================================
+# Input Validation Tests
+# =============================================================================
+
+class TestInputValidation:
+    """Test store-level validation of dep_type and issue_type."""
+
+    def test_invalid_dep_type_raises(self, temp_beads):
+        a = temp_beads.add_bead(title="A")
+        b = temp_beads.add_bead(title="B")
+        with pytest.raises(ValueError, match="Invalid dep_type"):
+            temp_beads.add_dependency(a, b, "blokcs")  # typo
+
+    def test_valid_dep_types_accepted(self, temp_beads):
+        a = temp_beads.add_bead(title="Source")
+        b = temp_beads.add_bead(title="Target")
+        for dep_type in VALID_DEP_TYPES:
+            temp_beads.add_dependency(a, b, dep_type)
+
+    def test_invalid_issue_type_raises(self, temp_beads):
+        with pytest.raises(ValueError, match="Invalid issue_type"):
+            temp_beads.add_bead(title="Bad type", issue_type="feature-request")
+
+    def test_valid_issue_types_accepted(self, temp_beads):
+        for i, issue_type in enumerate(VALID_ISSUE_TYPES):
+            temp_beads.add_bead(title=f"Type test {i}", issue_type=issue_type)
 
 
 # =============================================================================
@@ -848,6 +888,156 @@ class TestMigration:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
 
+class TestTouch:
+    """Test last_activity heartbeat."""
+
+    def test_touch_updates_last_activity(self, temp_beads):
+        bid = temp_beads.add_bead(title="Touch me")
+        bead_before = temp_beads.get_bead(bid)
+        import time; time.sleep(0.05)  # ensure timestamp differs
+        temp_beads.touch(bid)
+        bead_after = temp_beads.get_bead(bid)
+        assert bead_after["last_activity"] > bead_before["last_activity"]
+
+    def test_touch_nonexistent_no_error(self, temp_beads):
+        # touch is fire-and-forget; nonexistent ID just updates 0 rows
+        temp_beads.touch("bd-nope")  # should not raise
+
+
+class TestSessionWork:
+    """Test session-scoped task queries."""
+
+    def test_get_session_work(self, temp_beads):
+        bid = temp_beads.add_bead(title="Session task")
+        temp_beads.claim(bid, "claraity:session-abc")
+        work = temp_beads.get_session_work("abc")
+        assert len(work) == 1
+        assert work[0]["id"] == bid
+
+    def test_get_session_work_excludes_other_sessions(self, temp_beads):
+        a = temp_beads.add_bead(title="Task A")
+        b = temp_beads.add_bead(title="Task B")
+        temp_beads.claim(a, "claraity:session-aaa")
+        temp_beads.claim(b, "claraity:session-bbb")
+        work_a = temp_beads.get_session_work("aaa")
+        assert len(work_a) == 1
+        assert work_a[0]["id"] == a
+        work_b = temp_beads.get_session_work("bbb")
+        assert len(work_b) == 1
+        assert work_b[0]["id"] == b
+
+    def test_get_session_work_empty(self, temp_beads):
+        temp_beads.add_bead(title="Unclaimed")
+        assert temp_beads.get_session_work("xyz") == []
+
+
+class TestReleaseSession:
+    """Test graceful session cleanup."""
+
+    def test_release_returns_to_pool(self, temp_beads):
+        bid = temp_beads.add_bead(title="Release me")
+        temp_beads.claim(bid, "claraity:session-abc")
+        count = temp_beads.release_session("abc")
+        assert count == 1
+        bead = temp_beads.get_bead(bid)
+        assert bead["status"] == "open"
+        assert bead["assignee"] == "agent"
+
+    def test_release_records_event(self, temp_beads):
+        bid = temp_beads.add_bead(title="Release event")
+        temp_beads.claim(bid, "claraity:session-abc")
+        temp_beads.release_session("abc")
+        events = temp_beads.get_events(bid)
+        released = [e for e in events if e["event_type"] == "released"]
+        assert len(released) == 1
+        assert "session abc ended" in released[0]["comment"]
+
+    def test_release_only_affects_own_session(self, temp_beads):
+        a = temp_beads.add_bead(title="A")
+        b = temp_beads.add_bead(title="B")
+        temp_beads.claim(a, "claraity:session-aaa")
+        temp_beads.claim(b, "claraity:session-bbb")
+        temp_beads.release_session("aaa")
+        # A released, B still claimed
+        assert temp_beads.get_bead(a)["status"] == "open"
+        assert temp_beads.get_bead(b)["status"] == "in_progress"
+        assert temp_beads.get_bead(b)["assignee"] == "claraity:session-bbb"
+
+    def test_release_no_tasks_returns_zero(self, temp_beads):
+        assert temp_beads.release_session("nonexistent") == 0
+
+    def test_release_does_not_touch_closed(self, temp_beads):
+        bid = temp_beads.add_bead(title="Already closed")
+        temp_beads.claim(bid, "claraity:session-abc")
+        temp_beads.update_status(bid, "closed", summary="Done")
+        count = temp_beads.release_session("abc")
+        assert count == 0  # closed tasks not released
+        assert temp_beads.get_bead(bid)["status"] == "closed"
+
+
+class TestEpicGuard:
+    """Test that epics cannot be claimed."""
+
+    def test_claim_epic_raises(self, temp_beads):
+        bid = temp_beads.add_bead(title="Big initiative", issue_type="epic")
+        with pytest.raises(ValueError, match="Cannot claim an epic"):
+            temp_beads.claim(bid, "claraity:session-abc")
+
+    def test_claim_task_succeeds(self, temp_beads):
+        bid = temp_beads.add_bead(title="Regular task", issue_type="task")
+        assert temp_beads.claim(bid, "claraity:session-abc") is True
+
+    def test_claim_bug_succeeds(self, temp_beads):
+        bid = temp_beads.add_bead(title="Bug fix", issue_type="bug")
+        assert temp_beads.claim(bid, "claraity:session-abc") is True
+
+
+class TestStaleClaims:
+    """Test stale claim detection in ready queue."""
+
+    def test_fresh_claim_not_in_ready(self, temp_beads):
+        bid = temp_beads.add_bead(title="Freshly claimed")
+        temp_beads.claim(bid, "claraity:session-abc")
+        ready = temp_beads.get_ready()
+        assert bid not in {r["id"] for r in ready}
+
+    def test_stale_claim_appears_in_ready(self, temp_beads):
+        bid = temp_beads.add_bead(title="Stale task")
+        temp_beads.claim(bid, "claraity:session-dead")
+        # Simulate staleness by backdating last_activity
+        stale_time = (
+            datetime.now(timezone.utc) - timedelta(minutes=60)
+        ).isoformat()
+        with temp_beads._cursor() as cur:
+            cur.execute(
+                "UPDATE beads SET last_activity=? WHERE id=?",
+                (stale_time, bid),
+            )
+        ready = temp_beads.get_ready()
+        assert bid in {r["id"] for r in ready}
+
+    def test_stale_epic_not_in_ready(self, temp_beads):
+        """Epics never appear in ready even if stale."""
+        bid = temp_beads.add_bead(title="Old epic", issue_type="epic")
+        # Manually set in_progress + stale (bypass claim guard for test)
+        stale_time = (
+            datetime.now(timezone.utc) - timedelta(minutes=60)
+        ).isoformat()
+        with temp_beads._cursor() as cur:
+            cur.execute(
+                "UPDATE beads SET status='in_progress', assignee='someone', last_activity=? WHERE id=?",
+                (stale_time, bid),
+            )
+        ready = temp_beads.get_ready()
+        assert bid not in {r["id"] for r in ready}
+
+    def test_unclaimed_open_still_in_ready(self, temp_beads):
+        """Regular open tasks still appear in ready (regression check)."""
+        bid = temp_beads.add_bead(title="Normal open task")
+        ready = temp_beads.get_ready()
+        assert bid in {r["id"] for r in ready}
+
+
 class TestRenderExpanded:
     """Test markdown renderer with new statuses and fields."""
 
@@ -872,3 +1062,69 @@ class TestRenderExpanded:
         md = render_tasks_md(temp_beads)
         assert "1 blocked" in md
         assert "1 deferred" in md
+
+    def test_in_progress_shows_description(self, temp_beads):
+        bid = temp_beads.add_bead(
+            title="Working task",
+            description="Extract auth middleware into separate module",
+        )
+        temp_beads.update_status(bid, "in_progress")
+        md = render_tasks_md(temp_beads)
+        assert "## In Progress" in md
+        assert "Extract auth middleware" in md
+
+    def test_in_progress_shows_latest_notes(self, temp_beads):
+        bid = temp_beads.add_bead(title="Noted task")
+        temp_beads.update_status(bid, "in_progress")
+        temp_beads.add_note(bid, "Started extraction")
+        temp_beads.add_note(bid, "Middleware moved, 3 call sites left")
+        temp_beads.add_note(bid, "Updated agent.py call site")
+        md = render_tasks_md(temp_beads)
+        # Should show latest 2 notes, not the first one
+        assert "3 call sites left" in md
+        assert "Updated agent.py" in md
+        assert "Started extraction" not in md
+
+
+class TestRenderBeadDetail:
+    """Test full bead detail rendering."""
+
+    def test_renders_all_fields(self, temp_beads):
+        bid = temp_beads.add_bead(
+            title="Full detail task",
+            description="This is the description",
+            design="Use compare-and-swap",
+            acceptance_criteria="No race conditions",
+            issue_type="bug",
+            external_ref="jira-CC-42",
+            estimated_minutes=60,
+            priority=1,
+            tags=["urgent", "auth"],
+        )
+        temp_beads.add_note(bid, "Progress note 1")
+        md = render_bead_detail(temp_beads, bid)
+        assert "Full detail task" in md
+        assert "This is the description" in md
+        assert "Use compare-and-swap" in md
+        assert "No race conditions" in md
+        assert "bug" in md
+        assert "jira-CC-42" in md
+        assert "60 min" in md
+        assert "P1" in md
+        assert "urgent" in md
+        assert "Progress note 1" in md
+
+    def test_renders_dependencies(self, temp_beads):
+        a = temp_beads.add_bead(title="Blocker task")
+        b = temp_beads.add_bead(title="Detailed task")
+        temp_beads.add_dependency(a, b, "blocks")
+        temp_beads.add_dependency(a, b, "discovered-from")
+        md = render_bead_detail(temp_beads, b)
+        assert "Blocked By" in md
+        assert "Blocker task" in md
+        assert "Related" in md
+        assert "discovered-from" in md
+
+    def test_not_found(self, temp_beads):
+        md = render_bead_detail(temp_beads, "bd-nope")
+        assert "not found" in md

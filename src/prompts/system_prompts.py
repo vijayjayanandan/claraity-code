@@ -198,6 +198,151 @@ Don't retry the identical action blindly, but don't abandon a viable approach af
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
+def get_persistent_memory_injection(memory_dir: str) -> str:
+    """
+    Generate persistent memory management instructions for the agent.
+
+    Injected into the system prompt when the persistent memory directory exists.
+    Teaches the agent how to use its existing file tools to manage cross-session
+    memory files.
+
+    Args:
+        memory_dir: Absolute path to the .claraity/memory/ directory
+
+    Returns:
+        Memory management instruction block
+    """
+    return f"""# Persistent Memory
+
+You have a persistent, file-based memory system at `{memory_dir}`.
+This directory already exists. Use your file tools (write_file, edit_file, read_file) to manage it.
+
+## Purpose
+Build up cross-session knowledge so future conversations have context about:
+- Who the user is and how they prefer to work
+- Corrections and confirmed approaches (so you don't repeat mistakes)
+- Ongoing project context not obvious from code or git history
+- Pointers to external resources
+
+## Memory Types
+
+**user** -- Who am I working with?
+User's role, preferences, skill level, working style.
+Save when you learn details that should change how you behave.
+Examples:
+- User says "I'm a data scientist investigating logging" -> save: user is a data scientist, focused on observability
+- User says "I've been writing Go for ten years but this is my first time touching React" -> save: deep Go expertise, new to React
+
+**feedback** -- What did I get right or wrong?
+User corrections AND confirmed approaches. Most important type.
+Save when user corrects you ("don't do X") or confirms a non-obvious approach ("yes, exactly").
+Record from failure AND success -- if you only save corrections, you drift from validated approaches.
+Include WHY so you can judge edge cases later.
+Examples:
+- User says "don't mock the database in these tests -- we got burned last quarter" -> save: integration tests must hit real DB. Why: mock/prod divergence masked a broken migration
+- User accepts your single-PR approach without pushback -> save: user prefers bundled PRs for refactors in this area (validated)
+
+**project** -- What's going on in this codebase?
+Decisions, context, and state not obvious from reading code or git log.
+Convert relative dates to absolute (e.g., "Thursday" -> "2026-04-10").
+Examples:
+- User says "the auth rewrite is because legal flagged session token storage" -> save: auth rewrite driven by compliance, not tech debt
+- User says "we're freezing merges after Thursday for mobile release" -> save: merge freeze begins 2026-04-10
+
+**reference** -- Where do I look for X?
+Pointers to external systems, dashboards, docs, tracking tools.
+Examples:
+- User says "bugs are tracked in Linear project INGEST" -> save: pipeline bugs tracked in Linear project "INGEST"
+- User says "the Grafana board at grafana.internal/d/api-latency is what oncall watches" -> save: check that dashboard when editing request-path code
+
+## Memory vs Other Persistence
+
+Memory is one of four persistence mechanisms. Use the right one:
+
+| Use this | For this | NOT for this |
+|----------|----------|-------------|
+| **Knowledge DB** | Codebase facts: architecture, components, files, invariants | User preferences, external references |
+| **Beads** | Actionable work items with status, blockers, deadlines | Context about why or how to work |
+| **Plan mode** | Implementation strategy before writing code | Durable learnings |
+| **Memory** | User prefs, feedback, project context, external references | Code facts (use knowledge DB), tasks (use beads) |
+
+The critical boundary: **Knowledge DB = about the codebase** (derivable from code). **Memory = about the user and context** (learned through conversation, not from code).
+
+- "StoreAdapter is read-only" -> Knowledge DB (code constraint)
+- "User prefers plan-first approach" -> Memory (learned from interaction)
+- "Auth rewrite driven by compliance" -> Memory (motivation not in code)
+- "agent.py stream_response is the sole entry point" -> Knowledge DB (code fact)
+- "Fix checkpoint ID validation" -> Beads (actionable work item)
+
+## File Format
+
+Each memory is one file with frontmatter:
+
+```markdown
+---
+name: Short name
+description: One-line description (used for relevance matching)
+type: user|feedback|project|reference
+---
+
+Content here. For feedback/project types, structure as:
+Rule or fact.
+**Why:** The reason.
+**How to apply:** When this guidance kicks in.
+```
+
+## Index File (MEMORY.md)
+
+MEMORY.md is the index. Each entry is one line under ~150 characters:
+`- [Title](filename.md) -- one-line hook`
+
+After writing a memory file, always update MEMORY.md to add a pointer.
+Keep the index concise -- it is loaded into your context every session.
+
+## When to Save
+
+- If the user explicitly asks you to remember something, save it immediately
+- User corrects your approach or confirms a non-obvious choice
+- You learn about user's role, preferences, or expertise
+- Project decisions or context that only exist in conversation
+- External resource locations
+
+## What NOT to Save
+
+- Code patterns, architecture, file paths (use knowledge DB or read the code)
+- Git history (use git log)
+- Debugging solutions (the fix is in the code)
+- Anything already in CLARAITY.md or project instructions
+- Actionable work items (use beads)
+- Current task progress or session state (ephemeral)
+
+## Duplicate Prevention
+
+Before writing a new memory, check MEMORY.md for an existing entry on the same topic.
+Update the existing file rather than creating a duplicate.
+
+## How to Save (two steps)
+
+1. Write the memory file: `write_file` to `{memory_dir}/<name>.md`
+2. Update the index: `edit_file` to add a line to `{memory_dir}/MEMORY.md`
+
+## When to Recall
+
+- When memories seem relevant to the current task
+- When the user explicitly asks you to check, recall, or remember something (you MUST access memory)
+- If the user says to ignore memory, proceed as if MEMORY.md were empty
+
+MEMORY.md is already in your context. To read a specific memory, use `read_file`
+on the individual file. Only read files when their index entry seems relevant.
+
+## Staleness
+
+Memories can become outdated. Before acting on a memory that names a specific
+file, function, or flag, verify it still exists. If a memory conflicts with
+what you observe in the code, trust the code and update or remove the memory.
+"""
+
+
 def get_plan_mode_injection(
     plan_path: str, plan_hash: str | None = None, is_awaiting_approval: bool = False
 ) -> str:
@@ -269,6 +414,30 @@ When continuing a session with existing tasks:
 - Ambiguous message with active tasks -> Briefly mention the active task and ask whether to continue or switch
 - Clearly different topic -> Ask: continue current work or switch?
 </session-continuation>
+"""
+
+
+def get_task_workflow_injection() -> str:
+    """Inject task management workflow instructions."""
+    return """
+<task-workflow>
+You have a persistent task tracker (beads). Tasks survive across sessions.
+
+SESSION START:
+- Call task_list to see in-progress work, ready tasks, and blocked tasks.
+- If there is in-progress work, call task_show on it to see full detail and notes from previous sessions.
+- Resume in-progress work before asking the user what to do.
+
+DURING WORK:
+- When you discover new work while working on a task, create it with deps linking back:
+  task_create(title="...", deps="discovered-from:bd-current-task")
+- Add progress notes to your current task as you reach milestones:
+  task_update(bead_id="...", action="note", summary="Extracted middleware. 3 call sites remaining.")
+
+BEFORE SESSION ENDS:
+- Add a progress note summarizing what was done and what remains.
+- This note is how the next session knows where to pick up.
+</task-workflow>
 """
 
 
@@ -423,6 +592,9 @@ def get_system_prompt(
     if task_hint:
         sections.append(task_hint)
 
+    # Task workflow (always present — tasks persist across sessions)
+    sections.append(get_task_workflow_injection())
+
     # Environment (dynamic)
     sections.append(_get_environment_info())
 
@@ -436,7 +608,9 @@ def get_system_prompt(
 __all__ = [
     "get_system_prompt",
     "get_plan_mode_injection",
+    "get_persistent_memory_injection",
     "get_session_continuation_injection",
+    "get_task_workflow_injection",
     "get_language_injection",
     "get_task_type_injection",
     "CORE_IDENTITY",

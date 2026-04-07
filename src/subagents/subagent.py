@@ -215,8 +215,7 @@ class SubAgent:
         # Track execution history
         self.execution_history: list[SubAgentResult] = []
 
-        # Token usage tracking (accumulated across all LLM calls)
-        self._total_tokens: int = 0
+        # Token usage tracking
         self._context_tokens: int = 0  # prompt_tokens from last LLM call
 
         # Per-subagent LLM: create separate backend if llm overrides are set
@@ -427,7 +426,6 @@ class SubAgent:
                     "iterations": len(tool_calls),
                     "subagent_id": self.session_id,
                     "transcript_path": str(self._transcript_path),
-                    "total_tokens": self._total_tokens,
                     "context_tokens": self._context_tokens,
                 },
                 tool_calls=tool_calls,
@@ -692,8 +690,6 @@ class SubAgent:
             messages=current_context, tools=subagent_tools, tool_choice="none"
         )
 
-        # Accumulate token usage from summary call
-        self._total_tokens += final_response.total_tokens or 0
         self._context_tokens = final_response.prompt_tokens or 0
 
         final_msg = Message.create_assistant(
@@ -877,8 +873,6 @@ class SubAgent:
                 messages=current_context, tools=subagent_tools, tool_choice="auto"
             )
 
-            # Accumulate token usage
-            self._total_tokens += llm_response.total_tokens or 0
             self._context_tokens = llm_response.prompt_tokens or 0
 
             response_content = llm_response.content or ""
@@ -1053,7 +1047,6 @@ class SubAgent:
                     tool_name=tool_name,
                     extra_metadata=build_tool_metadata(
                         tool_name, tool_args, args_summary,
-                        cumulative_tokens=self._total_tokens,
                         context_tokens=self._context_tokens,
                     ),
                 )

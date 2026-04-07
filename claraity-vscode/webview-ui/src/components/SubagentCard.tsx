@@ -79,7 +79,6 @@ export function SubagentCard({ info, toolCards: toolCardsList, postMessage }: Su
   } else if (info.contextTokens > 0) {
     statsParts.push(`ctx ${fmtTokens(info.contextTokens)}`);
   }
-  if (info.totalTokens > 0) statsParts.push(`${fmtTokens(info.totalTokens)} tokens`);
   const statsText = statsParts.join(" | ");
 
   return (

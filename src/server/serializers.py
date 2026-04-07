@@ -199,8 +199,6 @@ def serialize_store_notification(notification: StoreNotification) -> dict | None
             data["requires_approval"] = metadata["requires_approval"]
         if "message" in metadata:
             data["message"] = metadata["message"]
-        if "cumulative_tokens" in metadata:
-            data["cumulative_tokens"] = metadata["cumulative_tokens"]
         if "context_tokens" in metadata:
             data["context_tokens"] = metadata["context_tokens"]
 

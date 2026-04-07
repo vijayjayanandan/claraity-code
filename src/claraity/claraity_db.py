@@ -1118,31 +1118,56 @@ class ClaraityStore:
                     store.set_metadata(rec["key"], rec["value"])
                 elif t == "node":
                     props = rec.get("properties")
-                    if isinstance(props, str):
-                        props = json.loads(props)
-                    store.add_node(
-                        id=rec["id"],
-                        type=rec["type"],
-                        layer=rec.get("layer", 0),
-                        name=rec["name"],
-                        description=rec.get("description", ""),
-                        file_path=rec.get("file_path"),
-                        line_count=rec.get("line_count"),
-                        risk_level=rec.get("risk_level", "low"),
-                        properties=props if isinstance(props, dict) else {},
-                    )
+                    if isinstance(props, dict):
+                        props = json.dumps(props)
+                    elif not isinstance(props, str):
+                        props = "{}"
+                    now = store._now()
+                    with store._cursor() as cur:
+                        cur.execute(
+                            """INSERT OR REPLACE INTO nodes
+                               (id, type, layer, name, description, file_path,
+                                line_count, risk_level, properties,
+                                created_at, updated_at)
+                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                            (
+                                rec["id"],
+                                rec["type"],
+                                rec.get("layer", 0),
+                                rec["name"],
+                                rec.get("description", ""),
+                                rec.get("file_path"),
+                                rec.get("line_count"),
+                                rec.get("risk_level", "low"),
+                                props,
+                                rec.get("created_at", now),
+                                rec.get("updated_at", now),
+                            ),
+                        )
                 elif t == "edge":
                     props = rec.get("properties")
-                    if isinstance(props, str):
-                        props = json.loads(props)
-                    store.add_edge(
-                        from_id=rec["from_id"],
-                        to_id=rec["to_id"],
-                        type=rec["type"],
-                        label=rec.get("label"),
-                        weight=rec.get("weight", 1.0),
-                        properties=props if isinstance(props, dict) else {},
-                    )
+                    if isinstance(props, dict):
+                        props = json.dumps(props)
+                    elif not isinstance(props, str):
+                        props = "{}"
+                    with store._cursor() as cur:
+                        cur.execute(
+                            """INSERT OR REPLACE INTO edges
+                               (id, from_id, to_id, type, weight, label, properties)
+                               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                            (
+                                rec.get("id", store._make_id("e", f"{rec['from_id']}:{rec['to_id']}:{rec['type']}")),
+                                rec["from_id"],
+                                rec["to_id"],
+                                rec["type"],
+                                rec.get("weight", 1.0),
+                                rec.get("label"),
+                                props,
+                            ),
+                        )
+        # Rebuild FTS index since we bypassed add_node's _upsert_fts
+        with store._cursor() as cur:
+            store._rebuild_fts_index(cur)
         return store
 
     # -- Export ----------------------------------------------------------------
@@ -1356,7 +1381,7 @@ def populate(store: ClaraityStore):
             3700,
             "high",
             {
-                "key_files": ["memory_manager.py", "working_memory.py", "observation_store.py"],
+                "key_files": ["memory_manager.py", "working_memory.py"],
                 "flow_rank": 3,
                 "flow_col": 1,
             },
@@ -1680,16 +1705,6 @@ def populate(store: ClaraityStore):
             "src/memory/episodic_memory.py",
             None,
             "low",
-            {},
-        ),
-        (
-            "comp-observation-store",
-            "component",
-            "ObservationStore",
-            "Reversible tool output masking to manage context window pressure",
-            "src/memory/observation_store.py",
-            591,
-            "medium",
             {},
         ),
         (

@@ -14,7 +14,11 @@ from src.core.file_reference_parser import FileReference
 from src.memory import MemoryManager
 from src.observability import get_logger
 from src.prompts import PromptOptimizer
-from src.prompts.system_prompts import get_plan_mode_injection, get_system_prompt
+from src.prompts.system_prompts import (
+    get_persistent_memory_injection,
+    get_plan_mode_injection,
+    get_system_prompt,
+)
 
 logger = get_logger(__name__)
 
@@ -39,7 +43,6 @@ class ContextAssemblyReport:
     file_references_tokens: int = 0
     agent_state_tokens: int = 0
     working_memory_tokens: int = 0
-    episodic_memory_tokens: int = 0
 
     # Computed fields
     total_input_tokens: int = field(init=False)
@@ -55,7 +58,6 @@ class ContextAssemblyReport:
             + self.file_references_tokens
             + self.agent_state_tokens
             + self.working_memory_tokens
-            + self.episodic_memory_tokens
         )
 
         # Available budget for input (excluding output reservation and safety buffer)
@@ -99,8 +101,7 @@ class ContextAssemblyReport:
             f"({self.utilization_percent:.1f}%) [{self.get_pressure_level().upper()}] | "
             f"sys={self.system_prompt_tokens:,} tools={self.tools_schema_tokens:,} "
             f"refs={self.file_references_tokens:,} "
-            f"state={self.agent_state_tokens:,} work={self.working_memory_tokens:,} "
-            f"epi={self.episodic_memory_tokens:,} | "
+            f"state={self.agent_state_tokens:,} work={self.working_memory_tokens:,} | "
             f"reserve_out={self.reserved_output_tokens:,} headroom={self.headroom_tokens:,}"
         )
 
@@ -115,7 +116,6 @@ class ContextAssemblyReport:
             "file_references_tokens": self.file_references_tokens,
             "agent_state_tokens": self.agent_state_tokens,
             "working_memory_tokens": self.working_memory_tokens,
-            "episodic_memory_tokens": self.episodic_memory_tokens,
             "total_input_tokens": self.total_input_tokens,
             "available_for_input": self.available_for_input,
             "utilization_percent": self.utilization_percent,
@@ -169,6 +169,30 @@ class ContextBuilder:
         # Store last assembly report for inspection
         self.last_report: ContextAssemblyReport | None = None
 
+        # Cached context sources (loaded once, stable during session)
+        self._cached_project_instructions: str | None = None
+        self._cached_knowledge_brief: str | None = None
+        self._load_cached_sources()
+
+    def _load_cached_sources(self) -> None:
+        """Load context sources that are stable during a session.
+
+        CLARAITY.md and Knowledge DB brief don't change during normal
+        conversation. Loading them once avoids disk reads and SQLite
+        queries on every build_context() iteration.
+        """
+        self._cached_project_instructions = self._load_project_instructions()
+        self._cached_knowledge_brief = self._load_knowledge_brief()
+        logger.debug(
+            "context_sources_cached",
+            has_project_instructions=bool(self._cached_project_instructions),
+            has_knowledge_brief=bool(self._cached_knowledge_brief),
+        )
+
+    def reload_cached_sources(self) -> None:
+        """Reload cached context sources (e.g. after CLARAITY.md is edited)."""
+        self._load_cached_sources()
+
     def set_trace(self, trace: Any) -> None:
         """Set TraceIntegration for emitting context source events."""
         self._trace = trace
@@ -214,7 +238,6 @@ class ContextBuilder:
             "file_references": 0,
             "agent_state": 0,
             "working_memory": 0,
-            "episodic_memory": 0,
         }
 
         # Calculate token budgets (percentages for compression decisions)
@@ -259,8 +282,8 @@ class ContextBuilder:
             elapsed_ms=round((time.monotonic() - _t0) * 1000),
         )
 
-        # Inject project instructions from CLARAITY.md (if available)
-        project_instructions = self._load_project_instructions()
+        # Inject project instructions from CLARAITY.md (cached at startup)
+        project_instructions = self._cached_project_instructions or ""
         if project_instructions:
             system_prompt = (
                 system_prompt
@@ -277,8 +300,8 @@ class ContextBuilder:
                 iteration,
             )
 
-        # Inject architecture brief from knowledge DB (if available)
-        knowledge_brief = self._load_knowledge_brief()
+        # Inject architecture brief from knowledge DB (cached at startup)
+        knowledge_brief = self._cached_knowledge_brief or ""
         if knowledge_brief:
             system_prompt = (
                 system_prompt
@@ -310,6 +333,34 @@ class ContextBuilder:
                 bool(mem_files),
                 iteration,
             )
+
+        # Emit persistent memory source (agent-managed, cross-session)
+        if _emit_sources:
+            persistent_mem = self.memory.persistent_memory_content if hasattr(self.memory, "persistent_memory_content") else ""
+            self._trace.on_context_source(
+                "Persistent Memory",
+                persistent_mem if persistent_mem else "(no persistent memories)",
+                bool(persistent_mem),
+                iteration,
+            )
+
+        # Inject persistent memory management instructions + actual memory content
+        if hasattr(self.memory, "persistent_memory_dir"):
+            memory_dir = str(self.memory.persistent_memory_dir)
+            system_prompt = (
+                system_prompt + "\n\n" + get_persistent_memory_injection(memory_dir)
+            )
+            # Inject actual MEMORY.md content into the system prompt so the
+            # agent sees its memories without needing a tool call.
+            # (get_context_for_llm injects it as a system message, but
+            # build_context filters out system messages from memory context.)
+            persistent_mem = getattr(self.memory, "persistent_memory_content", "")
+            if persistent_mem:
+                system_prompt = (
+                    system_prompt
+                    + "\n\n## Your Current Memories\n\n"
+                    + persistent_mem
+                )
 
         # Compress if needed
         if self.optimizer.count_tokens(system_prompt) > system_prompt_budget:
@@ -359,18 +410,11 @@ class ContextBuilder:
             )
             self._trace.mark_build_complete()
 
-        # Count memory tokens by type
+        # Count memory tokens
         for msg in memory_context:
-            if msg.get("role") == "system":
-                # System messages from memory are episodic summaries
-                content = msg.get("content", "")
-                if isinstance(content, str):
-                    tokens["episodic_memory"] += self.optimizer.count_tokens(content)
-            else:
-                # User/assistant/tool messages are working memory
-                content = msg.get("content", "")
-                if isinstance(content, str):
-                    tokens["working_memory"] += self.optimizer.count_tokens(content)
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                tokens["working_memory"] += self.optimizer.count_tokens(content)
 
         # 3. Assemble final context
         context = []
@@ -428,7 +472,6 @@ class ContextBuilder:
             file_references_tokens=tokens["file_references"],
             agent_state_tokens=tokens["agent_state"],
             working_memory_tokens=tokens["working_memory"],
-            episodic_memory_tokens=tokens["episodic_memory"],
         )
 
         # Log the report if enabled

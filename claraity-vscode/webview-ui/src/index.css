@@ -4515,6 +4515,183 @@ button, .toolbar-icon, .session-card, .mention-item, .tool-badge {
   color: var(--app-fg-muted);
 }
 
+/* ── Issue type badges ── */
+
+.bead-issue-type {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
+.issue-type-bug { color: #f85149; background: color-mix(in srgb, #f85149 15%, transparent); }
+.issue-type-feature { color: #3fb950; background: color-mix(in srgb, #3fb950 15%, transparent); }
+.issue-type-epic { color: #d2a8ff; background: color-mix(in srgb, #d2a8ff 15%, transparent); }
+.issue-type-chore { color: var(--app-fg-muted); background: color-mix(in srgb, var(--app-fg-muted) 15%, transparent); }
+.issue-type-decision { color: #e89b00; background: color-mix(in srgb, #e89b00 15%, transparent); }
+.issue-type-task { display: none; }
+
+/* ── Inline notes (visible without expanding for in-progress) ── */
+
+.bead-inline-notes {
+  margin-top: 2px;
+  padding-left: 4px;
+}
+.bead-inline-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--app-fg-muted);
+  line-height: 1.4;
+}
+.bead-inline-note .codicon {
+  font-size: 10px;
+  margin-top: 2px;
+  flex-shrink: 0;
+  color: var(--app-accent);
+}
+.bead-inline-note span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Meta row additions (assignee, due date, external ref) ── */
+
+.bead-assignee,
+.bead-due,
+.bead-external-ref {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--app-fg-muted);
+}
+.bead-assignee .codicon,
+.bead-due .codicon,
+.bead-external-ref .codicon {
+  font-size: 10px;
+}
+.bead-due.overdue {
+  color: var(--app-error, #f85149);
+}
+.bead-external-ref {
+  font-style: italic;
+}
+
+/* ── Defer info ── */
+
+.bead-defer-info {
+  font-size: 10px;
+  color: var(--app-fg-muted);
+  margin-top: 2px;
+  padding-left: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.bead-defer-info .codicon {
+  font-size: 10px;
+}
+
+/* ── Expanded detail additions ── */
+
+.bead-detail-label {
+  font-weight: 600;
+  color: var(--app-fg-muted);
+}
+.bead-design,
+.bead-acceptance {
+  font-size: var(--font-size-xs);
+  color: var(--app-fg);
+  margin-top: 4px;
+}
+.bead-estimate {
+  font-size: 10px;
+  color: var(--app-fg-muted);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 4px;
+}
+.bead-estimate .codicon {
+  font-size: 10px;
+}
+.bead-notes {
+  margin-top: 6px;
+}
+.bead-note {
+  font-size: var(--font-size-xs);
+  color: var(--app-fg);
+  margin-top: 2px;
+  padding-left: 4px;
+  border-left: 2px solid var(--app-border);
+}
+.bead-note-author {
+  color: var(--app-fg-muted);
+  font-size: 10px;
+}
+.bead-close-reason {
+  font-size: var(--font-size-xs);
+  color: var(--app-fg-muted);
+  font-style: italic;
+}
+
+/* ── Deferred/Pinned status colors ── */
+
+.epic-dot.status-deferred::before { background: #e89b00; }
+.epic-dot.status-pinned::before { background: #d2a8ff; }
+.epic-child .status-deferred { color: #e89b00; }
+.epic-child .status-pinned { color: #d2a8ff; }
+
+/* ── Recursive tree nodes ── */
+
+.tree-node {
+  /* padding-left is set inline based on depth */
+}
+
+.epic-child.has-children {
+  cursor: pointer;
+}
+.epic-child.has-children:hover {
+  background: var(--app-hover);
+}
+
+.tree-chevron {
+  font-size: 10px;
+  flex-shrink: 0;
+  color: var(--app-fg-muted);
+  margin-right: -2px;
+}
+
+.tree-meta {
+  font-size: 10px;
+  color: var(--app-fg-muted);
+}
+.tree-meta .codicon {
+  font-size: 10px;
+}
+
+.tree-blockers {
+  font-size: 10px;
+  color: var(--app-fg-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 1px;
+}
+
+.bead-blocker-pill {
+  font-size: 9px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--app-error, #f85149) 15%, transparent);
+  color: var(--app-error, #f85149);
+}
+
 /* ============================================================================
    Architecture Panel
    ============================================================================ */

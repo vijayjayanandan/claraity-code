@@ -68,14 +68,6 @@ class TestCheckpointManager:
         working_memory.messages = [message1, message2]
         agent.memory.working_memory = working_memory
 
-        # Mock episodic memory
-        episodic_memory = Mock()
-        episodic_memory.compressed_history = [
-            "Session 1: Discussed calculator requirements",
-            "Session 2: Implemented basic operations"
-        ]
-        agent.memory.episodic_memory = episodic_memory
-
         # Mock task context
         task_context = Mock()
         task_context.project_type = "Python CLI Tool"
@@ -139,7 +131,6 @@ class TestCheckpointManager:
             data = json.load(f)
             assert "metadata" in data
             assert "working_memory" in data
-            assert "episodic_memory" in data
 
     def test_save_checkpoint_extracts_data_correctly(self, checkpoint_manager, mock_agent):
         """Test that save_checkpoint extracts all data from agent correctly"""
@@ -166,10 +157,6 @@ class TestCheckpointManager:
         assert checkpoint.working_memory[0]["role"] == "user"
         assert checkpoint.working_memory[0]["content"] == "Create a calculator"
         assert checkpoint.working_memory[1]["role"] == "assistant"
-
-        # Verify episodic memory
-        assert len(checkpoint.episodic_memory) == 2
-        assert "Session 1" in checkpoint.episodic_memory[0]
 
         # Verify task context
         assert checkpoint.task_context["project_type"] == "Python CLI Tool"
@@ -237,8 +224,6 @@ class TestCheckpointManager:
         new_agent.memory = Mock()
         new_agent.memory.working_memory = Mock()
         new_agent.memory.working_memory.messages = []
-        new_agent.memory.episodic_memory = Mock()
-        new_agent.memory.episodic_memory.compressed_history = []
         new_agent.memory.task_context = Mock()
         new_agent.tool_execution_history = []
 
@@ -253,9 +238,6 @@ class TestCheckpointManager:
         restored_msg = new_agent.memory.working_memory.messages[0]
         assert restored_msg.role == MessageRole.USER
         assert restored_msg.content == "Create a calculator"
-
-        # Verify episodic memory was restored
-        assert len(new_agent.memory.episodic_memory.compressed_history) == 2
 
         # Verify task context was restored
         assert new_agent.memory.task_context.project_type == "Python CLI Tool"
@@ -347,8 +329,6 @@ class TestCheckpointManager:
             messages.append(msg)
 
         agent.memory.working_memory.messages = messages
-        agent.memory.episodic_memory = Mock()
-        agent.memory.episodic_memory.compressed_history = []
         agent.memory.task_context = Mock()
         agent.memory.task_context.project_type = None
         agent.memory.task_context.key_files = []
@@ -390,7 +370,6 @@ class TestCheckpointManager:
         checkpoint = ExecutionCheckpoint(
             metadata=metadata,
             working_memory=[{"role": "user", "content": "Hello"}],
-            episodic_memory=["Summary 1"],
             task_context={"project_type": "Python"},
             tool_execution_history=[{"tool": "write_file", "success": True}],
             files_modified=["file1.py"],
@@ -435,7 +414,6 @@ class TestCheckpointManager:
         # Load and verify empty data
         checkpoint = checkpoint_manager.load_checkpoint(checkpoint_id)
         assert len(checkpoint.working_memory) == 0
-        assert len(checkpoint.episodic_memory) == 0
         assert checkpoint.task_context == {}
         assert len(checkpoint.tool_execution_history) == 0
 

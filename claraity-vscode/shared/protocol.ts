@@ -40,8 +40,6 @@ export interface ToolStateData {
     original_content: string;
     modified_content: string;
   };
-  /** Cumulative tokens consumed by the subagent (across all LLM calls). */
-  cumulative_tokens?: number;
   /** Prompt tokens from the subagent's most recent LLM call. */
   context_tokens?: number;
 }
@@ -106,26 +104,54 @@ export interface ImageAttachment {
 // ClarAIty Knowledge & Beads data shapes
 // ============================================================================
 
+export interface BeadNote {
+  content: string;
+  author: string;
+  created_at: string;
+}
+
 export interface BeadData {
   id: string;
   title: string;
   description: string | null;
-  status: "open" | "in_progress" | "closed";
+  status: "open" | "in_progress" | "blocked" | "deferred" | "closed" | "pinned" | "hooked";
   priority: number;
   tags: string[];
   parent_id: string | null;
   created_at: string;
   closed_at: string | null;
   summary: string | null;
-  blockers: Array<{ id: string; title: string; status: string }>;
+  blockers: Array<{ id: string; title: string; status: string; dep_type?: string }>;
+  // New fields from schema expansion
+  issue_type: string;           // bug, feature, task, epic, chore, decision
+  assignee: string | null;
+  notes: BeadNote[];            // Latest 2-3 notes for context
+  external_ref: string | null;  // e.g., jira-CC-42
+  due_at: string | null;
+  defer_until: string | null;
+  estimated_minutes: number | null;
+  close_reason: string | null;
+  last_activity: string | null;
+  design: string | null;
+  acceptance_criteria: string | null;
 }
 
 export interface BeadsResponse {
   ready: BeadData[];
   in_progress: BeadData[];
   blocked: BeadData[];
+  deferred?: BeadData[];   // Optional: older servers may not send
+  pinned?: BeadData[];     // Optional: older servers may not send
   closed: BeadData[];
-  stats: { total: number; open: number; in_progress: number; closed: number; dependencies: number };
+  stats: {
+    total: number;
+    open: number;
+    in_progress: number;
+    blocked?: number;      // Optional: older servers may not send
+    deferred?: number;     // Optional: older servers may not send
+    closed: number;
+    dependencies: number;
+  };
 }
 
 export interface ArchitectureNode {

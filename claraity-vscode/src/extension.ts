@@ -94,6 +94,7 @@ export function activate(context: vscode.ExtensionContext) {
             // Begin undo checkpoint on each agent turn
             if (msg.type === 'stream_start') {
                 undoManager.beginCheckpoint();
+                vscode.commands.executeCommand('setContext', 'claraity.isStreaming', true);
             }
 
             if (msg.type === 'store' && msg.event === 'tool_state_updated') {
@@ -142,6 +143,7 @@ export function activate(context: vscode.ExtensionContext) {
 
             // Commit undo checkpoint when turn ends
             if (msg.type === 'stream_end') {
+                vscode.commands.executeCommand('setContext', 'claraity.isStreaming', false);
                 const checkpoint = undoManager.commitCheckpoint();
                 if (checkpoint) {
                     const filePaths = Array.from(checkpoint.files.values()).map(f => f.path);
@@ -168,6 +170,7 @@ export function activate(context: vscode.ExtensionContext) {
             statusBar.tooltip = 'ClarAIty - Connected';
         });
         conn.onDisconnected(() => {
+            vscode.commands.executeCommand('setContext', 'claraity.isStreaming', false);
             statusBar.text = '$(loading~spin) ClarAIty (reconnecting...)';
             statusBar.tooltip = 'ClarAIty - Reconnecting...';
             // If auto-restart fails, the connection will show an error dialog

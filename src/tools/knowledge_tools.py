@@ -431,13 +431,66 @@ class BeadReadyTool(Tool):
         return {"type": "object", "properties": {}, "required": []}
 
 
+class BeadShowTool(Tool):
+    """Get full detail for a specific task."""
+
+    def __init__(self):
+        super().__init__(
+            name="task_show",
+            description=(
+                "Get full detail for a specific task: description, design, acceptance criteria, "
+                "notes, dependencies, and metadata. Use when picking up a task to understand "
+                "what needs to be done and where a previous session left off."
+            ),
+        )
+
+    def execute(self, bead_id: str, **kwargs: Any) -> ToolResult:
+        from src.claraity.claraity_beads import BeadStore, render_bead_detail
+
+        store = BeadStore()
+        try:
+            md = render_bead_detail(store, bead_id)
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.SUCCESS,
+                output=md,
+                metadata={"bead_id": bead_id},
+            )
+        except Exception as e:
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.ERROR,
+                output=None,
+                error=f"Failed to show task: {e}",
+            )
+        finally:
+            store.close()
+
+    def _get_parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "bead_id": {
+                    "type": "string",
+                    "description": "Task ID (e.g., bd-a1b2)",
+                },
+            },
+            "required": ["bead_id"],
+        }
+
+
 class BeadCreateTool(Tool):
     """Create a new task in the task tracker."""
 
     def __init__(self):
         super().__init__(
             name="task_create",
-            description="Create a new task with title, description, priority, and optional tags. Returns the generated task ID.",
+            description=(
+                "Create a new task with title, description, priority, type, and optional deps.\n\n"
+                "Always provide a meaningful description with context about why this issue exists, "
+                "what needs to be done, and how you discovered it. Use deps to link back to the "
+                "task you were working on (e.g., 'discovered-from:bd-a1b2')."
+            ),
         )
 
     def execute(
@@ -447,6 +500,12 @@ class BeadCreateTool(Tool):
         priority: int = 5,
         parent_id: str = None,
         tags: str = "",
+        issue_type: str = "task",
+        external_ref: str = None,
+        design: str = "",
+        acceptance_criteria: str = "",
+        estimated_minutes: int = None,
+        deps: str = "",
         **kwargs: Any,
     ) -> ToolResult:
         from src.claraity.claraity_beads import BeadStore
@@ -460,11 +519,43 @@ class BeadCreateTool(Tool):
                 priority=priority,
                 parent_id=parent_id,
                 tags=tag_list,
+                issue_type=issue_type,
+                external_ref=external_ref,
+                design=design,
+                acceptance_criteria=acceptance_criteria,
+                estimated_minutes=estimated_minutes,
             )
+            # Parse and add dependencies: "discovered-from:bd-a1b2,blocks:bd-c3d4"
+            dep_results = []
+            if deps:
+                for dep_spec in deps.split(","):
+                    dep_spec = dep_spec.strip()
+                    if not dep_spec:
+                        continue
+                    if ":" in dep_spec:
+                        dep_type, dep_id = dep_spec.split(":", 1)
+                        dep_type, dep_id = dep_type.strip(), dep_id.strip()
+                    else:
+                        dep_type, dep_id = "blocks", dep_spec.strip()
+                    if not dep_id:
+                        dep_results.append(f"[SKIP] Empty target in '{dep_spec}'")
+                        continue
+                    # "blocks:X" means new task blocks X -> X depends on new task
+                    if dep_type == "blocks":
+                        store.add_dependency(bid, dep_id, "blocks")
+                        dep_results.append(f"{bid} blocks {dep_id}")
+                    else:
+                        # Other types: dep_id is the source, new task is the target
+                        store.add_dependency(dep_id, bid, dep_type)
+                        dep_results.append(f"{bid} {dep_type} {dep_id}")
+
+            output = f"Created task: {bid} - {title}"
+            if dep_results:
+                output += "\nDeps: " + "; ".join(dep_results)
             return ToolResult(
                 tool_name=self.name,
                 status=ToolStatus.SUCCESS,
-                output=f"Created task: {bid} - {title}",
+                output=output,
                 metadata={"bead_id": bid},
             )
         except Exception as e:
@@ -482,18 +573,50 @@ class BeadCreateTool(Tool):
             "type": "object",
             "properties": {
                 "title": {"type": "string", "description": "Task title"},
-                "description": {"type": "string", "description": "Task description"},
+                "description": {
+                    "type": "string",
+                    "description": "Why this issue exists, what needs to be done, how you discovered it",
+                },
                 "priority": {
                     "type": "integer",
-                    "description": "Priority (0=highest, 5=default)",
+                    "description": "Priority (0=highest, 5=default, 9=lowest)",
                 },
                 "parent_id": {
                     "type": "string",
-                    "description": "Parent task ID for subtasks (optional)",
+                    "description": "Parent task ID for subtasks",
                 },
                 "tags": {
                     "type": "string",
                     "description": "Comma-separated tags (e.g., 'bug,urgent')",
+                },
+                "issue_type": {
+                    "type": "string",
+                    "enum": ["bug", "feature", "task", "epic", "chore", "decision"],
+                    "description": "Issue type (default: task)",
+                },
+                "external_ref": {
+                    "type": "string",
+                    "description": "External reference (e.g., jira-CC-42, gh-123)",
+                },
+                "design": {
+                    "type": "string",
+                    "description": "Technical design notes or approach",
+                },
+                "acceptance_criteria": {
+                    "type": "string",
+                    "description": "Definition of done",
+                },
+                "estimated_minutes": {
+                    "type": "integer",
+                    "description": "Effort estimate in minutes",
+                },
+                "deps": {
+                    "type": "string",
+                    "description": (
+                        "Comma-separated dependencies: 'type:id' or just 'id' (default: blocks). "
+                        "Types: blocks, discovered-from, related, caused-by, tracks, validates. "
+                        "Example: 'discovered-from:bd-a1b2,blocks:bd-c3d4'"
+                    ),
                 },
             },
             "required": ["title"],
@@ -501,12 +624,16 @@ class BeadCreateTool(Tool):
 
 
 class BeadUpdateTool(Tool):
-    """Update task status: start, close, or add notes."""
+    """Update task status, lifecycle, or add notes."""
 
     def __init__(self):
         super().__init__(
             name="task_update",
-            description="Update a task's status (start/close) or add a note. Use 'start' when beginning work, 'close' when done with a summary of what was accomplished.",
+            description=(
+                "Update a task's lifecycle. Actions: start (begin work), close (done), "
+                "note (add comment), defer (park), reopen (un-close/un-defer), "
+                "claim (atomic ownership for parallel sessions)."
+            ),
         )
 
     def execute(
@@ -514,6 +641,9 @@ class BeadUpdateTool(Tool):
         bead_id: str,
         action: str,
         summary: str = "",
+        close_reason: str = "",
+        defer_until: str = "",
+        claimant: str = "",
         **kwargs: Any,
     ) -> ToolResult:
         from src.claraity.claraity_beads import BeadStore
@@ -529,7 +659,11 @@ class BeadUpdateTool(Tool):
                     metadata={"bead_id": bead_id},
                 )
             elif action == "close":
-                store.update_status(bead_id, "closed", summary=summary or None)
+                store.update_status(
+                    bead_id, "closed",
+                    summary=summary or None,
+                    close_reason=close_reason or None,
+                )
                 return ToolResult(
                     tool_name=self.name,
                     status=ToolStatus.SUCCESS,
@@ -544,12 +678,49 @@ class BeadUpdateTool(Tool):
                     output=f"Note added to: {bead_id}",
                     metadata={"bead_id": bead_id},
                 )
+            elif action == "defer":
+                store.defer(bead_id, until=defer_until or None)
+                msg = f"Deferred: {bead_id}"
+                if defer_until:
+                    msg += f" until {defer_until}"
+                return ToolResult(
+                    tool_name=self.name,
+                    status=ToolStatus.SUCCESS,
+                    output=msg,
+                    metadata={"bead_id": bead_id},
+                )
+            elif action == "reopen":
+                store.reopen(bead_id)
+                return ToolResult(
+                    tool_name=self.name,
+                    status=ToolStatus.SUCCESS,
+                    output=f"Reopened: {bead_id}",
+                    metadata={"bead_id": bead_id},
+                )
+            elif action == "claim":
+                claimant_id = claimant or "agent"
+                ok = store.claim(bead_id, claimant_id)
+                if ok:
+                    return ToolResult(
+                        tool_name=self.name,
+                        status=ToolStatus.SUCCESS,
+                        output=f"Claimed: {bead_id} by {claimant_id}",
+                        metadata={"bead_id": bead_id},
+                    )
+                else:
+                    bead = store.get_bead(bead_id)
+                    return ToolResult(
+                        tool_name=self.name,
+                        status=ToolStatus.ERROR,
+                        output=None,
+                        error=f"Already claimed by {bead['assignee']}",
+                    )
             else:
                 return ToolResult(
                     tool_name=self.name,
                     status=ToolStatus.ERROR,
                     output=None,
-                    error=f"Unknown action: {action}. Use 'start', 'close', or 'note'.",
+                    error=f"Unknown action: {action}. Use start, close, note, defer, reopen, or claim.",
                 )
         except Exception as e:
             return ToolResult(
@@ -568,38 +739,64 @@ class BeadUpdateTool(Tool):
                 "bead_id": {"type": "string", "description": "Task ID (e.g., bd-a1b2)"},
                 "action": {
                     "type": "string",
-                    "enum": ["start", "close", "note"],
-                    "description": "Action: 'start' (mark in_progress), 'close' (mark done), 'note' (add comment)",
+                    "enum": ["start", "close", "note", "defer", "reopen", "claim"],
+                    "description": (
+                        "start: begin work. close: mark done. note: add comment. "
+                        "defer: park task. reopen: un-close or un-defer. "
+                        "claim: atomic ownership (prevents parallel sessions from double-claiming)."
+                    ),
                 },
                 "summary": {
                     "type": "string",
-                    "description": "For 'close': what was accomplished. For 'note': the note content.",
+                    "description": "For close: what was accomplished. For note: the content.",
+                },
+                "close_reason": {
+                    "type": "string",
+                    "description": "For close: why it was closed (e.g., 'resolved', 'wontfix', 'duplicate').",
+                },
+                "defer_until": {
+                    "type": "string",
+                    "description": "For defer: ISO8601 date when task should reappear in ready queue.",
+                },
+                "claimant": {
+                    "type": "string",
+                    "description": "For claim: identity of claimer (e.g., 'claraity:session-abc'). Default: 'agent'.",
                 },
             },
             "required": ["bead_id", "action"],
         }
 
 
-class BeadBlockTool(Tool):
-    """Add a blocking dependency between two tasks."""
+class BeadLinkTool(Tool):
+    """Add a typed dependency between two tasks."""
 
     def __init__(self):
         super().__init__(
-            name="task_block",
-            description="Add a blocking dependency: blocker_id must be completed before blocked_id can start.",
+            name="task_link",
+            description=(
+                "Add a typed dependency between two tasks. Default: 'blocks' (from_id must "
+                "complete before to_id can start). Use other types for non-blocking relationships: "
+                "related, discovered-from, caused-by, tracks, validates, supersedes."
+            ),
         )
 
-    def execute(self, blocker_id: str, blocked_id: str, **kwargs: Any) -> ToolResult:
+    def execute(
+        self,
+        from_id: str,
+        to_id: str,
+        dep_type: str = "blocks",
+        **kwargs: Any,
+    ) -> ToolResult:
         from src.claraity.claraity_beads import BeadStore
 
         store = BeadStore()
         try:
-            store.add_dependency(blocker_id, blocked_id, "blocks")
+            store.add_dependency(from_id, to_id, dep_type)
             return ToolResult(
                 tool_name=self.name,
                 status=ToolStatus.SUCCESS,
-                output=f"{blocker_id} now blocks {blocked_id}",
-                metadata={"blocker_id": blocker_id, "blocked_id": blocked_id},
+                output=f"{from_id} --({dep_type})--> {to_id}",
+                metadata={"from_id": from_id, "to_id": to_id, "dep_type": dep_type},
             )
         except Exception as e:
             return ToolResult(
@@ -615,14 +812,24 @@ class BeadBlockTool(Tool):
         return {
             "type": "object",
             "properties": {
-                "blocker_id": {"type": "string", "description": "Task that must complete first"},
-                "blocked_id": {
+                "from_id": {"type": "string", "description": "Source task ID"},
+                "to_id": {"type": "string", "description": "Target task ID"},
+                "dep_type": {
                     "type": "string",
-                    "description": "Task that cannot start until blocker completes",
+                    "enum": [
+                        "blocks", "conditional-blocks", "waits-for",
+                        "related", "discovered-from", "caused-by",
+                        "tracks", "validates", "supersedes", "duplicates",
+                    ],
+                    "description": "Dependency type (default: blocks). Blocking types affect the ready queue.",
                 },
             },
-            "required": ["blocker_id", "blocked_id"],
+            "required": ["from_id", "to_id"],
         }
+
+
+# Backward compatibility alias
+BeadBlockTool = BeadLinkTool
 
 
 class KnowledgeAutoLayoutTool(Tool):

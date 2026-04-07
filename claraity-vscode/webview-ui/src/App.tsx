@@ -191,6 +191,19 @@ export function App() {
     postMessage({ type: "interrupt" });
   };
 
+  // Escape key stops the stream (same as clicking the stop button).
+  // Uses capture phase so the webview catches it before VS Code can intercept it at the iframe level.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && state.isStreaming) {
+        e.preventDefault();
+        postMessage({ type: "interrupt" });
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [state.isStreaming, postMessage]);
+
   // Memoized context value for ChatHistory's child components
   const chatContextValue = useMemo<ChatContextValue>(() => ({
     postMessage,
@@ -284,6 +297,16 @@ export function App() {
           }}
           onOpenFile={(path) => postMessage({ type: "openFile", path })}
           onExport={() => postMessage({ type: "exportKnowledge" })}
+          onScan={() => {
+            const userMsg = "Scan this codebase and build the architecture knowledge graph.";
+            const systemContext = "The user clicked 'Scan Codebase' from the Architecture panel. " +
+              "Delegate this to the knowledge-builder subagent to scan the project and populate " +
+              "the ClarAIty knowledge database with modules, components, files, data flows, and relationships.";
+            dispatch({ type: "ADD_USER_MESSAGE", content: userMsg });
+            postMessage({ type: "chatMessage", content: userMsg, systemContext });
+            dispatch({ type: "SET_ACTIVE_PANEL", panel: "chat" });
+          }}
+          onImport={() => postMessage({ type: "importKnowledge" })}
         />
       </div>
     );

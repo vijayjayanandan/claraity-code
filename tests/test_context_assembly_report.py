@@ -18,13 +18,12 @@ class TestContextAssemblyReport:
             file_references_tokens=0,
             agent_state_tokens=500,
             working_memory_tokens=10000,
-            episodic_memory_tokens=2000,
         )
 
         # Check computed fields
-        assert report.total_input_tokens == 20500  # Sum of all buckets
+        assert report.total_input_tokens == 18500  # Sum of all buckets
         assert report.available_for_input == 186000  # 200000 - 12000 - 2000
-        assert report.headroom_tokens == 165500  # 186000 - 20500
+        assert report.headroom_tokens == 167500  # 186000 - 18500
 
     def test_utilization_percent(self):
         """Test utilization percentage calculation."""
@@ -164,12 +163,11 @@ class TestContextAssemblyReport:
             file_references_tokens=2000,
             agent_state_tokens=500,
             working_memory_tokens=20000,
-            episodic_memory_tokens=5000,
         )
 
-        expected_total = 5000 + 3000 + 2000 + 500 + 20000 + 5000
+        expected_total = 5000 + 3000 + 2000 + 500 + 20000
         assert report.total_input_tokens == expected_total
-        assert report.total_input_tokens == 35500
+        assert report.total_input_tokens == 30500
 
 
 class TestContextAssemblyReportThresholds:

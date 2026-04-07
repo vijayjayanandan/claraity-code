@@ -2,7 +2,6 @@
 
 from .compaction import PrioritizedSummarizer, SummarySection
 from .context_injector import ContextInjector
-from .episodic_memory import EpisodicMemory
 from .memory_manager import MemoryManager
 from .models import (
     CodeContext,
@@ -12,13 +11,6 @@ from .models import (
     Message,
     MessageRole,
     TaskContext,
-)
-from .observation_store import (
-    Importance,
-    Observation,
-    ObservationPointer,
-    ObservationStore,
-    classify_importance,
 )
 from .working_memory import WorkingMemory
 
@@ -33,14 +25,7 @@ __all__ = [
     "TaskContext",
     # Memory components
     "WorkingMemory",
-    "EpisodicMemory",
     "MemoryManager",
-    # Observation store (Phase 2)
-    "ObservationStore",
-    "Observation",
-    "ObservationPointer",
-    "Importance",
-    "classify_importance",
     # Context injection and compaction
     "ContextInjector",
     "PrioritizedSummarizer",

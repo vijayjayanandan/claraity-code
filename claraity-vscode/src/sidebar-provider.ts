@@ -700,7 +700,11 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                 break;
 
             case 'exportKnowledge':
-                this.connection?.send({ type: 'export_knowledge' } as ClientMessage);
+                this.exportKnowledgeToFile();
+                break;
+
+            case 'importKnowledge':
+                this.importKnowledgeFromFile();
                 break;
 
             // ── Subagent management ──
@@ -815,6 +819,53 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             path: uri.fsPath,
             name,
         });
+    }
+
+    /**
+     * Show Save As dialog, then tell the backend to export the knowledge DB
+     * to the chosen file path.
+     */
+    private async exportKnowledgeToFile(): Promise<void> {
+        const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        const defaultFile = wsRoot
+            ? vscode.Uri.file(path.join(wsRoot, '.claraity', 'claraity_knowledge.jsonl'))
+            : undefined;
+        const result = await vscode.window.showSaveDialog({
+            defaultUri: defaultFile,
+            saveLabel: 'Export Knowledge',
+            filters: { 'Knowledge JSONL': ['jsonl'] },
+        });
+        if (!result) return;
+
+        this.connection?.send({
+            type: 'export_knowledge',
+            path: result.fsPath,
+        } as ClientMessage);
+    }
+
+    /**
+     * Open native file picker for a .jsonl knowledge file, read its content,
+     * and forward it to the backend for import. On success the backend sends
+     * back an architecture_data response which auto-refreshes the panel.
+     */
+    private async importKnowledgeFromFile(): Promise<void> {
+        const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        const defaultDir = wsRoot ? vscode.Uri.file(path.join(wsRoot, '.claraity')) : undefined;
+        const result = await vscode.window.showOpenDialog({
+            canSelectMany: false,
+            canSelectFolders: false,
+            openLabel: 'Import Knowledge',
+            defaultUri: defaultDir,
+            filters: { 'Knowledge JSONL': ['jsonl', 'json'] },
+        });
+        if (!result || result.length === 0) return;
+
+        try {
+            const content = await fs.promises.readFile(result[0].fsPath, 'utf-8');
+            this.connection?.send({ type: 'import_knowledge', content } as ClientMessage);
+        } catch (e: any) {
+            vscode.window.showErrorMessage(`Failed to read file: ${e.message}`);
+        }
     }
 
     /**

@@ -513,6 +513,8 @@ class TestContextBuilderTraceWiring:
             {"role": "assistant", "content": "hi there"},
         ]
         mm.file_memory_content = "memory file content here"
+        mm.persistent_memory_content = ""
+        mm.persistent_memory_dir = "/tmp/test/.claraity/memory"
         return mm
 
     @pytest.fixture
@@ -546,9 +548,9 @@ class TestContextBuilderTraceWiring:
         trace.is_first_build = False
         return trace
 
-    def test_first_build_emits_four_context_sources(self, builder, mock_trace):
+    def test_first_build_emits_context_sources(self, builder, mock_trace):
         """First build_context emits on_context_source for System Prompt,
-        CLARAITY.md, Knowledge DB, and Memory Files."""
+        CLARAITY.md, Knowledge DB, Memory Files, and Persistent Memory."""
         builder.set_trace(mock_trace)
         builder.build_context(user_query="test", log_report=False)
 
@@ -558,7 +560,8 @@ class TestContextBuilderTraceWiring:
         assert "CLARAITY.md" in source_names
         assert "Knowledge DB" in source_names
         assert "Memory Files" in source_names
-        assert len(source_names) == 4
+        assert "Persistent Memory" in source_names
+        assert len(source_names) == 5
 
     def test_first_build_emits_store_fetch(self, builder, mock_trace):
         """First build_context emits on_context_store_fetch."""
@@ -610,6 +613,8 @@ class TestContextBuilderTraceWiring:
         claraity_md = tmp_path / "CLARAITY.md"
         claraity_md.write_text("# Project Instructions\nDo the thing.", encoding="utf-8")
 
+        # Reload cached sources since file was created after builder init
+        builder.reload_cached_sources()
         builder.set_trace(mock_trace)
         builder.build_context(user_query="test", log_report=False)
 

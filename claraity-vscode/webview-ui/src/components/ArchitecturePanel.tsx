@@ -18,6 +18,8 @@ interface ArchitecturePanelProps {
   onReview: (reviewedBy: string, status: string, comments: string) => void;
   onOpenFile: (path: string) => void;
   onExport: () => void;
+  onScan: () => void;
+  onImport: () => void;
 }
 
 // ============================================================================
@@ -986,7 +988,7 @@ function EdgeDrawer({ detail, onClose }: { detail: EdgeDetail; onClose: () => vo
 // React component
 // ============================================================================
 
-export const ArchitecturePanel = memo(function ArchitecturePanel({ data, onBack, onRefresh, onDiscuss, onReview, onOpenFile, onExport }: ArchitecturePanelProps) {
+export const ArchitecturePanel = memo(function ArchitecturePanel({ data, onBack, onRefresh, onDiscuss, onReview, onOpenFile, onExport, onScan, onImport }: ArchitecturePanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const expandedRef = useRef(new Set<string>());
   const dragPosRef = useRef<Record<string, { x: number; y: number }>>({});
@@ -1128,13 +1130,61 @@ export const ArchitecturePanel = memo(function ArchitecturePanel({ data, onBack,
         <button className="panel-action" onClick={onRefresh} title="Refresh" aria-label="Refresh architecture">
           <i className="codicon codicon-refresh" />
         </button>
-        <button className="panel-action" onClick={onExport} title="Export to JSONL" aria-label="Export to JSONL">
+        <button className="panel-action" onClick={onImport} title="Import knowledge from a JSONL file" aria-label="Import JSONL">
+          <i className="codicon codicon-cloud-upload" />
+        </button>
+        <button className="panel-action" onClick={onExport} title="Export knowledge to a JSONL file" aria-label="Export JSONL">
           <i className="codicon codicon-cloud-download" />
         </button>
       </div>
 
       {!data ? (
         <div className="arch-loading">Loading architecture...</div>
+      ) : data.stats.node_count === 0 ? (
+        <div style={{
+          flex: 1, display: "flex", flexDirection: "column",
+          alignItems: "center", justifyContent: "center",
+          padding: 40, textAlign: "center", gap: 16,
+        }}>
+          <i className="codicon codicon-type-hierarchy" style={{ fontSize: 40, opacity: 0.2 }} />
+          <div style={{ fontSize: 14, fontWeight: 600, opacity: 0.7 }}>Architecture Knowledge Not Set Up</div>
+          <div style={{ fontSize: 12, opacity: 0.45, maxWidth: 320, lineHeight: 1.6 }}>
+            This panel visualizes your codebase as an interactive graph — modules, components,
+            data flows, and their relationships. Build the knowledge graph to explore how your
+            code is structured.
+          </div>
+          <div style={{ fontSize: 10, opacity: 0.3, maxWidth: 320, lineHeight: 1.5 }}>
+            Data is stored locally in your project's .claraity/claraity_knowledge.db file. Nothing is sent to any server.
+          </div>
+          <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
+            <button
+              onClick={onScan}
+              title="Initiates a codebase scan via the agent to build the architecture knowledge graph"
+              style={{
+                display: "flex", alignItems: "center", gap: 8,
+                background: "#1565C0", border: "none", borderRadius: 6,
+                padding: "8px 20px", cursor: "pointer", color: "#fff",
+                fontSize: 13, fontWeight: 600,
+              }}
+            >
+              <i className="codicon codicon-search" />
+              Scan Codebase
+            </button>
+            <button
+              onClick={onImport}
+              title="Import architecture from a previously exported .jsonl file"
+              style={{
+                display: "flex", alignItems: "center", gap: 8,
+                background: "transparent", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 6,
+                padding: "8px 20px", cursor: "pointer", color: "rgba(255,255,255,0.7)",
+                fontSize: 13, fontWeight: 600,
+              }}
+            >
+              <i className="codicon codicon-cloud-upload" />
+              Import JSONL
+            </button>
+          </div>
+        </div>
       ) : (
         <>
           <div className="arch-stats-bar" onClick={() => !reviewOpen && setStatsExpanded(!statsExpanded)}>

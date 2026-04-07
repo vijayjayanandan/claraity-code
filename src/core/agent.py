@@ -348,7 +348,6 @@ class CodingAgent(AgentInterface):
         self.memory = MemoryManager(
             total_context_tokens=context_window,
             working_memory_tokens=int(context_window * 0.4),
-            episodic_memory_tokens=int(context_window * 0.2),
             load_file_memories=load_file_memories,
             starting_directory=self.working_directory,
         )
@@ -671,7 +670,6 @@ class CodingAgent(AgentInterface):
         if config.context_window != old_context:
             self.memory.total_context_tokens = config.context_window
             self.memory.working_memory.max_tokens = int(config.context_window * 0.4)
-            self.memory.episodic_memory.max_tokens = int(config.context_window * 0.2)
             self.context_builder.max_context_tokens = config.context_window
 
         # Apply subagent overrides
@@ -913,9 +911,10 @@ class CodingAgent(AgentInterface):
             KnowledgeQueryTool,
             KnowledgeSetMetadataTool,
             BeadReadyTool,
+            BeadShowTool,
             BeadCreateTool,
             BeadUpdateTool,
-            BeadBlockTool,
+            BeadLinkTool,
             KnowledgeAutoLayoutTool,
             KnowledgeExportTool,
         )
@@ -925,9 +924,10 @@ class CodingAgent(AgentInterface):
         self.tool_executor.register_tool(KnowledgeQueryTool())
         self.tool_executor.register_tool(KnowledgeSetMetadataTool())
         self.tool_executor.register_tool(BeadReadyTool())
+        self.tool_executor.register_tool(BeadShowTool())
         self.tool_executor.register_tool(BeadCreateTool())
         self.tool_executor.register_tool(BeadUpdateTool())
-        self.tool_executor.register_tool(BeadBlockTool())
+        self.tool_executor.register_tool(BeadLinkTool())
         self.tool_executor.register_tool(KnowledgeAutoLayoutTool())
         self.tool_executor.register_tool(KnowledgeExportTool())
 
@@ -2616,7 +2616,7 @@ class CodingAgent(AgentInterface):
                     for p_idx, p_call_id, p_tc, p_outcome in parallel_results:
                         # Deferred side effects: task notifications
                         tool_name = p_outcome.get("_tool_name", "")
-                        if tool_name in ("task_create", "task_update", "task_block"):
+                        if tool_name in ("task_create", "task_update", "task_link", "task_block"):
                             ui.notify_todos_updated(self._get_bead_todos())
                             ui.notify_beads_updated()
                         # Deferred side effects: director context refresh
@@ -2815,6 +2815,18 @@ class CodingAgent(AgentInterface):
         # Trace: persist + response delivered
         self._trace.on_persist(self._session_id)
         self._trace.on_response_sent()
+
+        # Touch claimed task to keep claim fresh (prevents stale detection)
+        try:
+            todo_id = self._get_in_progress_bead_id()
+            if todo_id:
+                store = self._open_bead_store()
+                try:
+                    store.touch(todo_id)
+                finally:
+                    store.close()
+        except Exception as e:
+            logger.debug("bead_touch_error", error=str(e))
 
         # Yield StreamEnd to signal completion
         yield StreamEnd()
@@ -3556,6 +3568,19 @@ class CodingAgent(AgentInterface):
 
             except Exception as e:
                 logger.warning(f"SessionEnd hook error: {e}", exc_info=True)
+
+        # Release claimed tasks back to pool
+        if self._session_id:
+            try:
+                store = self._open_bead_store()
+                try:
+                    count = store.release_session(self._session_id)
+                    if count:
+                        logger.info("beads_released", session=self._session_id, count=count)
+                finally:
+                    store.close()
+            except Exception as e:
+                logger.warning("bead_release_error", error=str(e))
 
         # Clean up background task registry
         self._bg_registry.cleanup()

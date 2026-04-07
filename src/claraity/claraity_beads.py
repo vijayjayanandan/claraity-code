@@ -31,7 +31,7 @@ import hashlib
 import sys
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -39,7 +39,8 @@ from typing import Optional
 
 VALID_STATUSES = (
     "open", "in_progress", "blocked", "deferred",
-    "closed", "pinned", "hooked",
+    "closed", "pinned",
+    "hooked",  # Reserved for future multi-agent locking. No codepath sets this yet.
 )
 
 STATUS_CATEGORIES = {
@@ -59,6 +60,8 @@ ASSOCIATION_DEP_TYPES = (
     "related", "discovered-from", "caused-by", "tracks",
     "validates", "supersedes", "duplicates", "parent-child",
 )
+
+VALID_DEP_TYPES = BLOCKING_DEP_TYPES + ASSOCIATION_DEP_TYPES
 
 
 class BeadStore:
@@ -292,6 +295,10 @@ class BeadStore:
         acceptance_criteria: str = "",
     ) -> str:
         """Create a new bead (task). Returns bead ID."""
+        if issue_type not in VALID_ISSUE_TYPES:
+            raise ValueError(
+                f"Invalid issue_type '{issue_type}'. Must be one of: {VALID_ISSUE_TYPES}"
+            )
         bid = bead_id or self._make_id(title)
         now = self._now()
         with self._cursor() as cur:
@@ -373,15 +380,19 @@ class BeadStore:
 
         Returns True if claimed successfully, False if already claimed by another.
         Idempotent: re-claiming by same actor returns True.
+        Raises ValueError for epics (claim their children instead).
         """
         now = self._now()
         with self._cursor() as cur:
             cur.execute(
-                "SELECT assignee, status FROM beads WHERE id=?", (bead_id,)
+                "SELECT assignee, status, issue_type FROM beads WHERE id=?", (bead_id,)
             )
             row = cur.fetchone()
             if row is None:
                 raise ValueError(f"Bead '{bead_id}' not found")
+
+            if row["issue_type"] == "epic":
+                raise ValueError("Cannot claim an epic. Claim its child tasks instead.")
 
             # Idempotent: already claimed by same actor
             if row["assignee"] == claimant and row["status"] == "in_progress":
@@ -450,6 +461,10 @@ class BeadStore:
         metadata: dict = None,
     ) -> str:
         """Add dependency: from_id relates to to_id via dep_type."""
+        if dep_type not in VALID_DEP_TYPES:
+            raise ValueError(
+                f"Invalid dep_type '{dep_type}'. Must be one of: {VALID_DEP_TYPES}"
+            )
         did = self._make_id(f"{from_id}:{to_id}:{dep_type}")
         now = self._now()
         with self._cursor() as cur:
@@ -520,6 +535,69 @@ class BeadStore:
                 "UPDATE beads SET metadata=?, updated_at=?, last_activity=? WHERE id=?",
                 (json.dumps(existing), now, now, bead_id),
             )
+
+    # -- Session lifecycle -----------------------------------------------------
+
+    STALE_CLAIM_MINUTES = 30
+
+    def touch(self, bead_id: str):
+        """Update last_activity timestamp. Called at stream end to keep claims fresh."""
+        now = self._now()
+        with self._cursor() as cur:
+            cur.execute(
+                "UPDATE beads SET last_activity=? WHERE id=?",
+                (now, bead_id),
+            )
+
+    def get_session_work(self, session_id: str) -> list[dict]:
+        """Get tasks claimed by a specific session."""
+        claimant = f"claraity:session-{session_id}"
+        with self._cursor() as cur:
+            cur.execute(
+                """SELECT * FROM beads
+                   WHERE assignee=? AND status='in_progress'
+                   ORDER BY priority, created_at""",
+                (claimant,),
+            )
+            return [dict(r) for r in cur.fetchall()]
+
+    def release_session(self, session_id: str) -> int:
+        """Release all tasks claimed by this session back to the pool.
+
+        Called on graceful shutdown. Returns count of released tasks.
+        """
+        claimant = f"claraity:session-{session_id}"
+        now = self._now()
+        with self._cursor() as cur:
+            # Find tasks to release (for event recording)
+            cur.execute(
+                """SELECT id FROM beads
+                   WHERE assignee=? AND status='in_progress'""",
+                (claimant,),
+            )
+            bead_ids = [row["id"] for row in cur.fetchall()]
+
+            if not bead_ids:
+                return 0
+
+            # Release them back to pool
+            cur.execute(
+                """UPDATE beads
+                   SET assignee='agent', status='open', updated_at=?, last_activity=?
+                   WHERE assignee=? AND status='in_progress'""",
+                (now, now, claimant),
+            )
+            count = cur.rowcount
+
+            # Record events
+            for bid in bead_ids:
+                self._record_event(
+                    cur, bid, "released",
+                    claimant, "agent",
+                    comment=f"session {session_id} ended",
+                )
+
+        return count
 
     # -- Read ------------------------------------------------------------------
 
@@ -640,18 +718,39 @@ class BeadStore:
             return [dict(r) for r in cur.fetchall()]
 
     def get_ready(self) -> list[dict]:
-        """Get beads that are open, not pinned, not deferred, and have no active blockers.
+        """Get beads that are open and available for work.
 
         The ready frontier: tasks an agent can start working on right now.
-        Respects defer_until (hidden until date passes) and all blocking dep types.
+        Includes:
+          - Open tasks that are unclaimed
+          - Tasks with stale claims (last_activity > STALE_CLAIM_MINUTES, non-epic)
+        Excludes:
+          - Pinned, deferred (unless defer_until has passed)
+          - Tasks with unresolved blocking dependencies
+          - Tasks actively claimed by another session (fresh last_activity)
         """
         now = self._now()
         placeholders = ",".join("?" for _ in BLOCKING_DEP_TYPES)
+        # Compute stale threshold as ISO8601 string for comparison
+        stale_threshold = (
+            datetime.now(timezone.utc)
+            - timedelta(minutes=self.STALE_CLAIM_MINUTES)
+        ).isoformat()
         with self._cursor() as cur:
             cur.execute(
                 f"""
                 SELECT b.* FROM beads b
-                WHERE b.status = 'open'
+                WHERE (
+                    -- Normal open tasks (unclaimed)
+                    (b.status = 'open'
+                     AND (b.assignee IS NULL OR b.assignee = '' OR b.assignee = 'agent'))
+                    OR
+                    -- Stale claims: in_progress but inactive for too long (non-epic)
+                    (b.status = 'in_progress'
+                     AND (b.issue_type IS NULL OR b.issue_type != 'epic')
+                     AND b.last_activity IS NOT NULL
+                     AND b.last_activity < ?)
+                )
                 AND (b.pinned = 0 OR b.pinned IS NULL)
                 AND (b.defer_until IS NULL OR b.defer_until <= ?)
                 AND b.id NOT IN (
@@ -662,7 +761,7 @@ class BeadStore:
                 )
                 ORDER BY b.priority, b.created_at
                 """,
-                (now, *BLOCKING_DEP_TYPES),
+                (stale_threshold, now, *BLOCKING_DEP_TYPES),
             )
             return [dict(r) for r in cur.fetchall()]
 
@@ -904,13 +1003,23 @@ def render_tasks_md(store: BeadStore) -> str:
                 lines.append(f"  > {desc}")
         lines.append("")
 
-    # In-progress
+    # In-progress (show description + latest notes for context)
     in_progress = [b for b in beads if b["status"] == "in_progress"]
     if in_progress:
         lines.append("## In Progress")
         lines.append("")
         for b in in_progress:
             lines.append(f"- `{b['id']}` {b['title']} (assigned: {b['assignee']})")
+            if b.get("description"):
+                desc = b["description"][:150]
+                if len(b["description"]) > 150:
+                    desc += "..."
+                lines.append(f"  > {desc}")
+            notes = store.get_notes(b["id"])
+            if notes:
+                # Show latest 2 notes
+                for n in notes[-2:]:
+                    lines.append(f"  - [{n['author']}] {n['content']}")
         lines.append("")
 
     # Blocked (status='blocked' OR open with unmet deps)
@@ -922,13 +1031,14 @@ def render_tasks_md(store: BeadStore) -> str:
         or (b["status"] == "open" and b["id"] not in ready_ids)
     ]
     if blocked:
+        all_blockers = store.get_all_blockers()
         lines.append("## Blocked")
         lines.append("")
         for b in blocked:
-            deps = store.get_dependencies(b["id"])
+            blockers = all_blockers.get(b["id"], [])
             blocker_names = [
                 f"`{bl['id']}` {bl['title']}"
-                for bl in deps["blockers"]
+                for bl in blockers
                 if bl["status"] not in ("closed", "pinned")
             ]
             lines.append(f"- `{b['id']}` {b['title']}")
@@ -966,6 +1076,90 @@ def render_tasks_md(store: BeadStore) -> str:
         if len(closed) > 5:
             lines.append(f"- ... and {len(closed) - 5} more")
         lines.append("")
+
+    return "\n".join(lines)
+
+
+def render_bead_detail(store: BeadStore, bead_id: str) -> str:
+    """Render full detail for a single bead as markdown."""
+    bead = store.get_bead(bead_id)
+    if not bead:
+        return f"Task '{bead_id}' not found."
+
+    lines = []
+    lines.append(f"# {bead['title']}")
+    lines.append("")
+
+    # Core metadata
+    tags = json.loads(bead["tags"]) if bead["tags"] else []
+    lines.append(f"- **ID**: {bead['id']}")
+    lines.append(f"- **Status**: {bead['status']}")
+    lines.append(f"- **Priority**: P{bead['priority']}")
+    lines.append(f"- **Type**: {bead.get('issue_type', 'task')}")
+    if tags:
+        lines.append(f"- **Tags**: {', '.join(tags)}")
+    if bead.get("assignee"):
+        lines.append(f"- **Assignee**: {bead['assignee']}")
+    if bead.get("parent_id"):
+        parent = store.get_bead(bead["parent_id"])
+        lines.append(f"- **Parent**: {parent['title'] if parent else bead['parent_id']}")
+    if bead.get("external_ref"):
+        lines.append(f"- **External**: {bead['external_ref']}")
+    if bead.get("due_at"):
+        lines.append(f"- **Due**: {bead['due_at']}")
+    if bead.get("defer_until"):
+        lines.append(f"- **Deferred until**: {bead['defer_until']}")
+    if bead.get("estimated_minutes"):
+        lines.append(f"- **Estimate**: {bead['estimated_minutes']} min")
+
+    # Content fields
+    if bead.get("description"):
+        lines.append(f"\n## Description\n\n{bead['description']}")
+    if bead.get("design"):
+        lines.append(f"\n## Design\n\n{bead['design']}")
+    if bead.get("acceptance_criteria"):
+        lines.append(f"\n## Acceptance Criteria\n\n{bead['acceptance_criteria']}")
+
+    # Dependencies
+    deps = store.get_dependencies(bead["id"])
+    if deps["blockers"]:
+        lines.append("\n## Blocked By")
+        for bl in deps["blockers"]:
+            lines.append(f"- [{bl['status']}] `{bl['id']}` {bl['title']}")
+    if deps["blocking"]:
+        lines.append("\n## Blocks")
+        for bl in deps["blocking"]:
+            lines.append(f"- [{bl['status']}] `{bl['id']}` {bl['title']}")
+    if deps.get("associations"):
+        lines.append("\n## Related")
+        for a in deps["associations"]:
+            lines.append(f"- ({a['dep_type']}) `{a['id']}` {a['title']}")
+
+    # References
+    refs = store.get_refs(bead["id"])
+    if refs:
+        lines.append("\n## References")
+        for r in refs:
+            lines.append(f"- {r['ref_type']} {r['component_id']}")
+
+    # Notes
+    notes = store.get_notes(bead["id"])
+    if notes:
+        lines.append("\n## Notes")
+        for n in notes:
+            ts = n["created_at"][:16] if n.get("created_at") else ""
+            lines.append(f"- [{ts}] ({n['author']}) {n['content']}")
+
+    # Close info
+    if bead.get("summary"):
+        lines.append(f"\n## Summary\n\n{bead['summary']}")
+    if bead.get("close_reason"):
+        lines.append(f"\n**Close Reason**: {bead['close_reason']}")
+
+    # Metadata
+    meta = json.loads(bead.get("metadata") or "{}")
+    if meta:
+        lines.append(f"\n## Metadata\n\n```json\n{json.dumps(meta, indent=2)}\n```")
 
     return "\n".join(lines)
 
@@ -1198,68 +1392,7 @@ Commands:
             if len(sys.argv) < 3:
                 print("Usage: show <bead_id>")
                 sys.exit(1)
-            bead = store.get_bead(sys.argv[2])
-            if not bead:
-                print(f"Task '{sys.argv[2]}' not found.")
-                sys.exit(1)
-            tags = json.loads(bead["tags"]) if bead["tags"] else []
-            print(f"# {bead['title']}")
-            print(f"- **ID**: {bead['id']}")
-            print(f"- **Status**: {bead['status']}")
-            print(f"- **Priority**: P{bead['priority']}")
-            print(f"- **Type**: {bead.get('issue_type', 'task')}")
-            if tags:
-                print(f"- **Tags**: {', '.join(tags)}")
-            if bead.get("assignee"):
-                print(f"- **Assignee**: {bead['assignee']}")
-            if bead.get("parent_id"):
-                parent = store.get_bead(bead["parent_id"])
-                print(f"- **Parent**: {parent['title'] if parent else bead['parent_id']}")
-            if bead.get("external_ref"):
-                print(f"- **External**: {bead['external_ref']}")
-            if bead.get("due_at"):
-                print(f"- **Due**: {bead['due_at']}")
-            if bead.get("defer_until"):
-                print(f"- **Deferred until**: {bead['defer_until']}")
-            if bead.get("estimated_minutes"):
-                print(f"- **Estimate**: {bead['estimated_minutes']} min")
-            if bead.get("description"):
-                print(f"\n{bead['description']}")
-            if bead.get("design"):
-                print(f"\n**Design**: {bead['design']}")
-            if bead.get("acceptance_criteria"):
-                print(f"\n**Acceptance Criteria**: {bead['acceptance_criteria']}")
-            if bead.get("summary"):
-                print(f"\n**Summary**: {bead['summary']}")
-            if bead.get("close_reason"):
-                print(f"**Close Reason**: {bead['close_reason']}")
-            deps = store.get_dependencies(bead["id"])
-            if deps["blockers"]:
-                print(f"\n**Blocked by**:")
-                for bl in deps["blockers"]:
-                    print(f"  - [{bl['status']}] `{bl['id']}` {bl['title']}")
-            if deps["blocking"]:
-                print(f"\n**Blocks**:")
-                for bl in deps["blocking"]:
-                    print(f"  - [{bl['status']}] `{bl['id']}` {bl['title']}")
-            if deps.get("associations"):
-                print(f"\n**Related**:")
-                for a in deps["associations"]:
-                    print(f"  - ({a['dep_type']}) `{a['id']}` {a['title']}")
-            refs = store.get_refs(bead["id"])
-            if refs:
-                print(f"\n**References**:")
-                for r in refs:
-                    print(f"  - {r['ref_type']} {r['component_id']}")
-            notes = store.get_notes(bead["id"])
-            if notes:
-                print(f"\n**Notes**:")
-                for n in notes:
-                    print(f"  [{n['author']}] {n['content']}")
-            # Metadata (if non-empty)
-            meta = json.loads(bead.get("metadata") or "{}")
-            if meta:
-                print(f"\n**Metadata**: {json.dumps(meta, indent=2)}")
+            print(render_bead_detail(store, sys.argv[2]))
 
         elif cmd == "create":
             if len(sys.argv) < 3:

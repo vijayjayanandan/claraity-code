@@ -194,7 +194,8 @@ export type ClientMessage =
     | { type: 'get_beads' }
     | { type: 'get_architecture' }
     | { type: 'approve_knowledge'; approved_by: string; status: string; comments: string }
-    | { type: 'export_knowledge' }
+    | { type: 'export_knowledge'; path?: string }
+    | { type: 'import_knowledge'; content: string }
     // Subagent management
     | { type: 'list_subagents' }
     | { type: 'save_subagent'; name: string; description: string; system_prompt: string; tools?: string[] | null; is_fork?: boolean }
@@ -277,6 +278,7 @@ export type WebViewMessage =
     | { type: 'getTrace'; sessionId: string | null }
     | { type: 'approveKnowledge'; approvedBy: string }
     | { type: 'exportKnowledge' }
+    | { type: 'importKnowledge' }
     // Subagent management
     | { type: 'listSubagents' }
     | { type: 'saveSubagent'; name: string; description: string; systemPrompt: string; tools?: string[] | null; isFork?: boolean }

@@ -16,9 +16,10 @@ def get_stateless_tools() -> list:
     Each tool opens/closes its own resources per execute() call.
     """
     from src.tools.knowledge_tools import (
-        BeadBlockTool,
         BeadCreateTool,
+        BeadLinkTool,
         BeadReadyTool,
+        BeadShowTool,
         BeadUpdateTool,
         KnowledgeAutoLayoutTool,
         KnowledgeExportTool,
@@ -61,9 +62,10 @@ def get_stateless_tools() -> list:
         KnowledgeExportTool(),
         # ClarAIty Beads
         BeadReadyTool(),
+        BeadShowTool(),
         BeadCreateTool(),
         BeadUpdateTool(),
-        BeadBlockTool(),
+        BeadLinkTool(),
         # Web tools (basic, no rate limiting — agent overrides with budgeted versions)
         WebSearchTool(),
         WebFetchTool(),

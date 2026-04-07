@@ -74,9 +74,9 @@ class TestMemoryManagerSessions:
             tags=["test"],
         )
 
-        # Should return a valid session ID (UUID format)
+        # Should return a valid session ID
         assert session_id is not None
-        assert len(session_id) == 36  # UUID length
+        assert session_id.startswith("session-")
 
     def test_save_session_saves_all_components(self, populated_manager, temp_dir):
         """Test that save_session saves all memory components."""
@@ -92,7 +92,6 @@ class TestMemoryManagerSessions:
         assert session_dir.exists()
         assert (session_dir / "metadata.json").exists()
         assert (session_dir / "working_memory.json").exists()
-        assert (session_dir / "episodic_memory.json").exists()
         assert (session_dir / "task_context.json").exists()
         assert (session_dir / "file_memories.txt").exists()
 
@@ -164,23 +163,21 @@ class TestMemoryManagerSessions:
         assert new_manager.working_memory.task_context is not None
         assert new_manager.file_memory_content == "# Project Memory\nUse 2-space indentation"
 
-    def test_load_session_by_short_id(self, populated_manager):
-        """Test loading session by short ID (8 chars)."""
+    def test_load_session_by_name_short(self, populated_manager):
+        """Test loading session by name (short ID no longer applies to new format)."""
         # Save session
         session_id = populated_manager.save_session(
             session_name="short-id-test",
             task_description="Short ID test",
         )
 
-        short_id = session_id[:8]
-
-        # Create new manager and load with short ID
+        # Create new manager and load by name
         new_manager = MemoryManager(
             persist_directory=str(populated_manager.persist_directory),
             load_file_memories=False,
         )
 
-        new_manager.load_session(short_id)
+        new_manager.load_session("short-id-test")
 
         # Verify data restored
         assert len(new_manager.working_memory.messages) == 4
@@ -232,28 +229,6 @@ class TestMemoryManagerSessions:
         user_msg = new_manager.working_memory.messages[0]
         assert user_msg.role == MessageRole.USER
         assert "authentication" in user_msg.content.lower()
-
-    def test_load_session_preserves_episodic_memory(self, populated_manager):
-        """Test that loading session preserves episodic memory."""
-        # Save
-        session_id = populated_manager.save_session(
-            session_name="episodic-test",
-            task_description="Episodic memory test",
-        )
-
-        # Load into new manager
-        new_manager = MemoryManager(
-            persist_directory=str(populated_manager.persist_directory),
-            load_file_memories=False,
-        )
-        new_manager.load_session(session_id)
-
-        # Verify episodic memory has conversation turns
-        assert len(new_manager.episodic_memory.conversation_turns) == 2
-
-        # Check first turn
-        first_turn = new_manager.episodic_memory.conversation_turns[0]
-        assert "authentication" in first_turn.user_message.content.lower()
 
     def test_load_session_preserves_task_context(self, populated_manager):
         """Test that loading session preserves task context."""
@@ -318,10 +293,6 @@ class TestMemoryManagerSessions:
         )
 
         # Episodic memory
-        assert len(new_manager.episodic_memory.conversation_turns) == len(
-            populated_manager.episodic_memory.conversation_turns
-        )
-
         # Task context
         assert (
             new_manager.working_memory.task_context.task_id

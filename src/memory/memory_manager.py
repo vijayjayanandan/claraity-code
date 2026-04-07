@@ -12,22 +12,13 @@ logger = get_logger("memory")
 from src.core.render_meta import RenderMetaRegistry
 from src.session.models.message import Message as SessionMessage
 
-from .episodic_memory import EpisodicMemory
 from .file_loader import MemoryFileLoader
 from .models import (
     CodeContext,
-    ConversationTurn,
     MemoryType,
     Message,
     MessageRole,
     TaskContext,
-)
-from .observation_store import (
-    Importance,
-    Observation,
-    ObservationPointer,
-    ObservationStore,
-    classify_importance,
 )
 from .working_memory import WorkingMemory
 
@@ -47,9 +38,9 @@ class MemoryManager:
         self,
         total_context_tokens: int = 4096,
         working_memory_tokens: int = 2000,
-        episodic_memory_tokens: int = 1000,
+        episodic_memory_tokens: int = 1000,  # Kept for backward compat (ignored)
         system_prompt_tokens: int = 300,
-        persist_directory: str = "./data",
+        persist_directory: str = ".claraity",
         load_file_memories: bool = True,
         starting_directory: Path | None = None,
     ):
@@ -59,7 +50,7 @@ class MemoryManager:
         Args:
             total_context_tokens: Total available context window
             working_memory_tokens: Tokens allocated to working memory
-            episodic_memory_tokens: Tokens allocated to episodic memory
+            episodic_memory_tokens: Ignored (kept for backward compat)
             system_prompt_tokens: Tokens reserved for system prompt
             persist_directory: Directory for persistence
             load_file_memories: Whether to load hierarchical file memories on init
@@ -71,14 +62,13 @@ class MemoryManager:
         # Initialize memory layers
         self.working_memory = WorkingMemory(max_tokens=working_memory_tokens)
 
-        self.episodic_memory = EpisodicMemory(
-            max_tokens=episodic_memory_tokens,
-            compression_threshold=0.8,
-        )
-
         # Initialize file-based memory loader
         self.file_loader = MemoryFileLoader()
         self.file_memory_content = ""
+
+        # Persistent memory (agent-managed, cross-session)
+        self.persistent_memory_content = ""
+        self._persistent_memory_dir: Path | None = None
 
         # Knowledge base cache
 
@@ -91,6 +81,9 @@ class MemoryManager:
         if load_file_memories:
             self.load_file_memories(starting_directory)
 
+        # Load persistent memory (always attempt)
+        self.load_persistent_memory()
+
         # Session metadata
         self.session_id = str(uuid.uuid4())
         self.session_start = datetime.now()
@@ -102,10 +95,6 @@ class MemoryManager:
 
         self._kv_lock = threading.RLock()  # Thread safety for key-value store
 
-        # Phase 2: ObservationStore for reversible tool output masking
-        self.observation_store = ObservationStore(
-            db_path=f"{persist_directory}/observations.db",
-        )
         self._current_turn_id = 0  # Stable turn ID incremented per user message
 
         # MessageStore integration (Option A: Single Source of Truth)
@@ -359,29 +348,6 @@ class MemoryManager:
             metadata=metadata,
         )
 
-        # Create conversation turn for episodic memory
-        if len(self.working_memory.messages) >= 2:
-            messages = self.working_memory.messages
-            # Find last user message
-            user_msg = None
-            for msg in reversed(messages):
-                if msg.role == MessageRole.USER:
-                    user_msg = msg
-                    break
-
-            if user_msg:
-                assistant_msg = messages[-1]  # Last message is assistant
-
-                turn = ConversationTurn(
-                    id=str(uuid.uuid4()),
-                    user_message=user_msg,
-                    assistant_message=assistant_msg,
-                    tool_calls=tool_calls or [],
-                    timestamp=datetime.now(),
-                )
-
-                self.episodic_memory.add_turn(turn)
-
         return session_message
 
     def persist_system_event(
@@ -600,112 +566,6 @@ class MemoryManager:
         """Check if currently processing an assistant stream."""
         return self._streaming_pipeline is not None
 
-    def add_tool_observation(
-        self,
-        tool_name: str,
-        args: Any,
-        content: str,
-        importance: Importance | None = None,
-        metadata: dict[str, Any] | None = None,
-        inline_threshold_tokens: int = 500,
-    ) -> tuple[str, bool]:
-        """
-        Store tool output in ObservationStore and decide inline vs pointer.
-
-        This implements Phase 2 of context management: reversible masking.
-        Large or old tool outputs are stored externally with a pointer in context.
-
-        Args:
-            tool_name: Name of the tool that produced output
-            args: Tool arguments (for deduplication)
-            content: Full tool output content
-            importance: Importance level (auto-classified if None)
-            metadata: Optional metadata
-            inline_threshold_tokens: Token threshold for inline vs pointer decision
-
-        Returns:
-            tuple of (content_to_use, is_pointer):
-                - content_to_use: Either full content or pointer string
-                - is_pointer: True if content was stored as pointer
-
-        Example:
-            >>> content, is_pointer = memory.add_tool_observation(
-            ...     tool_name="read_file",
-            ...     args={"path": "/src/app.py"},
-            ...     content="def main():\\n    print('Hello')",
-            ... )
-            >>> if is_pointer:
-            ...     print(f"Stored as pointer: {content}")
-        """
-        # Auto-classify importance if not provided
-        if importance is None:
-            importance = classify_importance(tool_name, content)
-
-        # Save to ObservationStore
-        observation = self.observation_store.save(
-            tool_name=tool_name,
-            args=args,
-            content=content,
-            turn_id=self._current_turn_id,
-            importance=importance,
-            metadata=metadata,
-        )
-
-        # Decision: inline vs pointer
-        # Inline if: small AND (recent OR critical)
-        is_recent = True  # Current turn is always recent
-        is_small = observation.token_count <= inline_threshold_tokens
-        is_critical = importance == Importance.CRITICAL
-
-        if is_small and (is_recent or is_critical):
-            # Keep inline
-            return content, False
-        else:
-            # Use pointer
-            pointer = observation.to_pointer()
-            return pointer, True
-
-    def rehydrate_observation(self, pointer: str) -> str | None:
-        """
-        Rehydrate a pointer to its full content.
-
-        Args:
-            pointer: Pointer string like [[OBS#abc123 ...]]
-
-        Returns:
-            Full content if found, None otherwise
-        """
-        return self.observation_store.rehydrate(pointer)
-
-    def mask_old_observations(
-        self,
-        mask_age: int = 15,
-        exclude_critical: bool = True,
-    ) -> int:
-        """
-        Convert old inline tool outputs to pointers.
-
-        This is called during context compaction to reduce token usage
-        while preserving recoverability.
-
-        Args:
-            mask_age: Mask observations older than this many turns
-            exclude_critical: If True, don't mask critical observations
-
-        Returns:
-            Number of observations that could be masked
-        """
-        maskable = self.observation_store.find_for_masking(
-            current_turn_id=self._current_turn_id,
-            mask_age=mask_age,
-            exclude_critical=exclude_critical,
-        )
-        return len(maskable)
-
-    def get_observation_stats(self) -> dict[str, Any]:
-        """Get statistics about stored observations."""
-        return self.observation_store.get_stats()
-
     def add_code_context(self, code_context: CodeContext) -> None:
         """
         Add code context to working memory.
@@ -727,7 +587,7 @@ class MemoryManager:
     def get_context_for_llm(
         self,
         system_prompt: str,
-        include_episodic: bool = True,
+        include_episodic: bool = True,  # Kept for backward compat (ignored)
         include_file_memories: bool = True,
         max_context_messages: int | None = None,
     ) -> list[dict[str, str]]:
@@ -742,7 +602,7 @@ class MemoryManager:
 
         Args:
             system_prompt: System prompt to include
-            include_episodic: Whether to include episodic memory summary
+            include_episodic: Ignored (kept for backward compat)
             include_file_memories: Whether to include file-based memories (default: True)
             max_context_messages: Optional limit on conversation messages
 
@@ -763,26 +623,14 @@ class MemoryManager:
                 }
             )
 
+        # 2a. Persistent memory is injected by ContextBuilder into the system
+        # prompt (not as a separate system message) so it survives the system
+        # message filtering in build_context().
+
         # 2b. Knowledge base is now injected by ContextBuilder directly
         # into the system prompt (not as a separate system message).
 
-        # 3. Episodic memory summary (if requested)
-        # Skip if using MessageStore (it has its own compaction handling)
-        if (
-            include_episodic
-            and self._message_store is None
-            and self.episodic_memory.conversation_turns
-        ):
-            episodic_summary = self.episodic_memory.get_context_summary()
-            if episodic_summary:
-                context.append(
-                    {
-                        "role": "system",
-                        "content": f"Previous conversation context:\n{episodic_summary}",
-                    }
-                )
-
-        # 4. Conversation history
+        # 3. Conversation history
         # Option A: Use MessageStore if configured (single source of truth)
         if self._message_store is not None:
             # Get LLM-ready context from MessageStore
@@ -819,31 +667,15 @@ class MemoryManager:
             Dictionary with token counts
         """
         working_tokens = self.working_memory.get_current_token_count()
-        episodic_tokens = self.episodic_memory.current_token_count
 
         return {
             "total_available": self.total_context_tokens,
             "system_prompt_reserved": self.system_prompt_tokens,
             "working_memory": working_tokens,
-            "episodic_memory": episodic_tokens,
             "remaining": self.total_context_tokens
             - self.system_prompt_tokens
-            - working_tokens
-            - episodic_tokens,
+            - working_tokens,
         }
-
-    def search_history(self, query: str, max_results: int = 3) -> list[ConversationTurn]:
-        """
-        Search conversation history.
-
-        Args:
-            query: Search query
-            max_results: Maximum results
-
-        Returns:
-            list of relevant conversation turns
-        """
-        return self.episodic_memory.search_history(query=query, max_results=max_results)
 
     def save_session(
         self,
@@ -881,27 +713,13 @@ class MemoryManager:
         # Build complete session state
         state = {
             "working_memory": self.working_memory.to_dict(),
-            "episodic_memory": {
-                "compressed_history": self.episodic_memory.compressed_history,
-                "conversation_turns": [
-                    {
-                        "id": turn.id,
-                        "user_message": turn.user_message.model_dump(mode="json"),
-                        "assistant_message": turn.assistant_message.model_dump(mode="json"),
-                        "tool_calls": turn.tool_calls,
-                        "timestamp": turn.timestamp.isoformat(),
-                        "summary": turn.summary,
-                        "token_count": turn.token_count,
-                    }
-                    for turn in self.episodic_memory.conversation_turns
-                ],
-            },
             "task_context": (
                 self.working_memory.task_context.model_dump(mode="json")
                 if self.working_memory.task_context
                 else None
             ),
             "file_memories": self.file_memory_content,
+            "persistent_memory": self.persistent_memory_content,
             "model_name": "unknown",  # Will be overridden if Agent provides it
             "message_count": len(self.working_memory.messages),
             "duration_minutes": duration_minutes,
@@ -940,7 +758,6 @@ class MemoryManager:
             >>> memory_manager.load_session("feature-auth")
         """
         from ..core.session_manager import SessionManager
-        from .models import ConversationTurn
 
         # Initialize SessionManager
         sessions_dir = self.persist_directory / "sessions"
@@ -968,34 +785,13 @@ class MemoryManager:
         if "working_memory" in state:
             self.working_memory.from_dict(state["working_memory"])
 
-        # Restore episodic memory
-        if "episodic_memory" in state:
-            episodic_data = state["episodic_memory"]
-            self.episodic_memory.compressed_history = episodic_data.get("compressed_history", [])
-
-            # Restore conversation turns
-            self.episodic_memory.conversation_turns = []
-            for turn_data in episodic_data.get("conversation_turns", []):
-                user_msg = Message.model_validate(turn_data["user_message"])
-                assistant_msg = Message.model_validate(turn_data["assistant_message"])
-
-                turn = ConversationTurn(
-                    id=turn_data["id"],
-                    user_message=user_msg,
-                    assistant_message=assistant_msg,
-                    tool_calls=turn_data["tool_calls"],
-                    timestamp=datetime.fromisoformat(turn_data["timestamp"]),
-                    summary=turn_data.get("summary"),
-                    token_count=turn_data.get("token_count"),
-                )
-                self.episodic_memory.conversation_turns.append(turn)
-
-            # Recalculate tokens
-            self.episodic_memory._recalculate_tokens()
-
         # Restore file memories
         if "file_memories" in state:
             self.file_memory_content = state["file_memories"]
+
+        # Restore persistent memory (reload from disk — it may have changed
+        # since the session was saved, which is the whole point)
+        self.load_persistent_memory()
 
         # Restore session metadata
         metadata = state.get("metadata", {})
@@ -1011,11 +807,6 @@ class MemoryManager:
             session_path: Path to session directory
         """
         import json
-
-        # Load episodic memory
-        episodic_path = session_path / "episodic_memory.json"
-        if episodic_path.exists():
-            self.episodic_memory.load_session(episodic_path)
 
         # Load metadata
         metadata_path = session_path / "metadata.json"
@@ -1037,7 +828,6 @@ class MemoryManager:
                 "tokens": self.working_memory.get_current_token_count(),
                 "summary": self.working_memory.get_summary(),
             },
-            "episodic_memory": self.episodic_memory.get_statistics(),
             "token_budget": self.get_token_budget(),
         }
 
@@ -1045,14 +835,9 @@ class MemoryManager:
         """Clear working memory only."""
         self.working_memory.clear()
 
-    def clear_episodic_memory(self) -> None:
-        """Clear episodic memory only."""
-        self.episodic_memory.clear()
-
     def clear_all(self) -> None:
         """Clear all memory layers and ephemeral state."""
         self.working_memory.clear()
-        self.episodic_memory.clear()
         # Clear ephemeral session state
         self._render_meta.clear()
         if self._message_store:
@@ -1151,6 +936,74 @@ class MemoryManager:
             self.reload_file_memories()
 
         return created_path
+
+    # =========================================================================
+    # Persistent Memory (agent-managed, cross-session)
+    # =========================================================================
+
+    @property
+    def persistent_memory_dir(self) -> Path:
+        """Get the persistent memory directory path (.claraity/memory/)."""
+        if self._persistent_memory_dir is not None:
+            return self._persistent_memory_dir
+        return self._project_root / ".claraity" / "memory"
+
+    def load_persistent_memory(self) -> str:
+        """
+        Load the agent-managed persistent memory index (MEMORY.md).
+
+        Reads .claraity/memory/MEMORY.md if it exists. Creates the directory
+        and an empty MEMORY.md if they don't exist.
+
+        This is separate from file_memory_content (developer-authored project
+        instructions). Persistent memory is written by the agent across sessions
+        to remember user preferences, feedback, project context, and references.
+
+        Returns:
+            Content of MEMORY.md, or empty string if none exists.
+        """
+        memory_dir = self.persistent_memory_dir
+        index_path = memory_dir / "MEMORY.md"
+
+        # Ensure directory exists
+        try:
+            memory_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.warning("persistent_memory_dir_create_failed", error=str(e))
+            self.persistent_memory_content = ""
+            return ""
+
+        # Create empty MEMORY.md if it doesn't exist
+        if not index_path.exists():
+            try:
+                index_path.write_text(
+                    "# ClarAIty Agent Memory\n",
+                    encoding="utf-8",
+                )
+                logger.info("persistent_memory_index_created", path=str(index_path))
+            except OSError as e:
+                logger.warning("persistent_memory_index_create_failed", error=str(e))
+
+        # Load the index
+        try:
+            if index_path.exists():
+                content = index_path.read_text(encoding="utf-8").strip()
+                self.persistent_memory_content = content
+                logger.info(
+                    "persistent_memory_loaded",
+                    path=str(index_path),
+                    length=len(content),
+                )
+                return content
+        except (OSError, UnicodeDecodeError) as e:
+            logger.warning("persistent_memory_load_failed", error=str(e))
+
+        self.persistent_memory_content = ""
+        return ""
+
+    def reload_persistent_memory(self) -> str:
+        """Reload persistent memory (useful after agent writes new memories)."""
+        return self.load_persistent_memory()
 
     @staticmethod
     def _fix_orphaned_tool_calls(context: list) -> list:

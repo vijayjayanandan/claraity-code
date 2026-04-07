@@ -416,10 +416,7 @@ export function appReducer(state: AppState, action: Action): AppState {
       if (subagentId && subagents[subagentId]) {
         const sa = subagents[subagentId];
         const tokenUpdate: Partial<typeof sa> = {};
-        // Update token stats from metadata (sent with every RUNNING tool_state)
-        if (action.data.cumulative_tokens != null) {
-          tokenUpdate.totalTokens = action.data.cumulative_tokens;
-        }
+        // Update context tokens from metadata (sent with every RUNNING tool_state)
         if (action.data.context_tokens != null) {
           tokenUpdate.contextTokens = action.data.context_tokens;
         }
