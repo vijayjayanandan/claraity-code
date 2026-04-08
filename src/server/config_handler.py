@@ -19,6 +19,7 @@ SUBAGENT_NAMES = [
     "explore",
     "planner",
     "general-purpose",
+    "knowledge-builder",
 ]
 
 
@@ -53,7 +54,7 @@ def _validate_list_models_url(base_url: str) -> tuple:
         return False, f"URL validation error: {e}"
 
 
-def get_config_response(config_path: str) -> dict:
+def get_config_response(config_path: str, working_directory: str = "") -> dict:
     """Load config from disk and return a sanitised dict (no api_key value).
 
     Returns:
@@ -75,13 +76,30 @@ def get_config_response(config_path: str) -> dict:
         "has_api_key": bool(cfg.api_key),
     }
 
+    # Merge built-in names with discovered custom subagent names
+    all_names = list(SUBAGENT_NAMES)
+    if working_directory:
+        try:
+            from pathlib import Path
+            from src.subagents.config import SubAgentConfigLoader
+
+            loader = SubAgentConfigLoader(working_directory=Path(working_directory))
+            for name, config in loader.discover_all().items():
+                if name not in all_names:
+                    all_names.append(name)
+        except Exception as e:
+            logger.debug("subagent_discovery_error", error=str(e))
+
     # Flatten subagent models to {name: model_str}
     subagent_models = {}
-    for name in SUBAGENT_NAMES:
+    for name in all_names:
         override = cfg.subagents.get(name)
         subagent_models[name] = override.model if override and override.model else ""
 
     config_dict["subagent_models"] = subagent_models
+
+    # Web search provider
+    config_dict["web_search_provider"] = cfg.web_search_provider
 
     # Prompt enrichment config
     from src.prompts.enrichment import ENRICHMENT_SYSTEM_PROMPT
@@ -95,7 +113,7 @@ def get_config_response(config_path: str) -> dict:
     return {
         "type": "config_loaded",
         "config": config_dict,
-        "subagent_names": list(SUBAGENT_NAMES),
+        "subagent_names": all_names,
     }
 
 
@@ -127,6 +145,11 @@ def save_config_from_request(data: dict, config_path: str) -> dict:
             for name, model_str in sa_models.items():
                 if model_str and str(model_str).strip():
                     cfg.subagents[str(name)] = SubAgentLLMOverride(model=str(model_str).strip())
+
+        # Web search provider
+        ws_provider = str(raw.get("web_search_provider", "tavily")).strip()
+        if ws_provider in ("tavily", "brave"):
+            cfg.web_search_provider = ws_provider
 
         # Prompt enrichment overrides
         from src.llm.config_loader import PromptEnrichmentConfig

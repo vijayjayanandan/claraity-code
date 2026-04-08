@@ -263,12 +263,13 @@ export function SubagentsPanel({
         </button>
         <span className="panel-title">Subagents</span>
         <button
-          className="toolbar-icon"
+          className="toolbar-icon toolbar-icon--with-label"
           onClick={handleNew}
           title="New Subagent"
           aria-label="New Subagent"
         >
           <i className="codicon codicon-add" />
+          <span>New Subagent</span>
         </button>
       </div>
 

@@ -165,6 +165,13 @@ button, .toolbar-icon, .session-card, .mention-item, .tool-badge {
   background: var(--vscode-toolbar-hoverBackground);
 }
 
+.toolbar-icon--with-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+}
+
 /* ── Context Bar ── */
 
 .context-bar {

@@ -752,7 +752,7 @@ def _make_protocol_for_enrich(deltas: tuple[str, ...] = ("enriched text",)):
 
     protocol = StdioProtocol.__new__(StdioProtocol)
     protocol._agent = agent
-    protocol._config_path = ""
+    protocol._working_directory = ""
     protocol._sent = []
 
     async def _fake_send_json(data):
@@ -907,7 +907,7 @@ class TestHandleEnrichPrompt:
 
         protocol = StdioProtocol.__new__(StdioProtocol)
         protocol._agent = SimpleNamespace(llm=mock_llm)
-        protocol._config_path = ""
+        protocol._working_directory = ""
         protocol._sent = []
 
         async def _fake_send_json(data):

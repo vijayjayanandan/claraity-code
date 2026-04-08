@@ -37,6 +37,7 @@ interface ConfigSnapshot {
   maxTokens: number;
   contextWindow: number;
   thinkingBudget: string;
+  searchProvider: string;
   hasSearchKey: boolean;
   subagentModels: Record<string, string>;
   enrichmentModel: string;
@@ -53,6 +54,7 @@ function snapshotEqual(a: ConfigSnapshot, b: ConfigSnapshot): boolean {
     a.maxTokens !== b.maxTokens ||
     a.contextWindow !== b.contextWindow ||
     a.thinkingBudget !== b.thinkingBudget ||
+    a.searchProvider !== b.searchProvider ||
     a.enrichmentModel !== b.enrichmentModel ||
     a.enrichmentSystemPrompt !== b.enrichmentSystemPrompt
   ) return false;
@@ -79,6 +81,7 @@ function parseSnapshot(cfg: Record<string, unknown>): ConfigSnapshot {
     maxTokens: cfg.max_tokens != null ? Number(cfg.max_tokens) : 16384,
     contextWindow: cfg.context_window != null ? Number(cfg.context_window) : 131072,
     thinkingBudget: cfg.thinking_budget != null ? String(cfg.thinking_budget) : "",
+    searchProvider: typeof cfg.web_search_provider === "string" ? cfg.web_search_provider : "tavily",
     hasSearchKey: !!cfg.has_search_key,
     subagentModels: (cfg.subagent_models != null && typeof cfg.subagent_models === "object")
       ? { ...(cfg.subagent_models as Record<string, string>) }
@@ -119,6 +122,7 @@ export function ConfigPanel({
   const [maxTokens, setMaxTokens] = useState(16384);
   const [contextWindow, setContextWindow] = useState(131072);
   const [thinkingBudget, setThinkingBudget] = useState("");
+  const [searchProvider, setSearchProvider] = useState("tavily");
   const [searchKey, setSearchKey] = useState("");
   const [hasSearchKey, setHasSearchKey] = useState(false);
   const [subagentModels, setSubagentModels] = useState<Record<string, string>>({});
@@ -137,6 +141,8 @@ export function ConfigPanel({
 
   // Last snapshot committed to disk — basis for dirty-checking and cancel reset.
   const savedSnapshot = useRef<ConfigSnapshot | null>(null);
+  // Base URL used for the last model fetch — triggers re-fetch when provider changes.
+  const modelsBaseUrlRef = useRef<string>("");
 
   // ── Typeahead state ──────────────────────────────────────────────────────────
   const [modelListOpen, setModelListOpen] = useState(false);
@@ -152,12 +158,21 @@ export function ConfigPanel({
   // Apply incoming configData — hydrates the form and resets the dirty baseline.
   // Skipped while a save is in flight so the ACK-triggered re-request doesn't
   // overwrite the form mid-save.
+  // Auto-fetches models on first load if not already cached.
   useEffect(() => {
     if (!configData) return;
     if (isSaving) return;
     const snap = parseSnapshot(configData);
     savedSnapshot.current = snap;
     applySnapshot(snap);
+    // Auto-fetch models if not cached or if base URL changed (e.g. provider switch)
+    const urlChanged = snap.baseUrl && snap.baseUrl !== modelsBaseUrlRef.current;
+    if (snap.baseUrl && (!configModels || urlChanged)) {
+      const key = snap.hasApiKey ? "__use_stored__" : "";
+      postMessage({ type: "listModels", backend: snap.backend, base_url: snap.baseUrl, api_key: key });
+      modelsBaseUrlRef.current = snap.baseUrl;
+      setFetchStatus("Fetching...");
+    }
   }, [configData, isSaving]);
 
   /** Apply a snapshot to all form fields (shared by hydration and cancel). */
@@ -171,6 +186,7 @@ export function ConfigPanel({
     setMaxTokens(snap.maxTokens);
     setContextWindow(snap.contextWindow);
     setThinkingBudget(snap.thinkingBudget);
+    setSearchProvider(snap.searchProvider);
     setHasSearchKey(snap.hasSearchKey);
     setSearchKey(snap.hasSearchKey ? KEY_STORED_SENTINEL : "");
     setSubagentModels({ ...snap.subagentModels });
@@ -178,7 +194,12 @@ export function ConfigPanel({
     setEnrichmentModel(snap.enrichmentModel);
     setEnrichmentSystemPrompt(snap.enrichmentSystemPrompt);
     setEnrichmentDefaultPrompt(snap.enrichmentDefaultPrompt);
-    setFetchStatus("");
+    // Restore fetch status from cached models (if available from a previous Fetch)
+    if (configModels && !configModels.error && configModels.models.length > 0) {
+      setFetchStatus(configModels.models.length + " model(s)");
+    } else {
+      setFetchStatus("");
+    }
   }
 
   // ── Round-trip completion ────────────────────────────────────────────────────
@@ -206,12 +227,13 @@ export function ConfigPanel({
     maxTokens,
     contextWindow,
     thinkingBudget,
+    searchProvider,
     hasSearchKey,
     subagentModels,
     enrichmentModel,
     enrichmentSystemPrompt,
     enrichmentDefaultPrompt,
-  }), [backend, baseUrl, hasApiKey, model, temperature, maxTokens, contextWindow, thinkingBudget, hasSearchKey, subagentModels, enrichmentModel, enrichmentSystemPrompt, enrichmentDefaultPrompt]);
+  }), [backend, baseUrl, hasApiKey, model, temperature, maxTokens, contextWindow, thinkingBudget, searchProvider, hasSearchKey, subagentModels, enrichmentModel, enrichmentSystemPrompt, enrichmentDefaultPrompt]);
 
   const isDirty = useMemo(() => {
     if (!savedSnapshot.current) return false;
@@ -227,6 +249,7 @@ export function ConfigPanel({
   // ── Fetch models ─────────────────────────────────────────────────────────────
   const handleFetchModels = useCallback(() => {
     setFetchStatus("Fetching...");
+    modelsBaseUrlRef.current = baseUrl;
     postMessage({
       type: "listModels",
       backend,
@@ -323,6 +346,7 @@ export function ConfigPanel({
       max_tokens: snap.maxTokens,
       context_window: snap.contextWindow,
       thinking_budget: snap.thinkingBudget || null,
+      web_search_provider: snap.searchProvider,
       subagent_models: snap.subagentModels,
     };
     if (apiKey && apiKey !== KEY_STORED_SENTINEL) { payload.api_key = apiKey; }
@@ -523,17 +547,28 @@ export function ConfigPanel({
           {/* Web Search */}
           <div className="settings-section">
             <div className="settings-section-label">Web Search</div>
-            <Field label={<>Search API Key <span className="form-label-hint">{hasSearchKey ? "(key stored)" : "(not set)"}</span></>}>
-              <input
-                className="form-input"
-                type="password"
-                value={searchKey}
-                onChange={(e) => setSearchKey(e.target.value)}
-                onFocus={() => { if (searchKey === KEY_STORED_SENTINEL) setSearchKey(""); }}
-                onBlur={() => { if (searchKey === "" && hasSearchKey) setSearchKey(KEY_STORED_SENTINEL); }}
-                placeholder="Enter new key to update"
-              />
-            </Field>
+            <div className="form-row">
+              <div style={{ flex: "0 0 140px" }}>
+                <Field label="Provider">
+                  <select className="form-input" value={searchProvider} onChange={(e) => setSearchProvider(e.target.value)}>
+                    <option value="tavily">Tavily</option>
+                  </select>
+                </Field>
+              </div>
+              <div style={{ flex: 1 }}>
+                <Field label={<>API Key <span className="form-label-hint">{hasSearchKey ? "(key stored)" : "(not set)"}</span></>}>
+                  <input
+                    className="form-input"
+                    type="password"
+                    value={searchKey}
+                    onChange={(e) => setSearchKey(e.target.value)}
+                    onFocus={() => { if (searchKey === KEY_STORED_SENTINEL) setSearchKey(""); }}
+                    onBlur={() => { if (searchKey === "" && hasSearchKey) setSearchKey(KEY_STORED_SENTINEL); }}
+                    placeholder="Enter new key to update"
+                  />
+                </Field>
+              </div>
+            </div>
           </div>
 
           {/* Subagent Models: expanded by default */}

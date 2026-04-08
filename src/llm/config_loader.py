@@ -124,6 +124,7 @@ class LLMConfigData:
     limits: LimitsConfig = field(default_factory=LimitsConfig)
     auto_approve: AutoApproveConfig = field(default_factory=AutoApproveConfig)
     prompt_enrichment: PromptEnrichmentConfig = field(default_factory=PromptEnrichmentConfig)
+    web_search_provider: str = "tavily"
 
 
 # =============================================================================
@@ -294,6 +295,13 @@ def load_llm_config(config_path: str = DEFAULT_CONFIG_PATH) -> LLMConfigData:
         if "system_prompt" in pe_data and pe_data["system_prompt"]:
             pe.system_prompt = str(pe_data["system_prompt"])
 
+    # -- Web search provider (top-level `web_search:` section) --
+    ws_data = data.get("web_search")
+    if isinstance(ws_data, dict):
+        provider = ws_data.get("provider", "")
+        if provider in ("tavily", "brave"):
+            config.web_search_provider = str(provider)
+
     # Populate api_key from credential store (runtime only, never saved to YAML)
     try:
         from src.llm.credential_store import load_api_key
@@ -417,6 +425,11 @@ def save_llm_config(
     else:
         # Remove the section if both fields are empty (clean YAML)
         existing_data.pop("prompt_enrichment", None)
+
+    # Build web_search section (top-level)
+    existing_data["web_search"] = {
+        "provider": config.web_search_provider,
+    }
 
     # Write back
     try:

@@ -638,7 +638,7 @@ export function appReducer(state: AppState, action: Action): AppState {
     case "UNDO_COMPLETE":
       return { ...state, undoCompleted: true };
     case "CONFIG_LOADED":
-      return { ...state, configData: action.config, configSubagentNames: action.subagentNames, configModels: null, configNotification: null };
+      return { ...state, configData: action.config, configSubagentNames: action.subagentNames, configNotification: null };
     case "MODELS_LIST":
       return { ...state, configModels: { models: action.models, error: action.error } };
     case "CONFIG_SAVED":

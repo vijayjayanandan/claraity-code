@@ -16,6 +16,7 @@ Engineering Principles:
 """
 
 import logging
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,7 +26,7 @@ from typing import Optional
 # CONSTANTS
 # =============================================================================
 
-DEFAULT_CONFIG_PATH = ".claraity/config.yaml"
+DEFAULT_CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".claraity", "config.yaml")
 
 VALID_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 

@@ -285,19 +285,11 @@ class StdioProtocol(UIProtocol):
         message_store,
         agent,
         data_port: int,
-        config_path: str = "",
         working_directory: str = "",
     ):
         super().__init__()
         self._store = message_store
         self._agent = agent
-        self._config_path = config_path
-        # Save to project-level config if it exists (keeps project overrides
-        # self-contained), otherwise fall back to system-level so new folders
-        # share settings without creating per-project files.
-        from src.llm.config_loader import SYSTEM_CONFIG_PATH
-        project_config = os.path.join(working_directory, ".claraity", "config.yaml") if working_directory else ""
-        self._save_config_path = project_config if project_config and os.path.isfile(project_config) else SYSTEM_CONFIG_PATH
         self._data_port = data_port
         self._working_directory = working_directory
         self._send_lock = asyncio.Lock()
@@ -312,6 +304,17 @@ class StdioProtocol(UIProtocol):
         self._session_writer: SessionWriter | None = None
         # Streaming task -- cancelled on InterruptSignal for immediate stop
         self._streaming_task: asyncio.Task | None = None
+
+    @property
+    def _config_path(self) -> str:
+        """Resolve config path: project-level if it exists, else system-level."""
+        from src.llm.config_loader import SYSTEM_CONFIG_PATH
+
+        if self._working_directory:
+            project_config = os.path.join(self._working_directory, ".claraity", "config.yaml")
+            if os.path.isfile(project_config):
+                return project_config
+        return SYSTEM_CONFIG_PATH
 
     def set_streaming_task(self, task: asyncio.Task | None) -> None:
         """Register the current streaming task so it can be cancelled on interrupt."""
@@ -645,13 +648,13 @@ class StdioProtocol(UIProtocol):
     async def _handle_get_config(self, data: dict) -> None:
         from src.server.config_handler import get_config_response
 
-        response = get_config_response(self._config_path)
+        response = get_config_response(self._config_path, self._working_directory)
         await self._send_json(response)
 
     async def _handle_save_config(self, data: dict) -> None:
         from src.server.config_handler import save_config_from_request
 
-        response = save_config_from_request(data, self._save_config_path)
+        response = save_config_from_request(data, self._config_path)
 
         # Hot-swap the LLM backend if agent is available
         cfg = response.pop("_config", None)
@@ -731,12 +734,12 @@ class StdioProtocol(UIProtocol):
         try:
             from src.llm.config_loader import load_llm_config, save_llm_config
 
-            cfg = load_llm_config(self._save_config_path)
+            cfg = load_llm_config(self._config_path)
             cfg.auto_approve.read = categories.get("read", cfg.auto_approve.read)
             cfg.auto_approve.edit = categories.get("edit", cfg.auto_approve.edit)
             cfg.auto_approve.execute = categories.get("execute", cfg.auto_approve.execute)
             cfg.auto_approve.browser = categories.get("browser", cfg.auto_approve.browser)
-            save_llm_config(cfg, self._save_config_path)
+            save_llm_config(cfg, self._config_path)
         except Exception as e:
             logger.warning("auto_approve_persist_error", error=str(e))
 
@@ -765,7 +768,7 @@ class StdioProtocol(UIProtocol):
     async def _handle_save_limits(self, data: dict) -> None:
         from src.server.config_handler import save_limits_from_request
 
-        response = save_limits_from_request(data, self._save_config_path)
+        response = save_limits_from_request(data, self._config_path)
         # Apply to running agent immediately (hot-swap)
         if response.get("success") and self._agent and response.get("limits"):
             confirmed = self._agent.set_limits(response["limits"])
@@ -791,7 +794,7 @@ class StdioProtocol(UIProtocol):
                 sessions_dir = Path(self._working_directory) / ".claraity" / "sessions"
                 self._agent._trace.init_session(self._agent._session_id, sessions_dir)
         # Persist to config.yaml
-        save_trace_enabled(enabled, self._save_config_path)
+        save_trace_enabled(enabled, self._config_path)
         await self._send_json({"type": "trace_enabled", "enabled": enabled})
 
     # -----------------------------------------------------------------
@@ -1904,6 +1907,11 @@ class StdioProtocol(UIProtocol):
         if delegation_tool and hasattr(delegation_tool, "refresh_description"):
             delegation_tool.refresh_description()
 
+        # Invalidate the agent's tools cache so the next LLM call picks up
+        # the refreshed description instead of returning the stale snapshot.
+        if hasattr(self._agent, "_invalidate_tools_cache"):
+            self._agent._invalidate_tools_cache()
+
     # Static tool names available to subagents (matches runner.py all_tools list)
     _SUBAGENT_STATIC_TOOLS = [
         "read_file",
@@ -2412,7 +2420,6 @@ async def run_stdio_server(
         message_store,
         agent,
         data_port,
-        config_path,
         working_directory=working_directory,
     )
     protocol._session_id = session_id

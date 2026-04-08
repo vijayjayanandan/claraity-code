@@ -43,7 +43,6 @@ def _make_handler(tmp_path: Path) -> "StdioProtocol":
         handler = StdioProtocol.__new__(StdioProtocol)
         handler._store = store
         handler._agent = agent
-        handler._config_path = ""
         handler._working_directory = str(tmp_path)
         handler._data_port = 0
         handler._send_lock = asyncio.Lock()
