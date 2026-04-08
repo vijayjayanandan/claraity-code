@@ -14,8 +14,10 @@ Security:
 - Workspace boundary enforcement
 """
 
+import json
 import platform
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -94,6 +96,8 @@ class ReadFileTool(FileOperationTool):
     - Line number formatting (cat -n style)
     - Long line truncation
     - Path traversal protection
+    - PDF text and table extraction (via PyMuPDF)
+    - Word (.docx) paragraph and table extraction (via python-docx)
 
     Matches Claude Code's Read tool capabilities.
     """
@@ -102,6 +106,15 @@ class ReadFileTool(FileOperationTool):
     MAX_LINES_DEFAULT = 1000  # Balanced default - read meaningful chunks
     MAX_LINES_LIMIT = 2000  # Hard cap per request
     MAX_LINE_LENGTH = 2000  # Truncate lines longer than this
+
+    # Document parsing safety limits (configurable per-instance)
+    MAX_DOCUMENT_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB - reject before parsing
+    MAX_EXTRACTED_LINES = 10_000  # ~200 pages - cap memory during extraction
+    MAX_ZIP_DECOMPRESSED_BYTES = 200 * 1024 * 1024  # 200 MB total decompressed
+    MAX_ZIP_RATIO = 100  # Max compression ratio before flagging as zip bomb
+
+    # Supported binary document formats
+    _BINARY_FORMATS = {".pdf", ".docx"}
 
     def __init__(self):
         super().__init__(
@@ -121,6 +134,61 @@ class ReadFileTool(FileOperationTool):
             "required": ["file_path"],
         }
 
+    def _format_extracted_lines(
+        self,
+        all_lines: list[str],
+        path: Path,
+        start: int,
+        end: int,
+        effective_max: int,
+    ) -> ToolResult:
+        """
+        Apply line-range selection and formatting to extracted document lines.
+
+        Shared by PDF and DOCX paths. Takes raw lines from an extractor,
+        applies start/end/max bounds, formats with line numbers, and returns
+        a ToolResult matching the same structure as plain text reads.
+        """
+        total_lines = len(all_lines)
+        collected_lines: list[str] = []
+
+        for lineno in range(start, min(end, total_lines + 1)):
+            if len(collected_lines) >= effective_max:
+                break
+            idx = lineno - 1  # Convert 1-indexed to 0-indexed
+            if idx < 0 or idx >= total_lines:
+                break
+            line_content = all_lines[idx]
+            # Truncate long lines
+            if len(line_content) > self.MAX_LINE_LENGTH:
+                line_content = line_content[: self.MAX_LINE_LENGTH] + "... [truncated]"
+            collected_lines.append(f"{lineno:6}\t{line_content}")
+
+        content = "\n".join(collected_lines)
+        actual_start = start
+        actual_end = start + len(collected_lines)
+        has_more = actual_end <= total_lines
+
+        if has_more and len(collected_lines) > 0:
+            content += (
+                f"\n\n[Lines {actual_start}-{actual_end - 1} of {total_lines}"
+                f" | Continue: start_line={actual_end}, max_lines={self.MAX_LINES_LIMIT}]"
+            )
+
+        return ToolResult(
+            tool_name=self.name,
+            status=ToolStatus.SUCCESS,
+            output=content,
+            metadata={
+                "file_path": str(path),
+                "total_lines": total_lines,
+                "lines_returned": len(collected_lines),
+                "start_line": actual_start,
+                "end_line": actual_end,
+                "has_more": has_more,
+            },
+        )
+
     def execute(
         self,
         file_path: str,
@@ -136,7 +204,7 @@ class ReadFileTool(FileOperationTool):
             file_path: Path to file to read
             start_line: 1-indexed start line, inclusive (default: 1)
             end_line: 1-indexed end line, EXCLUSIVE (default: start + max_lines)
-            max_lines: Maximum lines to return (default: 500, max: 2000)
+            max_lines: Maximum lines to return (default: 1000, max: 2000)
 
         Returns:
             ToolResult with file contents and metadata
@@ -182,7 +250,123 @@ class ReadFileTool(FileOperationTool):
                 # Default: start + max_lines
                 end = start + effective_max
 
-            # STREAMING READ - bounded memory
+            # --- Binary document format handling ---
+            suffix = path.suffix.lower()
+            if suffix in self._BINARY_FORMATS:
+                # Pre-flight: reject oversized files before parsing
+                file_size = path.stat().st_size
+                if file_size > self.MAX_DOCUMENT_SIZE_BYTES:
+                    size_mb = file_size / (1024 * 1024)
+                    limit_mb = self.MAX_DOCUMENT_SIZE_BYTES / (1024 * 1024)
+                    return ToolResult(
+                        tool_name=self.name,
+                        status=ToolStatus.ERROR,
+                        output=None,
+                        error=(
+                            f"Document too large: {size_mb:.1f} MB "
+                            f"(limit: {limit_mb:.0f} MB)."
+                        ),
+                    )
+
+                # Run extraction in a subprocess for C-library crash isolation.
+                # If PyMuPDF's MuPDF segfaults, only the child process dies.
+                try:
+                    cmd = [
+                        sys.executable, "-m", "src.tools.document_extractor",
+                        str(path),
+                        "--format", suffix.lstrip("."),
+                        "--max-lines", str(self.MAX_EXTRACTED_LINES),
+                        "--max-zip-size", str(self.MAX_ZIP_DECOMPRESSED_BYTES),
+                        "--max-zip-ratio", str(self.MAX_ZIP_RATIO),
+                    ]
+                    proc = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        stdin=subprocess.DEVNULL,
+                        timeout=30,
+                    )
+
+                    if proc.returncode != 0:
+                        logger.warning(
+                            "document_extractor_crashed",
+                            path=str(path),
+                            format=suffix,
+                            returncode=proc.returncode,
+                        )
+                        return ToolResult(
+                            tool_name=self.name,
+                            status=ToolStatus.ERROR,
+                            output=None,
+                            error=f"Failed to extract text from {suffix} file. "
+                            f"The file may be corrupt or unsupported.",
+                        )
+
+                    data = json.loads(proc.stdout)
+                    if data.get("error"):
+                        raw_error = data["error"]
+                        # Pass through install instructions (safe, helpful).
+                        # Sanitize everything else to avoid leaking paths.
+                        if "pip install" in raw_error:
+                            error_msg = raw_error
+                        else:
+                            logger.warning(
+                                "document_extraction_error",
+                                path=str(path),
+                                format=suffix,
+                                error=raw_error,
+                            )
+                            error_msg = (
+                                f"Failed to extract text from {suffix} file. "
+                                f"The file may be corrupt or unsupported."
+                            )
+                        return ToolResult(
+                            tool_name=self.name,
+                            status=ToolStatus.ERROR,
+                            output=None,
+                            error=error_msg,
+                        )
+
+                    all_lines = data["lines"]
+                    return self._format_extracted_lines(all_lines, path, start, end, effective_max)
+
+                except subprocess.TimeoutExpired:
+                    return ToolResult(
+                        tool_name=self.name,
+                        status=ToolStatus.ERROR,
+                        output=None,
+                        error=f"Document extraction timed out after 30 seconds.",
+                    )
+                except (json.JSONDecodeError, KeyError) as e:
+                    logger.warning(
+                        "document_extractor_bad_output",
+                        path=str(path),
+                        format=suffix,
+                        error=str(e),
+                    )
+                    return ToolResult(
+                        tool_name=self.name,
+                        status=ToolStatus.ERROR,
+                        output=None,
+                        error=f"Failed to extract text from {suffix} file. "
+                        f"The file may be corrupt or unsupported.",
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "document_extraction_failed",
+                        path=str(path),
+                        format=suffix,
+                        error=str(e),
+                    )
+                    return ToolResult(
+                        tool_name=self.name,
+                        status=ToolStatus.ERROR,
+                        output=None,
+                        error=f"Failed to extract text from {suffix} file. "
+                        f"The file may be corrupt or unsupported.",
+                    )
+
+            # STREAMING READ - bounded memory (plain text files)
             # Only stores lines we need, stops early
             collected_lines: list[str] = []
             total_lines = 0

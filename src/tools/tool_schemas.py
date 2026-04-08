@@ -16,6 +16,9 @@ READ_FILE_TOOL = ToolDefinition(
     description=(
         "Read file contents with line-range support. Returns content with line numbers (cat -n format). "
         "Reads up to 1000 lines by default (max 2000 per call).\n\n"
+        "Supports plain text files, PDF (.pdf), and Word (.docx) documents. "
+        "PDF and Word files are automatically extracted to text with page/section markers and tables. "
+        "Legacy .doc (pre-2007) files are not supported; only .docx format.\n\n"
         "THIS IS YOUR PRIMARY TOOL for understanding any file. "
         "You MUST read a file before making claims about it or editing it. "
         "Do NOT use run_command with cat/head/tail to read files -- use this tool instead.\n\n"

@@ -40,6 +40,10 @@ redis>=5.0.0
 sqlalchemy>=2.0.30
 alembic>=1.13.0
 
+# Document Reading (PDF, Word)
+PyMuPDF>=1.23.0  # PDF text + table extraction (import as fitz)
+python-docx>=1.0.0  # Word .docx paragraph + table extraction
+
 # CLI & UI
 rich>=13.7.0
 prompt_toolkit>=3.0.0  # Interactive CLI with autocomplete and key bindings
