@@ -92,6 +92,7 @@ src/
 │   └── openai_backend.py       # OpenAI/compatible API implementation
 ├── tools/
 │   ├── file_operations.py      # read_file, write_file, edit_file, etc.
+│   ├── document_extractor.py   # Subprocess PDF/DOCX text extractor (crash isolation)
 │   └── tool_schemas.py         # Tool definitions for LLM
 ├── observability/
 │   ├── logging_config.py       # Logging setup (all logs to JSONL, no console)
@@ -254,6 +255,8 @@ Never add write methods to StoreAdapter. MemoryManager is the single writer.
 7. **Protocol interrupt lifecycle:** `_interrupted` must be cleared after "Continue" on a pause prompt (via `clear_interrupt()`). See STATE LIFECYCLE comment in `protocol.py`. Forgetting this causes the pause prompt to re-appear on every subsequent iteration.
 
 8. **subprocess.run stdin inheritance (stdio mode):** Every `subprocess.run()` call MUST include `stdin=subprocess.DEVNULL`. In stdio mode, a background thread reads stdin for JSON commands. Without DEVNULL, child processes inherit the stdin handle, causing a deadlock on Windows — the subprocess hangs, freezing the event loop until data arrives on stdin. This doesn't affect TUI or WebSocket modes (no stdin reader thread).
+
+9. **Document parsing runs in subprocess:** `read_file` for PDF/DOCX delegates to `document_extractor.py` via `subprocess.run()`. This isolates C-library crashes (PyMuPDF/MuPDF) from the agent process. Security guards (file size 10MB, zip bomb detection, 10K line cap, 30s timeout) are enforced. The in-process extraction methods were removed — all extraction logic lives in `document_extractor.py` only.
 
 ---
 
