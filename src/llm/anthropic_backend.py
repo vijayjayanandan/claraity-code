@@ -57,6 +57,9 @@ from .base import (
 from .cache_tracker import CacheTracker
 from .failure_handler import LLMFailureHandler
 
+# Allowlisted image MIME types for multimodal content (security: reject unknown/malformed)
+_SAFE_IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
+
 # Known Claude models (Anthropic has no list models endpoint)
 KNOWN_CLAUDE_MODELS = [
     "claude-opus-4-20250514",
@@ -252,11 +255,45 @@ class AnthropicBackend(LLMBackend):
                 result_content = content if content is not None else ""
 
                 # Build tool_result content block
-                tool_result_block = {
-                    "type": "tool_result",
-                    "tool_use_id": tool_call_id,
-                    "content": str(result_content),
-                }
+                # Content can be str (text-only) or list (multimodal with images)
+                if isinstance(result_content, list):
+                    # Multimodal: convert OpenAI content blocks to Anthropic format
+                    anthropic_content = []
+                    for block in result_content:
+                        if isinstance(block, dict) and block.get("type") == "image_url":
+                            image_info = block.get("image_url", {})
+                            url = image_info.get("url", "")
+                            if url.startswith("data:") and ";base64," in url:
+                                header, b64_data = url.split(";base64,", 1)
+                                media_type = header.replace("data:", "")
+                                if media_type not in _SAFE_IMAGE_TYPES:
+                                    continue  # reject unknown/malformed media types
+                                anthropic_content.append({
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": media_type,
+                                        "data": b64_data,
+                                    },
+                                })
+                        elif isinstance(block, dict) and block.get("type") == "text":
+                            anthropic_content.append({
+                                "type": "text",
+                                "text": block.get("text", ""),
+                            })
+                        # Skip unknown block types (defense against JSONL tampering)
+
+                    tool_result_block = {
+                        "type": "tool_result",
+                        "tool_use_id": tool_call_id,
+                        "content": anthropic_content if anthropic_content else "",
+                    }
+                else:
+                    tool_result_block = {
+                        "type": "tool_result",
+                        "tool_use_id": tool_call_id,
+                        "content": str(result_content),
+                    }
 
                 # Check if we have an error status
                 if msg.get("is_error"):
@@ -286,6 +323,8 @@ class AnthropicBackend(LLMBackend):
                             if url.startswith("data:") and ";base64," in url:
                                 header, b64_data = url.split(";base64,", 1)
                                 media_type = header.replace("data:", "")
+                                if media_type not in _SAFE_IMAGE_TYPES:
+                                    continue  # reject unknown/malformed media types
                                 anthropic_blocks.append(
                                     {
                                         "type": "image",
@@ -314,8 +353,8 @@ class AnthropicBackend(LLMBackend):
                                     "text": block.get("text", ""),
                                 }
                             )
-                        elif isinstance(block, dict):
-                            # Pass through other block types (e.g. already in Anthropic format)
+                        elif isinstance(block, dict) and block.get("type") in ("image", "text"):
+                            # Pass through known Anthropic-native block types only
                             anthropic_blocks.append(block)
                     translated.append({"role": "user", "content": anthropic_blocks})
                 else:

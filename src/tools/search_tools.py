@@ -734,7 +734,7 @@ class GlobTool(Tool):
         if any(part in skip_dirs for part in file_path.parts):
             return True
 
-        # Skip binary file extensions
+        # Skip binary file extensions (but NOT .pdf/.docx -- read_file handles those)
         skip_exts = {
             ".pyc",
             ".pyo",
@@ -746,7 +746,6 @@ class GlobTool(Tool):
             ".jpg",
             ".jpeg",
             ".gif",
-            ".pdf",
             ".zip",
             ".tar",
             ".gz",

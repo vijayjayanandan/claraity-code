@@ -1082,7 +1082,8 @@ class SubAgent:
                     result = self._tool_executor.execute_tool(tool_name, **tool_args)
 
                     if result.is_success():
-                        output = str(result.output)
+                        # Preserve list output (multimodal) -- only stringify scalars
+                        output = result.output if isinstance(result.output, list) else str(result.output)
                         tool_messages.append(
                             {
                                 "role": "tool",

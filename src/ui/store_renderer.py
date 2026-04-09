@@ -316,7 +316,8 @@ class StoreRenderer:
 
         status = message.meta.status if message.meta else None
         duration_ms = message.meta.duration_ms if message.meta else None
-        content = message.content or ""
+        # Use get_text_content() to safely handle multimodal list content
+        content = message.get_text_content()
 
         if status == "success":
             card.set_result(content, duration_ms=duration_ms)
@@ -361,11 +362,8 @@ class StoreRenderer:
         result_msg = self._message_store.get_tool_result(tool_call_id)
 
         if result_msg:
-            result_content = (
-                result_msg.get_text_content()
-                if hasattr(result_msg, "get_text_content")
-                else (result_msg.content or "")
-            )
+            # get_text_content() safely handles multimodal list content
+            result_content = result_msg.get_text_content()
             status = result_msg.meta.status if result_msg.meta else None
             duration = result_msg.meta.duration_ms if result_msg.meta else None
 

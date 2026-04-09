@@ -117,22 +117,21 @@ class ReadFileTool(FileOperationTool):
     _BINARY_FORMATS = {".pdf", ".docx"}
 
     def __init__(self):
+        from src.tools.tool_schemas import READ_FILE_TOOL
+
         super().__init__(
-            name="read_file", description="Read contents of a file with optional line range support"
+            name=READ_FILE_TOOL.name, description=READ_FILE_TOOL.description,
         )
 
     def _get_parameters(self) -> dict[str, Any]:
-        """Get parameter schema (canonical source is tool_schemas.py)."""
-        return {
-            "type": "object",
-            "properties": {
-                "file_path": {"type": "string", "description": "Path to file"},
-                "start_line": {"type": "integer", "description": "Start line (1-indexed)"},
-                "end_line": {"type": "integer", "description": "End line (exclusive)"},
-                "max_lines": {"type": "integer", "description": "Max lines to return"},
-            },
-            "required": ["file_path"],
-        }
+        """Get parameter schema for LLM.
+
+        This is the canonical schema the LLM sees. Must match tool_schemas.py
+        READ_FILE_TOOL for consistency with subagent tool filtering.
+        """
+        from src.tools.tool_schemas import READ_FILE_TOOL
+
+        return READ_FILE_TOOL.parameters
 
     def _format_extracted_lines(
         self,
@@ -189,12 +188,74 @@ class ReadFileTool(FileOperationTool):
             },
         )
 
+    def _build_multimodal_result(
+        self, text_result: ToolResult, images: list[dict],
+    ) -> ToolResult:
+        """Build a multimodal ToolResult with images interleaved at their document positions.
+
+        The formatted text from _format_extracted_lines contains [IMAGE:N] markers
+        at the positions where images should appear (with line number prefixes like
+        "     7\\t[IMAGE:2]"). This method splits the text at those markers and
+        interleaves image content blocks between the text segments.
+        """
+        import re
+
+        text_output = str(text_result.output or "")
+        if not text_output or not images:
+            # No text or no images -- return text as-is
+            return text_result
+
+        # Split at image markers (line-numbered: "   7\t[IMAGE:2]")
+        IMAGE_MARKER = re.compile(r"^\s*\d+\t\[IMAGE:(\d+)\]\s*$", re.MULTILINE)
+        parts = IMAGE_MARKER.split(text_output)
+
+        # parts alternates: [text, img_idx_str, text, img_idx_str, ...]
+        content_blocks: list[dict[str, Any]] = []
+        image_count = 0
+
+        for i, part in enumerate(parts):
+            if i % 2 == 0:
+                # Text segment
+                text = part.strip()
+                if text:
+                    content_blocks.append({"type": "text", "text": text})
+            else:
+                # Image index
+                img_idx = int(part)
+                if img_idx < len(images):
+                    img = images[img_idx]
+                    b64 = img.get("base64", "")
+                    media_type = img.get("media_type", "image/png")
+                    content_blocks.append({
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{media_type};base64,{b64}"},
+                    })
+                    image_count += 1
+
+        if image_count:
+            content_blocks.append({
+                "type": "text",
+                "text": f"[{image_count} embedded image(s) extracted from document]",
+            })
+
+        metadata = dict(text_result.metadata)
+        metadata["image_count"] = image_count
+
+        return ToolResult(
+            tool_name=self.name,
+            status=text_result.status,
+            output=content_blocks,
+            metadata=metadata,
+        )
+
     def execute(
         self,
         file_path: str,
         start_line: int | None = None,
         end_line: int | None = None,
         max_lines: int | None = None,
+        extract_images: bool = False,
+        pages: str | None = None,
         **kwargs: Any,
     ) -> ToolResult:
         """
@@ -205,6 +266,11 @@ class ReadFileTool(FileOperationTool):
             start_line: 1-indexed start line, inclusive (default: 1)
             end_line: 1-indexed end line, EXCLUSIVE (default: start + max_lines)
             max_lines: Maximum lines to return (default: 1000, max: 2000)
+            extract_images: For PDF/DOCX only. When True, renders pages with images
+                as full-page screenshots (PDF) or extracts inline images (DOCX).
+                Default False returns text-only with image hints.
+            pages: For PDF only. Page numbers/ranges to process, e.g. "3", "1-5", "3,7,9".
+                When omitted, processes all pages.
 
         Returns:
             ToolResult with file contents and metadata
@@ -279,6 +345,11 @@ class ReadFileTool(FileOperationTool):
                         "--max-zip-size", str(self.MAX_ZIP_DECOMPRESSED_BYTES),
                         "--max-zip-ratio", str(self.MAX_ZIP_RATIO),
                     ]
+                    # Conditional flags: only extract images when explicitly requested
+                    if extract_images:
+                        cmd.append("--extract-images")
+                    if pages and suffix == ".pdf":
+                        cmd.extend(["--pages", str(pages)])
                     proc = subprocess.run(
                         cmd,
                         capture_output=True,
@@ -328,7 +399,15 @@ class ReadFileTool(FileOperationTool):
                         )
 
                     all_lines = data["lines"]
-                    return self._format_extracted_lines(all_lines, path, start, end, effective_max)
+                    images = data.get("images", [])
+                    text_result = self._format_extracted_lines(
+                        all_lines, path, start, end, effective_max,
+                    )
+
+                    # If images were extracted, build multimodal content
+                    if images:
+                        return self._build_multimodal_result(text_result, images)
+                    return text_result
 
                 except subprocess.TimeoutExpired:
                     return ToolResult(

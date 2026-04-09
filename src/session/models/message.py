@@ -560,7 +560,7 @@ class Message:
     def create_tool(
         cls,
         tool_call_id: str,
-        content: str,
+        content: "str | list[dict]",
         session_id: str,
         parent_uuid: str | None,
         seq: int,
@@ -569,7 +569,11 @@ class Message:
         exit_code: int | None = None,
         **meta_kwargs,
     ) -> "Message":
-        """Create a tool result message."""
+        """Create a tool result message.
+
+        content can be a string (text-only) or a list of content blocks
+        (multimodal, e.g. text + images from document extraction).
+        """
         # Remove parent_uuid from meta_kwargs to avoid duplicate parameter error
         meta_kwargs.pop("parent_uuid", None)
 
@@ -881,8 +885,30 @@ class Message:
     # =========================================================================
 
     def get_text_content(self) -> str:
-        """Get text content (handles None)."""
-        return self.content or ""
+        """Get text content as a string (handles None and multimodal list content).
+
+        For multimodal content (list of content blocks from document extraction),
+        extracts text blocks and joins them, with an image count note appended.
+        """
+        if self.content is None:
+            return ""
+        if isinstance(self.content, str):
+            return self.content
+        # Multimodal list content: extract text blocks
+        if isinstance(self.content, list):
+            texts = []
+            image_count = 0
+            for block in self.content:
+                if isinstance(block, dict):
+                    if block.get("type") == "text":
+                        texts.append(block.get("text", ""))
+                    elif block.get("type") == "image_url":
+                        image_count += 1
+            result = "\n".join(texts)
+            if image_count:
+                result += f"\n[{image_count} image(s) embedded in document]"
+            return result
+        return str(self.content)
 
     def has_tool_calls(self) -> bool:
         """Check if message has tool calls."""

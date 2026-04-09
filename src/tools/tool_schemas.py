@@ -19,6 +19,13 @@ READ_FILE_TOOL = ToolDefinition(
         "Supports plain text files, PDF (.pdf), and Word (.docx) documents. "
         "PDF and Word files are automatically extracted to text with page/section markers and tables. "
         "Legacy .doc (pre-2007) files are not supported; only .docx format.\n\n"
+        "For PDF/DOCX files with images: the default read extracts text only. "
+        "Pages containing images show hints like "
+        "'[N image(s) on this page -- use extract_images=true to see]'. "
+        "IMPORTANT: When you see these image hints AND the user's question relates to "
+        "visual content (diagrams, screenshots, charts, figures), you MUST re-read the file "
+        "with extract_images=true to render the images. Use the pages parameter to target "
+        "only the pages that have images, e.g. pages='3' or pages='3,7'.\n\n"
         "THIS IS YOUR PRIMARY TOOL for understanding any file. "
         "You MUST read a file before making claims about it or editing it. "
         "Do NOT use run_command with cat/head/tail to read files -- use this tool instead.\n\n"
@@ -45,6 +52,25 @@ READ_FILE_TOOL = ToolDefinition(
             "max_lines": {
                 "type": "integer",
                 "description": "Maximum lines to return (default: 1000, limit: 2000 per read).",
+            },
+            "extract_images": {
+                "type": "boolean",
+                "description": (
+                    "For PDF/DOCX only. When true, extracts embedded images at "
+                    "original resolution, interleaved with text at their document "
+                    "position. Only pages/paragraphs containing images are affected "
+                    "-- text-only content has zero overhead. "
+                    "Default: false (text-only extraction with image hint lines)."
+                ),
+            },
+            "pages": {
+                "type": "string",
+                "description": (
+                    "For PDF only. Page numbers or ranges to extract, e.g. '3', '1-5', '3,7,9'. "
+                    "Works for both text-only and image extraction modes. "
+                    "When omitted, reads all pages. Use with extract_images=true to "
+                    "render only specific pages as screenshots."
+                ),
             },
         },
         "required": ["file_path"],

@@ -391,7 +391,7 @@ class MemoryManager:
     def add_tool_result(
         self,
         tool_call_id: str,
-        content: str,
+        content: "str | list[dict]",
         tool_name: str | None = None,
         status: str = "success",
         duration_ms: int | None = None,
@@ -405,7 +405,7 @@ class MemoryManager:
 
         Args:
             tool_call_id: ID of the tool call this result responds to
-            content: Tool output content
+            content: Tool output content (str for text, list for multimodal)
             tool_name: Optional tool name (for logging/display)
             status: Tool execution status ("success", "error", "timeout")
             duration_ms: Optional execution duration in milliseconds

@@ -6,6 +6,10 @@ Tests are organized into:
 - TestReadDOCX: Integration tests for DOCX reading via ReadFileTool (subprocess)
 - TestDocumentSecurity: Security guards (file size, zip bomb, line cap, crash isolation)
 - TestDocumentEdgeCases: Edge cases and metadata
+- TestMultimodalExtraction: Image extraction from PDF/DOCX
+- TestMultimodalToolResult: Multimodal content building in ReadFileTool
+- TestFrameToolResultMultimodal: _frame_tool_result with str and list content
+- TestAnthropicMultimodalToolResult: Anthropic backend multimodal tool results
 """
 
 import json
@@ -16,10 +20,14 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
+# Prime import chain (see conftest.py)
+import src.core  # noqa: F401
+
 from src.tools import ReadFileTool
 from src.tools.file_operations import FileOperationTool
 from src.tools.base import ToolStatus
-from src.tools.document_extractor import extract_pdf, extract_docx, check_zip_bomb
+from src.tools.document_extractor import extract_pdf, extract_docx, check_zip_bomb, _parse_pages
+from src.llm.base import LLMConfig, LLMBackendType
 
 
 @pytest.fixture(autouse=True)
@@ -30,9 +38,9 @@ def allow_test_workspace(tmp_path, monkeypatch):
     monkeypatch.setattr(FileOperationTool, "_workspace_root", None)
 
 
-def _make_subprocess_result(lines, error=None, returncode=0):
+def _make_subprocess_result(lines, error=None, returncode=0, images=None):
     """Create a mock subprocess.CompletedProcess with JSON output."""
-    data = {"lines": lines, "error": error}
+    data = {"lines": lines, "images": images or [], "error": error}
     result = MagicMock(spec=subprocess.CompletedProcess)
     result.stdout = json.dumps(data)
     result.stderr = ""
@@ -60,9 +68,10 @@ class TestExtractorModule:
         doc.save(str(pdf_path))
         doc.close()
 
-        lines, error = extract_pdf(pdf_path, max_lines=10_000)
+        lines, images, error = extract_pdf(pdf_path, max_lines=10_000)
 
         assert error is None
+        assert images == []
         assert any("--- Page 1 of 1 ---" in line for line in lines)
         assert any("Hello PDF World" in line for line in lines)
 
@@ -79,7 +88,7 @@ class TestExtractorModule:
         doc.save(str(pdf_path))
         doc.close()
 
-        lines, error = extract_pdf(pdf_path, max_lines=10)
+        lines, _images, error = extract_pdf(pdf_path, max_lines=10)
 
         assert error is None
         assert len(lines) == 11  # 10 lines + truncation notice
@@ -95,10 +104,11 @@ class TestExtractorModule:
         doc.add_paragraph("World")
         doc.save(str(docx_path))
 
-        lines, error = extract_docx(docx_path, max_lines=10_000,
-                                     max_zip_size=200 * 1024 * 1024, max_zip_ratio=100)
+        lines, images, error = extract_docx(docx_path, max_lines=10_000,
+                                             max_zip_size=200 * 1024 * 1024, max_zip_ratio=100)
 
         assert error is None
+        assert images == []
         assert "Hello" in lines
         assert "World" in lines
 
@@ -116,8 +126,8 @@ class TestExtractorModule:
         table.rows[1].cells[1].text = "D"
         doc.save(str(docx_path))
 
-        lines, error = extract_docx(docx_path, max_lines=10_000,
-                                     max_zip_size=200 * 1024 * 1024, max_zip_ratio=100)
+        lines, _images, error = extract_docx(docx_path, max_lines=10_000,
+                                              max_zip_size=200 * 1024 * 1024, max_zip_ratio=100)
 
         assert error is None
         assert "Before" in lines
@@ -134,8 +144,8 @@ class TestExtractorModule:
             doc.add_paragraph(f"Paragraph {i}")
         doc.save(str(docx_path))
 
-        lines, error = extract_docx(docx_path, max_lines=10,
-                                     max_zip_size=200 * 1024 * 1024, max_zip_ratio=100)
+        lines, _images, error = extract_docx(docx_path, max_lines=10,
+                                              max_zip_size=200 * 1024 * 1024, max_zip_ratio=100)
 
         assert error is None
         assert len(lines) == 11  # 10 lines + truncation notice
@@ -435,7 +445,7 @@ class TestDocumentSecurity:
             zf.writestr("word/document.xml", "\x00" * (2 * 1024 * 1024))
 
         # Use the extractor directly to test the zip bomb guard
-        lines, error = extract_docx(
+        lines, _images, error = extract_docx(
             zip_path, max_lines=10_000,
             max_zip_size=200 * 1024 * 1024, max_zip_ratio=5  # Very strict ratio
         )
@@ -592,3 +602,551 @@ class TestDocumentEdgeCases:
         assert result.status == ToolStatus.SUCCESS
         assert "line 1" in result.output
         assert result.metadata["total_lines"] == 3
+
+
+# ---------------------------------------------------------------------------
+# Multimodal (image extraction) tests
+# ---------------------------------------------------------------------------
+
+
+class TestMultimodalExtraction:
+    """Tests for scout-then-render image extraction from documents."""
+
+    def test_pdf_scout_mode_shows_hints(self, tmp_path):
+        """Test that scout mode (default) shows image hints but no images."""
+        import fitz
+        import base64
+
+        pdf_path = tmp_path / "with_image.pdf"
+        doc = fitz.open()
+        page = doc.new_page()
+        page.insert_text((72, 72), "Page with image")
+        tiny_png = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4"
+            "nGP4z8BQDwAEgAF/pooBPQAAAABJRU5ErkJggg=="
+        )
+        page.insert_image(fitz.Rect(100, 100, 200, 200), stream=tiny_png)
+        doc.save(str(pdf_path))
+        doc.close()
+
+        lines, images, error = extract_pdf(pdf_path, max_lines=10_000, extract_images=False)
+
+        assert error is None
+        assert images == []  # No images in scout mode
+        assert any("use extract_images=true to see" in line for line in lines)
+
+    def test_pdf_render_mode_returns_page_screenshots(self, tmp_path):
+        """Test that render mode returns page screenshots for pages with images."""
+        import fitz
+        import base64
+
+        pdf_path = tmp_path / "with_image.pdf"
+        doc = fitz.open()
+        page = doc.new_page()
+        page.insert_text((72, 72), "Page with image")
+        tiny_png = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4"
+            "nGP4z8BQDwAEgAF/pooBPQAAAABJRU5ErkJggg=="
+        )
+        page.insert_image(fitz.Rect(100, 100, 200, 200), stream=tiny_png)
+        doc.save(str(pdf_path))
+        doc.close()
+
+        lines, images, error = extract_pdf(pdf_path, max_lines=10_000, extract_images=True)
+
+        assert error is None
+        assert len(images) >= 1
+        assert images[0]["media_type"] == "image/png"
+        assert len(images[0]["base64"]) > 0
+        assert images[0]["source"] == "page_1"
+        # Should have [IMAGE:0] marker interleaved in lines
+        assert any("[IMAGE:0]" in line for line in lines)
+
+    def test_pdf_text_only_pages_not_rendered(self, tmp_path):
+        """Test that text-only pages get no image rendering."""
+        import fitz
+        import base64
+
+        pdf_path = tmp_path / "mixed.pdf"
+        doc = fitz.open()
+        # Page 1: text only
+        page1 = doc.new_page()
+        page1.insert_text((72, 72), "Text only page")
+        # Page 2: has image
+        page2 = doc.new_page()
+        page2.insert_text((72, 72), "Page with image")
+        tiny_png = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4"
+            "nGP4z8BQDwAEgAF/pooBPQAAAABJRU5ErkJggg=="
+        )
+        page2.insert_image(fitz.Rect(100, 100, 200, 200), stream=tiny_png)
+        doc.save(str(pdf_path))
+        doc.close()
+
+        lines, images, error = extract_pdf(pdf_path, max_lines=10_000, extract_images=True)
+
+        assert error is None
+        # Only page 2 should produce a screenshot
+        assert len(images) == 1
+        assert images[0]["source"] == "page_2"
+
+    def test_pdf_image_count_limit(self, tmp_path):
+        """Test that max_images cap is respected."""
+        import fitz
+
+        pdf_path = tmp_path / "many_images.pdf"
+        doc = fitz.open()
+        for i in range(5):
+            page = doc.new_page()
+            pix = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 2, 2), 0)
+            pix.clear_with(i * 40)
+            page.insert_image(fitz.Rect(10, 10, 50, 50), pixmap=pix)
+        doc.save(str(pdf_path))
+        doc.close()
+
+        lines, images, error = extract_pdf(
+            pdf_path, max_lines=10_000, extract_images=True, max_images=2,
+        )
+
+        assert error is None
+        assert len(images) == 2
+
+    def test_pdf_pages_filter(self, tmp_path):
+        """Test that pages parameter filters to specific pages."""
+        import fitz
+
+        pdf_path = tmp_path / "multi.pdf"
+        doc = fitz.open()
+        for i in range(5):
+            page = doc.new_page()
+            page.insert_text((72, 72), f"Page {i+1} content")
+        doc.save(str(pdf_path))
+        doc.close()
+
+        # Only read pages 2 and 4
+        pages_filter = _parse_pages("2,4", 5)
+        lines, images, error = extract_pdf(
+            pdf_path, max_lines=10_000, pages_filter=pages_filter,
+        )
+
+        assert error is None
+        assert any("Page 2 of 5" in line for line in lines)
+        assert any("Page 4 of 5" in line for line in lines)
+        assert not any("Page 1 of 5" in line for line in lines)
+        assert not any("Page 3 of 5" in line for line in lines)
+
+    def test_parse_pages_various_formats(self):
+        """Test page specification parsing."""
+        assert _parse_pages("3", 10) == {2}
+        assert _parse_pages("1-3", 10) == {0, 1, 2}
+        assert _parse_pages("2,5,8", 10) == {1, 4, 7}
+        assert _parse_pages("1-3,7", 10) == {0, 1, 2, 6}
+
+    def test_docx_scout_mode_shows_hints(self, tmp_path):
+        """Test that DOCX scout mode shows image hints."""
+        from docx import Document
+        from docx.shared import Inches
+        import base64
+
+        docx_path = tmp_path / "with_image.docx"
+        doc = Document()
+        doc.add_paragraph("Document with image")
+        tiny_png = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4"
+            "nGP4z8BQDwAEgAF/pooBPQAAAABJRU5ErkJggg=="
+        )
+        img_path = tmp_path / "tiny.png"
+        img_path.write_bytes(tiny_png)
+        doc.add_picture(str(img_path), width=Inches(1))
+        doc.save(str(docx_path))
+
+        lines, images, error = extract_docx(
+            docx_path, max_lines=10_000,
+            max_zip_size=200 * 1024 * 1024, max_zip_ratio=100,
+            extract_images=False,
+        )
+
+        assert error is None
+        assert images == []
+        assert any("use extract_images=true to see" in line for line in lines)
+
+    def test_docx_render_mode_extracts_inline(self, tmp_path):
+        """Test that DOCX render mode extracts images at paragraph position."""
+        from docx import Document
+        from docx.shared import Inches
+        import base64
+
+        docx_path = tmp_path / "with_image.docx"
+        doc = Document()
+        doc.add_paragraph("Before image")
+        tiny_png = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4"
+            "nGP4z8BQDwAEgAF/pooBPQAAAABJRU5ErkJggg=="
+        )
+        img_path = tmp_path / "tiny.png"
+        img_path.write_bytes(tiny_png)
+        doc.add_picture(str(img_path), width=Inches(1))
+        doc.add_paragraph("After image")
+        doc.save(str(docx_path))
+
+        lines, images, error = extract_docx(
+            docx_path, max_lines=10_000,
+            max_zip_size=200 * 1024 * 1024, max_zip_ratio=100,
+            extract_images=True,
+        )
+
+        assert error is None
+        assert len(images) >= 1
+        assert images[0]["media_type"] == "image/png"
+        # Image marker should be between "Before image" and "After image"
+        marker_idx = next(i for i, l in enumerate(lines) if "[IMAGE:0]" in l)
+        before_idx = next(i for i, l in enumerate(lines) if "Before image" in l)
+        after_idx = next(i for i, l in enumerate(lines) if "After image" in l)
+        assert before_idx < marker_idx < after_idx
+
+
+class TestMultimodalToolResult:
+    """Tests for multimodal content building with interleaved markers."""
+
+    def test_interleaved_markers_produce_multimodal(self, tmp_path):
+        """Test that [IMAGE:N] markers in text are replaced with image blocks."""
+        pdf_path = tmp_path / "img.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4 dummy")
+
+        mock_images = [
+            {"base64": "aGVsbG8=", "media_type": "image/png", "source": "page_1"},
+        ]
+        mock_result = _make_subprocess_result(
+            ["--- Page 1 ---", "Text before image", "[IMAGE:0]", "Text after image"],
+            images=mock_images,
+        )
+
+        tool = ReadFileTool()
+        with patch("src.tools.file_operations.subprocess.run", return_value=mock_result):
+            result = tool.execute(file_path=str(pdf_path), extract_images=True)
+
+        assert result.status == ToolStatus.SUCCESS
+        assert isinstance(result.output, list)
+        # Should have text, image, text, count note
+        types = [b["type"] for b in result.output]
+        assert "image_url" in types
+        assert result.metadata["image_count"] == 1
+        # Image should be between text segments, not at end
+        img_idx = types.index("image_url")
+        assert img_idx > 0  # not first
+        assert img_idx < len(types) - 1  # not last (count note is last)
+
+    def test_no_images_returns_string(self, tmp_path):
+        """Test that documents without images return plain string output."""
+        pdf_path = tmp_path / "text_only.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4 dummy")
+
+        mock_result = _make_subprocess_result(
+            ["--- Page 1 ---", "Text only"],
+            images=[],
+        )
+
+        tool = ReadFileTool()
+        with patch("src.tools.file_operations.subprocess.run", return_value=mock_result):
+            result = tool.execute(file_path=str(pdf_path))
+
+        assert result.status == ToolStatus.SUCCESS
+        assert isinstance(result.output, str)
+
+    def test_scout_mode_hints_no_images(self, tmp_path):
+        """Test that scout mode (default) returns string with hints."""
+        pdf_path = tmp_path / "with_hint.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4 dummy")
+
+        mock_result = _make_subprocess_result(
+            ["--- Page 1 ---", "Text", "[1 image(s) on this page -- use extract_images=true to see]"],
+            images=[],
+        )
+
+        tool = ReadFileTool()
+        with patch("src.tools.file_operations.subprocess.run", return_value=mock_result):
+            result = tool.execute(file_path=str(pdf_path))
+
+        assert isinstance(result.output, str)
+        assert "extract_images=true" in result.output
+
+    def test_multiple_interleaved_images(self, tmp_path):
+        """Test handling of multiple interleaved images."""
+        pdf_path = tmp_path / "multi_img.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4 dummy")
+
+        mock_images = [
+            {"base64": "img1data", "media_type": "image/png", "source": "page_1"},
+            {"base64": "img2data", "media_type": "image/jpeg", "source": "page_3"},
+        ]
+        mock_result = _make_subprocess_result(
+            ["--- Page 1 ---", "Page 1 text", "[IMAGE:0]",
+             "--- Page 2 ---", "Text only page",
+             "--- Page 3 ---", "Page 3 text", "[IMAGE:1]"],
+            images=mock_images,
+        )
+
+        tool = ReadFileTool()
+        with patch("src.tools.file_operations.subprocess.run", return_value=mock_result):
+            result = tool.execute(file_path=str(pdf_path), extract_images=True)
+
+        assert isinstance(result.output, list)
+        image_blocks = [b for b in result.output if b.get("type") == "image_url"]
+        assert len(image_blocks) == 2
+        assert result.metadata["image_count"] == 2
+
+
+# ---------------------------------------------------------------------------
+# _frame_tool_result multimodal tests
+# ---------------------------------------------------------------------------
+
+
+class TestFrameToolResultMultimodal:
+    """Tests for _frame_tool_result handling both str and list content."""
+
+    def test_string_content_unchanged(self):
+        """Test that string content produces the same framing as before."""
+        from src.core.agent import _frame_tool_result
+
+        result = _frame_tool_result("hello world", "read_file")
+
+        assert isinstance(result, str)
+        assert "[TOOL OUTPUT from read_file" in result
+        assert "hello world" in result
+        assert "[END TOOL OUTPUT]" in result
+
+    def test_list_content_frames_text_blocks(self):
+        """Test that list content frames text blocks and passes images through."""
+        from src.core.agent import _frame_tool_result
+
+        content = [
+            {"type": "text", "text": "Document text here"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+            {"type": "text", "text": "1 embedded image(s)"},
+        ]
+        result = _frame_tool_result(content, "read_file")
+
+        assert isinstance(result, list)
+        assert len(result) == 3
+
+        # Text blocks should be framed
+        assert result[0]["type"] == "text"
+        assert "[TOOL OUTPUT from read_file" in result[0]["text"]
+        assert "Document text here" in result[0]["text"]
+        assert "[END TOOL OUTPUT]" in result[0]["text"]
+
+        # Image blocks should pass through unchanged
+        assert result[1]["type"] == "image_url"
+        assert result[1]["image_url"]["url"] == "data:image/png;base64,abc"
+
+        # Second text block also framed
+        assert "[TOOL OUTPUT from read_file" in result[2]["text"]
+
+    def test_empty_list_returns_empty_list(self):
+        """Test that empty list content returns empty list."""
+        from src.core.agent import _frame_tool_result
+
+        result = _frame_tool_result([], "test_tool")
+        assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Anthropic backend multimodal tool result tests
+# ---------------------------------------------------------------------------
+
+
+class TestAnthropicMultimodalToolResult:
+    """Tests for Anthropic backend handling multimodal tool results."""
+
+    @pytest.fixture
+    def backend(self):
+        """Create an AnthropicBackend for translation testing."""
+        with patch("src.llm.anthropic_backend.Anthropic"), \
+             patch("src.llm.anthropic_backend.AsyncAnthropic"):
+            from src.llm.anthropic_backend import AnthropicBackend
+            config = LLMConfig(
+                backend_type=LLMBackendType.ANTHROPIC,
+                model_name="claude-sonnet-4-5-20250929",
+                base_url="https://api.anthropic.com",
+                context_window=200000,
+                temperature=0.2,
+                max_tokens=16384,
+                top_p=0.95,
+            )
+            return AnthropicBackend(config, api_key="test-key")
+
+    def test_string_tool_result_unchanged(self, backend):
+        """Test that string tool results translate as before."""
+        messages = [
+            {"role": "user", "content": "Read the file"},
+            {"role": "assistant", "content": "I'll read it.", "tool_calls": [
+                {"id": "tc_123", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}
+            ]},
+            {"role": "tool", "tool_call_id": "tc_123", "content": "file contents here"},
+        ]
+
+        _system, translated = backend._translate_messages(messages)
+
+        # Find the tool_result block
+        tool_msg = [m for m in translated if m["role"] == "user" and isinstance(m.get("content"), list)
+                     and any(b.get("type") == "tool_result" for b in m["content"])]
+        assert len(tool_msg) >= 1
+        tool_result = [b for b in tool_msg[-1]["content"] if b.get("type") == "tool_result"][0]
+        assert tool_result["content"] == "file contents here"
+        assert tool_result["tool_use_id"] == "tc_123"
+
+    def test_multimodal_tool_result_converted(self, backend):
+        """Test that list tool results convert image_url to Anthropic image blocks."""
+        multimodal_content = [
+            {"type": "text", "text": "Document text"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,dGVzdA=="}},
+            {"type": "text", "text": "1 embedded image(s)"},
+        ]
+
+        messages = [
+            {"role": "user", "content": "Read the PDF"},
+            {"role": "assistant", "content": "Reading.", "tool_calls": [
+                {"id": "tc_456", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}
+            ]},
+            {"role": "tool", "tool_call_id": "tc_456", "content": multimodal_content},
+        ]
+
+        _system, translated = backend._translate_messages(messages)
+
+        # Find the tool_result
+        tool_msg = [m for m in translated if m["role"] == "user" and isinstance(m.get("content"), list)
+                     and any(b.get("type") == "tool_result" for b in m["content"])]
+        assert len(tool_msg) >= 1
+        tool_result = [b for b in tool_msg[-1]["content"] if b.get("type") == "tool_result"][0]
+
+        # Content should be a list of Anthropic-format blocks
+        assert isinstance(tool_result["content"], list)
+        assert len(tool_result["content"]) == 3
+
+        # First: text block
+        assert tool_result["content"][0]["type"] == "text"
+        assert tool_result["content"][0]["text"] == "Document text"
+
+        # Second: image block (converted from image_url to Anthropic image)
+        img_block = tool_result["content"][1]
+        assert img_block["type"] == "image"
+        assert img_block["source"]["type"] == "base64"
+        assert img_block["source"]["media_type"] == "image/png"
+        assert img_block["source"]["data"] == "dGVzdA=="
+
+        # Third: text block
+        assert tool_result["content"][2]["type"] == "text"
+
+
+# ---------------------------------------------------------------------------
+# Display path multimodal safety tests
+# ---------------------------------------------------------------------------
+
+
+class TestGetTextContentMultimodal:
+    """Tests for Message.get_text_content() with multimodal content."""
+
+    def test_string_content_unchanged(self):
+        """get_text_content() returns string content as-is."""
+        from src.session.models.message import Message
+
+        msg = Message(role="tool", content="plain text", tool_call_id="tc_1")
+        assert msg.get_text_content() == "plain text"
+
+    def test_none_content_returns_empty(self):
+        """get_text_content() returns empty string for None."""
+        from src.session.models.message import Message
+
+        msg = Message(role="tool", content=None, tool_call_id="tc_1")
+        assert msg.get_text_content() == ""
+
+    def test_list_content_extracts_text_blocks(self):
+        """get_text_content() extracts text from multimodal list content."""
+        from src.session.models.message import Message
+
+        msg = Message(
+            role="tool",
+            content=[
+                {"type": "text", "text": "Document text here"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+                {"type": "text", "text": "[1 embedded image(s) extracted from document]"},
+            ],
+            tool_call_id="tc_1",
+        )
+        text = msg.get_text_content()
+
+        assert isinstance(text, str)
+        assert "Document text here" in text
+        assert "1 embedded image(s) extracted from document" in text
+        assert "1 image(s) embedded in document" in text  # count note from helper
+        assert "data:image/png" not in text  # base64 data NOT in display text
+
+    def test_list_content_no_images(self):
+        """get_text_content() handles list content with only text blocks."""
+        from src.session.models.message import Message
+
+        msg = Message(
+            role="tool",
+            content=[{"type": "text", "text": "Only text"}],
+            tool_call_id="tc_1",
+        )
+        text = msg.get_text_content()
+
+        assert text == "Only text"
+        assert "image" not in text
+
+    def test_empty_list_returns_empty(self):
+        """get_text_content() handles empty list."""
+        from src.session.models.message import Message
+
+        msg = Message(role="tool", content=[], tool_call_id="tc_1")
+        assert msg.get_text_content() == ""
+
+
+class TestSerializerMultimodal:
+    """Tests for serializer handling of multimodal tool results."""
+
+    def test_string_result_serialized_normally(self):
+        """String results are serialized as before."""
+        from src.server.serializers import serialize_store_notification
+        from src.core.events import ToolStatus as CoreToolStatus
+        from src.session.store.memory_store import StoreNotification, StoreEvent, ToolExecutionState
+
+        notification = StoreNotification(
+            event=StoreEvent.TOOL_STATE_UPDATED,
+            tool_call_id="tc_1",
+            tool_state=ToolExecutionState(
+                status=CoreToolStatus.SUCCESS,
+                result="plain text result",
+            ),
+        )
+
+        serialized = serialize_store_notification(notification)
+        assert serialized["data"]["result"] == "plain text result"
+
+    def test_list_result_extracted_to_text(self):
+        """Multimodal list results are extracted to display text."""
+        from src.server.serializers import serialize_store_notification
+        from src.core.events import ToolStatus as CoreToolStatus
+        from src.session.store.memory_store import StoreNotification, StoreEvent, ToolExecutionState
+
+        notification = StoreNotification(
+            event=StoreEvent.TOOL_STATE_UPDATED,
+            tool_call_id="tc_2",
+            tool_state=ToolExecutionState(
+                status=CoreToolStatus.SUCCESS,
+                result=[
+                    {"type": "text", "text": "Document content"},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+                    {"type": "text", "text": "[1 embedded image(s)]"},
+                ],
+            ),
+        )
+
+        serialized = serialize_store_notification(notification)
+        result_text = serialized["data"]["result"]
+
+        assert isinstance(result_text, str)
+        assert "Document content" in result_text
+        assert "1 image(s) embedded in document" in result_text
+        assert "data:image/png" not in result_text

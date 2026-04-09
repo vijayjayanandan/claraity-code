@@ -183,7 +183,25 @@ def serialize_store_notification(notification: StoreNotification) -> dict | None
 
         # Include optional fields only when present
         if tool_state.result is not None:
-            data["result"] = str(tool_state.result)
+            # Multimodal content (list of content blocks) needs text extraction
+            # for display, not Python repr() from str()
+            result = tool_state.result
+            if isinstance(result, list):
+                # Extract text blocks from multimodal content
+                texts = []
+                image_count = 0
+                for block in result:
+                    if isinstance(block, dict):
+                        if block.get("type") == "text":
+                            texts.append(block.get("text", ""))
+                        elif block.get("type") == "image_url":
+                            image_count += 1
+                display = "\n".join(texts)
+                if image_count:
+                    display += f"\n[{image_count} image(s) embedded in document]"
+                data["result"] = display
+            else:
+                data["result"] = str(result)
         if tool_state.error is not None:
             data["error"] = tool_state.error
         if tool_state.duration_ms is not None:
