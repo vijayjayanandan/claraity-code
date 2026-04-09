@@ -716,6 +716,93 @@ describe('ClarAItySidebarProvider', () => {
             );
         });
 
+        test('saveConfig forwards api_key in save_config for hot-swap', () => {
+            const { sendMessage } = resolveView();
+
+            const config = { model: 'claude-haiku-4-5-20251001', backend_type: 'anthropic', api_key: 'sk-ant-test' };
+            sendMessage({ type: 'saveConfig', config });
+
+            // api_key must reach the agent for hot-swap reconfigure_llm
+            expect(connection.send).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    type: 'save_config',
+                    config: expect.objectContaining({ api_key: 'sk-ant-test' }),
+                }),
+            );
+        });
+
+        test('saveConfig strips search_key from save_config', () => {
+            const { sendMessage } = resolveView();
+
+            const config = { model: 'gpt-4', search_key: 'tvly-secret' };
+            sendMessage({ type: 'saveConfig', config });
+
+            // search_key should be stripped (injected via env var at spawn)
+            const sentConfig = (connection.send as ReturnType<typeof vi.fn>).mock.calls
+                .find((c: unknown[]) => (c[0] as Record<string, unknown>).type === 'save_config')?.[0] as Record<string, unknown>;
+            expect((sentConfig.config as Record<string, unknown>).search_key).toBeUndefined();
+        });
+
+        test('saveConfig stores api_key in SecretStorage when present', async () => {
+            // Wire up a mock SecretStorage
+            const mockSecrets = {
+                get: vi.fn().mockResolvedValue(undefined),
+                store: vi.fn().mockResolvedValue(undefined),
+                delete: vi.fn().mockResolvedValue(undefined),
+                onDidChange: vi.fn(),
+            };
+            provider.setSecrets(mockSecrets as any);
+
+            const { sendMessage } = resolveView();
+
+            const config = { model: 'gpt-4o', api_key: 'sk-ant-new-key' };
+            sendMessage({ type: 'saveConfig', config });
+
+            // secrets.store should be called with the key
+            expect(mockSecrets.store).toHaveBeenCalledWith('claraity.apiKey', 'sk-ant-new-key');
+        });
+
+        test('saveConfig does NOT call secrets.store when api_key is absent', () => {
+            const mockSecrets = {
+                get: vi.fn().mockResolvedValue(undefined),
+                store: vi.fn().mockResolvedValue(undefined),
+                delete: vi.fn().mockResolvedValue(undefined),
+                onDidChange: vi.fn(),
+            };
+            provider.setSecrets(mockSecrets as any);
+
+            const { sendMessage } = resolveView();
+
+            const config = { model: 'gpt-4o' };
+            sendMessage({ type: 'saveConfig', config });
+
+            // No api_key in config — secrets.store should NOT be called for apiKey
+            const apiKeyCalls = mockSecrets.store.mock.calls.filter(
+                (c: unknown[]) => c[0] === 'claraity.apiKey',
+            );
+            expect(apiKeyCalls).toHaveLength(0);
+        });
+
+        test('saveConfig calls setApiKey on connection after storing', async () => {
+            const mockSecrets = {
+                get: vi.fn().mockResolvedValue(undefined),
+                store: vi.fn().mockResolvedValue(undefined),
+                delete: vi.fn().mockResolvedValue(undefined),
+                onDidChange: vi.fn(),
+            };
+            provider.setSecrets(mockSecrets as any);
+
+            const { sendMessage } = resolveView();
+
+            const config = { model: 'gpt-4o', api_key: 'sk-ant-hot-swap' };
+            sendMessage({ type: 'saveConfig', config });
+
+            // Wait for the secrets.store promise to resolve
+            await vi.waitFor(() => {
+                expect(connection.setApiKey).toHaveBeenCalledWith('sk-ant-hot-swap');
+            });
+        });
+
         test('listModels sends list_models with backend details to server', () => {
             const { sendMessage } = resolveView();
 

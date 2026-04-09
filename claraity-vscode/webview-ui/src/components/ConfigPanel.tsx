@@ -237,8 +237,12 @@ export function ConfigPanel({
 
   const isDirty = useMemo(() => {
     if (!savedSnapshot.current) return false;
-    return !snapshotEqual(currentSnapshot, savedSnapshot.current);
-  }, [currentSnapshot]);
+    // Keys are write-only (never loaded into the snapshot).  If the user
+    // typed a new value the form is dirty regardless of other fields.
+    const keyChanged = apiKey !== "" && apiKey !== KEY_STORED_SENTINEL;
+    const sKeyChanged = searchKey !== "" && searchKey !== KEY_STORED_SENTINEL;
+    return !snapshotEqual(currentSnapshot, savedSnapshot.current) || keyChanged || sKeyChanged;
+  }, [currentSnapshot, apiKey, searchKey]);
 
   // ── Backend change ───────────────────────────────────────────────────────────
   const handleBackendChange = useCallback((val: string) => {
@@ -356,7 +360,7 @@ export function ConfigPanel({
       system_prompt: enrichmentSystemPrompt.trim(),
     };
     postMessage({ type: "saveConfig", config: payload });
-  }, [currentSnapshot, subagentModels, configSubagentNames, postMessage]);
+  }, [currentSnapshot, subagentModels, configSubagentNames, apiKey, searchKey, enrichmentModel, enrichmentSystemPrompt, postMessage]);
 
   // ── Cancel ───────────────────────────────────────────────────────────────────
   // Resets all fields to the last saved values. Does not navigate away.

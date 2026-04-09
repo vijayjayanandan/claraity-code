@@ -138,6 +138,25 @@ class TestSaveConfigFromRequest:
         # API key should be in the response for runtime use
         assert result["_api_key"] == "sk-new-key"
         # But not written to YAML (save_llm_config never receives it)
+        saved_cfg = mock_save.call_args[0][0]
+        assert saved_cfg.api_key == ""  # LLMConfigData.api_key stays default
+
+    @patch("src.llm.config_loader.save_llm_config", return_value=True)
+    def test_api_key_empty_when_not_provided(self, mock_save):
+        """When frontend doesn't include api_key, _api_key should be empty."""
+        data = {"config": {"model": "gpt-4o"}}
+        result = save_config_from_request(data, "/fake/config.yaml")
+        assert result["_api_key"] == ""
+
+    @patch("src.llm.config_loader.save_llm_config", return_value=True)
+    def test_config_object_returned_for_hot_swap(self, mock_save):
+        """_config must be present in response so stdio_server can hot-swap."""
+        data = {"config": {"backend_type": "anthropic", "model": "claude-haiku-4-5-20251001"}}
+        result = save_config_from_request(data, "/fake/config.yaml")
+        assert result["success"] is True
+        cfg = result["_config"]
+        assert cfg.backend_type == "anthropic"
+        assert cfg.model == "claude-haiku-4-5-20251001"
 
     @patch("src.llm.config_loader.save_llm_config", return_value=False)
     def test_save_failure(self, mock_save):

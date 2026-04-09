@@ -1666,13 +1666,19 @@ class OpenAIBackend(LLMBackend):
         """
         list available models.
 
+        Raises on auth/connection errors so the UI can surface them.
+        Only swallows 404/405 (endpoint not supported by some providers).
+
         Returns:
             list of model names
         """
         try:
             models_response = self.client.models.list(timeout=10.0)
             return [model.id for model in models_response.data]
-        except Exception:
-            # If listing fails, return empty list
-            # Different providers have different model listing support
+        except Exception as exc:
+            # Let auth and connection errors propagate to the UI
+            exc_name = type(exc).__name__
+            if "Auth" in exc_name or "Permission" in exc_name or "Connection" in exc_name:
+                raise
+            # Swallow 404/405 from providers that don't support model listing
             return []

@@ -227,9 +227,18 @@ def _list_models(backend: str, base_url: str, api_key: str) -> list[str]:
     from src.llm.base import LLMBackendType, LLMConfig
 
     if backend == "anthropic":
-        from src.llm.anthropic_backend import KNOWN_CLAUDE_MODELS
+        from src.llm.anthropic_backend import AnthropicBackend
 
-        return list(KNOWN_CLAUDE_MODELS)
+        config = LLMConfig(
+            backend_type=LLMBackendType.ANTHROPIC,
+            model_name="temp",
+            base_url=base_url,
+            temperature=0.2,
+            max_tokens=1024,
+            top_p=0.95,
+            context_window=4096,
+        )
+        return AnthropicBackend(config, api_key=api_key).list_models()
     else:
         from src.llm.openai_backend import OpenAIBackend
 

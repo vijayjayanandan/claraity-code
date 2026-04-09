@@ -60,19 +60,6 @@ from .failure_handler import LLMFailureHandler
 # Allowlisted image MIME types for multimodal content (security: reject unknown/malformed)
 _SAFE_IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
 
-# Known Claude models (Anthropic has no list models endpoint)
-KNOWN_CLAUDE_MODELS = [
-    "claude-opus-4-20250514",
-    "claude-sonnet-4-20250514",
-    "claude-sonnet-4-5-20250929",
-    "claude-haiku-4-5-20251001",
-    "claude-3-5-sonnet-20241022",
-    "claude-3-5-haiku-20241022",
-    "claude-3-opus-20240229",
-    "claude-3-sonnet-20240229",
-    "claude-3-haiku-20240307",
-]
-
 # Stop reason mapping: Anthropic -> OpenAI-compatible
 STOP_REASON_MAP = {
     "end_turn": "stop",
@@ -1540,8 +1527,9 @@ class AnthropicBackend(LLMBackend):
             return False
 
     def list_models(self) -> list[str]:
-        """Return known Claude model IDs (Anthropic has no list endpoint)."""
-        return list(KNOWN_CLAUDE_MODELS)
+        """Fetch available models from the Anthropic API."""
+        response = self.client.models.list(limit=100)
+        return [m.id for m in response.data]
 
     def log_cache_summary(self) -> None:
         """Log prompt caching performance summary."""

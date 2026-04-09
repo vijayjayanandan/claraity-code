@@ -417,9 +417,12 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                     });
                 }
 
-                // Strip secrets before forwarding to agent (agent reads from env vars)
-                const { api_key: _stripped, search_key: _sStripped, ...configWithoutKey } = config;
-                this.connection?.send({ type: 'save_config', config: configWithoutKey } as ClientMessage);
+                // Forward config to agent — include api_key so the running process
+                // can hot-swap backends without a restart.  The Python side uses it
+                // for reconfigure_llm() but never persists it to config.yaml.
+                // Strip search_key only (injected via env var at spawn).
+                const { search_key: _sStripped, ...configWithoutSearchKey } = config;
+                this.connection?.send({ type: 'save_config', config: configWithoutSearchKey } as ClientMessage);
                 break;
             }
 
