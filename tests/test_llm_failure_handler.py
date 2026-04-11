@@ -946,6 +946,62 @@ class TestClassifyProviderError:
         assert result is original
         assert result.user_message == "My custom message"
 
+    # -- Production log reproduction (real exception chains from logs) --
+
+    def test_production_thinking_budget_too_low(self):
+        """Exact exception chain from production log: thinking_budget below minimum.
+
+        Chain: RuntimeError -> APIError
+        root_cause_message contains litellm-wrapped Anthropic bytes payload.
+        """
+        inner = Exception(
+            "litellm.BadRequestError: AnthropicException - "
+            "b'{\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\","
+            "\"message\":\"thinking.enabled.budget_tokens: Input should be greater than or equal to 1024\"}}'"
+            " LiteLLM Retried: 1 times"
+        )
+        outer = RuntimeError("OpenAI async provider delta error: APIError: " + str(inner))
+        outer.__cause__ = inner
+
+        result = classify_provider_error(outer)
+
+        assert isinstance(result, InvalidRequestError)
+        assert result.event_type == "config_error"
+        assert result.retryable is False
+        # Provider message preserved (constraint value from API, not hardcoded)
+        assert "greater than or equal to 1024" in result.user_message
+        # Field path prefix stripped ("thinking.enabled.budget_tokens:" not shown)
+        assert "thinking.enabled.budget_tokens" not in result.user_message
+        # Actionable hint appended
+        assert "Settings > Thinking Budget" in result.user_message
+
+    def test_production_invalid_model_403(self):
+        """Exact exception chain from production log: invalid model name returns 403.
+
+        Chain: RuntimeError -> PermissionDeniedError
+        Provider uses 403 with ModelAuthorizationError for unrecognised model names.
+        Must NOT classify as NetworkError or InvalidAPIKeyError.
+        """
+        inner = Exception(
+            "Error code: 403 - {'error': {'message': "
+            "\"Authorization failed for model 'claude-sonnet-4-62'. "
+            "The model may be unavailable, retired, or not enabled for your organization. "
+            "If your API key is valid, verify the model name is correct and currently supported.\", "
+            "'type': 'basicllm.schemas.errors.ModelAuthorizationError', "
+            "'param': {'model': 'claude-sonnet-4-62'}, 'code': 403}}"
+        )
+        outer = RuntimeError("OpenAI async provider delta error: PermissionDeniedError: " + str(inner))
+        outer.__cause__ = inner
+
+        result = classify_provider_error(outer)
+
+        assert isinstance(result, InvalidModelError), (
+            f"Expected InvalidModelError, got {type(result).__name__}: {result.user_message}"
+        )
+        assert result.event_type == "config_error"
+        assert result.retryable is False
+        assert "API configuration error" in result.user_message
+
     # -- handle_api_error backward compat --
 
     def test_handle_api_error_still_returns_tuple(self):
@@ -971,3 +1027,67 @@ class TestClassifyProviderError:
 if __name__ == "__main__":
     # Run tests with pytest
     pytest.main([__file__, "-v", "--tb=short"])
+
+
+class TestHumanizeConfigError:
+    """Tests for _humanize_config_error() and the full classify -> user_message pipeline."""
+
+    def test_field_path_prefix_stripped(self):
+        """Dotted field path prefix is removed; constraint value is preserved."""
+        exc = Exception("thinking.enabled.budget_tokens: Input should be greater than or equal to 1024")
+        result = classify_provider_error(exc)
+        assert "thinking.enabled.budget_tokens" not in result.user_message
+        assert "greater than or equal to 1024" in result.user_message
+        assert "Settings > Thinking Budget" in result.user_message
+
+    def test_no_field_path_prefix_unchanged(self):
+        """Messages without a dotted prefix are passed through as-is."""
+        exc = Exception("temperature must be between 0 and 2")
+        result = classify_provider_error(exc)
+        assert "temperature must be between 0 and 2" in result.user_message.lower()
+        assert "Settings > Temperature" in result.user_message
+
+    def test_max_tokens_hint(self):
+        """max_tokens validation error maps to Settings > Max Tokens."""
+        exc = Exception("max_tokens must not exceed 4096 for this model")
+        result = classify_provider_error(exc)
+        assert "Settings > Max Tokens" in result.user_message
+
+    def test_ansi_codes_stripped_once_in_extract(self):
+        """ANSI escape codes in the root message are stripped before humanization."""
+        exc = Exception("\x1b[31mbudget_tokens: Input should be greater than or equal to 1024\x1b[0m")
+        result = classify_provider_error(exc)
+        assert "\x1b[" not in result.user_message
+        assert "greater than or equal to 1024" in result.user_message
+
+    def test_false_positive_generic_phrase_without_config_field(self):
+        """'greater than or equal to' alone does NOT trigger InvalidRequestError."""
+        exc = Exception("Value must be greater than or equal to the threshold")
+        result = classify_provider_error(exc)
+        assert not isinstance(result, InvalidRequestError)
+
+    def test_sentence_boundary_truncation(self):
+        """Long messages are truncated at a sentence boundary, not mid-word."""
+        long_msg = ("budget_tokens: " + "This is sentence one. " * 10 +
+                    "This is sentence two. " * 10)
+        exc = Exception(long_msg)
+        result = classify_provider_error(exc)
+        # Must not cut mid-sentence (no trailing partial word before hint)
+        msg = result.user_message
+        hint_pos = msg.find(" Go to ")
+        if hint_pos > 0:
+            before_hint = msg[:hint_pos]
+            assert before_hint.endswith("."), f"Expected sentence boundary before hint, got: {before_hint[-20:]!r}"
+
+    def test_period_added_before_hint(self):
+        """A period is inserted between the provider message and the hint if missing."""
+        exc = Exception("budget_tokens: Input should be greater than or equal to 1024")
+        result = classify_provider_error(exc)
+        # hint must be preceded by ". Go to"
+        assert ". Go to" in result.user_message
+
+    def test_no_hint_for_unknown_field(self):
+        """Errors with no matching field produce a clean message without a hint."""
+        exc = Exception("invalid_request_error: some unknown parameter is wrong")
+        result = classify_provider_error(exc)
+        assert "Go to" not in result.user_message

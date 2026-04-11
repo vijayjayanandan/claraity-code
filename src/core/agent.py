@@ -2064,6 +2064,18 @@ class CodingAgent(AgentInterface):
                     from src.llm.failure_handler import classify_provider_error
                     _classified = classify_provider_error(e)
 
+                    # recoverable = agent stays alive after this error (user can fix and retry).
+                    # This is distinct from _classified.retryable (auto-retry loop).
+                    # Config errors (bad model, bad params) are NOT auto-retried but ARE
+                    # recoverable -- the agent must stay alive so the user can fix Settings.
+                    # Only True network errors that exhaust retries are non-recoverable here,
+                    # and even then we keep the agent alive (recoverable=True) since killing
+                    # the connection on a transient network blip is worse than staying idle.
+                    # In practice recoverable=True for all error types -- the extension's
+                    # disconnect-on-recoverable=false path is reserved for genuine process
+                    # failures signalled elsewhere (e.g. stdio_server startup errors).
+                    _recoverable = True
+
                     # Emit ErrorEvent for TUI visibility
                     from src.core.events import ErrorEvent
 
@@ -2071,7 +2083,7 @@ class CodingAgent(AgentInterface):
                         error_type=_classified.event_type,
                         user_message=_classified.user_message,
                         error_id=error_id,
-                        recoverable=_classified.retryable,
+                        recoverable=_recoverable,
                         retry_after=None,
                     )
 

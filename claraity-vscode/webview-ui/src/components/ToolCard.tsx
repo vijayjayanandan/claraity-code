@@ -23,7 +23,7 @@ export const ToolCard = memo(function ToolCard({ data, postMessage }: ToolCardPr
   const [showResult, setShowResult] = useState(false);
   // Optimistic status: immediately reflect user's approval/rejection click
   // so the widget updates without waiting for the backend round-trip.
-  const [optimisticStatus, setOptimisticStatus] = useState<"approved" | "rejected" | null>(null);
+  const [optimisticStatus, setOptimisticStatus] = useState<"running" | "rejected" | null>(null);
 
   const toolName = data.tool_name || "tool";
   const icon = TOOL_ICONS[toolName] || "T";
@@ -41,7 +41,7 @@ export const ToolCard = memo(function ToolCard({ data, postMessage }: ToolCardPr
     : data.status;
 
   const handleApprove = useCallback(() => {
-    setOptimisticStatus("approved");
+    setOptimisticStatus("running");
     postMessage({ type: "approvalResult", callId: data.call_id, approved: true });
   }, [data.call_id, postMessage]);
 

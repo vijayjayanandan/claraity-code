@@ -1,7 +1,7 @@
 /**
  * Collapsible task/todo panel.
  */
-import { useState } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 
 interface TodoPanelProps {
   todos: unknown[];
@@ -16,6 +16,21 @@ interface TodoItem {
 
 export function TodoPanel({ todos }: TodoPanelProps) {
   const [collapsed, setCollapsed] = useState(true);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // Close panel when clicking outside
+  const handleClickOutside = useCallback((e: MouseEvent) => {
+    if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+      setCollapsed(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!collapsed) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [collapsed, handleClickOutside]);
 
   const items = todos as TodoItem[];
   const active = items.filter((t) => t.status === "in_progress").length;
@@ -29,7 +44,7 @@ export function TodoPanel({ todos }: TodoPanelProps) {
     : `Tasks: ${completed}/${total} done`;
 
   return (
-    <div className="todo-panel">
+    <div className="todo-panel" ref={panelRef}>
       <div className="todo-header" onClick={() => setCollapsed(!collapsed)}>
         <span className="todo-summary">
           {collapsedText}

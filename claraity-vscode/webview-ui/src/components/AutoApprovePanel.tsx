@@ -1,7 +1,7 @@
 /**
  * Auto-approve and iteration limit settings panel.
  */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import type { LimitsData } from "../types";
 
 interface AutoApprovePanelProps {
@@ -18,9 +18,24 @@ export function AutoApprovePanel({
 }: AutoApprovePanelProps) {
   const [expanded, setExpanded] = useState(false);
   const [draft, setDraft] = useState<LimitsData>(limits);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { setDraft(limits); }, [limits]);
   useEffect(() => { if (expanded) onLoadLimits(); }, [expanded]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Close panel when clicking outside
+  const handleClickOutside = useCallback((e: MouseEvent) => {
+    if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+      setExpanded(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (expanded) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [expanded, handleClickOutside]);
 
   const activeCategories: string[] = [];
   if (autoApprove.read) activeCategories.push("Read");
@@ -43,7 +58,7 @@ export function AutoApprovePanel({
   }
 
   return (
-    <div className="auto-approve-panel">
+    <div className="auto-approve-panel" ref={panelRef}>
       <div className="auto-approve-header" onClick={() => setExpanded(!expanded)}>
         <span className={`auto-approve-summary ${activeCategories.length > 0 ? "has-active" : ""}`}>
           {summaryText}

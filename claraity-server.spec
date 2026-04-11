@@ -65,6 +65,7 @@ a = Analysis(
         "src.tools.base",
         "src.tools.delegation",
         "src.tools.file_operations",
+        "src.tools.document_extractor",
         "src.tools.tool_schemas",
         "src.tools.knowledge_tools",
         # Memory
@@ -93,6 +94,9 @@ a = Analysis(
         # Testing
         "src.testing.test_runner",
         # Third-party hidden imports
+        "fitz",           # PyMuPDF - PDF extraction
+        "pymupdf",        # PyMuPDF alternate import name
+        "docx",           # python-docx - Word extraction
         "bs4",
         "emoji",
         "aiohttp",

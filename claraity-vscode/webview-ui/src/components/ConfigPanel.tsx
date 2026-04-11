@@ -347,8 +347,8 @@ export function ConfigPanel({
       base_url: snap.baseUrl,
       model: snap.model,
       temperature: snap.temperature,
-      max_tokens: snap.maxTokens,
-      context_window: snap.contextWindow,
+      max_tokens: snap.maxTokens || null,
+      context_window: snap.contextWindow || null,
       thinking_budget: snap.thinkingBudget || null,
       web_search_provider: snap.searchProvider,
       subagent_models: snap.subagentModels,
@@ -500,7 +500,7 @@ export function ConfigPanel({
           </Field>
 
           {/* Temperature */}
-          <Field label={`Temperature: ${temperature}`}>
+          <Field label={`Temperature: ${temperature}`} hint="Controls randomness. Lower = more focused and deterministic, higher = more creative.">
             <input
               type="range"
               min={0}
@@ -518,27 +518,29 @@ export function ConfigPanel({
           </Field>
 
           {/* Max Tokens */}
-          <Field label="Max Tokens">
+          <Field label="Max Tokens" hint="Maximum number of tokens in the model's response.">
             <input
               className="form-input"
               type="number"
-              value={maxTokens}
-              onChange={(e) => setMaxTokens(parseInt(e.target.value) || 0)}
+              value={maxTokens || ""}
+              onChange={(e) => { const v = parseInt(e.target.value); setMaxTokens(isNaN(v) ? 0 : v); }}
+              placeholder="default: 16384"
             />
           </Field>
 
           {/* Context Window */}
-          <Field label="Context Window">
+          <Field label="Context Window" hint="Maximum tokens the model can process (prompt + response combined).">
             <input
               className="form-input"
               type="number"
-              value={contextWindow}
-              onChange={(e) => setContextWindow(parseInt(e.target.value) || 0)}
+              value={contextWindow || ""}
+              onChange={(e) => { const v = parseInt(e.target.value); setContextWindow(isNaN(v) ? 0 : v); }}
+              placeholder="default: 131072"
             />
           </Field>
 
           {/* Thinking Budget: supported by Anthropic and OpenAI-compatible backends */}
-          <Field label="Thinking Budget (tokens)">
+          <Field label="Thinking Budget (tokens)" hint="Tokens reserved for the model's internal reasoning before responding.">
             <input
               className="form-input"
               type="text"
@@ -757,10 +759,11 @@ export function ConfigPanel({
   );
 }
 
-function Field({ label, children }: { label: React.ReactNode; children: React.ReactNode }) {
+function Field({ label, hint, children }: { label: React.ReactNode; hint?: string; children: React.ReactNode }) {
   return (
     <div className="form-field">
       <label className="form-label">{label}</label>
+      {hint && <span className="form-hint">{hint}</span>}
       {children}
     </div>
   );

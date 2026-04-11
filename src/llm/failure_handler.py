@@ -196,6 +196,9 @@ _CONTENT_POLICY_SIGNALS: frozenset[str] = frozenset({
 
 _MODEL_SIGNALS: frozenset[str] = frozenset({
     "invalid_model", "invalid model", "model not found", "404",
+    # 403 PermissionDeniedError from providers that gate models per-org
+    "403", "modelauthorizationerror", "authorization failed for model",
+    "model may be unavailable", "permissiondenied",
 })
 
 # Full phrases only -- no bare "invalid_request" (too broad, catches content policy)
@@ -204,7 +207,21 @@ _INVALID_REQUEST_SIGNALS: frozenset[str] = frozenset({
     "invalid value for", "must be between", "must be a",
     "max_tokens must", "temperature must", "top_p must",
     "top_p not supported",
+    "budget_tokens",  # Anthropic thinking budget validation errors
 })
+
+# Generic validation phrases that only count as invalid-request when a known
+# config field is also present in the error text.
+_CONDITIONAL_INVALID_REQUEST_PHRASES: tuple[str, ...] = (
+    "greater than or equal to",
+    "less than or equal to",
+    "input should be",
+)
+
+# Config field names used to gate _CONDITIONAL_INVALID_REQUEST_PHRASES
+_CONFIG_FIELD_NAMES: tuple[str, ...] = (
+    "budget_tokens", "temperature", "max_tokens", "top_p", "context_window",
+)
 
 _CONTEXT_LENGTH_SIGNALS: frozenset[str] = frozenset({
     "context_length_exceeded", "maximum context length",
@@ -252,7 +269,87 @@ def _extract_root_cause_message(exc: Exception) -> str:
     if msg_match:
         return msg_match.group(1)
 
-    return raw
+    # Handle Python dict repr: {'error': {'message': "..."}} or {'message': '...'}
+    # The value may be double- or single-quoted; if double-quoted, capture until closing ".
+    # If single-quoted, capture until the closing ' that is followed by } or end.
+    msg_match = re.search(r"'message'\s*:\s*\"([^\"]+)\"", raw)
+    if not msg_match:
+        msg_match = re.search(r"'message'\s*:\s*'((?:[^'\\]|\\.)+)'", raw)
+    if msg_match:
+        return msg_match.group(1)
+
+    # Strip ANSI escape codes before returning -- callers (including _humanize_config_error)
+    # receive a clean string and do not need to strip again.
+    return re.sub(r"\x1b\[[0-9;]*m", "", raw).strip()
+
+
+# Maps known SDK field path fragments to the Settings label the user sees.
+_FIELD_TO_SETTING: list[tuple[str, str]] = [
+    ("budget_tokens",  "Settings > Thinking Budget"),
+    ("temperature",    "Settings > Temperature"),
+    ("max_tokens",     "Settings > Max Tokens"),
+    ("top_p",          "Settings"),
+    ("model",          "Settings > Model"),
+    ("base_url",       "Settings > Base URL"),
+]
+
+
+def _humanize_config_error(provider_msg: str) -> str:
+    """Translate a provider validation error message into an actionable user message.
+
+    Receives the already-extracted, ANSI-clean message from _extract_root_cause_message.
+
+    Strategy:
+    1. Strip SDK-internal field path prefix (e.g. "thinking.enabled.budget_tokens: ")
+       so only the provider's human-readable constraint text remains.
+    2. Truncate at a sentence boundary if the message is very long.
+    3. Append a contextual "Go to <Setting>" hint via a stable field->label lookup,
+       so the user knows exactly where to fix it.
+    4. Never hardcode constraint values -- they come from the provider message itself.
+    """
+    # Strip leading dotted field path prefix: "thinking.enabled.budget_tokens: msg"
+    # A field path has no spaces and contains at least one dot (e.g. "a.b.c").
+    # Split on the first ": " only -- if the left side looks like a field path, drop it.
+    msg = provider_msg.strip()
+    if ": " in msg:
+        prefix, _, rest = msg.partition(": ")
+        if "." in prefix and " " not in prefix.strip():
+            msg = rest
+    msg = " ".join(msg.split())
+
+    # Truncate at a sentence boundary to avoid cutting mid-word.
+    # Walk forward finding ". ", "! ", "? " boundaries.
+    if len(msg) > 300:
+        truncated = ""
+        pos = 0
+        while pos < len(msg):
+            end = pos
+            while end < len(msg) and not (
+                msg[end] in ".!?" and end + 1 < len(msg) and msg[end + 1] == " "
+            ):
+                end += 1
+            sentence = msg[pos: end + 1].strip()
+            if truncated and len(truncated) + 1 + len(sentence) > 300:
+                break
+            truncated = (truncated + " " + sentence).strip()
+            pos = end + 2  # skip past the space after punctuation
+        msg = truncated or msg[:300]
+
+    if not msg:
+        return " ".join(provider_msg.split())[:200]
+
+    # Find which setting to point the user to
+    lower = provider_msg.lower()
+    setting_hint = ""
+    for field, label in _FIELD_TO_SETTING:
+        if field in lower:
+            setting_hint = f" Go to {label} to fix this."
+            break
+
+    # Ensure the message ends with a period before appending the hint
+    if setting_hint and not msg.endswith("."):
+        msg += "."
+    return f"{msg}{setting_hint}"
 
 
 def _build_combined_text(exc: Exception) -> str:
@@ -304,11 +401,10 @@ def classify_provider_error(exc: Exception) -> LLMError:
     # 4. Invalid API key / auth (specific signals only)
     if any(s in combined or s in type_name for s in _AUTH_SIGNALS):
         root_msg = _extract_root_cause_message(exc)
-        clean = re.sub(r"\x1b\[[0-9;]*m", "", root_msg)
-        clean = " ".join(clean.split())[:200]
+        friendly = _humanize_config_error(root_msg)
         return InvalidAPIKeyError(
             str(exc),
-            user_message=f"API configuration error: {clean}",
+            user_message=f"API configuration error: {friendly}",
         )
 
     # 5. Content policy (before invalid_request -- some providers send both signals)
@@ -318,21 +414,25 @@ def classify_provider_error(exc: Exception) -> LLMError:
     # 6. Invalid model
     if any(s in combined or s in type_name for s in _MODEL_SIGNALS):
         root_msg = _extract_root_cause_message(exc)
-        clean = re.sub(r"\x1b\[[0-9;]*m", "", root_msg)
-        clean = " ".join(clean.split())[:200]
+        friendly = _humanize_config_error(root_msg)
         return InvalidModelError(
             str(exc),
-            user_message=f"API configuration error: {clean}",
+            user_message=f"API configuration error: {friendly}",
         )
 
-    # 7. Invalid request / bad params (full phrases only)
-    if any(s in combined for s in _INVALID_REQUEST_SIGNALS):
+    # 7. Invalid request / bad params
+    # Unconditional signals match on their own; conditional phrases only match
+    # when a known config field name is also present (prevents false positives).
+    _conditional_match = (
+        any(phrase in combined for phrase in _CONDITIONAL_INVALID_REQUEST_PHRASES)
+        and any(field in combined for field in _CONFIG_FIELD_NAMES)
+    )
+    if any(s in combined for s in _INVALID_REQUEST_SIGNALS) or _conditional_match:
         root_msg = _extract_root_cause_message(exc)
-        clean = re.sub(r"\x1b\[[0-9;]*m", "", root_msg)
-        clean = " ".join(clean.split())[:200]
+        friendly = _humanize_config_error(root_msg)
         return InvalidRequestError(
             str(exc),
-            user_message=f"API configuration error: {clean}",
+            user_message=f"API configuration error: {friendly}",
         )
 
     # 8. Context length

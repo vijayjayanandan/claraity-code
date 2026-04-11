@@ -8,7 +8,7 @@
  * - Dismiss button to remove finished tasks from the panel
  * - Auto-clear of completed tasks after 60 seconds
  */
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import type { BackgroundTaskData } from "../types";
 
 interface BackgroundTaskPanelProps {
@@ -39,6 +39,21 @@ export function BackgroundTaskPanel({ tasks, onCancel, onDismiss }: BackgroundTa
   const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set());
   // Track when each finished task was first seen so we can auto-clear it
   const completionTimes = useRef<Map<string, number>>(new Map());
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // Close panel when clicking outside
+  const handleClickOutside = useCallback((e: MouseEvent) => {
+    if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+      setCollapsed(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!collapsed) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [collapsed, handleClickOutside]);
 
   // Auto-clear completed tasks after AUTO_CLEAR_MS
   useEffect(() => {
@@ -93,7 +108,7 @@ export function BackgroundTaskPanel({ tasks, onCancel, onDismiss }: BackgroundTa
   const hasOutput = (task: BackgroundTaskData) => !!(task.stdout || task.stderr);
 
   return (
-    <div className="bg-task-panel">
+    <div className="bg-task-panel" ref={panelRef}>
       <div className="bg-task-header" onClick={() => setCollapsed(!collapsed)}>
         <span className="bg-task-summary">
           {running.length > 0 && <span className="bg-task-dot" />}
