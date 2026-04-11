@@ -15,11 +15,14 @@ from src.llm.failure_handler import (
     LLMError,
     RateLimitError,
     TimeoutError,
+    NetworkError,
     ValidationError,
     InvalidAPIKeyError,
     InvalidModelError,
+    InvalidRequestError,
     ContextLengthExceededError,
     ContentPolicyViolationError,
+    classify_provider_error,
 )
 
 
@@ -72,7 +75,7 @@ class TestErrorClassification:
         is_retryable, msg = handler.handle_api_error(error)
 
         assert is_retryable is False
-        assert "fatal" in msg.lower()
+        assert msg  # has a user-friendly message
 
     def test_fatal_invalid_model(self):
         """Test invalid model is fatal."""
@@ -82,7 +85,7 @@ class TestErrorClassification:
         is_retryable, msg = handler.handle_api_error(error)
 
         assert is_retryable is False
-        assert "fatal" in msg.lower()
+        assert msg
 
     def test_fatal_context_length_exceeded(self):
         """Test context length exceeded is fatal."""
@@ -92,12 +95,12 @@ class TestErrorClassification:
         is_retryable, msg = handler.handle_api_error(error)
 
         assert is_retryable is False
-        assert "fatal" in msg.lower()
+        assert msg
 
     def test_fatal_authentication_error(self):
-        """Test authentication errors are fatal."""
+        """Test authentication_error signal is fatal (specific signal, not bare word)."""
         handler = LLMFailureHandler(enable_jitter=False, show_progress=False)
-        error = Exception("Authentication failed: Check your API key")
+        error = Exception("authentication_error: Check your API key")
 
         is_retryable, msg = handler.handle_api_error(error)
 
@@ -112,7 +115,7 @@ class TestErrorClassification:
 
         # Conservative approach: retry unknown errors
         assert is_retryable is True
-        assert "unknown" in msg.lower()
+        assert msg  # has some user-facing message
 
 
 class TestExponentialBackoff:
@@ -194,9 +197,9 @@ class TestExponentialBackoff:
         with pytest.raises(LLMError) as exc_info:
             handler.execute_with_retry(mock_func, max_attempts=5)
 
-        # Should fail immediately, not retry
+        # Should fail immediately, not retry, and raise a typed non-retryable exception
         assert mock_func.call_count == 1
-        assert "fatal" in str(exc_info.value).lower()
+        assert exc_info.value.retryable is False
 
     def test_custom_backoff_base(self):
         """Test custom backoff base (3.0 instead of 2.0)."""
@@ -818,6 +821,151 @@ class TestUserProgress:
 
             # Should show countdown (multiple safe_print calls)
             assert mock_print.call_count > 5  # Multiple countdown updates
+
+
+class TestClassifyProviderError:
+    """Tests for the centralized classify_provider_error() classifier."""
+
+    # -- Typed returns --
+
+    def test_timeout_returns_timeout_error(self):
+        result = classify_provider_error(Exception("Request timed out after 30s"))
+        assert isinstance(result, TimeoutError)
+        assert result.event_type == "provider_timeout"
+        assert result.retryable is True
+
+    def test_rate_limit_returns_rate_limit_error(self):
+        result = classify_provider_error(Exception("429 Too Many Requests"))
+        assert isinstance(result, RateLimitError)
+        assert result.event_type == "rate_limit"
+        assert result.retryable is True
+
+    def test_network_returns_network_error(self):
+        result = classify_provider_error(Exception("Connection reset by peer"))
+        assert isinstance(result, NetworkError)
+        assert result.event_type == "network"
+        assert result.retryable is True
+
+    def test_invalid_api_key_via_401(self):
+        result = classify_provider_error(Exception("401 Unauthorized: bad credentials"))
+        assert isinstance(result, InvalidAPIKeyError)
+        assert result.event_type == "config_error"
+        assert result.retryable is False
+
+    def test_invalid_api_key_via_signal(self):
+        result = classify_provider_error(Exception("invalid_api_key: The key is wrong"))
+        assert isinstance(result, InvalidAPIKeyError)
+        assert result.retryable is False
+
+    def test_invalid_model_via_signal(self):
+        result = classify_provider_error(Exception("invalid_model: gpt-99 does not exist"))
+        assert isinstance(result, InvalidModelError)
+        assert result.event_type == "config_error"
+        assert result.retryable is False
+        assert "API configuration error" in result.user_message
+
+    def test_invalid_model_via_404(self):
+        result = classify_provider_error(Exception("404 model not found"))
+        assert isinstance(result, InvalidModelError)
+        assert result.retryable is False
+
+    def test_content_policy_is_distinct_from_config_error(self):
+        result = classify_provider_error(Exception("content_policy_violation: request refused"))
+        assert isinstance(result, ContentPolicyViolationError)
+        assert result.event_type == "content_policy"  # NOT "config_error"
+        assert result.retryable is False
+
+    def test_content_policy_not_labeled_api_config_error(self):
+        result = classify_provider_error(Exception("content policy violation detected"))
+        assert result.event_type == "content_policy"
+        assert "content policy" in result.user_message.lower()
+
+    def test_invalid_request_bad_temperature(self):
+        result = classify_provider_error(Exception("invalid value for 'temperature': must be between 0 and 2"))
+        assert isinstance(result, InvalidRequestError)
+        assert result.event_type == "config_error"
+        assert result.retryable is False
+        assert "API configuration error" in result.user_message
+
+    def test_invalid_request_bad_max_tokens(self):
+        result = classify_provider_error(Exception("max_tokens must be a positive integer"))
+        assert isinstance(result, InvalidRequestError)
+        assert result.retryable is False
+
+    def test_invalid_request_error_string(self):
+        result = classify_provider_error(Exception("invalid_request_error: bad parameter"))
+        assert isinstance(result, InvalidRequestError)
+        assert result.retryable is False
+
+    def test_context_length_exceeded(self):
+        result = classify_provider_error(Exception("maximum context length exceeded (128k tokens)"))
+        assert isinstance(result, ContextLengthExceededError)
+        assert result.retryable is False
+
+    def test_unknown_error_is_retryable(self):
+        result = classify_provider_error(Exception("Unknown mysterious provider error XYZ"))
+        assert result.retryable is True
+
+    # -- False positive prevention --
+
+    def test_bare_authentication_word_not_classified_as_api_key_error(self):
+        """Broad 'authentication' in user code errors should NOT trigger InvalidAPIKeyError."""
+        result = classify_provider_error(Exception("authentication required for user login endpoint"))
+        assert not isinstance(result, InvalidAPIKeyError)
+
+    def test_bare_unauthorized_not_classified_as_api_key_error(self):
+        """Broad 'unauthorized' should NOT trigger InvalidAPIKeyError."""
+        result = classify_provider_error(Exception("user is unauthorized to access this resource"))
+        assert not isinstance(result, InvalidAPIKeyError)
+
+    def test_bare_invalid_request_not_classified_alone(self):
+        """Bare 'invalid_request' (without _error suffix) should not classify as InvalidRequestError
+        when accompanied by content policy signals -- content policy takes precedence."""
+        result = classify_provider_error(Exception("content policy violation invalid_request"))
+        assert isinstance(result, ContentPolicyViolationError)
+
+    # -- Anthropic bytes payload extraction --
+
+    def test_anthropic_bytes_payload_extraction(self):
+        """Anthropic SDK wraps errors as bytes literal strings -- classifier extracts the message."""
+        # Simulate what str(root_cause) looks like for an Anthropic error.
+        # The SDK produces: b'{"type":"error","error":{"message":"..."}}'
+        payload = '{"type":"error","error":{"message":"model not found: claude-99 does not exist"}}'
+        exc = Exception(f'b"{payload}"')
+        result = classify_provider_error(exc)
+        # Should classify based on extracted content; model not found -> InvalidModelError
+        assert isinstance(result, InvalidModelError)
+        assert "API configuration error" in result.user_message
+
+    # -- Already-classified passthrough --
+
+    def test_already_classified_exception_passed_through(self):
+        """If the exception is already an LLMError subclass, return it unchanged."""
+        original = InvalidAPIKeyError("already classified", user_message="My custom message")
+        result = classify_provider_error(original)
+        assert result is original
+        assert result.user_message == "My custom message"
+
+    # -- handle_api_error backward compat --
+
+    def test_handle_api_error_still_returns_tuple(self):
+        """handle_api_error() must still return (bool, str) for all existing callers."""
+        handler = LLMFailureHandler(enable_jitter=False, show_progress=False)
+        is_retryable, msg = handler.handle_api_error(Exception("timeout"))
+        assert isinstance(is_retryable, bool)
+        assert isinstance(msg, str)
+        assert is_retryable is True
+
+    def test_handle_api_error_fatal_returns_false(self):
+        handler = LLMFailureHandler(enable_jitter=False, show_progress=False)
+        is_retryable, msg = handler.handle_api_error(Exception("401 invalid_api_key"))
+        assert is_retryable is False
+        assert msg
+
+    def test_handle_api_error_content_policy_is_fatal(self):
+        handler = LLMFailureHandler(enable_jitter=False, show_progress=False)
+        is_retryable, msg = handler.handle_api_error(Exception("content_policy_violation"))
+        assert is_retryable is False
 
 
 if __name__ == "__main__":

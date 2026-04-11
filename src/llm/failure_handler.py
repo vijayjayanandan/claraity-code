@@ -28,6 +28,7 @@ Thread Safety:
 """
 
 import asyncio
+import json
 import logging
 import random
 import re
@@ -58,21 +59,54 @@ except ImportError:
 
 
 class LLMError(Exception):
-    """Base exception for LLM errors."""
+    """Base exception for LLM errors.
 
-    pass
+    All subclasses carry UI metadata so the agent's except block
+    can emit an ErrorEvent without doing its own phrase matching.
+    """
+
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        user_message: str = "",
+        event_type: str = "provider_error",
+        retryable: bool = True,
+    ) -> None:
+        super().__init__(message)
+        self.user_message = user_message or message or "An unexpected provider error occurred."
+        self.event_type = event_type
+        self.retryable = retryable
 
 
 class RateLimitError(LLMError):
-    """Rate limit exceeded error."""
+    """Rate limit exceeded -- retryable."""
 
-    pass
+    def __init__(self, message: str = "", **kwargs: Any) -> None:
+        kwargs.setdefault("user_message", "Rate limit reached. Retrying automatically.")
+        kwargs.setdefault("event_type", "rate_limit")
+        kwargs.setdefault("retryable", True)
+        super().__init__(message, **kwargs)
 
 
 class TimeoutError(LLMError):
-    """Timeout error."""
+    """Request timed out -- retryable."""
 
-    pass
+    def __init__(self, message: str = "", **kwargs: Any) -> None:
+        kwargs.setdefault("user_message", "Request timed out. The server took too long to respond.")
+        kwargs.setdefault("event_type", "provider_timeout")
+        kwargs.setdefault("retryable", True)
+        super().__init__(message, **kwargs)
+
+
+class NetworkError(LLMError):
+    """Connection / network error -- retryable."""
+
+    def __init__(self, message: str = "", **kwargs: Any) -> None:
+        kwargs.setdefault("user_message", "Connection error. Please check your network.")
+        kwargs.setdefault("event_type", "network")
+        kwargs.setdefault("retryable", True)
+        super().__init__(message, **kwargs)
 
 
 class ValidationError(LLMError):
@@ -82,62 +116,234 @@ class ValidationError(LLMError):
 
 
 class InvalidAPIKeyError(LLMError):
-    """Invalid API key error (fatal)."""
+    """Invalid API key -- fatal config error."""
 
-    pass
+    def __init__(self, message: str = "", **kwargs: Any) -> None:
+        kwargs.setdefault("user_message", "API key is invalid or missing. Check the API Key in Settings.")
+        kwargs.setdefault("event_type", "config_error")
+        kwargs.setdefault("retryable", False)
+        super().__init__(message, **kwargs)
 
 
 class InvalidModelError(LLMError):
-    """Invalid model error (fatal)."""
+    """Invalid or unknown model -- fatal config error."""
 
-    pass
+    def __init__(self, message: str = "", **kwargs: Any) -> None:
+        kwargs.setdefault("user_message", "Model not found. Check the model name in Settings.")
+        kwargs.setdefault("event_type", "config_error")
+        kwargs.setdefault("retryable", False)
+        super().__init__(message, **kwargs)
+
+
+class InvalidRequestError(LLMError):
+    """Invalid request parameters (temperature, max_tokens, etc.) -- fatal config error."""
+
+    def __init__(self, message: str = "", **kwargs: Any) -> None:
+        kwargs.setdefault("user_message", "Invalid request parameters. Check your model settings.")
+        kwargs.setdefault("event_type", "config_error")
+        kwargs.setdefault("retryable", False)
+        super().__init__(message, **kwargs)
 
 
 class ContextLengthExceededError(LLMError):
-    """Context length exceeded error (fatal)."""
+    """Context length exceeded -- fatal."""
 
-    pass
+    def __init__(self, message: str = "", **kwargs: Any) -> None:
+        kwargs.setdefault("user_message", "Context length exceeded. The conversation is too long.")
+        kwargs.setdefault("event_type", "config_error")
+        kwargs.setdefault("retryable", False)
+        super().__init__(message, **kwargs)
 
 
 class ContentPolicyViolationError(LLMError):
-    """Content policy violation error (fatal)."""
+    """Content policy violation -- fatal (distinct from config errors)."""
 
-    pass
+    def __init__(self, message: str = "", **kwargs: Any) -> None:
+        kwargs.setdefault("user_message", "Request blocked by provider content policy.")
+        kwargs.setdefault("event_type", "content_policy")
+        kwargs.setdefault("retryable", False)
+        super().__init__(message, **kwargs)
 
 
-# Error classification maps
-RETRYABLE_ERROR_KEYWORDS = {
-    "timeout": True,
-    "timed out": True,
-    "rate_limit": True,
-    "rate limit": True,
-    "too many requests": True,
-    "service unavailable": True,
-    "503": True,
-    "connection": True,
-    "network": True,
-    "temporarily unavailable": True,
-    "overloaded": True,
-    "502": True,
-    "504": True,
+# ---------------------------------------------------------------------------
+# Signal sets used by classify_provider_error()
+# Single source of truth -- agent.py no longer duplicates these.
+# ---------------------------------------------------------------------------
+
+_TIMEOUT_SIGNALS: frozenset[str] = frozenset({
+    "timeout", "timed out",
+})
+
+_RATE_LIMIT_SIGNALS: frozenset[str] = frozenset({
+    "rate_limit", "rate limit", "too many requests", "429",
+})
+
+_NETWORK_SIGNALS: frozenset[str] = frozenset({
+    "connection", "network", "service unavailable", "temporarily unavailable",
+    "overloaded", "502", "503", "504",
+})
+
+# Specific auth signals only -- bare "authentication" / "unauthorized" removed
+# to prevent false positives on user code that mentions those words.
+_AUTH_SIGNALS: frozenset[str] = frozenset({
+    "invalid_api_key", "invalid api key", "incorrect api key",
+    "authentication_error", "401",
+})
+
+_CONTENT_POLICY_SIGNALS: frozenset[str] = frozenset({
+    "content_policy_violation", "content policy",
+})
+
+_MODEL_SIGNALS: frozenset[str] = frozenset({
+    "invalid_model", "invalid model", "model not found", "404",
+})
+
+# Full phrases only -- no bare "invalid_request" (too broad, catches content policy)
+_INVALID_REQUEST_SIGNALS: frozenset[str] = frozenset({
+    "invalid_request_error",
+    "invalid value for", "must be between", "must be a",
+    "max_tokens must", "temperature must", "top_p must",
+    "top_p not supported",
+})
+
+_CONTEXT_LENGTH_SIGNALS: frozenset[str] = frozenset({
+    "context_length_exceeded", "maximum context length",
+})
+
+# Backward-compat aliases (kept in case external code imports them)
+RETRYABLE_ERROR_KEYWORDS: dict[str, bool] = {s: True for s in _TIMEOUT_SIGNALS | _RATE_LIMIT_SIGNALS | _NETWORK_SIGNALS}
+FATAL_ERROR_KEYWORDS: dict[str, bool] = {
+    s: True for s in _AUTH_SIGNALS | _CONTENT_POLICY_SIGNALS | _MODEL_SIGNALS
+    | _INVALID_REQUEST_SIGNALS | _CONTEXT_LENGTH_SIGNALS
 }
 
-FATAL_ERROR_KEYWORDS = {
-    "invalid_api_key": True,
-    "invalid api key": True,
-    "authentication": True,
-    "unauthorized": True,
-    "401": True,
-    "invalid_model": True,
-    "invalid model": True,
-    "model not found": True,
-    "404": True,
-    "context_length_exceeded": True,
-    "maximum context length": True,
-    "content_policy_violation": True,
-    "content policy": True,
-    "invalid_request": True,
-}
+
+# ---------------------------------------------------------------------------
+# Private helpers for root-cause extraction
+# ---------------------------------------------------------------------------
+
+def _extract_root_cause_message(exc: Exception) -> str:
+    """Walk the __cause__ chain and return the cleanest error message.
+
+    Handles the Anthropic SDK quirk where the response body is stored as a
+    bytes literal string: b'{"type":"error","error":{"message":"..."}}'.
+    Falls back to str(root) if JSON parsing fails -- always returns a string.
+    """
+    root = exc
+    while root.__cause__ is not None:
+        root = root.__cause__
+
+    raw = str(root).strip()[:500]
+
+    # Anthropic SDK may produce: b'{"type":"error","error":{"message":"..."}}'
+    # Strip the leading b" or b' and trailing quote, then try JSON parse.
+    bytes_match = re.match(r'^b([\'"])(.*)\1$', raw, re.DOTALL)
+    if bytes_match:
+        try:
+            payload = json.loads(bytes_match.group(2))
+            msg = payload.get("error", {}).get("message") or payload.get("message")
+            if msg:
+                return str(msg)
+        except (json.JSONDecodeError, AttributeError):
+            pass
+
+    # Also try extracting "message" field from any embedded JSON in the string
+    msg_match = re.search(r'"message"\s*:\s*"([^"]+)"', raw)
+    if msg_match:
+        return msg_match.group(1)
+
+    return raw
+
+
+def _build_combined_text(exc: Exception) -> str:
+    """Return a single lowercased string combining top-level and root-cause messages.
+
+    Used for signal matching in classify_provider_error().
+    """
+    top = str(exc).strip()
+    root_msg = _extract_root_cause_message(exc)
+    return (top + " " + root_msg).lower()
+
+
+def classify_provider_error(exc: Exception) -> LLMError:
+    """Classify any provider exception into a typed LLMError subclass.
+
+    Returns a typed LLMError carrying user_message, event_type, and retryable.
+    Never raises -- always returns an LLMError even for completely unknown exceptions.
+
+    Classification precedence (first match wins):
+      1. Timeout
+      2. Rate limit
+      3. Network / transient
+      4. Invalid API key / auth
+      5. Content policy (must be before invalid_request to prevent misclassification)
+      6. Invalid model
+      7. Invalid request / bad params
+      8. Context length exceeded
+      9. Unknown -> NetworkError (retryable, conservative)
+    """
+    combined = _build_combined_text(exc)
+    type_name = type(exc).__name__.lower()
+
+    # Already classified upstream -- preserve the type
+    if isinstance(exc, LLMError):
+        return exc
+
+    # 1. Timeout
+    if any(s in combined or s in type_name for s in _TIMEOUT_SIGNALS):
+        return TimeoutError(str(exc))
+
+    # 2. Rate limit
+    if any(s in combined or s in type_name for s in _RATE_LIMIT_SIGNALS):
+        return RateLimitError(str(exc))
+
+    # 3. Network / transient
+    if any(s in combined or s in type_name for s in _NETWORK_SIGNALS):
+        return NetworkError(str(exc))
+
+    # 4. Invalid API key / auth (specific signals only)
+    if any(s in combined or s in type_name for s in _AUTH_SIGNALS):
+        root_msg = _extract_root_cause_message(exc)
+        clean = re.sub(r"\x1b\[[0-9;]*m", "", root_msg)
+        clean = " ".join(clean.split())[:200]
+        return InvalidAPIKeyError(
+            str(exc),
+            user_message=f"API configuration error: {clean}",
+        )
+
+    # 5. Content policy (before invalid_request -- some providers send both signals)
+    if any(s in combined for s in _CONTENT_POLICY_SIGNALS):
+        return ContentPolicyViolationError(str(exc))
+
+    # 6. Invalid model
+    if any(s in combined or s in type_name for s in _MODEL_SIGNALS):
+        root_msg = _extract_root_cause_message(exc)
+        clean = re.sub(r"\x1b\[[0-9;]*m", "", root_msg)
+        clean = " ".join(clean.split())[:200]
+        return InvalidModelError(
+            str(exc),
+            user_message=f"API configuration error: {clean}",
+        )
+
+    # 7. Invalid request / bad params (full phrases only)
+    if any(s in combined for s in _INVALID_REQUEST_SIGNALS):
+        root_msg = _extract_root_cause_message(exc)
+        clean = re.sub(r"\x1b\[[0-9;]*m", "", root_msg)
+        clean = " ".join(clean.split())[:200]
+        return InvalidRequestError(
+            str(exc),
+            user_message=f"API configuration error: {clean}",
+        )
+
+    # 8. Context length
+    if any(s in combined for s in _CONTEXT_LENGTH_SIGNALS):
+        return ContextLengthExceededError(str(exc))
+
+    # 9. Unknown -- conservative: keep agent alive, let user retry
+    return NetworkError(
+        str(exc),
+        user_message="Connection error. Please check your network and provider status.",
+    )
 
 
 class LLMFailureHandler:
@@ -349,15 +555,17 @@ class LLMFailureHandler:
             except Exception as e:
                 last_error = e
 
-                # Classify error
-                is_retryable, error_message = self.handle_api_error(e)
+                # Classify error -- preserves typed metadata for callers
+                classified = classify_provider_error(e)
+                is_retryable = classified.retryable
+                error_message = classified.user_message
 
-                # If fatal error, fail immediately
+                # If fatal error, fail immediately -- re-raise typed exception
                 if not is_retryable:
                     if self.show_progress:
                         safe_print(f"[FAIL] {error_message}")
                     self.logger.error(f"[FAIL] Fatal error (not retrying): {error_message}")
-                    raise LLMError(error_message) from e
+                    raise classified from e
 
                 # If last attempt, raise error
                 if attempt == max_attempts - 1:
@@ -423,11 +631,13 @@ class LLMFailureHandler:
             except Exception as e:
                 last_error = e
 
-                is_retryable, error_message = self.handle_api_error(e)
+                classified = classify_provider_error(e)
+                is_retryable = classified.retryable
+                error_message = classified.user_message
 
                 if not is_retryable:
                     self.logger.error(f"[FAIL] Fatal error (not retrying): {error_message}")
-                    raise LLMError(error_message) from e
+                    raise classified from e
 
                 if attempt == max_attempts - 1:
                     self.logger.error(
@@ -480,28 +690,12 @@ class LLMFailureHandler:
                 # Fail fast
                 raise FatalError(msg)
         """
-        error_type = type(error).__name__
-        error_str = str(error).lower()
-
-        # Sanitize error message for safe display
-        sanitized_error = self._sanitize_error_message(error)
-
-        # Check for retryable errors
-        for keyword in RETRYABLE_ERROR_KEYWORDS:
-            if keyword in error_str or keyword in error_type.lower():
-                return True, f"Retryable error ({error_type}): {sanitized_error}"
-
-        # Check for fatal errors
-        for keyword in FATAL_ERROR_KEYWORDS:
-            if keyword in error_str or keyword in error_type.lower():
-                return False, f"Fatal error ({error_type}): {sanitized_error}"
-
-        # Default: treat unknown errors as retryable (conservative approach)
-        # This prevents giving up too early on transient issues
-        self.logger.warning(
-            f"[WARN] Unknown error type ({error_type}), treating as retryable: {error}"
-        )
-        return True, f"Unknown error ({error_type}): {sanitized_error}"
+        classified = classify_provider_error(error)
+        if not classified.retryable:
+            self.logger.warning(
+                f"[WARN] Fatal provider error ({type(error).__name__}): {classified.user_message}"
+            )
+        return classified.retryable, classified.user_message
 
     @observe(name="rate_limit_handler", as_type="span")
     def handle_rate_limit(self, func: Callable, max_retries: int = 5) -> Any:
@@ -556,9 +750,9 @@ class LLMFailureHandler:
                 # If not a rate limit error, re-raise
                 if not is_rate_limit:
                     # Check if it's a fatal error
-                    is_retryable, error_message = self.handle_api_error(e)
-                    if not is_retryable:
-                        raise LLMError(error_message) from e
+                    classified = classify_provider_error(e)
+                    if not classified.retryable:
+                        raise classified from e
                     else:
                         # Use standard retry for non-rate-limit retryable errors
                         raise LLMError(f"Not a rate limit error: {str(e)}") from e
@@ -652,9 +846,9 @@ class LLMFailureHandler:
                 # If not a timeout error, re-raise
                 if not is_timeout:
                     # Check if it's a fatal error
-                    is_retryable, error_message = self.handle_api_error(e)
-                    if not is_retryable:
-                        raise LLMError(error_message) from e
+                    classified = classify_provider_error(e)
+                    if not classified.retryable:
+                        raise classified from e
                     else:
                         # Use standard retry for non-timeout retryable errors
                         raise LLMError(f"Not a timeout error: {str(e)}") from e
