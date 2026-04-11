@@ -294,6 +294,12 @@ class SubAgent:
                     config=override_config,
                     api_key=api_key,
                 )
+            elif backend_type == "anthropic":
+                from src.llm.anthropic_backend import AnthropicBackend
+                override_llm = AnthropicBackend(
+                    config=override_config,
+                    api_key=api_key,
+                )
             else:
                 logger.warning(
                     f"SubAgent [{self.config.name}]: Unsupported backend_type "

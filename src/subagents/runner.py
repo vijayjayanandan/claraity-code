@@ -64,6 +64,9 @@ def _create_llm_backend(llm_config_dict, api_key):
     OPENAI_COMPATIBLE = {"openai", "vllm", "localai", "llamacpp"}
     if backend_type in OPENAI_COMPATIBLE:
         return OpenAIBackend(config=config, api_key=api_key)
+    elif backend_type == "anthropic":
+        from src.llm.anthropic_backend import AnthropicBackend
+        return AnthropicBackend(config=config, api_key=api_key)
     else:
         raise ValueError(f"Unsupported backend_type: {backend_type}")
 

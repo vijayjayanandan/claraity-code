@@ -33,7 +33,7 @@ import yaml
 logger = logging.getLogger(__name__)
 
 
-VALID_BACKEND_TYPES = {"openai", "vllm", "localai", "llamacpp"}
+VALID_BACKEND_TYPES = {"openai", "vllm", "localai", "llamacpp", "anthropic"}
 
 
 @dataclass
