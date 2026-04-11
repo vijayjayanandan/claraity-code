@@ -16,6 +16,17 @@ import sys
 
 def main():
 
+    # Early routing for subprocess modes that have their own argparse.
+    # Must happen before the server's argparse to avoid argument conflicts.
+    if len(sys.argv) > 1 and sys.argv[1] == "--extract-doc":
+        # Document extractor mode: strip our flag, pass rest to extractor's argparse.
+        # Same pattern as --subagent — frozen binary can't use `-m src.tools.document_extractor`.
+        sys.argv = [sys.argv[0]] + sys.argv[2:]
+        from src.tools.document_extractor import main as extractor_main
+
+        extractor_main()
+        return
+
     parser = argparse.ArgumentParser(description="ClarAIty VS Code Server")
     parser.add_argument("--workdir", default=None, help="Working directory (default: cwd)")
     parser.add_argument(
