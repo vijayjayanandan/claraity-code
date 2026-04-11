@@ -2,7 +2,7 @@
  * Streaming status bar — shows current activity phase and elapsed time.
  *
  * Displays a spinning icon, dynamic status text (Thinking / tool name /
- * activeForm / Streaming...), and an elapsed timer that ticks every second.
+ * Streaming...), and an elapsed timer that ticks every second.
  * Only visible while isStreaming is true.
  */
 import { useState, useEffect, useRef } from "react";
@@ -13,12 +13,6 @@ interface StreamingStatusProps {
   isCompacting: boolean;
   currentThinking: { content: string; open: boolean } | null;
   toolCards: Record<string, ToolStateData>;
-  todos: unknown[];
-}
-
-interface TodoItem {
-  status?: string;
-  activeForm?: string;
 }
 
 function formatElapsed(seconds: number): string {
@@ -32,7 +26,6 @@ export function StreamingStatus({
   isCompacting,
   currentThinking,
   toolCards,
-  todos,
 }: StreamingStatusProps) {
   const [elapsed, setElapsed] = useState(0);
   const startRef = useRef(0);
@@ -59,7 +52,7 @@ export function StreamingStatus({
 
   if (!isStreaming) return null;
 
-  // Derive status text: compacting > thinking > running tool > activeForm > default
+  // Derive status text: compacting > thinking > running tool > default
   let statusText = "Streaming...";
 
   if (isCompacting) {
@@ -73,13 +66,6 @@ export function StreamingStatus({
     if (running.length > 0) {
       const latest = running[running.length - 1];
       statusText = latest.tool_name || "Running tool...";
-    } else {
-      // Check for active todo form
-      const items = todos as TodoItem[];
-      const active = items.find((t) => t.status === "in_progress" && t.activeForm);
-      if (active?.activeForm) {
-        statusText = active.activeForm;
-      }
     }
   }
 

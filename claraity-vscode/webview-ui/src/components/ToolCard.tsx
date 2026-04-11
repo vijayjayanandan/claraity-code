@@ -28,7 +28,7 @@ export const ToolCard = memo(function ToolCard({ data, postMessage }: ToolCardPr
   const toolName = data.tool_name || "tool";
   const icon = TOOL_ICONS[toolName] || "T";
   const primaryArg = toolName === "delegate_to_subagent"
-    ? ""
+    ? (typeof data.arguments?.subagent === "string" ? data.arguments.subagent : "")
     : getPrimaryArg(toolName, data.arguments);
 
   const summary = data.arguments?.summary;
@@ -87,6 +87,8 @@ export const ToolCard = memo(function ToolCard({ data, postMessage }: ToolCardPr
   // Build visible params: exclude summary, primary arg key (already shown inline),
   // and skip entirely for delegate_to_subagent (SubagentCard handles its own display).
   const isSubagent = toolName === "delegate_to_subagent";
+  const delegateTask = isSubagent && typeof data.arguments?.task === "string"
+    ? data.arguments.task : "";
   const primaryArgKey = getPrimaryArgKey(toolName, data.arguments);
   const hiddenKeys = new Set([...HIDDEN_PARAMS]);
   if (!hasSummary && primaryArgKey) hiddenKeys.add(primaryArgKey);
@@ -127,6 +129,11 @@ export const ToolCard = memo(function ToolCard({ data, postMessage }: ToolCardPr
         <div className="tool-args" title={primaryArg}>
           {primaryArg}
         </div>
+      )}
+
+      {/* Delegate task — shown for delegate_to_subagent so user can review */}
+      {isSubagent && delegateTask && (
+        <div className="tool-summary">{delegateTask}</div>
       )}
 
       {/* Collapsible parameters */}
