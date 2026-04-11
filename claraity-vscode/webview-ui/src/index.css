@@ -206,6 +206,39 @@ button, .toolbar-icon, .session-card, .mention-item, .tool-badge {
   padding-bottom: 24px;
 }
 
+/* ── Error bubble ── */
+
+.error-message {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+  padding: var(--space-xs) var(--space-sm);
+  border-left: 2px solid var(--vscode-errorForeground);
+  color: var(--vscode-errorForeground);
+  font-size: 0.9em;
+  word-break: break-word;
+}
+
+.error-settings-link {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border: 1px solid var(--vscode-errorForeground);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--vscode-errorForeground);
+  font-size: 0.85em;
+  cursor: pointer;
+  white-space: nowrap;
+  opacity: 0.85;
+  transition: opacity 0.15s ease, background-color 0.15s ease;
+}
+
+.error-settings-link:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--vscode-errorForeground) 10%, transparent);
+}
+
 /* ── Message ── */
 
 .message {

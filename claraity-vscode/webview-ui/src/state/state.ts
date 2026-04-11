@@ -32,7 +32,7 @@ export type TimelineEntry =
   | { type: "thinking"; id: string; content: string; tokenCount?: number }
   | { type: "code"; id: string; language: string; content: string }
   | { type: "subagent"; id: string; subagentId: string }
-  | { type: "error"; id: string; message: string }
+  | { type: "error"; id: string; message: string; errorType?: string }
   | { type: "compaction_summary"; id: string; content: string };
 
 // ============================================================================

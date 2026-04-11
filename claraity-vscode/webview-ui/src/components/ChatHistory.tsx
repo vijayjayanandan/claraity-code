@@ -62,6 +62,7 @@ interface ChatHistoryProps {
   onSendPrompt?: (prompt: string) => void;
   onDismissClarify?: () => void;
   onDismissPlan?: () => void;
+  onOpenSettings?: () => void;
   connected?: boolean;
   modelName?: string;
   workingDirectory?: string;
@@ -82,6 +83,7 @@ export function ChatHistory({
   onSendPrompt,
   onDismissClarify,
   onDismissPlan,
+  onOpenSettings,
   connected,
   modelName,
   workingDirectory,
@@ -289,7 +291,12 @@ export function ChatHistory({
           case "error":
             return (
               <div key={entry.id} className="error-message">
-                {entry.message}
+                <span>{entry.message}</span>
+                {entry.errorType === "config_error" && onOpenSettings && (
+                  <button className="error-settings-link" onClick={onOpenSettings}>
+                    Open Settings
+                  </button>
+                )}
               </div>
             );
 

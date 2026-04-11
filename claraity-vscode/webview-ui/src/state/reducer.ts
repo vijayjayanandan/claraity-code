@@ -192,8 +192,25 @@ export function appReducer(state: AppState, action: Action): AppState {
 
     case "STREAM_END": {
       const flushed = commitMarkdownBuffer(state);
+
+      // Finalize any tool cards still stuck in "running" or "pending" status.
+      // If the stream ended and they're still running, they'll never complete —
+      // mark them as "error" so StreamingStatus doesn't show stale tool names.
+      let toolCards = flushed.toolCards;
+      const staleStatuses = new Set(["running", "pending"]);
+      const hasStale = Object.values(toolCards).some(c => staleStatuses.has(c.status));
+      if (hasStale) {
+        toolCards = { ...toolCards };
+        for (const [id, card] of Object.entries(toolCards)) {
+          if (staleStatuses.has(card.status)) {
+            toolCards[id] = { ...card, status: "error" as ToolStateData["status"] };
+          }
+        }
+      }
+
       const endState = {
         ...flushed,
+        toolCards,
         isStreaming: false,
         isCompacting: false,  // safety reset: clears stuck state if context_compacted was missed
         lastTurnStats: action.tokens != null
@@ -710,7 +727,7 @@ export function appReducer(state: AppState, action: Action): AppState {
         ...errState,
         timeline: [
           ...errState.timeline,
-          { type: "error" as const, id: errId, message: action.message },
+          { type: "error" as const, id: errId, message: action.message, errorType: action.errorType },
         ],
       };
     }

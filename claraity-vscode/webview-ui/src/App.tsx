@@ -385,6 +385,7 @@ export function App() {
           onSendPrompt={(prompt) => handleSendMessage(prompt)}
           onDismissClarify={() => dispatch({ type: "CLARIFY_DISMISS" })}
           onDismissPlan={() => dispatch({ type: "PLAN_APPROVAL_DISMISS" })}
+          onOpenSettings={() => dispatch({ type: "SET_ACTIVE_PANEL", panel: "config" })}
           connected={state.connected}
           modelName={state.modelName}
           workingDirectory={state.workingDirectory}
@@ -419,7 +420,6 @@ export function App() {
         isCompacting={state.isCompacting}
         currentThinking={state.currentThinking}
         toolCards={state.toolCards}
-        todos={state.todos}
       />
 
       <InputBox
