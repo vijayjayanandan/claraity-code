@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import re
 import traceback
 import uuid
 from pathlib import Path
@@ -2014,7 +2015,7 @@ class CodingAgent(AgentInterface):
                         else ErrorCategory.PROVIDER_ERROR
                     )
 
-                    # Find root cause in exception chain
+                    # Find root cause in exception chain (kept for logging context)
                     root_cause = e
                     while root_cause.__cause__ is not None:
                         root_cause = root_cause.__cause__
@@ -2025,8 +2026,6 @@ class CodingAgent(AgentInterface):
                     elapsed_ms = int((time.monotonic() - loop_start_time) * 1000)
 
                     # Record error to SQLite store and get error_id for reference
-                    import traceback as tb
-
                     from src.observability.error_store import ErrorCategory as StoreCategory
                     from src.observability.error_store import get_error_store
 
@@ -2036,7 +2035,7 @@ class CodingAgent(AgentInterface):
                         category=category,
                         error_type=error_type,
                         message=error_msg,
-                        traceback=tb.format_exc(),
+                        traceback=traceback.format_exc(),
                         component="core.agent",
                         operation="stream_response",
                         model=self.model_name,
@@ -2061,27 +2060,23 @@ class CodingAgent(AgentInterface):
                         root_cause_message=root_cause_message,
                     )
 
-                    # Determine user-friendly message (no stack traces!)
-                    is_timeout = "timeout" in root_cause_type.lower()
-                    if is_timeout:
-                        user_message = "Request timed out. The server took too long to respond."
-                    else:
-                        user_message = "Connection error. Please check your network."
+                    # Classify into typed exception -- single source of truth in failure_handler
+                    from src.llm.failure_handler import classify_provider_error
+                    _classified = classify_provider_error(e)
 
-                    # Emit ErrorEvent for TUI visibility (recoverable)
-                    # Use root_cause_type (not error_type) to correctly classify wrapped exceptions
+                    # Emit ErrorEvent for TUI visibility
                     from src.core.events import ErrorEvent
 
                     yield ErrorEvent(
-                        error_type="provider_timeout" if is_timeout else "network",
-                        user_message=user_message,
+                        error_type=_classified.event_type,
+                        user_message=_classified.user_message,
                         error_id=error_id,
-                        recoverable=True,
+                        recoverable=_classified.retryable,
                         retry_after=None,
                     )
 
                     # Set provider_error for pause flow (also user-friendly)
-                    provider_error = user_message
+                    provider_error = _classified.user_message
 
                 # Handle provider error by transitioning to pause state
                 if provider_error:
