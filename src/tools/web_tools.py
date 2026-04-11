@@ -588,6 +588,8 @@ class WebFetchTool(Tool):
     - Content-type: allowlist (text/*, json, xml only)
     """
 
+    _SCHEMA_NAME = "web_fetch"
+
     def __init__(
         self,
         cache_ttl_seconds: int = 900,
@@ -602,10 +604,9 @@ class WebFetchTool(Tool):
             timeout_seconds: HTTP request timeout (default: 30s)
             max_content_bytes: Maximum bytes to read (default: 100KB)
         """
-        super().__init__(
-            name="web_fetch",
-            description="Fetch content from a specific URL. Returns extracted text.",
-        )
+        from src.tools.tool_schemas import _SCHEMA_REGISTRY
+        _def = _SCHEMA_REGISTRY["web_fetch"]
+        super().__init__(name=_def.name, description=_def.description)
         self.cache = TTLCache(ttl_seconds=cache_ttl_seconds)
         self.timeout = timeout_seconds
         self.max_bytes = max_content_bytes
@@ -818,20 +819,6 @@ class WebFetchTool(Tool):
 
         return text.strip()
 
-    def _get_parameters(self) -> dict[str, Any]:
-        """Get parameter schema for LLM."""
-        return {
-            "type": "object",
-            "properties": {
-                "url": {"type": "string", "description": "URL to fetch (http/https only)"},
-                "extract_text": {
-                    "type": "boolean",
-                    "description": "Extract plain text from HTML (default: true)",
-                },
-            },
-            "required": ["url"],
-        }
-
 
 # =============================================================================
 # WebSearchTool
@@ -848,6 +835,8 @@ class WebSearchTool(Tool):
     - Per-run budget
     - Inline citations (domain + url)
     """
+
+    _SCHEMA_NAME = "web_search"
 
     # Query limits
     MAX_QUERY_LENGTH = 500
@@ -866,10 +855,9 @@ class WebSearchTool(Tool):
             cache_ttl_seconds: Cache TTL for search results (default: 1 hour)
             rate_limit_per_minute: Max requests per minute (default: 10)
         """
-        super().__init__(
-            name="web_search",
-            description="Search the web for current information. Returns results with citations.",
-        )
+        from src.tools.tool_schemas import _SCHEMA_REGISTRY
+        _def = _SCHEMA_REGISTRY["web_search"]
+        super().__init__(name=_def.name, description=_def.description)
         self._provider = provider  # Lazy init if None
         self.cache = TTLCache(ttl_seconds=cache_ttl_seconds)
         self.rate_limiter = RateLimiter(requests_per_minute=rate_limit_per_minute)
@@ -1113,31 +1101,4 @@ class WebSearchTool(Tool):
 
         return "\n".join(parts)
 
-    def _get_parameters(self) -> dict[str, Any]:
-        """Get parameter schema for LLM."""
-        return {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "Search query"},
-                "max_results": {
-                    "type": "number",
-                    "description": "Results to return (1-10, default: 5)",
-                },
-                "search_depth": {
-                    "type": "string",
-                    "enum": ["basic", "advanced"],
-                    "description": "'basic' (fast) or 'advanced' (thorough)",
-                },
-                "include_domains": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Only include results from these domains",
-                },
-                "exclude_domains": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Exclude results from these domains",
-                },
-            },
-            "required": ["query"],
-        }
+

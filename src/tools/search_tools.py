@@ -191,6 +191,8 @@ class GrepTool(Tool):
     Matches Claude Code's Grep tool capabilities.
     """
 
+    _SCHEMA_NAME = "grep"
+
     def __init__(self):
         super().__init__(
             name="grep", description="Search for regex patterns in files with advanced filtering"
@@ -199,10 +201,10 @@ class GrepTool(Tool):
     def execute(
         self,
         pattern: str,
-        path: str | None = None,
+        file_path: str | None = None,
         file_type: str | None = None,
         glob: str | None = None,
-        output_mode: str = "files_with_matches",
+        output_mode: str | None = None,
         context_before: int = 0,
         context_after: int = 0,
         context: int = 0,
@@ -216,9 +218,12 @@ class GrepTool(Tool):
         """
         Search for pattern in files.
 
+        Note: the path parameter was renamed to file_path. If 'path' is passed
+        it is caught here to prevent silent misbehaviour.
+
         Args:
             pattern: Regex pattern to search for
-            path: Directory or file to search (default: current directory)
+            file_path: File or directory to search (default: current directory)
             file_type: File type filter (e.g., 'py', 'js', 'ts')
             glob: Glob pattern (e.g., '*.py', 'src/**/*.ts')
             output_mode: Output mode - 'content', 'files_with_matches', 'count'
@@ -235,24 +240,22 @@ class GrepTool(Tool):
             ToolResult with matches
         """
         try:
-            # Validate output mode
-            try:
-                mode = OutputMode(output_mode)
-            except ValueError:
+            # Catch renamed parameter to prevent silent misbehaviour
+            if "path" in kwargs:
                 return ToolResult(
                     tool_name=self.name,
                     status=ToolStatus.ERROR,
                     output=None,
-                    error=f"Invalid output_mode: {output_mode}. Must be 'content', 'files_with_matches', or 'count'",
+                    error="Unknown argument 'path'. Use 'file_path' instead.",
                 )
 
             # Default path
-            if path is None:
-                path = "."
+            if file_path is None:
+                file_path = "."
 
             # Validate path for security (prevent path traversal)
             try:
-                search_path = validate_path_security(path)
+                search_path = validate_path_security(file_path)
             except ValueError as e:
                 return ToolResult(
                     tool_name=self.name, status=ToolStatus.ERROR, output=None, error=str(e)
@@ -263,7 +266,25 @@ class GrepTool(Tool):
                     tool_name=self.name,
                     status=ToolStatus.ERROR,
                     output=None,
-                    error=f"Path not found: {path}",
+                    error=f"Path not found: {file_path}",
+                )
+
+            # Auto-detect output_mode based on whether target is a file or directory.
+            # File  -> content:           you already know which file, you want the lines.
+            # Dir   -> files_with_matches: narrow down first; also prevents 7MB+ explosions
+            #          when the LLM forgets file_path and searches ".".
+            if output_mode is None:
+                output_mode = "content" if search_path.is_file() else "files_with_matches"
+
+            # Validate output mode
+            try:
+                mode = OutputMode(output_mode)
+            except ValueError:
+                return ToolResult(
+                    tool_name=self.name,
+                    status=ToolStatus.ERROR,
+                    output=None,
+                    error=f"Invalid output_mode: {output_mode}. Must be 'content', 'files_with_matches', or 'count'",
                 )
 
             # Determine context lines
@@ -534,58 +555,6 @@ class GrepTool(Tool):
 
         return matches
 
-    def _get_parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "pattern": {"type": "string", "description": "Regex pattern to search for"},
-                "path": {
-                    "type": "string",
-                    "description": "File or directory to search (default: current directory)",
-                },
-                "file_type": {
-                    "type": "string",
-                    "description": "File type filter (e.g., 'py', 'js', 'ts', 'java', 'cpp')",
-                },
-                "glob": {
-                    "type": "string",
-                    "description": "Glob pattern to filter files (e.g., '*.py', 'src/**/*.ts')",
-                },
-                "output_mode": {
-                    "type": "string",
-                    "enum": ["content", "files_with_matches", "count"],
-                    "description": "Output mode: 'content' (show matching lines), 'files_with_matches' (file paths only), 'count' (match counts). Defaults to 'files_with_matches'.",
-                },
-                "context_before": {
-                    "type": "number",
-                    "description": "Number of lines before match to show (like -B). Requires output_mode: 'content', ignored otherwise.",
-                },
-                "context_after": {
-                    "type": "number",
-                    "description": "Number of lines after match to show (like -A). Requires output_mode: 'content', ignored otherwise.",
-                },
-                "context": {
-                    "type": "number",
-                    "description": "Number of lines before AND after match (like -C). Requires output_mode: 'content', ignored otherwise.",
-                },
-                "case_insensitive": {
-                    "type": "boolean",
-                    "description": "Ignore case when searching (like -i)",
-                },
-                "line_numbers": {
-                    "type": "boolean",
-                    "description": "Show line numbers (default: true for content mode)",
-                },
-                "multiline": {
-                    "type": "boolean",
-                    "description": "Enable multiline matching (pattern can span lines)",
-                },
-                "head_limit": {"type": "number", "description": "Limit output to first N results"},
-                "offset": {"type": "number", "description": "Skip first N results"},
-            },
-            "required": ["pattern"],
-        }
-
 
 class GlobTool(Tool):
     """
@@ -601,6 +570,8 @@ class GlobTool(Tool):
     Matches Claude Code's Glob tool capabilities.
     """
 
+    _SCHEMA_NAME = "glob"
+
     def __init__(self):
         super().__init__(
             name="glob",
@@ -608,27 +579,36 @@ class GlobTool(Tool):
         )
 
     def execute(
-        self, pattern: str, path: str | None = None, sort_by_mtime: bool = True, **kwargs: Any
+        self, pattern: str, file_path: str | None = None, sort_by_mtime: bool = True, **kwargs: Any
     ) -> ToolResult:
         """
         Find files matching glob pattern.
 
         Args:
             pattern: Glob pattern (e.g., '*.py', '**/*.js', 'src/**/*.{ts,tsx}')
-            path: Directory to search in (default: current directory)
+            file_path: Directory to search in (default: current directory)
             sort_by_mtime: Sort results by modification time (newest first)
 
         Returns:
             ToolResult with matched file paths
         """
         try:
+            # Catch renamed parameter to prevent silent misbehaviour
+            if "path" in kwargs:
+                return ToolResult(
+                    tool_name=self.name,
+                    status=ToolStatus.ERROR,
+                    output=None,
+                    error="Unknown argument 'path'. Use 'file_path' instead.",
+                )
+
             # Default path
-            if path is None:
-                path = "."
+            if file_path is None:
+                file_path = "."
 
             # Validate path for security (prevent path traversal)
             try:
-                search_path = validate_path_security(path)
+                search_path = validate_path_security(file_path)
             except ValueError as e:
                 return ToolResult(
                     tool_name=self.name, status=ToolStatus.ERROR, output=None, error=str(e)
@@ -639,7 +619,7 @@ class GlobTool(Tool):
                     tool_name=self.name,
                     status=ToolStatus.ERROR,
                     output=None,
-                    error=f"Path not found: {path}",
+                    error=f"Path not found: {file_path}",
                 )
 
             # Handle brace expansion (e.g., *.{py,js,ts})
@@ -755,22 +735,4 @@ class GlobTool(Tool):
 
         return False
 
-    def _get_parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "pattern": {
-                    "type": "string",
-                    "description": "Glob pattern (e.g., '*.py', '**/*.js', 'src/**/*.{ts,tsx}')",
-                },
-                "path": {
-                    "type": "string",
-                    "description": "Directory to search in (default: current directory)",
-                },
-                "sort_by_mtime": {
-                    "type": "boolean",
-                    "description": "Sort results by modification time (default: true)",
-                },
-            },
-            "required": ["pattern"],
-        }
+

@@ -18,16 +18,12 @@ class ClarifyTool(Tool):
     and the ClarifyWidget handles interaction via SpecialToolHandlers.
     """
 
+    _SCHEMA_NAME = "clarify"
+
     def __init__(self):
-        super().__init__(
-            name="clarify", description="Ask the user clarifying questions before proceeding"
-        )
-
-    def _get_parameters(self) -> dict[str, Any]:
-        """Get parameter schema."""
-        from .tool_schemas import CLARIFY_TOOL
-
-        return CLARIFY_TOOL.parameters
+        from src.tools.tool_schemas import _SCHEMA_REGISTRY
+        _def = _SCHEMA_REGISTRY["clarify"]
+        super().__init__(name=_def.name, description=_def.description)
 
     def execute(self, **kwargs) -> ToolResult:
         """

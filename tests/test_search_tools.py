@@ -114,7 +114,7 @@ class TestGrepTool:
         tool = GrepTool()
         result = tool.execute(
             pattern="authenticate",
-            path=str(temp_codebase),
+            file_path=str(temp_codebase),
             file_type="py",
             output_mode="files_with_matches"
         )
@@ -129,7 +129,7 @@ class TestGrepTool:
         tool = GrepTool()
         result = tool.execute(
             pattern=r"^class \w+",
-            path=str(temp_codebase),
+            file_path=str(temp_codebase),
             file_type="py",
             output_mode="content"
         )
@@ -144,7 +144,7 @@ class TestGrepTool:
         # Search Python files
         result = tool.execute(
             pattern="def ",
-            path=str(temp_codebase),
+            file_path=str(temp_codebase),
             file_type="python",
             output_mode="files_with_matches"
         )
@@ -156,7 +156,7 @@ class TestGrepTool:
         # Search JavaScript files
         result = tool.execute(
             pattern="function",
-            path=str(temp_codebase),
+            file_path=str(temp_codebase),
             file_type="js",
             output_mode="files_with_matches"
         )
@@ -169,7 +169,7 @@ class TestGrepTool:
         tool = GrepTool()
         result = tool.execute(
             pattern="authenticate",
-            path=str(temp_codebase),
+            file_path=str(temp_codebase),
             glob="src/**/*.py",
             output_mode="files_with_matches"
         )
@@ -183,7 +183,7 @@ class TestGrepTool:
         tool = GrepTool()
         result = tool.execute(
             pattern="TODO|FIXME",
-            path=str(temp_codebase),
+            file_path=str(temp_codebase),
             file_type="py",
             output_mode="content"
         )
@@ -198,7 +198,7 @@ class TestGrepTool:
         tool = GrepTool()
         result = tool.execute(
             pattern="authenticate",
-            path=str(temp_codebase),
+            file_path=str(temp_codebase),
             file_type="py",
             output_mode="files_with_matches"
         )
@@ -214,7 +214,7 @@ class TestGrepTool:
         tool = GrepTool()
         result = tool.execute(
             pattern="def ",
-            path=str(temp_codebase),
+            file_path=str(temp_codebase),
             file_type="py",
             output_mode="count"
         )
@@ -232,7 +232,7 @@ class TestGrepTool:
         # Test context after
         result = tool.execute(
             pattern="class User",
-            path=str(temp_codebase / "src" / "main.py"),
+            file_path=str(temp_codebase / "src" / "main.py"),
             output_mode="content",
             context_after=2
         )
@@ -244,7 +244,7 @@ class TestGrepTool:
         # Test context before and after
         result = tool.execute(
             pattern="authenticate",
-            path=str(temp_codebase / "src" / "main.py"),
+            file_path=str(temp_codebase / "src" / "main.py"),
             output_mode="content",
             context=2
         )
@@ -256,7 +256,7 @@ class TestGrepTool:
         tool = GrepTool()
         result = tool.execute(
             pattern="USER",
-            path=str(temp_codebase),
+            file_path=str(temp_codebase),
             file_type="py",
             output_mode="files_with_matches",
             case_insensitive=True
@@ -271,7 +271,7 @@ class TestGrepTool:
         tool = GrepTool()
         result = tool.execute(
             pattern="def ",
-            path=str(temp_codebase),
+            file_path=str(temp_codebase),
             file_type="py",
             output_mode="content",
             head_limit=2
@@ -289,7 +289,7 @@ class TestGrepTool:
         # Get all results
         result_all = tool.execute(
             pattern="def ",
-            path=str(temp_codebase),
+            file_path=str(temp_codebase),
             file_type="py",
             output_mode="files_with_matches"
         )
@@ -297,7 +297,7 @@ class TestGrepTool:
         # Get results with offset
         result_offset = tool.execute(
             pattern="def ",
-            path=str(temp_codebase),
+            file_path=str(temp_codebase),
             file_type="py",
             output_mode="files_with_matches",
             offset=1
@@ -312,7 +312,7 @@ class TestGrepTool:
         tool = GrepTool()
         result = tool.execute(
             pattern="nonexistent_pattern_xyz",
-            path=str(temp_codebase),
+            file_path=str(temp_codebase),
             file_type="py",
             output_mode="files_with_matches"
         )
@@ -326,7 +326,7 @@ class TestGrepTool:
         tool = GrepTool()
         result = tool.execute(
             pattern="[invalid",
-            path=str(temp_codebase),
+            file_path=str(temp_codebase),
             file_type="py",
             output_mode="content"
         )
@@ -339,7 +339,7 @@ class TestGrepTool:
         tool = GrepTool()
         result = tool.execute(
             pattern="test",
-            path="/nonexistent/path",
+            file_path="/nonexistent/path",
             output_mode="content"
         )
 
@@ -351,7 +351,7 @@ class TestGrepTool:
         tool = GrepTool()
         result = tool.execute(
             pattern="SECRET",
-            path=str(temp_codebase),
+            file_path=str(temp_codebase),
             output_mode="files_with_matches"
         )
 
@@ -365,7 +365,7 @@ class TestGrepTool:
         # Use no file_type filter so _should_skip is applied
         result = tool.execute(
             pattern="exports",
-            path=str(temp_codebase),
+            file_path=str(temp_codebase),
             output_mode="files_with_matches"
         )
 
@@ -386,7 +386,7 @@ class TestGlobTool:
         tool = GlobTool()
         result = tool.execute(
             pattern="*.py",
-            path=str(temp_codebase)
+            file_path=str(temp_codebase)
         )
 
         assert result.status == ToolStatus.SUCCESS
@@ -398,7 +398,7 @@ class TestGlobTool:
         tool = GlobTool()
         result = tool.execute(
             pattern="**/*.py",
-            path=str(temp_codebase)
+            file_path=str(temp_codebase)
         )
 
         assert result.status == ToolStatus.SUCCESS
@@ -412,7 +412,7 @@ class TestGlobTool:
         tool = GlobTool()
         result = tool.execute(
             pattern="**/*.{py,js}",
-            path=str(temp_codebase)
+            file_path=str(temp_codebase)
         )
 
         assert result.status == ToolStatus.SUCCESS
@@ -425,7 +425,7 @@ class TestGlobTool:
         tool = GlobTool()
         result = tool.execute(
             pattern="src/**/*.py",
-            path=str(temp_codebase)
+            file_path=str(temp_codebase)
         )
 
         assert result.status == ToolStatus.SUCCESS
@@ -441,7 +441,7 @@ class TestGlobTool:
         tool = GlobTool()
         result = tool.execute(
             pattern="**/*.{json,yaml}",
-            path=str(temp_codebase)
+            file_path=str(temp_codebase)
         )
 
         assert result.status == ToolStatus.SUCCESS
@@ -453,7 +453,7 @@ class TestGlobTool:
         tool = GlobTool()
         result = tool.execute(
             pattern="**/*.py",
-            path=str(temp_codebase),
+            file_path=str(temp_codebase),
             sort_by_mtime=True
         )
 
@@ -466,7 +466,7 @@ class TestGlobTool:
         tool = GlobTool()
         result = tool.execute(
             pattern="*.xyz",
-            path=str(temp_codebase)
+            file_path=str(temp_codebase)
         )
 
         assert result.status == ToolStatus.SUCCESS
@@ -478,7 +478,7 @@ class TestGlobTool:
         tool = GlobTool()
         result = tool.execute(
             pattern="*.py",
-            path="/nonexistent/path"
+            file_path="/nonexistent/path"
         )
 
         assert result.status == ToolStatus.ERROR
@@ -489,7 +489,7 @@ class TestGlobTool:
         tool = GlobTool()
         result = tool.execute(
             pattern="**/*",
-            path=str(temp_codebase)
+            file_path=str(temp_codebase)
         )
 
         assert result.status == ToolStatus.SUCCESS
@@ -501,7 +501,7 @@ class TestGlobTool:
         tool = GlobTool()
         result = tool.execute(
             pattern="**/*.js",
-            path=str(temp_codebase)
+            file_path=str(temp_codebase)
         )
 
         assert result.status == ToolStatus.SUCCESS
@@ -517,7 +517,7 @@ class TestGlobTool:
         tool = GlobTool()
         result = tool.execute(
             pattern="**/*.ts",
-            path=str(temp_codebase)
+            file_path=str(temp_codebase)
         )
 
         assert result.status == ToolStatus.SUCCESS
@@ -533,7 +533,7 @@ class TestIntegration:
         glob_tool = GlobTool()
         glob_result = glob_tool.execute(
             pattern="**/*.py",
-            path=str(temp_codebase)
+            file_path=str(temp_codebase)
         )
 
         assert glob_result.status == ToolStatus.SUCCESS
@@ -543,7 +543,7 @@ class TestIntegration:
         grep_tool = GrepTool()
         grep_result = grep_tool.execute(
             pattern="def ",
-            path=str(temp_codebase),
+            file_path=str(temp_codebase),
             file_type="py",
             output_mode="count"
         )
@@ -558,7 +558,7 @@ class TestIntegration:
         # Find all error handling
         result = grep_tool.execute(
             pattern="raise |throw ",
-            path=str(temp_codebase),
+            file_path=str(temp_codebase),
             output_mode="content",
             context=1
         )
@@ -572,7 +572,7 @@ class TestIntegration:
         grep_tool = GrepTool()
         result = grep_tool.execute(
             pattern="TODO|FIXME",
-            path=str(temp_codebase),
+            file_path=str(temp_codebase),
             output_mode="content"
         )
 
@@ -592,7 +592,7 @@ class TestSecurityFixes:
         # Try to access file outside workspace
         result = grep_tool.execute(
             pattern="password",
-            path="../../../etc/passwd",
+            file_path="../../../etc/passwd",
             output_mode="files_with_matches"
         )
 
@@ -607,7 +607,7 @@ class TestSecurityFixes:
         # Try to access directory outside workspace
         result = glob_tool.execute(
             pattern="**/*.py",
-            path="../../../etc"
+            file_path="../../../etc"
         )
 
         assert result.status == ToolStatus.ERROR
@@ -621,7 +621,7 @@ class TestSecurityFixes:
         # Dangerous pattern: (a+)+b causes catastrophic backtracking
         result = grep_tool.execute(
             pattern="(a+)+b",
-            path=".",
+            file_path=".",
             output_mode="files_with_matches"
         )
 
@@ -637,7 +637,7 @@ class TestSecurityFixes:
         # Dangerous pattern: (.*)+x
         result = grep_tool.execute(
             pattern="(.*)+x",
-            path=".",
+            file_path=".",
             output_mode="files_with_matches"
         )
 
@@ -653,7 +653,7 @@ class TestSecurityFixes:
         long_pattern = "a" * 501
         result = grep_tool.execute(
             pattern=long_pattern,
-            path=".",
+            file_path=".",
             output_mode="files_with_matches"
         )
 
@@ -668,7 +668,7 @@ class TestSecurityFixes:
         # Safe pattern
         result = grep_tool.execute(
             pattern="def [a-z_]+\\(",
-            path=".",
+            file_path=".",
             output_mode="files_with_matches",
             head_limit=1
         )
@@ -689,7 +689,7 @@ class TestSecurityFixes:
         # The metadata should still have files_skipped and skipped_details fields
         result = grep_tool.execute(
             pattern="import",
-            path=str(temp_codebase),
+            file_path=str(temp_codebase),
             output_mode="files_with_matches"
         )
 
@@ -716,7 +716,7 @@ class TestSecurityFixes:
 
         result = grep_tool.execute(
             pattern="PNG",
-            path=str(temp_codebase),
+            file_path=str(temp_codebase),
             output_mode="files_with_matches"
         )
 

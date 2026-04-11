@@ -18,21 +18,17 @@ class CreateCheckpointTool(Tool):
     completing a module, passing tests, or before risky changes).
     """
 
+    _SCHEMA_NAME = "create_checkpoint"
+
     def __init__(self, controller: Any | None = None):
         """Initialize checkpoint tool.
 
         Args:
             controller: LongRunningController instance (optional, can be set later)
         """
-        super().__init__(
-            name="create_checkpoint",
-            description=(
-                "Save current work to a checkpoint (save point for long-running sessions). "
-                "Use at logical stopping points: module complete, tests passing, major "
-                "milestone achieved, before risky changes, etc. This allows resuming work "
-                "later if interrupted."
-            ),
-        )
+        from src.tools.tool_schemas import _SCHEMA_REGISTRY
+        _def = _SCHEMA_REGISTRY["create_checkpoint"]
+        super().__init__(name=_def.name, description=_def.description)
         self.controller = controller
 
     def set_controller(self, controller: Any) -> None:
@@ -120,28 +116,4 @@ class CreateCheckpointTool(Tool):
                 error=f"Checkpoint creation failed: {str(e)}",
             )
 
-    def _get_parameters(self) -> dict:
-        """Get parameter schema for the tool.
 
-        Returns:
-            Parameter schema dictionary
-        """
-        return {
-            "type": "object",
-            "properties": {
-                "description": {
-                    "type": "string",
-                    "description": "What was accomplished in this session",
-                },
-                "current_phase": {
-                    "type": "string",
-                    "description": "Optional: Current development phase (e.g., 'Phase 1')",
-                },
-                "pending_tasks": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Optional: list of tasks remaining to complete",
-                },
-            },
-            "required": ["description"],
-        }

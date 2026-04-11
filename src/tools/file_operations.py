@@ -15,6 +15,7 @@ Security:
 """
 
 import json
+import os
 import platform
 import subprocess
 import sys
@@ -102,6 +103,8 @@ class ReadFileTool(FileOperationTool):
     Matches Claude Code's Read tool capabilities.
     """
 
+    _SCHEMA_NAME = "read_file"
+
     # Configuration constants
     MAX_LINES_DEFAULT = 1000  # Balanced default - read meaningful chunks
     MAX_LINES_LIMIT = 2000  # Hard cap per request
@@ -117,21 +120,9 @@ class ReadFileTool(FileOperationTool):
     _BINARY_FORMATS = {".pdf", ".docx"}
 
     def __init__(self):
-        from src.tools.tool_schemas import READ_FILE_TOOL
-
-        super().__init__(
-            name=READ_FILE_TOOL.name, description=READ_FILE_TOOL.description,
-        )
-
-    def _get_parameters(self) -> dict[str, Any]:
-        """Get parameter schema for LLM.
-
-        This is the canonical schema the LLM sees. Must match tool_schemas.py
-        READ_FILE_TOOL for consistency with subagent tool filtering.
-        """
-        from src.tools.tool_schemas import READ_FILE_TOOL
-
-        return READ_FILE_TOOL.parameters
+        from src.tools.tool_schemas import _SCHEMA_REGISTRY
+        _def = _SCHEMA_REGISTRY["read_file"]
+        super().__init__(name=_def.name, description=_def.description)
 
     def _format_extracted_lines(
         self,
@@ -336,16 +327,20 @@ class ReadFileTool(FileOperationTool):
 
                 # Run extraction in a subprocess for C-library crash isolation.
                 # If PyMuPDF's MuPDF segfaults, only the child process dies.
+                # Frozen binary: sys.executable is the .exe, use --extract-doc flag
+                # Source mode: sys.executable is python, use -m src.server --extract-doc
                 try:
-                    cmd = [
-                        sys.executable, "-m", "src.tools.document_extractor",
+                    if getattr(sys, "_MEIPASS", None):
+                        cmd = [sys.executable, "--extract-doc"]
+                    else:
+                        cmd = [sys.executable, "-m", "src.server", "--extract-doc"]
+                    cmd.extend([
                         str(path),
                         "--format", suffix.lstrip("."),
                         "--max-lines", str(self.MAX_EXTRACTED_LINES),
                         "--max-zip-size", str(self.MAX_ZIP_DECOMPRESSED_BYTES),
                         "--max-zip-ratio", str(self.MAX_ZIP_RATIO),
-                    ]
-                    # Conditional flags: only extract images when explicitly requested
+                    ])
                     if extract_images:
                         cmd.append("--extract-images")
                     if pages and suffix == ".pdf":
@@ -374,6 +369,7 @@ class ReadFileTool(FileOperationTool):
                         )
 
                     data = json.loads(proc.stdout)
+
                     if data.get("error"):
                         raw_error = data["error"]
                         # Pass through install instructions (safe, helpful).
@@ -541,21 +537,12 @@ class ReadFileTool(FileOperationTool):
 class WriteFileTool(FileOperationTool):
     """Tool for writing files with security validation."""
 
-    def __init__(self):
-        super().__init__(
-            name="write_file", description="Write content to a file (creates or overwrites)"
-        )
+    _SCHEMA_NAME = "write_file"
 
-    def _get_parameters(self) -> dict[str, Any]:
-        """Get parameter schema."""
-        return {
-            "type": "object",
-            "properties": {
-                "file_path": {"type": "string", "description": "Path to file"},
-                "content": {"type": "string", "description": "Content to write"},
-            },
-            "required": ["file_path", "content"],
-        }
+    def __init__(self):
+        from src.tools.tool_schemas import _SCHEMA_REGISTRY
+        _def = _SCHEMA_REGISTRY["write_file"]
+        super().__init__(name=_def.name, description=_def.description)
 
     def execute(self, file_path: str, content: str, **kwargs: Any) -> ToolResult:
         """Write content to file."""
@@ -593,20 +580,12 @@ class WriteFileTool(FileOperationTool):
 class ListDirectoryTool(FileOperationTool):
     """Tool for listing directory contents with security validation."""
 
-    def __init__(self):
-        super().__init__(
-            name="list_directory", description="list contents of a directory with file details"
-        )
+    _SCHEMA_NAME = "list_directory"
 
-    def _get_parameters(self) -> dict[str, Any]:
-        """Get parameter schema."""
-        return {
-            "type": "object",
-            "properties": {
-                "directory_path": {"type": "string", "description": "Path to directory"}
-            },
-            "required": ["directory_path"],
-        }
+    def __init__(self):
+        from src.tools.tool_schemas import _SCHEMA_REGISTRY
+        _def = _SCHEMA_REGISTRY["list_directory"]
+        super().__init__(name=_def.name, description=_def.description)
 
     def execute(self, directory_path: str, **kwargs: Any) -> ToolResult:
         """list directory contents."""
@@ -689,22 +668,12 @@ class ListDirectoryTool(FileOperationTool):
 class EditFileTool(FileOperationTool):
     """Tool for editing files with find/replace and security validation."""
 
-    def __init__(self):
-        super().__init__(
-            name="edit_file", description="Edit a file by replacing old text with new text"
-        )
+    _SCHEMA_NAME = "edit_file"
 
-    def _get_parameters(self) -> dict[str, Any]:
-        """Get parameter schema."""
-        return {
-            "type": "object",
-            "properties": {
-                "file_path": {"type": "string", "description": "Path to file"},
-                "old_text": {"type": "string", "description": "Text to find"},
-                "new_text": {"type": "string", "description": "Text to replace with"},
-            },
-            "required": ["file_path", "old_text", "new_text"],
-        }
+    def __init__(self):
+        from src.tools.tool_schemas import _SCHEMA_REGISTRY
+        _def = _SCHEMA_REGISTRY["edit_file"]
+        super().__init__(name=_def.name, description=_def.description)
 
     def execute(self, file_path: str, old_text: str, new_text: str, **kwargs: Any) -> ToolResult:
         """Edit file with find/replace."""
@@ -763,22 +732,12 @@ class EditFileTool(FileOperationTool):
 class AppendToFileTool(FileOperationTool):
     """Tool for appending content to files with security validation."""
 
-    def __init__(self):
-        super().__init__(
-            name="append_to_file",
-            description="Append content to an existing file (or create if doesn't exist)",
-        )
+    _SCHEMA_NAME = "append_to_file"
 
-    def _get_parameters(self) -> dict[str, Any]:
-        """Get parameter schema."""
-        return {
-            "type": "object",
-            "properties": {
-                "file_path": {"type": "string", "description": "Path to file"},
-                "content": {"type": "string", "description": "Content to append"},
-            },
-            "required": ["file_path", "content"],
-        }
+    def __init__(self):
+        from src.tools.tool_schemas import _SCHEMA_REGISTRY
+        _def = _SCHEMA_REGISTRY["append_to_file"]
+        super().__init__(name=_def.name, description=_def.description)
 
     def execute(self, file_path: str, content: str, **kwargs: Any) -> ToolResult:
         """Append content to file."""
@@ -846,37 +805,13 @@ class RunCommandTool(Tool):
     operate on files directly. Security handled via command validation.
     """
 
-    def __init__(self, registry=None):
-        super().__init__(
-            name="run_command", description="Execute a shell command and return its output"
-        )
-        self._registry = registry
+    _SCHEMA_NAME = "run_command"
 
-    def _get_parameters(self) -> dict[str, Any]:
-        """Get parameter schema."""
-        return {
-            "type": "object",
-            "properties": {
-                "command": {"type": "string", "description": "Shell command to execute"},
-                "working_directory": {"type": "string", "description": "Working directory"},
-                "timeout": {
-                    "type": "integer",
-                    "description": (
-                        "Timeout in seconds (default: 120). Use higher values for "
-                        "long-running commands like test suites or builds (max: 600)"
-                    ),
-                },
-                "background": {
-                    "type": "boolean",
-                    "description": (
-                        "Run in background (non-blocking). Returns immediately with a task ID. "
-                        "You will be automatically notified when the task completes. "
-                        "Use for long-running operations like test suites, builds, or linters."
-                    ),
-                },
-            },
-            "required": ["command"],
-        }
+    def __init__(self, registry=None):
+        from src.tools.tool_schemas import _SCHEMA_REGISTRY
+        _def = _SCHEMA_REGISTRY["run_command"]
+        super().__init__(name=_def.name, description=_def.description)
+        self._registry = registry
 
     async def execute_async(
         self,

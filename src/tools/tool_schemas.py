@@ -214,10 +214,14 @@ def _build_run_command_description() -> str:
     )
 
     # --- Multiple commands ---
+    if shell_info["syntax"] == "unix":
+        chain_cmd = "chain with '&&'"
+    else:
+        chain_cmd = "chain with '; ' (NOT '&&' -- PowerShell does not support &&)"
     multi_cmd = (
         "\nMultiple commands:\n"
         "- Independent commands that can run in parallel -> make separate run_command calls.\n"
-        "- Dependent commands that must run sequentially -> chain with '&&'.\n"
+        f"- Dependent commands that must run sequentially -> {chain_cmd}.\n"
         "- Do NOT use newlines to separate commands in a single call.\n"
     )
 
@@ -315,7 +319,7 @@ GREP_TOOL = ToolDefinition(
                 "type": "string",
                 "description": r"Regex pattern to search for (e.g., '^class \w+', 'TODO|FIXME', 'def authenticate')",
             },
-            "path": {
+            "file_path": {
                 "type": "string",
                 "description": "File or directory to search (default: current directory)",
             },
@@ -330,7 +334,7 @@ GREP_TOOL = ToolDefinition(
             "output_mode": {
                 "type": "string",
                 "enum": ["content", "files_with_matches", "count"],
-                "description": "'content' (show matching lines), 'files_with_matches' (file paths only), 'count' (match counts per file)",
+                "description": "'content' (show matching lines), 'files_with_matches' (file paths only), 'count' (match counts per file). Auto-detected when omitted: 'content' if file_path is a file, 'files_with_matches' if it is a directory.",
             },
             "context_before": {
                 "type": "number",
@@ -377,7 +381,7 @@ GLOB_TOOL = ToolDefinition(
                 "type": "string",
                 "description": "Glob pattern (e.g., '*.py', '**/*.js', 'src/**/*.{ts,tsx}' for brace expansion)",
             },
-            "path": {
+            "file_path": {
                 "type": "string",
                 "description": "Directory to search in (default: current directory)",
             },
@@ -976,6 +980,7 @@ ALL_TOOLS = [
     # Task tools (task_create/task_update/task_list/task_block) are backed by BeadStore
     # and registered dynamically via tool_executor, not listed here
     CREATE_CHECKPOINT_TOOL,
+    CHECK_BACKGROUND_TASK_TOOL,
     WEB_SEARCH_TOOL,
     WEB_FETCH_TOOL,
     CLARIFY_TOOL,
@@ -1051,6 +1056,10 @@ def get_all_tools(
     return list(ALL_TOOLS) + list(mcp_definitions)
 
 
+# Registry for fast name-based lookup. Used by Tool._SCHEMA_NAME delegation pattern
+# in base.py so subclasses can delegate _get_parameters() without repeating schema defs.
+_SCHEMA_REGISTRY: dict[str, "ToolDefinition"] = {t.name: t for t in ALL_TOOLS}
+
 __all__ = [
     "READ_FILE_TOOL",
     "WRITE_FILE_TOOL",
@@ -1070,4 +1079,5 @@ __all__ = [
     "PLAN_MODE_TOOLS",
     "get_tools_for_task",
     "get_all_tools",
+    "_SCHEMA_REGISTRY",
 ]

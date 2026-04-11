@@ -95,6 +95,12 @@ class ToolResult(BaseModel):
 class Tool(ABC):
     """Abstract base class for tools."""
 
+    # Set to a tool name in tool_schemas.ALL_TOOLS to delegate _get_parameters()
+    # automatically. Subclasses that set this do NOT need to override _get_parameters().
+    # Subclasses NOT in tool_schemas (director tools, knowledge tools, etc.) must
+    # override _get_parameters() directly.
+    _SCHEMA_NAME: str | None = None
+
     def __init__(self, name: str, description: str):
         """
         Initialize tool.
@@ -132,10 +138,19 @@ class Tool(ABC):
             "parameters": self._get_parameters(),
         }
 
-    @abstractmethod
     def _get_parameters(self) -> dict[str, Any]:
-        """Get parameter schema."""
-        pass
+        """Get parameter schema.
+
+        Default implementation delegates to tool_schemas._SCHEMA_REGISTRY if
+        _SCHEMA_NAME is set. Subclasses that are not in tool_schemas must override
+        this method directly.
+        """
+        if self._SCHEMA_NAME is not None:
+            from src.tools.tool_schemas import _SCHEMA_REGISTRY
+            return _SCHEMA_REGISTRY[self._SCHEMA_NAME].parameters
+        raise NotImplementedError(
+            f"{type(self).__name__} must either set _SCHEMA_NAME or override _get_parameters()"
+        )
 
 
 class ToolExecutor:

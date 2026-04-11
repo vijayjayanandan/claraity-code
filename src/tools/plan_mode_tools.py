@@ -27,6 +27,8 @@ class EnterPlanModeTool(Tool):
     3. Returns the plan file path for the LLM to write to
     """
 
+    _SCHEMA_NAME = "enter_plan_mode"
+
     def __init__(self, plan_mode_state: "PlanModeState" = None, session_id: str = None):
         """
         Initialize EnterPlanMode tool.
@@ -35,15 +37,9 @@ class EnterPlanModeTool(Tool):
             plan_mode_state: The PlanModeState instance to use
             session_id: Current session ID for plan file naming
         """
-        super().__init__(
-            name="enter_plan_mode",
-            description=(
-                "Enter plan mode to design an implementation approach before making changes. "
-                "Creates a plan file where you write your implementation plan. "
-                "While in plan mode, only read-only tools are available (plus writing to the plan file). "
-                "Use this for complex tasks that benefit from upfront planning."
-            ),
-        )
+        from src.tools.tool_schemas import _SCHEMA_REGISTRY
+        _def = _SCHEMA_REGISTRY["enter_plan_mode"]
+        super().__init__(name=_def.name, description=_def.description)
         self.plan_mode_state = plan_mode_state
         self.session_id = session_id
 
@@ -117,18 +113,6 @@ class EnterPlanModeTool(Tool):
                 error=f"Failed to enter plan mode: {str(e)}",
             )
 
-    def _get_parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "reason": {
-                    "type": "string",
-                    "description": "Brief reason for entering plan mode (e.g., 'Complex refactoring with multiple dependencies')",
-                }
-            },
-            "required": [],
-        }
-
 
 class RequestPlanApprovalTool(Tool):
     """
@@ -141,6 +125,8 @@ class RequestPlanApprovalTool(Tool):
     4. Returns the approval decision (approved/rejected with feedback)
     """
 
+    _SCHEMA_NAME = "request_plan_approval"
+
     def __init__(self, plan_mode_state: "PlanModeState" = None):
         """
         Initialize RequestPlanApproval tool.
@@ -148,14 +134,9 @@ class RequestPlanApprovalTool(Tool):
         Args:
             plan_mode_state: The PlanModeState instance to use
         """
-        super().__init__(
-            name="request_plan_approval",
-            description=(
-                "Submit your implementation plan to the user for approval. "
-                "Call this after writing your plan to the plan file. "
-                "The user will review and either approve the plan, reject it, or provide feedback for revisions."
-            ),
-        )
+        from src.tools.tool_schemas import _SCHEMA_REGISTRY
+        _def = _SCHEMA_REGISTRY["request_plan_approval"]
+        super().__init__(name=_def.name, description=_def.description)
         self.plan_mode_state = plan_mode_state
 
     def execute(self, **kwargs: Any) -> ToolResult:
@@ -221,8 +202,7 @@ class RequestPlanApprovalTool(Tool):
                 error=f"Failed to request plan approval: {str(e)}",
             )
 
-    def _get_parameters(self) -> dict[str, Any]:
-        return {"type": "object", "properties": {}, "required": []}
+
 
 
 # Export all

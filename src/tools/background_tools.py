@@ -15,29 +15,13 @@ from src.tools.base import Tool, ToolResult, ToolStatus
 class CheckBackgroundTaskTool(Tool):
     """Check status and output of a background task."""
 
-    def __init__(self, registry: BackgroundTaskRegistry):
-        super().__init__(
-            name="check_background_task",
-            description=(
-                "Check the status of a background task that is currently still running. "
-                "Only call this for an early mid-run status check. "
-                "DO NOT call this after receiving a [BACKGROUND TASK UPDATE] notification — "
-                "the full output is already included in that notification."
-            ),
-        )
-        self._registry = registry
+    _SCHEMA_NAME = "check_background_task"
 
-    def _get_parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "task_id": {
-                    "type": "string",
-                    "description": "Background task ID (e.g., 'bg-1')",
-                },
-            },
-            "required": ["task_id"],
-        }
+    def __init__(self, registry: BackgroundTaskRegistry):
+        from src.tools.tool_schemas import _SCHEMA_REGISTRY
+        _def = _SCHEMA_REGISTRY["check_background_task"]
+        super().__init__(name=_def.name, description=_def.description)
+        self._registry = registry
 
     def execute(self, task_id: str, **kwargs: Any) -> ToolResult:
         info = self._registry.get_status(task_id)
