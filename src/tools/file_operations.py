@@ -675,7 +675,10 @@ class EditFileTool(FileOperationTool):
         _def = _SCHEMA_REGISTRY["edit_file"]
         super().__init__(name=_def.name, description=_def.description)
 
-    def execute(self, file_path: str, old_text: str, new_text: str, **kwargs: Any) -> ToolResult:
+    def execute(
+        self, file_path: str, old_text: str, new_text: str,
+        replace_all: bool = False, **kwargs: Any,
+    ) -> ToolResult:
         """Edit file with find/replace."""
         try:
             # Validate path security
@@ -706,8 +709,25 @@ class EditFileTool(FileOperationTool):
                     error="Text to replace not found in file",
                 )
 
-            # Replace
-            new_content = content.replace(old_text, new_text)
+            # Uniqueness check: require unique match unless replace_all=True
+            occurrence_count = content.count(old_text)
+            if occurrence_count > 1 and not replace_all:
+                return ToolResult(
+                    tool_name=self.name,
+                    status=ToolStatus.ERROR,
+                    output=None,
+                    error=(
+                        f"old_text matches {occurrence_count} locations in the file. "
+                        f"Provide more surrounding context to make the match unique, "
+                        f"or set replace_all=true to replace all occurrences."
+                    ),
+                )
+
+            # Replace (single or all)
+            if replace_all:
+                new_content = content.replace(old_text, new_text)
+            else:
+                new_content = content.replace(old_text, new_text, 1)
 
             # Write back
             with open(path, "w", encoding="utf-8") as f:
@@ -717,7 +737,7 @@ class EditFileTool(FileOperationTool):
                 tool_name=self.name,
                 status=ToolStatus.SUCCESS,
                 output=f"Successfully edited {file_path}",
-                metadata={"file_path": str(path), "replacements": content.count(old_text)},
+                metadata={"file_path": str(path), "replacements": occurrence_count if replace_all else 1},
             )
 
         except Exception as e:

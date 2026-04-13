@@ -123,6 +123,10 @@ EDIT_FILE_TOOL = ToolDefinition(
                 "description": "Exact text to find and replace. Must match exactly including whitespace. Must be unique in the file -- if multiple matches exist, the edit will fail. Provide more surrounding context to disambiguate.",
             },
             "new_text": {"type": "string", "description": "New text to replace the old text with"},
+            "replace_all": {
+                "type": "boolean",
+                "description": "If true, replace ALL occurrences of old_text. Default false (requires unique match).",
+            },
         },
         "required": ["file_path", "old_text", "new_text"],
     },

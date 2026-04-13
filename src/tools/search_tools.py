@@ -8,6 +8,7 @@ Provides:
 These tools provide Anthropic-grade search capabilities for code discovery and analysis.
 """
 
+import bisect
 import re
 from enum import Enum
 from pathlib import Path
@@ -126,6 +127,9 @@ def validate_regex_safety(pattern: str, max_length: int = 500) -> None:
 
     # Dangerous patterns that can cause catastrophic backtracking
     # These patterns have exponential time complexity: O(2^n)
+    # NOTE: These checks only catch single-char groups like (.+)+ or (a+)+.
+    # Multi-char groups like (\d+)+ or ([a-z]+)+ are NOT detected.
+    # Low practical risk since the LLM generates patterns, not adversaries.
     dangerous_patterns = [
         (r"\(\.\*\+", "(.* followed by +"),  # (.*+  - possessive quantifier misuse
         (r"\+\+", "Consecutive ++"),  # ++
@@ -192,6 +196,9 @@ class GrepTool(Tool):
     """
 
     _SCHEMA_NAME = "grep"
+
+    # Skip files larger than 10 MB to prevent OOM from readlines()
+    MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 
     def __init__(self):
         super().__init__(
@@ -291,6 +298,10 @@ class GrepTool(Tool):
             context_b = context if context > 0 else context_before
             context_a = context if context > 0 else context_after
 
+            # Default head_limit to prevent context window flooding
+            if head_limit is None:
+                head_limit = 250
+
             # Validate regex pattern for security (prevent ReDoS)
             try:
                 validate_regex_safety(pattern)
@@ -332,7 +343,8 @@ class GrepTool(Tool):
 
             for file_path in files:
                 matches = self._search_file(
-                    file_path, regex, mode, context_b, context_a, line_numbers, skipped_files
+                    file_path, regex, mode, context_b, context_a, line_numbers,
+                    skipped_files, multiline,
                 )
 
                 if matches:
@@ -346,16 +358,16 @@ class GrepTool(Tool):
             # Apply offset and head_limit
             if mode == OutputMode.FILES_WITH_MATCHES:
                 all_matches = all_matches[offset:]
-                if head_limit:
+                if head_limit > 0:
                     all_matches = all_matches[:head_limit]
             elif mode == OutputMode.CONTENT:
                 all_matches = all_matches[offset:]
-                if head_limit:
+                if head_limit > 0:
                     all_matches = all_matches[:head_limit]
             elif mode == OutputMode.COUNT:
                 # For count mode, offset/limit applies to number of files
                 items = list(file_match_counts.items())[offset:]
-                if head_limit:
+                if head_limit > 0:
                     items = items[:head_limit]
                 file_match_counts = dict(items)
 
@@ -482,6 +494,7 @@ class GrepTool(Tool):
         context_after: int,
         show_line_numbers: bool,
         skipped_files: list[str] | None = None,
+        multiline: bool = False,
     ) -> list[str]:
         """
         Search single file for pattern.
@@ -494,13 +507,28 @@ class GrepTool(Tool):
             context_after: Lines of context after match
             show_line_numbers: Whether to show line numbers
             skipped_files: Optional list to track files that couldn't be read
+            multiline: If True, search full file content for cross-line patterns
 
         Returns:
             list of matching lines or indicators
         """
+        # Skip oversized files to prevent OOM
+        try:
+            if file_path.stat().st_size > self.MAX_FILE_SIZE_BYTES:
+                if skipped_files is not None:
+                    size_mb = file_path.stat().st_size / (1024 * 1024)
+                    skipped_files.append(f"{file_path} (Too large: {size_mb:.1f} MB)")
+                return []
+        except OSError:
+            pass  # stat failed, try to open anyway
+
         try:
             with open(file_path, encoding="utf-8", errors="ignore") as f:
-                lines = f.readlines()
+                if multiline:
+                    content = f.read()
+                    lines = content.splitlines(keepends=True)
+                else:
+                    lines = f.readlines()
         except PermissionError:
             if skipped_files is not None:
                 skipped_files.append(f"{file_path} (Permission denied)")
@@ -518,20 +546,44 @@ class GrepTool(Tool):
                 skipped_files.append(f"{file_path} (Error: {type(e).__name__}: {str(e)})")
             return []
 
-        matches = []
-        matched_lines: set[int] = set()  # Track which lines matched
+        matched_lines: set[int] = set()  # 0-indexed line numbers that matched
 
-        # Find all matching lines
-        for line_num, line in enumerate(lines):
-            if regex.search(line):
-                matched_lines.add(line_num)
+        if multiline:
+            # Search full content for cross-line matches, map positions to lines
+            if not content:
+                return []
+
+            # Build a cumulative offset table for O(1) position->line lookup
+            line_offsets = []  # line_offsets[i] = start offset of line i
+            offset = 0
+            for line in lines:
+                line_offsets.append(offset)
+                offset += len(line)
+
+            for m in regex.finditer(content):
+                start_pos = m.start()
+                end_pos = max(m.end() - 1, start_pos)  # inclusive end
+                # Binary search for start line
+                start_line = self._offset_to_line(line_offsets, start_pos)
+                end_line = self._offset_to_line(line_offsets, end_pos)
+                for ln in range(start_line, end_line + 1):
+                    matched_lines.add(ln)
+        else:
+            # Standard line-by-line search
+            for line_num, line in enumerate(lines):
+                if regex.search(line):
+                    matched_lines.add(line_num)
 
         if not matched_lines:
             return []
 
-        # For FILES_WITH_MATCHES and COUNT modes, just return indicator
-        if mode in (OutputMode.FILES_WITH_MATCHES, OutputMode.COUNT):
+        # For FILES_WITH_MATCHES, just return indicator
+        if mode == OutputMode.FILES_WITH_MATCHES:
             return ["match"]  # Indicator that file has matches
+
+        # For COUNT, return one entry per match so len() gives real count
+        if mode == OutputMode.COUNT:
+            return list(matched_lines)
 
         # For CONTENT mode, build output with context
         output_lines: set[int] = set()
@@ -543,6 +595,7 @@ class GrepTool(Tool):
             output_lines.update(range(start, end))
 
         # Build formatted output
+        matches = []
         for line_num in sorted(output_lines):
             line_content = lines[line_num].rstrip("\n")
 
@@ -554,6 +607,12 @@ class GrepTool(Tool):
                 matches.append(f"{file_path}: {line_content}")
 
         return matches
+
+    @staticmethod
+    def _offset_to_line(line_offsets: list[int], pos: int) -> int:
+        """Map a character offset to a 0-indexed line number using binary search."""
+        # bisect_right returns the insertion point; subtract 1 for the line containing pos
+        return bisect.bisect_right(line_offsets, pos) - 1
 
 
 class GlobTool(Tool):
