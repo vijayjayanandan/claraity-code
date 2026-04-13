@@ -2447,30 +2447,31 @@ def scan_files(store: ClaraityStore, root: str = "src", extensions: list[str] = 
         print(f"[WARN] Root path not found: {root}")
         return
 
-    # Map directory prefixes to module node IDs
-    MODULE_MAP = {
-        "src/core/": "mod-core",
-        "src/memory/": "mod-memory",
-        "src/session/": "mod-session",
-        "src/ui/": "mod-ui",
-        "src/tools/": "mod-tools",
-        "src/llm/": "mod-llm",
-        "src/server/": "mod-server",
-        "src/observability/": "mod-observability",
-        "src/prompts/": "mod-prompts",
-        "src/subagents/": "mod-subagents",
-        "src/director/": "mod-director",
-        "src/integrations/": "mod-integrations",
-        "src/platform/": "mod-platform",
-        "src/hooks/": "mod-hooks",
-        "src/claraity/": "mod-claraity",
-        "src/execution/": "mod-execution",
-        "src/orchestration/": "mod-orchestration",
-        "src/security/": "mod-security",
-        "src/testing/": "mod-testing",
-        "src/validation/": "mod-validation",
-        "src/utils/": "mod-utils",
-    }
+    # Dynamically discover modules from actual directory structure.
+    # Scans for immediate subdirectories under root that contain source files.
+    scan_exts_early = set(extensions) if extensions else DEFAULT_EXTENSIONS
+    scan_exts_early = {e if e.startswith(".") else f".{e}" for e in scan_exts_early}
+
+    MODULE_MAP: dict[str, str] = {}
+    root_str = str(root_path).replace("\\", "/")
+    for child in sorted(root_path.iterdir()):
+        if not child.is_dir():
+            continue
+        if child.name.startswith(".") or child.name in {
+            "__pycache__", "node_modules", ".git", ".venv", "dist", "build",
+            ".tox", ".mypy_cache",
+        }:
+            continue
+        # Only create a module if the directory contains at least one source file
+        has_source = any(
+            f.suffix in scan_exts_early
+            for f in child.rglob("*")
+            if f.is_file()
+        )
+        if has_source:
+            prefix = f"{root_str}/{child.name}/"
+            mod_id = f"mod-{child.name}"
+            MODULE_MAP[prefix] = mod_id
 
     def get_module_id(file_path: str) -> Optional[str]:
         """Find which module a file belongs to."""
@@ -2521,16 +2522,16 @@ def scan_files(store: ClaraityStore, root: str = "src", extensions: list[str] = 
         except Exception:
             return "", 0
 
-    # Ensure all module nodes exist (some may not be in the main populate)
+    # Ensure module nodes exist for discovered directories
     existing_nodes = {n["id"] for n in store.get_all_nodes()}
     for prefix, mod_id in MODULE_MAP.items():
         if mod_id not in existing_nodes:
-            label = prefix.replace("src/", "").rstrip("/")
+            label = prefix.rstrip("/").rsplit("/", 1)[-1]
             store.add_node(
                 id=mod_id,
                 type="module",
                 layer=2,
-                name=prefix,
+                name=label,
                 description="[needs description]",
                 file_path=prefix,
                 risk_level="low",
@@ -2636,6 +2637,8 @@ def scan_files(store: ClaraityStore, root: str = "src", extensions: list[str] = 
 
     drift: dict = {"new": [], "modified": [], "deleted": [], "unchanged": 0, "total_scanned": 0}
     seen_paths = set()
+    total_lines = 0
+    ext_counts: dict[str, int] = {}
 
     file_count = 0
     for src_file in sorted(root_path.rglob("*")):
@@ -2674,6 +2677,8 @@ def scan_files(store: ClaraityStore, root: str = "src", extensions: list[str] = 
             drift["unchanged"] += 1
 
         description, line_count = extract_description(src_file)
+        total_lines += line_count
+        ext_counts[src_file.suffix] = ext_counts.get(src_file.suffix, 0) + 1
 
         # Determine role from filename patterns
         role = "source"
@@ -2717,11 +2722,23 @@ def scan_files(store: ClaraityStore, root: str = "src", extensions: list[str] = 
 
     drift["total_scanned"] = file_count
 
-    # Update scanned_at timestamp
+    # Auto-compute and store metadata that doesn't need LLM judgment
     store.set_metadata("scanned_at", ClaraityStore._now())
+    store.set_metadata("total_files", str(file_count))
+    store.set_metadata("total_lines", str(total_lines))
+
+    # Detect primary language from file extension frequency
+    if ext_counts:
+        ext_to_lang = {
+            ".py": "Python", ".ts": "TypeScript", ".tsx": "TypeScript",
+            ".js": "JavaScript", ".jsx": "JavaScript", ".go": "Go",
+            ".java": "Java", ".rs": "Rust", ".rb": "Ruby", ".cs": "C#",
+        }
+        top_ext = max(ext_counts, key=ext_counts.get)
+        store.set_metadata("repo_language", ext_to_lang.get(top_ext, top_ext))
 
     summary = (
-        f"[OK] Scanned {file_count} files: "
+        f"[OK] Scanned {file_count} files ({total_lines} lines): "
         f"{len(drift['new'])} new, {len(drift['modified'])} modified, "
         f"{len(drift['deleted'])} deleted, {drift['unchanged']} unchanged"
     )
@@ -3016,11 +3033,39 @@ def render_search(store: ClaraityStore, keyword: str, node_type: str = None) -> 
     type_label = f" type={node_type}" if node_type else ""
     lines = [f'## Search: "{keyword}"{type_label} ({len(matches)} matches)', ""]
 
+    # Load edges once for neighbor info
+    all_edges = store.get_all_edges()
+    all_nodes = store.get_all_nodes()
+    node_map = {n["id"]: n for n in all_nodes}
+
     for m in matches:
         lines.append(f"### {m['name']} ({m['node_type']})")
         lines.append(f"- **ID**: {m['node_id']}")
         if m.get("snippet"):
             lines.append(f"- **Match**: {m['snippet']}")
+
+        # Show neighbor edges for component/module nodes
+        nid = m["node_id"]
+        if m["node_type"] in ("component", "module"):
+            outgoing = [
+                e for e in all_edges
+                if e["from_id"] == nid and e["type"] not in ("contains", "constrains")
+            ]
+            incoming = [
+                e for e in all_edges
+                if e["to_id"] == nid and e["type"] not in ("contains", "constrains")
+            ]
+            if outgoing:
+                targets = ", ".join(
+                    node_map.get(e["to_id"], {}).get("name", e["to_id"]) for e in outgoing
+                )
+                lines.append(f"- **Depends on**: {targets}")
+            if incoming:
+                sources = ", ".join(
+                    node_map.get(e["from_id"], {}).get("name", e["from_id"]) for e in incoming
+                )
+                lines.append(f"- **Used by**: {sources}")
+
         lines.append("")
 
     return "\n".join(lines)

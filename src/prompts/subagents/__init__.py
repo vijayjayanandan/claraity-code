@@ -82,8 +82,8 @@ Use `knowledge_query` with these parameters (all optional, combine them):
 - `show="brief"` -- compact architecture overview (use at task start)
 - `search="keyword"` -- full-text search with ranking (supports AND/OR/NOT, prefix*, "phrases")
 - `file_path="src/core/agent.py"` -- file's role, module, and applicable decisions
-- `module_id="mod-core"` -- detailed module info (components, files, dependencies)
-- `impact="comp-message-store"` -- blast radius analysis before modifying
+- `module_id="mod-api"` -- detailed module info (components, files, dependencies)
+- `impact="comp-router"` -- blast radius analysis before modifying
 - `node_id="comp-x, comp-y"` -- detail for specific nodes (comma-separated)
 - `search="token", node_type="decision"` -- search filtered by type
 
@@ -1004,11 +1004,11 @@ Use `knowledge_update` to add all nodes and edges. Batch related operations toge
 **Example -- add modules, components, and edges in one call:**
 ```
 knowledge_update(operations='[
-  {{"op":"add_node","node_id":"sys-user","node_type":"system","name":"User","layer":1,"description":"End user interacting via TUI or VS Code"}},
-  {{"op":"update_node","node_id":"mod-core","description":"Core agent logic -- CodingAgent facade, tool gating, stream phases"}},
-  {{"op":"add_node","node_id":"comp-coding-agent","node_type":"component","name":"CodingAgent","layer":3,"description":"Main agent facade","file_path":"src/core/agent.py","line_count":2617,"risk_level":"high","properties":{{"key_methods":["stream_response","execute_tool"]}}}},
-  {{"op":"add_edge","from_id":"mod-core","to_id":"comp-coding-agent","edge_type":"contains"}},
-  {{"op":"add_edge","from_id":"comp-coding-agent","to_id":"comp-memory-manager","edge_type":"uses","label":"Persists messages after each turn"}}
+  {{"op":"add_node","node_id":"sys-user","node_type":"system","name":"User","layer":1,"description":"End user interacting via the web UI"}},
+  {{"op":"update_node","node_id":"mod-api","description":"REST API layer -- route handlers, middleware, request validation"}},
+  {{"op":"add_node","node_id":"comp-router","node_type":"component","name":"Router","layer":3,"description":"Main request router","file_path":"src/api/router.py","line_count":450,"risk_level":"medium","properties":{{"key_methods":["handle_request","dispatch"]}}}},
+  {{"op":"add_edge","from_id":"mod-api","to_id":"comp-router","edge_type":"contains"}},
+  {{"op":"add_edge","from_id":"comp-router","to_id":"comp-db-client","edge_type":"uses","label":"Queries database for request data"}}
 ]')
 ```
 
@@ -1055,10 +1055,11 @@ Do NOT set flow_rank/flow_col manually -- `knowledge_auto_layout` computes posit
 
 ### Step 8: Store architecture overview
 
+Note: `total_files`, `total_lines`, and `repo_language` are auto-computed by \
+`knowledge_scan_files` -- do NOT set them manually.
+
 ```
-knowledge_set_metadata(key="architecture_overview", value="<1500-2000 char narrative>")
-knowledge_set_metadata(key="scanned_by", value="<model name>")
-knowledge_set_metadata(key="repo_name", value="<repo name>")
+knowledge_set_metadata(metadata='{{"repo_name": "<human-readable project name>", "architecture_overview": "<1500-2000 char narrative>"}}')
 ```
 
 ## Phase 5: Auto-Layout and Self-Review

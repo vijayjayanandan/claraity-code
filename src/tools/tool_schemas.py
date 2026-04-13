@@ -844,14 +844,13 @@ KNOWLEDGE_QUERY_TOOL = ToolDefinition(
 
 KNOWLEDGE_SET_METADATA_TOOL = ToolDefinition(
     name="knowledge_set_metadata",
-    description="Store a key-value pair in the knowledge DB metadata (architecture overview, scan info, repo name).",
+    description="Store metadata in the knowledge DB. Pass a JSON object with all key-value pairs in one call. Note: total_files, total_lines, repo_language are auto-computed by knowledge_scan_files.",
     parameters={
         "type": "object",
         "properties": {
-            "key": {"type": "string", "description": "Metadata key (architecture_overview, repo_name, repo_language, scanned_by, total_files, total_lines)"},
-            "value": {"type": "string", "description": "Metadata value"},
+            "metadata": {"type": "string", "description": 'JSON object of key-value pairs. Example: {"repo_name": "MyProject", "architecture_overview": "A web app that..."}. Standard keys: architecture_overview, repo_name, scanned_by.'},
         },
-        "required": ["key", "value"],
+        "required": ["metadata"],
     },
 )
 

@@ -340,28 +340,69 @@ class KnowledgeQueryTool(Tool):
 class KnowledgeSetMetadataTool(Tool):
     """Store metadata in the knowledge DB (overview, scan info, etc.)."""
 
+    NUMERIC_KEYS = {"total_files", "total_lines"}
+
     def __init__(self):
         super().__init__(
             name="knowledge_set_metadata",
             description=(
-                "Store a key-value pair in the knowledge DB metadata. Use this to save "
-                "the architecture overview narrative, scan info (scanned_by, repo_name), "
-                "or any other metadata about the knowledge base."
+                "Store one or more key-value pairs in the knowledge DB metadata. "
+                "Pass a JSON object with all metadata to set in a single call. "
+                "Note: total_files, total_lines, and repo_language are auto-computed "
+                "by knowledge_scan_files -- you only need to set repo_name, "
+                "architecture_overview, and optionally scanned_by."
             ),
         )
 
-    def execute(self, key: str, value: str, **kwargs: Any) -> ToolResult:
+    def execute(self, metadata: str = "", **kwargs: Any) -> ToolResult:
+        import json as _json
+
         from src.claraity.claraity_db import ClaraityStore
 
         try:
+            pairs = _json.loads(metadata)
+            if not isinstance(pairs, dict) or not pairs:
+                return ToolResult(
+                    tool_name=self.name,
+                    status=ToolStatus.ERROR,
+                    output=None,
+                    error="'metadata' must be a non-empty JSON object, e.g. {\"repo_name\": \"MyProject\", \"architecture_overview\": \"...\"}",
+                )
+        except (_json.JSONDecodeError, TypeError) as e:
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.ERROR,
+                output=None,
+                error=f"Invalid JSON in 'metadata' parameter: {e}",
+            )
+
+        # Validate numeric keys
+        for k, v in pairs.items():
+            if k in self.NUMERIC_KEYS:
+                try:
+                    int(v)
+                except (ValueError, TypeError):
+                    return ToolResult(
+                        tool_name=self.name,
+                        status=ToolStatus.ERROR,
+                        output=None,
+                        error=f"Metadata key '{k}' requires a plain integer, got: {repr(v)}",
+                    )
+
+        try:
+            results = []
             with ClaraityStore() as store:
-                store.set_metadata(key, value)
-            preview = value[:100] + "..." if len(value) > 100 else value
+                for key, value in pairs.items():
+                    store.set_metadata(key, str(value))
+                    preview = str(value)[:80] + "..." if len(str(value)) > 80 else str(value)
+                    results.append(f"  {key} = {preview}")
+
+            output = f"[OK] Set {len(pairs)} metadata key(s):\n" + "\n".join(results)
             return ToolResult(
                 tool_name=self.name,
                 status=ToolStatus.SUCCESS,
-                output=f"[OK] Set metadata: {key} = {preview}",
-                metadata={"key": key},
+                output=output,
+                metadata={"keys": list(pairs.keys())},
             )
         except Exception as e:
             return ToolResult(
@@ -375,24 +416,21 @@ class KnowledgeSetMetadataTool(Tool):
         return {
             "type": "object",
             "properties": {
-                "key": {
+                "metadata": {
                     "type": "string",
                     "description": (
-                        "Metadata key. Standard keys: "
+                        "JSON object of key-value pairs to store. Example: "
+                        '{\"repo_name\": \"MyProject\", \"architecture_overview\": \"A web app that...\"}. '
+                        "Standard keys: "
                         "'architecture_overview' (1500-2000 char narrative of the system), "
-                        "'repo_name' (project name), "
-                        "'repo_language' (primary language), "
-                        "'scanned_by' (model that performed the scan), "
-                        "'total_files' (number of source files), "
-                        "'total_lines' (approximate line count)"
+                        "'repo_name' (human-readable project name), "
+                        "'scanned_by' (model that performed the scan). "
+                        "Note: total_files, total_lines, and repo_language are auto-computed "
+                        "by knowledge_scan_files -- do not set them manually."
                     ),
                 },
-                "value": {
-                    "type": "string",
-                    "description": "Metadata value. For 'architecture_overview', write a narrative covering: what the system is, how it works (data flow), and key subsystems.",
-                },
             },
-            "required": ["key", "value"],
+            "required": ["metadata"],
         }
 
 
