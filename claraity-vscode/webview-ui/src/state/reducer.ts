@@ -690,6 +690,8 @@ export function appReducer(state: AppState, action: Action): AppState {
       return { ...state, traceSteps: action.steps };
     case "TRACE_ENABLED":
       return { ...state, traceEnabled: action.enabled };
+    case "TOOL_LIST_LOADED":
+      return { ...state, toolList: action.tools };
 
     // ── Subagents panel ──
     case "SUBAGENTS_LIST":

@@ -57,7 +57,8 @@ export type ExtensionMessage =
   | { type: "enrichmentComplete"; original: string; enriched: string }
   | { type: "enrichmentError"; message: string }
   | { type: "traceData"; steps: TraceStepData[] }
-  | { type: "traceEnabled"; enabled: boolean };
+  | { type: "traceEnabled"; enabled: boolean }
+  | { type: "toolList"; tools: { name: string; description: string; parameters: Record<string, unknown> }[] };
 
 /** A single trace event from the agent pipeline .trace.jsonl file. */
 export interface TraceStepData {
@@ -129,6 +130,7 @@ export type WebViewMessage =
   | { type: "getTraceEnabled" }
   | { type: "setTraceEnabled"; enabled: boolean }
   | { type: "clearTrace"; sessionId: string | null }
+  | { type: "getToolList" }
   | { type: "approveKnowledge"; approvedBy: string; status: string; comments: string }
   | { type: "exportKnowledge" }
   | { type: "importKnowledge" }

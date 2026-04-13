@@ -245,6 +245,7 @@ class StdioProtocol(UIProtocol):
         "save_limits": "_handle_save_limits",
         "set_trace_enabled": "_handle_set_trace_enabled",
         "get_trace_enabled": "_handle_get_trace_enabled",
+        "get_tool_list": "_handle_get_tool_list",
         "new_session": "_handle_new_session",
         "list_sessions": "_handle_list_sessions",
         "resume_session": "_handle_resume_session",
@@ -778,6 +779,20 @@ class StdioProtocol(UIProtocol):
     # -----------------------------------------------------------------
     # Trace capture toggle
     # -----------------------------------------------------------------
+
+    async def _handle_get_tool_list(self, data: dict) -> None:
+        if not self._agent:
+            await self._send_json({"type": "tool_list", "tools": []})
+            return
+        tools = []
+        for td in self._agent._get_tools():
+            tools.append({
+                "name": td.name,
+                "description": td.description,
+                "parameters": td.parameters,
+            })
+        logger.debug("tool_list_response", total=len(tools))
+        await self._send_json({"type": "tool_list", "tools": tools})
 
     async def _handle_get_trace_enabled(self, data: dict) -> None:
         enabled = self._agent._trace.enabled if self._agent else False

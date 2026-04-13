@@ -85,6 +85,7 @@ export type Action =
   | { type: "ARCHITECTURE_LOADED"; data: ArchitectureResponse }
   | { type: "TRACE_LOADED"; steps: import('../types').TraceStepData[] }
   | { type: "TRACE_ENABLED"; enabled: boolean }
+  | { type: "TOOL_LIST_LOADED"; tools: { name: string; description: string; parameters: Record<string, unknown> }[] }
   // Subagents panel
   | { type: "SUBAGENTS_LIST"; subagents: SubAgentInfo[]; availableTools: string[] }
   | { type: "SUBAGENT_NOTIFICATION"; success: boolean; message: string }

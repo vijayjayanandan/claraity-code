@@ -205,7 +205,11 @@ export type ClientMessage =
     | { type: 'get_limits' }
     | { type: 'save_limits'; limits: import('../shared/protocol').LimitsData }
     // Prompt Enrichment
-    | { type: 'enrich_prompt'; content: string; history?: Array<{ role: string; content: string }> };
+    | { type: 'enrich_prompt'; content: string; history?: Array<{ role: string; content: string }> }
+    // Trace
+    | { type: 'get_trace_enabled' }
+    | { type: 'set_trace_enabled'; enabled: boolean }
+    | { type: 'get_tool_list' };
 
 // ============================================================================
 // Extension <-> WebView postMessage types
@@ -230,7 +234,9 @@ export type ExtensionMessage =
     | { type: 'enrichmentDelta'; delta: string }
     | { type: 'enrichmentComplete'; original: string; enriched: string }
     | { type: 'enrichmentError'; message: string }
-    | { type: 'traceData'; steps: Array<{ id: number; from: string; to: string; label: string; type: string; data: string; durationMs: number; timestamp?: number; sections?: Record<string, string>; thinking?: string }> };
+    | { type: 'traceData'; steps: Array<{ id: number; from: string; to: string; label: string; type: string; data: string; durationMs: number; timestamp?: number; sections?: Record<string, string>; thinking?: string }> }
+    | { type: 'traceEnabled'; enabled: boolean }
+    | { type: 'toolList'; tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }> };
 
 export type WebViewMessage =
     | { type: 'chatMessage'; content: string; attachments?: FileAttachment[]; images?: ImageAttachment[]; systemContext?: string }

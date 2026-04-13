@@ -188,6 +188,7 @@ export interface AppState {
   // Trace
   traceSteps: import('../types').TraceStepData[] | null;
   traceEnabled: boolean;
+  toolList: { name: string; description: string; parameters: Record<string, unknown> }[] | null;
 
   // Subagents panel
   subagentsList: SubAgentInfo[];
@@ -282,6 +283,7 @@ export const initialState: AppState = {
   architectureData: null,
   traceSteps: null,
   traceEnabled: false,
+  toolList: null,
 
   subagentsList: [],
   subagentsAvailableTools: [],

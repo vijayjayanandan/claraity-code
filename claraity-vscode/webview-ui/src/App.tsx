@@ -137,6 +137,10 @@ export function App() {
         dispatch({ type: "TRACE_ENABLED", enabled: msg.enabled });
         break;
 
+      case "toolList":
+        dispatch({ type: "TOOL_LIST_LOADED", tools: msg.tools });
+        break;
+
       case "serverMessage":
         dispatchServerMessage(dispatch, msg.payload);
 
@@ -322,6 +326,8 @@ export function App() {
           traceEnabled={state.traceEnabled}
           onToggleTrace={(enabled) => postMessage({ type: "setTraceEnabled", enabled })}
           onClearTrace={() => postMessage({ type: "clearTrace", sessionId: state.sessionId })}
+          toolList={state.toolList}
+          onGetToolList={() => postMessage({ type: "getToolList" })}
         />
       </div>
     );

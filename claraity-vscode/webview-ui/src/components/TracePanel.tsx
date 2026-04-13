@@ -45,6 +45,12 @@ interface ExternalTraceStep {
   thinking?: string;
 }
 
+interface ToolInfo {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+}
+
 interface TracePanelProps {
   onBack: () => void;
   /** Real trace steps from .trace.jsonl — falls back to MOCK_STEPS if null/empty */
@@ -55,6 +61,10 @@ interface TracePanelProps {
   onToggleTrace?: (enabled: boolean) => void;
   /** Clear trace data (with confirmation) */
   onClearTrace?: () => void;
+  /** Available tools (native + MCP) fetched from agent */
+  toolList?: ToolInfo[] | null;
+  /** Fetch the tool list from agent */
+  onGetToolList?: () => void;
 }
 
 // ─── SVG Layout ────────────────────────────────────────────────────────────────
@@ -728,7 +738,7 @@ function ThinkingCloud({ thinking }: { thinking: string }) {
 
 // ─── Main Component ─────────────────────────────────────────────────────────────
 
-export function TracePanel({ onBack, steps: externalSteps, traceEnabled = false, onToggleTrace, onClearTrace }: TracePanelProps) {
+export function TracePanel({ onBack, steps: externalSteps, traceEnabled = false, onToggleTrace, onClearTrace, toolList, onGetToolList }: TracePanelProps) {
   injectTraceStyles();
 
   // Use real trace data if provided, otherwise fall back to mock.
@@ -743,6 +753,41 @@ export function TracePanel({ onBack, steps: externalSteps, traceEnabled = false,
   const [isPlaying, setIsPlaying] = useState(false);
   const [finished, setFinished] = useState(false);
   const [sideTabIndex, setSideTabIndex] = useState(0);
+
+  // ── Tool list overlay (shown when Tools node is clicked) ──
+  const [showToolList, setShowToolList] = useState(false);
+
+  // ── Resizable side panel ──
+  const SIDE_WIDTH_KEY = "claraity.tracePanel.sideWidth";
+  const [sideWidth, setSideWidth] = useState<number>(() => {
+    try { return parseInt(localStorage.getItem(SIDE_WIDTH_KEY) ?? "290", 10) || 290; }
+    catch { return 290; }
+  });
+  const [isDraggingSide, setIsDraggingSide] = useState(false);
+  const dragStartX = useRef<number>(0);
+  const dragStartWidth = useRef<number>(290);
+
+  const onDragHandleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    dragStartX.current = e.clientX;
+    dragStartWidth.current = sideWidth;
+    setIsDraggingSide(true);
+
+    const onMouseMove = (ev: MouseEvent) => {
+      const delta = dragStartX.current - ev.clientX; // dragging left = wider
+      setSideWidth(Math.max(1, dragStartWidth.current + delta));
+    };
+    const onMouseUp = (ev: MouseEvent) => {
+      const delta = dragStartX.current - ev.clientX;
+      const final = Math.max(1, dragStartWidth.current + delta);
+      setIsDraggingSide(false);
+      try { localStorage.setItem(SIDE_WIDTH_KEY, String(final)); } catch { /* ignore */ }
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  }, [sideWidth]);
 
   // ── Scene swap state (subagent visualization) ──
   const [sceneState, setSceneState] = useState<SceneState>("main");
@@ -921,6 +966,7 @@ export function TracePanel({ onBack, steps: externalSteps, traceEnabled = false,
     clearTimer();
     setIsPlaying(false);
     setFinished(false);
+    setShowToolList(false);
     // Set correct scene state for the target step
     const targetStep = STEPS[idx] as any;
     if (targetStep?._isSubagentStep) {
@@ -1090,6 +1136,7 @@ export function TracePanel({ onBack, steps: externalSteps, traceEnabled = false,
             viewBox={`0 ${VY0} ${VW} ${VH}`}
             preserveAspectRatio="xMidYMid meet"
             style={{ width: "100%", height: "100%", display: "block" }}
+            onClick={() => setShowToolList(false)}
           >
             <defs>
               {/* Glow filters per node color */}
@@ -1136,6 +1183,7 @@ export function TracePanel({ onBack, steps: externalSteps, traceEnabled = false,
             {/* ── Nodes ── */}
             {(Object.values(NODES) as NodeDef[]).map((node) => {
               const active = isNodeActive(node.id);
+              const isToolsNode = node.id === "tools";
               return (
                 <g
                   key={node.id}
@@ -1144,6 +1192,12 @@ export function TracePanel({ onBack, steps: externalSteps, traceEnabled = false,
                     filter: `url(#glow-${node.id})`,
                     animation: "trace-node-glow 2s ease-in-out infinite",
                   } : {}}
+                  onClick={isToolsNode ? (e) => {
+                    e.stopPropagation();
+                    setShowToolList(true);
+                    onGetToolList?.();
+                  } : () => setShowToolList(false)}
+                  cursor={isToolsNode ? "pointer" : undefined}
                 >
                   {/* Background halo */}
                   <circle r={56}
@@ -1174,6 +1228,12 @@ export function TracePanel({ onBack, steps: externalSteps, traceEnabled = false,
                       ? `SubAgent: ${subagentName}`
                       : node.label}
                   </text>
+                  {/* Click hint for Tools node */}
+                  {isToolsNode && (
+                    <text y={86} textAnchor="middle" fontSize={9} fill="#4DB6AC" opacity={0.6}>
+                      click to inspect
+                    </text>
+                  )}
                 </g>
               );
             })}
@@ -1228,18 +1288,82 @@ export function TracePanel({ onBack, steps: externalSteps, traceEnabled = false,
 
         {/* ── Detail panel ── */}
         <div style={{
-          width: step ? 290 : 0,
+          width: (step || showToolList) ? sideWidth : 0,
           minWidth: 0,
-          transition: "width 0.28s cubic-bezier(0.4,0,0.2,1)",
+          transition: isDraggingSide ? "none" : "width 0.28s cubic-bezier(0.4,0,0.2,1)",
           overflow: "hidden",
           borderLeft: "1px solid var(--vscode-panel-border)",
           flexShrink: 0,
           display: "flex",
-          flexDirection: "column",
+          flexDirection: "row",
           background: "var(--vscode-sideBar-background, var(--vscode-editor-background))",
         }}>
-          {step && (
-            <div style={{ display: "flex", flexDirection: "column", height: "100%", padding: 14, overflowY: "auto", boxSizing: "border-box" }}>
+          {/* Drag handle */}
+          {(step || showToolList) && (
+            <div
+              onMouseDown={onDragHandleMouseDown}
+              style={{
+                width: 4, flexShrink: 0, cursor: "col-resize",
+                background: "transparent",
+                borderRight: "1px solid var(--vscode-panel-border)",
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--vscode-focusBorder, #007fd4)")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+            />
+          )}
+          {/* ── Tool list view ── */}
+          {showToolList && (
+            <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", height: "100%", boxSizing: "border-box" }}>
+              {/* Header */}
+              <div style={{ display: "flex", alignItems: "center", padding: "12px 14px 8px", gap: 8, borderBottom: "1px solid var(--vscode-panel-border)", flexShrink: 0 }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "#4DB6AC", flex: 1 }}>
+                  Available Tools {toolList ? `(${toolList.length})` : ""}
+                </span>
+                <button
+                  onClick={() => setShowToolList(false)}
+                  style={{ background: "none", border: "none", cursor: "pointer", color: "var(--vscode-foreground)", opacity: 0.5, padding: "2px 4px" }}
+                  title="Close"
+                >
+                  <i className="codicon codicon-close" />
+                </button>
+              </div>
+              <div style={{ flex: 1, overflowY: "auto", padding: "8px 14px", userSelect: "text" }}>
+                {!toolList && (
+                  <div style={{ fontSize: 12, opacity: 0.5, marginTop: 16, textAlign: "center" }}>Loading...</div>
+                )}
+                {toolList && toolList.map((tool) => (
+                  <details key={tool.name} style={{ marginBottom: 10 }}>
+                    <summary style={{
+                      cursor: "pointer", listStyle: "none", display: "flex", alignItems: "flex-start",
+                      gap: 6, padding: "6px 0",
+                    }}>
+                      <i className="codicon codicon-chevron-right" style={{ fontSize: 11, opacity: 0.5, marginTop: 2, flexShrink: 0 }} />
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: "#4DB6AC", fontFamily: "var(--vscode-editor-font-family, monospace)" }}>
+                          {tool.name}
+                        </div>
+                        <div style={{ fontSize: 11, opacity: 0.7, lineHeight: 1.5, marginTop: 2 }}>
+                          {tool.description}
+                        </div>
+                      </div>
+                    </summary>
+                    <pre style={{
+                      margin: "6px 0 0 18px", fontSize: 10, lineHeight: 1.6,
+                      whiteSpace: "pre-wrap", wordBreak: "break-word",
+                      background: "rgba(255,255,255,0.04)",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      padding: "8px 10px", borderRadius: 5,
+                      color: "var(--vscode-editor-foreground)",
+                    }}>
+                      {JSON.stringify(tool.parameters, null, 2)}
+                    </pre>
+                  </details>
+                ))}
+              </div>
+            </div>
+          )}
+          {step && !showToolList && (
+            <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", height: "100%", padding: 14, overflowY: "auto", boxSizing: "border-box" }}>
               {/* Step heading */}
               <div style={{
                 fontSize: 12, fontWeight: 700, marginBottom: 4,
