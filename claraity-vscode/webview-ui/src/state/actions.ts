@@ -65,6 +65,9 @@ export type Action =
   | { type: "REMOVE_IMAGE"; index: number }
   | { type: "CLEAR_INPUT" }
   | { type: "SET_MENTION_RESULTS"; files: Array<{ path: string; name: string; relativePath: string }> }
+  // Turn deletion
+  | { type: "TURN_DELETED"; anchorUuid: string; affectedUuids: string[]; count: number; preview: string }
+  | { type: "TURN_RESTORED"; anchorUuid: string; affectedUuids: string[] }
   // Undo
   | { type: "UNDO_AVAILABLE"; turnId: string; files: string[] }
   | { type: "UNDO_COMPLETE"; turnId: string }

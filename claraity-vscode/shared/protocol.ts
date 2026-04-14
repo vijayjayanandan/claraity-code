@@ -55,6 +55,19 @@ export interface MessageFinalizedData {
   stream_id: string;
 }
 
+export interface TurnDeletedData {
+  anchor_uuid: string;
+  affected_uuids: string[];
+  count: number;
+  preview: string;
+}
+
+export interface TurnRestoredData {
+  anchor_uuid: string;
+  affected_uuids: string[];
+  count: number;
+}
+
 export interface SessionSummary {
   session_id: string;
   first_message: string;
@@ -66,6 +79,9 @@ export interface SessionSummary {
 export interface ReplayMessage {
   role: string;
   content: string;
+  uuid?: string;
+  deleted?: boolean;
+  is_compact_summary?: boolean;
   tool_calls?: Array<{
     id: string;
     function: { name: string; arguments: string };
@@ -284,6 +300,8 @@ export type ServerMessage =
   | { type: "store"; event: "message_added"; data: MessageData; subagent_id?: string }
   | { type: "store"; event: "message_updated"; data: MessageData; subagent_id?: string }
   | { type: "store"; event: "message_finalized"; data: MessageFinalizedData; subagent_id?: string }
+  | { type: "store"; event: "turn_deleted"; data: TurnDeletedData }
+  | { type: "store"; event: "turn_restored"; data: TurnRestoredData }
   // Streaming
   | { type: "stream_start" }
   | { type: "stream_end"; tool_calls?: number; elapsed_s?: number; iterations?: number; total_tokens?: number; duration_ms?: number }

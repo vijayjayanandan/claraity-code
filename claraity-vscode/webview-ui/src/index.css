@@ -2749,6 +2749,94 @@ button, .toolbar-icon, .session-card, .mention-item, .tool-badge {
   color: var(--app-fg);
 }
 
+/* -- User message delete button (hover-reveal) -- */
+.user-message-wrapper {
+  position: relative;
+}
+
+.user-message-actions {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.user-message-wrapper:hover .user-message-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.delete-turn-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--app-fg-muted);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.delete-turn-btn:hover {
+  border-color: var(--vscode-errorForeground);
+  color: var(--vscode-errorForeground);
+  background: color-mix(in srgb, var(--vscode-errorForeground) 10%, transparent);
+}
+
+/* -- Deleted turn placeholder -- */
+.deleted-turn-placeholder {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  margin: 4px 0;
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--app-border);
+  background: color-mix(in srgb, var(--app-surface) 60%, transparent);
+  color: var(--app-fg-muted);
+  font-size: 12px;
+}
+
+.deleted-turn-placeholder .codicon {
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.deleted-turn-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deleted-turn-preview {
+  opacity: 0.7;
+}
+
+.restore-turn-btn {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--app-border);
+  background: var(--app-surface);
+  color: var(--vscode-textLink-foreground);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.restore-turn-btn:hover {
+  background: var(--vscode-toolbar-hoverBackground);
+  border-color: var(--vscode-textLink-foreground);
+}
+
 /* ============================================================================
    Welcome Screen v2 — Production
    ============================================================================ */

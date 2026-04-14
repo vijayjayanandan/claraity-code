@@ -12,6 +12,8 @@ export type {
   ToolStateData,
   MessageData,
   MessageFinalizedData,
+  TurnDeletedData,
+  TurnRestoredData,
   SessionSummary,
   ReplayMessage,
   JiraProfile,
@@ -209,7 +211,10 @@ export type ClientMessage =
     // Trace
     | { type: 'get_trace_enabled' }
     | { type: 'set_trace_enabled'; enabled: boolean }
-    | { type: 'get_tool_list' };
+    | { type: 'get_tool_list' }
+    // Turn deletion (context cleanup)
+    | { type: 'delete_turn'; anchor_uuid: string }
+    | { type: 'restore_turn'; anchor_uuid: string };
 
 // ============================================================================
 // Extension <-> WebView postMessage types
@@ -298,6 +303,9 @@ export type WebViewMessage =
     | { type: 'enrichPrompt'; content: string; history?: Array<{ role: string; content: string }> }
     // Background tasks
     | { type: 'cancelBackgroundTask'; taskId: string }
+    // Turn deletion (context cleanup)
+    | { type: 'deleteTurn'; anchorUuid: string }
+    | { type: 'restoreTurn'; anchorUuid: string }
     // Server connection control
     | { type: 'disconnectServer' }
     | { type: 'reconnectServer' };

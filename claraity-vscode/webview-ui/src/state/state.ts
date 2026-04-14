@@ -26,14 +26,15 @@ export type { FileAttachment, ImageAttachment };
 // ============================================================================
 
 export type TimelineEntry =
-  | { type: "user_message"; id: string; content: string; attachments?: FileAttachment[]; images?: ImageAttachment[] }
+  | { type: "user_message"; id: string; content: string; uuid?: string; attachments?: FileAttachment[]; images?: ImageAttachment[] }
   | { type: "assistant_text"; id: string; content: string }
   | { type: "tool"; id: string; callId: string }
   | { type: "thinking"; id: string; content: string; tokenCount?: number }
   | { type: "code"; id: string; language: string; content: string }
   | { type: "subagent"; id: string; subagentId: string }
   | { type: "error"; id: string; message: string; errorType?: string }
-  | { type: "compaction_summary"; id: string; content: string };
+  | { type: "compaction_summary"; id: string; content: string }
+  | { type: "deleted_turn"; id: string; anchorUuid: string; count: number; preview: string };
 
 // ============================================================================
 // Supporting types
@@ -161,6 +162,9 @@ export interface AppState {
   undoAvailable: { turnId: string; files: string[] } | null;
   undoCompleted: boolean;
 
+  // Turn deletion — cached entries allow instant restore without server round-trip
+  deletedTurns: Record<string, { entries: TimelineEntry[]; count: number; preview: string }>;
+
   // Turn stats
   lastTurnStats: { tokens: number; durationMs: number } | null;
 
@@ -260,6 +264,8 @@ export const initialState: AppState = {
   attachments: [],
   images: [],
   mentionResults: [],
+
+  deletedTurns: {},
 
   undoAvailable: null,
   undoCompleted: false,

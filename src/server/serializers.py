@@ -273,8 +273,15 @@ def serialize_store_notification(notification: StoreNotification) -> dict | None
                     },
                 }
 
-        # Suppress internal bookkeeping messages -- not useful to the webview
-        if msg.is_system and msg.meta and msg.meta.event_type == "compact_boundary":
+        # Suppress internal bookkeeping messages -- not useful to the webview.
+        # turn_deleted/turn_restored are suppressed here because the store
+        # already emits dedicated TURN_DELETED/TURN_RESTORED events with
+        # structured data (serialized below).
+        if msg.is_system and msg.meta and msg.meta.event_type in (
+            "compact_boundary",
+            "turn_deleted",
+            "turn_restored",
+        ):
             return None
 
         content_type = type(msg.content).__name__
@@ -335,6 +342,31 @@ def serialize_store_notification(notification: StoreNotification) -> dict | None
             "event": "message_finalized",
             "data": {
                 "stream_id": metadata.get("stream_id", ""),
+            },
+        }
+
+    elif event == StoreEvent.TURN_DELETED:
+        metadata = notification.metadata or {}
+        return {
+            "type": "store",
+            "event": "turn_deleted",
+            "data": {
+                "anchor_uuid": metadata.get("turn_anchor_uuid", ""),
+                "affected_uuids": metadata.get("affected_uuids", []),
+                "count": metadata.get("count", 0),
+                "preview": metadata.get("preview", ""),
+            },
+        }
+
+    elif event == StoreEvent.TURN_RESTORED:
+        metadata = notification.metadata or {}
+        return {
+            "type": "store",
+            "event": "turn_restored",
+            "data": {
+                "anchor_uuid": metadata.get("turn_anchor_uuid", ""),
+                "affected_uuids": metadata.get("affected_uuids", []),
+                "count": metadata.get("count", 0),
             },
         }
 

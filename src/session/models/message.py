@@ -295,6 +295,9 @@ class MessageMeta:
     is_compact_summary: bool | None = None
     is_visible_in_transcript_only: bool | None = None
 
+    # Turn deletion (user-initiated context cleanup)
+    deleted: bool = False
+
     # Extensible
     extra: dict[str, Any] | None = None
 
@@ -351,6 +354,8 @@ class MessageMeta:
             result["is_compact_summary"] = self.is_compact_summary
         if self.is_visible_in_transcript_only is not None:
             result["is_visible_in_transcript_only"] = self.is_visible_in_transcript_only
+        if self.deleted:
+            result["deleted"] = True
         if self.extra is not None:
             result["extra"] = self.extra
 
@@ -395,6 +400,7 @@ class MessageMeta:
             logical_parent_uuid=data.get("logical_parent_uuid"),
             is_compact_summary=data.get("is_compact_summary"),
             is_visible_in_transcript_only=data.get("is_visible_in_transcript_only"),
+            deleted=data.get("deleted", False),
             extra=data.get("extra"),
         )
 
@@ -866,6 +872,10 @@ class Message:
     @property
     def should_include_in_context(self) -> bool:
         """Check if this message should be included in LLM context."""
+        # Deleted messages are always excluded
+        if self.meta.deleted:
+            return False
+
         # Explicit setting takes precedence
         if self.meta.include_in_llm_context is not None:
             return self.meta.include_in_llm_context

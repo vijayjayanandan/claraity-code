@@ -388,6 +388,71 @@ class MemoryManager:
         self._message_store.add_message(msg)
         return msg
 
+    # =========================================================================
+    # Turn Deletion (user-initiated context cleanup)
+    # =========================================================================
+
+    def delete_turn(self, user_message_uuid: str) -> list[str]:
+        """Delete a turn (user message + all subsequent assistant/tool messages).
+
+        Marks messages as deleted in the store (excluded from LLM context),
+        then persists a turn_deleted event to JSONL so the deletion survives
+        session resume.
+
+        Args:
+            user_message_uuid: UUID of the user message that starts the turn
+
+        Returns:
+            List of affected UUIDs
+        """
+        if self._message_store is None:
+            return []
+
+        # 1. Mark messages as deleted in the store (emits TURN_DELETED notification)
+        affected_uuids = self._message_store.delete_turn(user_message_uuid)
+
+        # 2. Persist the deletion event to JSONL (via single-writer path)
+        self.persist_system_event(
+            event_type="turn_deleted",
+            content="[Turn deleted by user]",
+            extra={
+                "turn_anchor_uuid": user_message_uuid,
+                "affected_uuids": affected_uuids,
+            },
+        )
+
+        return affected_uuids
+
+    def restore_turn(self, user_message_uuid: str) -> list[str]:
+        """Restore a previously deleted turn.
+
+        Reverses the deletion: marks messages as not-deleted in the store,
+        then persists a turn_restored event to JSONL.
+
+        Args:
+            user_message_uuid: UUID of the user message that starts the turn
+
+        Returns:
+            List of affected UUIDs
+        """
+        if self._message_store is None:
+            return []
+
+        # 1. Restore messages in the store (emits TURN_RESTORED notification)
+        affected_uuids = self._message_store.restore_turn(user_message_uuid)
+
+        # 2. Persist the restoration event to JSONL
+        self.persist_system_event(
+            event_type="turn_restored",
+            content="[Turn restored by user]",
+            extra={
+                "turn_anchor_uuid": user_message_uuid,
+                "affected_uuids": affected_uuids,
+            },
+        )
+
+        return affected_uuids
+
     def add_tool_result(
         self,
         tool_call_id: str,

@@ -147,6 +147,9 @@ export type WebViewMessage =
   | { type: "enrichPrompt"; content: string; history?: Array<{ role: string; content: string }> }
   // Background tasks
   | { type: "cancelBackgroundTask"; taskId: string }
+  // Turn deletion (context cleanup)
+  | { type: "deleteTurn"; anchorUuid: string }
+  | { type: "restoreTurn"; anchorUuid: string }
   // Server connection control
   | { type: "disconnectServer" }
   | { type: "reconnectServer" };

@@ -124,6 +124,22 @@ export function dispatchServerMessage(
         case "message_finalized":
           dispatch({ type: "MESSAGE_FINALIZED", streamId: msg.data.stream_id });
           break;
+        case "turn_deleted":
+          dispatch({
+            type: "TURN_DELETED",
+            anchorUuid: msg.data.anchor_uuid,
+            affectedUuids: msg.data.affected_uuids,
+            count: msg.data.count,
+            preview: msg.data.preview,
+          });
+          break;
+        case "turn_restored":
+          dispatch({
+            type: "TURN_RESTORED",
+            anchorUuid: msg.data.anchor_uuid,
+            affectedUuids: msg.data.affected_uuids,
+          });
+          break;
       }
       break;
 

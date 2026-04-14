@@ -47,6 +47,14 @@ const SILENT_TOOLS = new Set([
 // Helpers
 // ============================================================================
 
+/** Find the last element matching a predicate (returns index, or -1). */
+function findLastIndex<T>(arr: T[], predicate: (item: T) => boolean): number {
+  for (let i = arr.length - 1; i >= 0; i--) {
+    if (predicate(arr[i])) return i;
+  }
+  return -1;
+}
+
 /** Exported for testing — no-op since counters are now in AppState. */
 export function resetTimelineCounter(): void {
   // No-op: counters are now in AppState. Tests should use initialState directly.
@@ -358,6 +366,19 @@ export function appReducer(state: AppState, action: Action): AppState {
           ],
         };
       }
+      // When the server confirms a user message, stamp the UUID on the latest
+      // user_message timeline entry that doesn't have one yet. This bridges
+      // backend UUIDs to frontend timeline entries (needed for turn deletion).
+      if (action.data.role === "user" && action.data.uuid) {
+        const idx = findLastIndex(state.timeline, (e) => e.type === "user_message" && !e.uuid);
+        if (idx >= 0) {
+          const updated = [...state.timeline];
+          const entry = updated[idx] as Extract<TimelineEntry, { type: "user_message" }>;
+          updated[idx] = { ...entry, uuid: action.data.uuid };
+          return { ...state, timeline: updated };
+        }
+        return state;
+      }
       if (action.data.role === "system" || action.data.role === "user" || action.data.role === "assistant") return state;
       const existing = state.messages.find((m) => m.id === action.data.uuid);
       if (existing) return state;
@@ -568,15 +589,104 @@ export function appReducer(state: AppState, action: Action): AppState {
         return `${prefix}-${replayCounter}-${replayNonce}`;
       };
 
+      // Track deleted turns during replay — build cached entries for instant restore
+      const replayDeletedTurns: Record<string, { entries: TimelineEntry[]; count: number; preview: string }> = {};
+      // Accumulator for the current deleted turn being scanned
+      let currentDeletedAnchor: { uuid: string; entries: TimelineEntry[]; preview: string } | null = null;
+
       for (let i = 0; i < action.messages.length; i++) {
         const m = action.messages[i];
         if (m.role === "system") continue;
 
         const msgId = `replay-${i}`;
+
+        // If this is a deleted user message, start tracking a deleted turn
+        if (m.role === "user" && m.deleted && m.uuid) {
+          // Finalize previous deleted turn if any
+          if (currentDeletedAnchor) {
+            replayDeletedTurns[currentDeletedAnchor.uuid] = {
+              entries: currentDeletedAnchor.entries,
+              count: currentDeletedAnchor.entries.length,
+              preview: currentDeletedAnchor.preview,
+            };
+          }
+          const preview = m.content.slice(0, 80) + (m.content.length > 80 ? "..." : "");
+          // Build the user_message entry (cached for restore, not added to timeline)
+          const userEntry: TimelineEntry = { type: "user_message", id: msgId, content: m.content, uuid: m.uuid };
+          if (m.images && m.images.length > 0) userEntry.images = m.images;
+          if (m.attachments && m.attachments.length > 0) userEntry.attachments = m.attachments;
+          currentDeletedAnchor = { uuid: m.uuid, entries: [userEntry], preview };
+          // Insert a placeholder in the timeline
+          replayTimeline.push({
+            type: "deleted_turn" as const,
+            id: `deleted-${m.uuid}`,
+            anchorUuid: m.uuid,
+            count: 0, // Updated after counting
+            preview,
+          });
+          continue;
+        }
+
+        // If we're inside a deleted turn, build cached entries but don't add to timeline.
+        // This lets Restore put them back instantly without a server round-trip.
+        if (currentDeletedAnchor && m.deleted) {
+          if (m.role === "assistant") {
+            if (m.tool_calls && m.tool_calls.length > 0) {
+              if (m.content.trim()) {
+                currentDeletedAnchor.entries.push({ type: "assistant_text", id: replayId("replay-text"), content: m.content });
+              }
+              for (const tc of m.tool_calls) {
+                let parsedArgs: Record<string, unknown> = {};
+                try { parsedArgs = JSON.parse(tc.function.arguments); } catch { /* empty */ }
+                const toolData: ToolStateData = { call_id: tc.id, tool_name: tc.function.name, status: "pending", arguments: parsedArgs };
+                replayToolCards[tc.id] = toolData;
+                replayToolOrder.push(tc.id);
+                currentDeletedAnchor.entries.push({ type: "tool", id: replayId("replay-tool"), callId: tc.id });
+              }
+            } else if (m.content.trim()) {
+              currentDeletedAnchor.entries.push({ type: "assistant_text", id: replayId("replay-text"), content: m.content });
+            }
+          } else if (m.role === "tool" && m.tool_call_id) {
+            // Update tool card status so restored turns show correct result
+            const existing = replayToolCards[m.tool_call_id];
+            if (existing) {
+              const toolStatus = m.meta?.status ?? "success";
+              replayToolCards[m.tool_call_id] = {
+                ...existing,
+                status: toolStatus as import("../types").ToolStatus,
+                duration_ms: m.meta?.duration_ms ?? null,
+                result: m.content,
+              };
+            }
+          }
+          continue;
+        }
+
+        // New non-deleted user message: finalize any pending deleted turn
+        if (m.role === "user" && currentDeletedAnchor) {
+          replayDeletedTurns[currentDeletedAnchor.uuid] = {
+            entries: currentDeletedAnchor.entries,
+            count: currentDeletedAnchor.entries.length,
+            preview: currentDeletedAnchor.preview,
+          };
+          // Update the placeholder count
+          const placeholderIdx = replayTimeline.findIndex(
+            (e) => e.type === "deleted_turn" && e.anchorUuid === currentDeletedAnchor!.uuid
+          );
+          if (placeholderIdx >= 0) {
+            const ph = replayTimeline[placeholderIdx] as Extract<TimelineEntry, { type: "deleted_turn" }>;
+            replayTimeline[placeholderIdx] = { ...ph, count: currentDeletedAnchor.entries.length };
+          }
+          currentDeletedAnchor = null;
+        }
+
         replayMessages.push({ id: msgId, role: m.role as "user" | "assistant" | "system", content: m.content, finalized: true });
 
-        if (m.role === "user") {
-          const userEntry: TimelineEntry = { type: "user_message", id: msgId, content: m.content };
+        if (m.role === "user" && m.is_compact_summary) {
+          // Render as collapsible compaction card, not a user bubble
+          replayTimeline.push({ type: "compaction_summary" as const, id: msgId, content: m.content });
+        } else if (m.role === "user") {
+          const userEntry: TimelineEntry = { type: "user_message", id: msgId, content: m.content, uuid: m.uuid };
           if (m.images && m.images.length > 0) userEntry.images = m.images;
           if (m.attachments && m.attachments.length > 0) userEntry.attachments = m.attachments;
           replayTimeline.push(userEntry);
@@ -599,13 +709,30 @@ export function appReducer(state: AppState, action: Action): AppState {
         } else if (m.role === "tool" && m.tool_call_id) {
           const existing = replayToolCards[m.tool_call_id];
           if (existing) {
+            const toolStatus = m.meta?.status ?? "success";
             replayToolCards[m.tool_call_id] = {
               ...existing,
-              status: m.meta?.status === "error" ? "error" : "success",
+              status: toolStatus as import("../types").ToolStatus,
               duration_ms: m.meta?.duration_ms ?? null,
               result: m.content,
             };
           }
+        }
+      }
+
+      // Finalize last deleted turn if the session ends mid-deleted-turn
+      if (currentDeletedAnchor) {
+        replayDeletedTurns[currentDeletedAnchor.uuid] = {
+          entries: currentDeletedAnchor.entries,
+          count: currentDeletedAnchor.entries.length,
+          preview: currentDeletedAnchor.preview,
+        };
+        const placeholderIdx = replayTimeline.findIndex(
+          (e) => e.type === "deleted_turn" && e.anchorUuid === currentDeletedAnchor!.uuid
+        );
+        if (placeholderIdx >= 0) {
+          const ph = replayTimeline[placeholderIdx] as Extract<TimelineEntry, { type: "deleted_turn" }>;
+          replayTimeline[placeholderIdx] = { ...ph, count: currentDeletedAnchor.entries.length };
         }
       }
 
@@ -616,6 +743,7 @@ export function appReducer(state: AppState, action: Action): AppState {
         toolCards: { ...state.toolCards, ...replayToolCards },
         toolOrder: [...state.toolOrder, ...replayToolOrder],
         timelineCounter: replayCounter,
+        deletedTurns: { ...state.deletedTurns, ...replayDeletedTurns },
       });
     }
 
@@ -638,6 +766,75 @@ export function appReducer(state: AppState, action: Action): AppState {
         backgroundTasks: state.backgroundTasks.filter((t) => t.task_id !== action.taskId),
         _dismissedBgTasks: new Set([...state._dismissedBgTasks, action.taskId]),
       };
+    // ── Turn Deletion ──
+    case "TURN_DELETED": {
+      // Find the user_message with matching UUID
+      const anchorIdx = state.timeline.findIndex(
+        (e) => e.type === "user_message" && e.uuid === action.anchorUuid
+      );
+      if (anchorIdx < 0) return state;
+
+      // Find the next user_message after the anchor (end of turn)
+      let endIdx = state.timeline.length;
+      for (let i = anchorIdx + 1; i < state.timeline.length; i++) {
+        if (state.timeline[i].type === "user_message") {
+          endIdx = i;
+          break;
+        }
+      }
+
+      // Cache the removed entries so restore can put them back instantly
+      const removedEntries = state.timeline.slice(anchorIdx, endIdx);
+
+      // Build new timeline: entries before anchor + placeholder + entries after turn
+      const placeholder: TimelineEntry = {
+        type: "deleted_turn",
+        id: `deleted-${action.anchorUuid}`,
+        anchorUuid: action.anchorUuid,
+        count: action.count,
+        preview: action.preview,
+      };
+      const newTimeline = [
+        ...state.timeline.slice(0, anchorIdx),
+        placeholder,
+        ...state.timeline.slice(endIdx),
+      ];
+
+      return {
+        ...state,
+        timeline: newTimeline,
+        deletedTurns: {
+          ...state.deletedTurns,
+          [action.anchorUuid]: { entries: removedEntries, count: action.count, preview: action.preview },
+        },
+      };
+    }
+
+    case "TURN_RESTORED": {
+      const turnInfo = state.deletedTurns[action.anchorUuid];
+      if (!turnInfo) return state;
+
+      // Find the placeholder in the timeline
+      const placeholderIdx = state.timeline.findIndex(
+        (e) => e.type === "deleted_turn" && e.anchorUuid === action.anchorUuid
+      );
+      if (placeholderIdx < 0) return state;
+
+      // Splice the cached entries back in where the placeholder was
+      const restoredTimeline = [
+        ...state.timeline.slice(0, placeholderIdx),
+        ...turnInfo.entries,
+        ...state.timeline.slice(placeholderIdx + 1),
+      ];
+
+      const { [action.anchorUuid]: _, ...remainingDeleted } = state.deletedTurns;
+      return {
+        ...state,
+        timeline: restoredTimeline,
+        deletedTurns: remainingDeleted,
+      };
+    }
+
     case "ADD_ATTACHMENT":
       return { ...state, attachments: [...state.attachments, action.attachment] };
     case "REMOVE_ATTACHMENT":

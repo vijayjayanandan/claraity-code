@@ -151,7 +151,11 @@ def _build_replay_messages(store) -> list[dict[str, Any]]:
                     }
                 )
 
-        entry: dict[str, Any] = {"role": msg.role, "content": content or ""}
+        entry: dict[str, Any] = {"role": msg.role, "content": content or "", "uuid": msg.uuid}
+        if msg.meta and msg.meta.deleted:
+            entry["deleted"] = True
+        if msg.meta and getattr(msg.meta, "is_compact_summary", False):
+            entry["is_compact_summary"] = True
         if images:
             entry["images"] = images
         if attachments:
@@ -171,8 +175,14 @@ def _build_replay_messages(store) -> list[dict[str, Any]]:
             entry["tool_call_id"] = msg.tool_call_id
         if msg.meta:
             meta: dict[str, Any] = {}
-            if hasattr(msg.meta, "stop_reason") and msg.meta.stop_reason:
+            if msg.meta.stop_reason:
                 meta["status"] = msg.meta.stop_reason
+            # Tool messages use meta.status ("success", "error", "timeout"),
+            # not stop_reason (which is for assistant messages)
+            if msg.is_tool and msg.meta.status:
+                meta["status"] = msg.meta.status
+            if msg.meta.duration_ms is not None:
+                meta["duration_ms"] = msg.meta.duration_ms
             if meta:
                 entry["meta"] = meta
         replay.append(entry)
@@ -279,6 +289,9 @@ class StdioProtocol(UIProtocol):
         "enrich_prompt": "_handle_enrich_prompt",
         # Background tasks
         "cancel_background_task": "_handle_cancel_background_task",
+        # Turn deletion (context cleanup)
+        "delete_turn": "_handle_delete_turn",
+        "restore_turn": "_handle_restore_turn",
     }
 
     def __init__(
@@ -2307,6 +2320,33 @@ class StdioProtocol(UIProtocol):
             await self._send_json(
                 {"type": "enrichment_error", "message": str(e)}
             )
+
+    # -----------------------------------------------------------------
+    # -----------------------------------------------------------------
+    # Turn deletion (context cleanup)
+    # -----------------------------------------------------------------
+
+    async def _handle_delete_turn(self, data: dict) -> None:
+        """Delete a conversation turn. Called when user clicks delete on a user message."""
+        anchor_uuid = data.get("anchor_uuid", "")
+        if not anchor_uuid:
+            await self._send_error("invalid_request", "Missing anchor_uuid")
+            return
+        try:
+            self._agent.memory.delete_turn(anchor_uuid)
+        except ValueError as e:
+            await self._send_error("invalid_request", str(e))
+
+    async def _handle_restore_turn(self, data: dict) -> None:
+        """Restore a previously deleted turn. Called when user clicks restore on a placeholder."""
+        anchor_uuid = data.get("anchor_uuid", "")
+        if not anchor_uuid:
+            await self._send_error("invalid_request", "Missing anchor_uuid")
+            return
+        try:
+            self._agent.memory.restore_turn(anchor_uuid)
+        except ValueError as e:
+            await self._send_error("invalid_request", str(e))
 
     # -----------------------------------------------------------------
     # Background tasks

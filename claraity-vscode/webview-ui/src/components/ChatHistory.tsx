@@ -188,17 +188,30 @@ export function ChatHistory({
         switch (entry.type) {
           case "user_message":
             return (
-              <MessageBubble
-                key={entry.id}
-                message={{
-                  id: entry.id,
-                  role: "user",
-                  content: entry.content,
-                  finalized: true,
-                }}
-                attachments={entry.attachments}
-                images={entry.images}
-              />
+              <div key={entry.id} className="user-message-wrapper">
+                <MessageBubble
+                  message={{
+                    id: entry.id,
+                    role: "user",
+                    content: entry.content,
+                    finalized: true,
+                  }}
+                  attachments={entry.attachments}
+                  images={entry.images}
+                />
+                {entry.uuid && !isStreaming && (
+                  <div className="user-message-actions">
+                    <button
+                      title="Delete this turn"
+                      aria-label="Delete this turn"
+                      className="delete-turn-btn"
+                      onClick={() => postMessage({ type: "deleteTurn", anchorUuid: entry.uuid! })}
+                    >
+                      <i className="codicon codicon-trash" />
+                    </button>
+                  </div>
+                )}
+              </div>
             );
 
           case "assistant_text":
@@ -297,6 +310,23 @@ export function ChatHistory({
                     Open Settings
                   </button>
                 )}
+              </div>
+            );
+
+          case "deleted_turn":
+            return (
+              <div key={entry.id} className="deleted-turn-placeholder">
+                <i className="codicon codicon-trash" aria-hidden="true" />
+                <span className="deleted-turn-text">
+                  {entry.count} message{entry.count !== 1 ? "s" : ""} removed
+                  {entry.preview && <span className="deleted-turn-preview"> &mdash; {entry.preview}</span>}
+                </span>
+                <button
+                  className="restore-turn-btn"
+                  onClick={() => postMessage({ type: "restoreTurn", anchorUuid: entry.anchorUuid })}
+                >
+                  Restore
+                </button>
               </div>
             );
 

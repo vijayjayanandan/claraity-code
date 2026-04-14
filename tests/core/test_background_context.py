@@ -118,13 +118,13 @@ class TestInjectBackgroundTaskCompletions:
         assert "first" in content
         assert "second" in content
 
-    def test_includes_check_hint(self):
-        """Message includes hint to use check_background_task."""
+    def test_includes_no_action_needed_hint(self):
+        """Message indicates full output is included and no tool call needed."""
         context = []
         task = _make_task()
         inject_background_task_completions(context, [task])
         content = context[0]["content"]
-        assert "check_background_task" in content
+        assert "No further action needed" in content
 
     def test_command_included(self):
         """Injected message includes the command."""

@@ -497,6 +497,14 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                 vscode.commands.executeCommand('claraity.undoTurn', msg.turnId);
                 break;
 
+            case 'deleteTurn':
+                this.connection?.send({ type: 'delete_turn', anchor_uuid: msg.anchorUuid } as ClientMessage);
+                break;
+
+            case 'restoreTurn':
+                this.connection?.send({ type: 'restore_turn', anchor_uuid: msg.anchorUuid } as ClientMessage);
+                break;
+
             case 'pickFile':
                 this.pickFileFromDisk();
                 break;

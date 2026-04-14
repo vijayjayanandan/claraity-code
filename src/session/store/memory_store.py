@@ -55,6 +55,8 @@ class StoreEvent(str, Enum):
     STORE_CLEARED = "store_cleared"
     BULK_LOAD_COMPLETE = "bulk_load_complete"
     TOOL_STATE_UPDATED = "tool_state_updated"
+    TURN_DELETED = "turn_deleted"
+    TURN_RESTORED = "turn_restored"
 
 
 @dataclass
@@ -291,6 +293,21 @@ class MessageStore:
             if message.is_system and message.meta.event_type == "compact_boundary":
                 self._last_compact_boundary_seq = seq
                 self._compact_boundary_uuid = uuid
+
+            # Handle turn deletion/restoration events (replayed during session hydration).
+            # Walks the affected_uuids list and flips the deleted flag on each message.
+            # Last event wins: delete -> restore -> delete = deleted.
+            if message.is_system and message.meta.event_type in (
+                "turn_deleted",
+                "turn_restored",
+            ):
+                extra = message.meta.extra or {}
+                affected_uuids = extra.get("affected_uuids", [])
+                mark_deleted = message.meta.event_type == "turn_deleted"
+                for affected_uuid in affected_uuids:
+                    affected_msg = self._messages.get(affected_uuid)
+                    if affected_msg:
+                        affected_msg.meta.deleted = mark_deleted
 
             # Handle compact summary
             if message.is_user and message.meta.is_compact_summary:
@@ -808,6 +825,143 @@ class MessageStore:
         """Check if session has been compacted."""
         with self._lock:
             return self._last_compact_boundary_seq is not None
+
+    # =========================================================================
+    # Turn Deletion (user-initiated context cleanup)
+    # =========================================================================
+
+    def get_turn_uuids(self, user_message_uuid: str) -> list[str]:
+        """Get UUIDs of all messages in a turn starting from a user message.
+
+        A "turn" is: user message + all subsequent assistant/tool messages
+        until the next user message. System events (compact_boundary, etc.)
+        within the turn are NOT included — they're infrastructure, not context.
+
+        Args:
+            user_message_uuid: UUID of the user message that starts the turn
+
+        Returns:
+            List of UUIDs in the turn (user msg first, then assistant/tool)
+
+        Raises:
+            ValueError: If UUID not found or not a user message
+        """
+        with self._lock:
+            msg = self._messages.get(user_message_uuid)
+            if not msg:
+                raise ValueError(f"Message not found: {user_message_uuid}")
+            if not msg.is_user:
+                raise ValueError(f"Not a user message: {user_message_uuid}")
+
+            ordered = self.get_ordered_messages()
+
+            # Find start index
+            start_idx = None
+            for i, m in enumerate(ordered):
+                if m.uuid == user_message_uuid:
+                    start_idx = i
+                    break
+            if start_idx is None:
+                raise ValueError(f"Message not in ordered list: {user_message_uuid}")
+
+            # Collect user msg + subsequent assistant/tool until next real user msg.
+            # Compact summaries are role="user" with is_compact_summary=True —
+            # they must NOT act as turn boundaries.
+            turn_uuids = [ordered[start_idx].uuid]
+            for m in ordered[start_idx + 1 :]:
+                if m.is_user and not getattr(m.meta, "is_compact_summary", False):
+                    break
+                # Only include assistant and tool messages, skip system events
+                if m.is_assistant or m.is_tool:
+                    turn_uuids.append(m.uuid)
+
+            return turn_uuids
+
+    def delete_turn(self, user_message_uuid: str) -> list[str]:
+        """Mark all messages in a turn as deleted.
+
+        Args:
+            user_message_uuid: UUID of the user message that starts the turn
+
+        Returns:
+            List of affected UUIDs
+
+        Emits:
+            TURN_DELETED notification with affected UUIDs and preview text
+        """
+        with self._lock:
+            turn_uuids = self.get_turn_uuids(user_message_uuid)
+
+            for uuid in turn_uuids:
+                msg = self._messages.get(uuid)
+                if msg:
+                    msg.meta.deleted = True
+
+            # Build a content preview from the user message (for UI placeholder)
+            user_msg = self._messages.get(user_message_uuid)
+            preview = ""
+            if user_msg:
+                text = user_msg.get_text_content()
+                preview = text[:80] + ("..." if len(text) > 80 else "")
+
+            self._notify(
+                StoreNotification(
+                    event=StoreEvent.TURN_DELETED,
+                    metadata={
+                        "turn_anchor_uuid": user_message_uuid,
+                        "affected_uuids": turn_uuids,
+                        "count": len(turn_uuids),
+                        "preview": preview,
+                    },
+                )
+            )
+
+            logger.info(
+                "turn_deleted",
+                anchor_uuid=user_message_uuid,
+                affected_count=len(turn_uuids),
+            )
+
+            return turn_uuids
+
+    def restore_turn(self, user_message_uuid: str) -> list[str]:
+        """Restore a previously deleted turn.
+
+        Args:
+            user_message_uuid: UUID of the user message that starts the turn
+
+        Returns:
+            List of affected UUIDs
+
+        Emits:
+            TURN_RESTORED notification with affected UUIDs
+        """
+        with self._lock:
+            turn_uuids = self.get_turn_uuids(user_message_uuid)
+
+            for uuid in turn_uuids:
+                msg = self._messages.get(uuid)
+                if msg:
+                    msg.meta.deleted = False
+
+            self._notify(
+                StoreNotification(
+                    event=StoreEvent.TURN_RESTORED,
+                    metadata={
+                        "turn_anchor_uuid": user_message_uuid,
+                        "affected_uuids": turn_uuids,
+                        "count": len(turn_uuids),
+                    },
+                )
+            )
+
+            logger.info(
+                "turn_restored",
+                anchor_uuid=user_message_uuid,
+                affected_count=len(turn_uuids),
+            )
+
+            return turn_uuids
 
     # =========================================================================
     # Threading (Parent-Child)
