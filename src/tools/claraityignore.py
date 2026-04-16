@@ -19,6 +19,30 @@ from src.observability import get_logger
 logger = get_logger("tools.claraityignore")
 
 CLARAITYIGNORE_FILENAME = ".claraityignore"
+GITIGNORE_FILENAME = ".gitignore"
+
+
+def _load_gitignore() -> Optional[pathspec.PathSpec]:
+    """Read root-level .gitignore and return compiled spec, or None if absent/empty.
+
+    Only the project-root .gitignore is read (same scope as .claraityignore).
+    Applied only by filter_paths() for silent search exclusion — not by
+    is_blocked(), which enforces user policy via .claraityignore alone.
+    """
+    gitignore_path = Path.cwd() / GITIGNORE_FILENAME
+    if not gitignore_path.is_file():
+        return None
+    try:
+        text = gitignore_path.read_text(encoding="utf-8")
+    except OSError as e:
+        logger.warning("gitignore_read_error", error=str(e))
+        return None
+    lines = [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    return pathspec.PathSpec.from_lines("gitwildmatch", lines) if lines else None
 
 
 def _load_patterns() -> tuple[list[str], Optional[pathspec.PathSpec]]:
@@ -91,19 +115,25 @@ def is_blocked(file_path: str | Path) -> tuple[bool, Optional[str]]:
 
 
 def filter_paths(paths: list[Path]) -> list[Path]:
-    """Filter out paths that match .claraityignore patterns.
+    """Filter out paths that match .claraityignore or .gitignore patterns.
 
     Silent filtering for search/list tools -- returns only unblocked paths.
+    Both specs are applied: a file is excluded if matched by either.
     """
-    _lines, spec = _load_patterns()
-    if spec is None:
+    _lines, claraity_spec = _load_patterns()
+    gitignore_spec = _load_gitignore()
+
+    if claraity_spec is None and gitignore_spec is None:
         return paths
 
     result = []
     for p in paths:
         normalized = _normalize_path(p)
-        if not spec.match_file(normalized):
-            result.append(p)
+        if claraity_spec and claraity_spec.match_file(normalized):
+            continue
+        if gitignore_spec and gitignore_spec.match_file(normalized):
+            continue
+        result.append(p)
     return result
 
 

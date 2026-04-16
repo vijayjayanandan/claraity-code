@@ -491,6 +491,87 @@ class TestGrepToolSkipping:
         assert "visible.txt" in result.output
         assert ".hidden" not in result.output
 
+    def test_skips_binary_file_with_text_extension(self, grep, tmp_path):
+        """A .txt file containing null bytes is detected as binary and skipped."""
+        (tmp_path / "output.txt").write_bytes(b"some text\x00more text")
+        (tmp_path / "clean.txt").write_text("some text more text")
+        result = grep.execute(
+            pattern="some text",
+            file_path=str(tmp_path),
+            output_mode="files_with_matches",
+        )
+        assert result.status == ToolStatus.SUCCESS
+        assert "clean.txt" in result.output
+        assert "output.txt" not in result.output
+        assert result.metadata["files_skipped"] == 1
+
+    def test_dotfiles_are_searchable(self, grep, tmp_path):
+        """.env and .gitignore should be searchable — only files INSIDE hidden dirs are skipped."""
+        (tmp_path / ".env").write_text("SECRET=findme")
+        (tmp_path / ".gitignore").write_text("*.pyc\nfindme")
+        result = grep.execute(
+            pattern="findme",
+            file_path=str(tmp_path),
+            output_mode="files_with_matches",
+        )
+        assert result.status == ToolStatus.SUCCESS
+        assert ".env" in result.output
+        assert ".gitignore" in result.output
+
+
+# ===========================================================================
+# Output Guard Tests
+# ===========================================================================
+
+class TestGrepToolOutputGuards:
+    """Per-line character cap and total output character budget."""
+
+    def test_long_line_is_truncated(self, grep, tmp_path):
+        """Lines exceeding MAX_LINE_CHARS are truncated with a [...+N chars] marker."""
+        long_line = "x" * 3000
+        (tmp_path / "wide.txt").write_text(f"before\n{long_line}\nafter\n")
+        result = grep.execute(
+            pattern="x",
+            file_path=str(tmp_path / "wide.txt"),
+            output_mode="content",
+        )
+        assert result.status == ToolStatus.SUCCESS
+        assert "[...+" in result.output
+        # The matching line must be well under the original 3000 chars
+        matching_line = next(l for l in result.output.splitlines() if "x" * 10 in l)
+        assert len(matching_line) < 2200  # 2000 cap + filepath + line num overhead
+
+    def test_output_budget_triggers_truncation(self, grep, tmp_path):
+        """When MAX_OUTPUT_CHARS is exceeded with head_limit=0, output_truncated=True."""
+        from src.tools.search_tools import GrepTool
+        original = GrepTool.MAX_OUTPUT_CHARS
+        try:
+            GrepTool.MAX_OUTPUT_CHARS = 500
+            for i in range(20):
+                (tmp_path / f"file_{i}.txt").write_text("findme " * 50)
+            result = grep.execute(
+                pattern="findme",
+                file_path=str(tmp_path),
+                output_mode="content",
+                head_limit=0,
+            )
+            assert result.status == ToolStatus.SUCCESS
+            assert result.metadata["output_truncated"] is True
+            assert "Stopped" in result.output
+        finally:
+            GrepTool.MAX_OUTPUT_CHARS = original
+
+    def test_output_within_budget_not_truncated(self, grep, tmp_path):
+        """Small results set output_truncated=False."""
+        (tmp_path / "small.txt").write_text("findme\n" * 5)
+        result = grep.execute(
+            pattern="findme",
+            file_path=str(tmp_path / "small.txt"),
+            output_mode="content",
+        )
+        assert result.status == ToolStatus.SUCCESS
+        assert result.metadata.get("output_truncated") is False
+
 
 # ===========================================================================
 # GlobTool Tests
@@ -626,12 +707,15 @@ class TestGlobToolSkipping:
         assert result.status == ToolStatus.SUCCESS
         assert "__pycache__" not in result.output
 
-    def test_skips_binary_extensions(self, glob_tool, tmp_path):
+    def test_does_not_filter_binary_extensions(self, glob_tool, tmp_path):
+        """GlobTool matches by name only — binary extensions are NOT filtered.
+        Use a specific pattern (e.g. **/*.py) to exclude unwanted types."""
         (tmp_path / "image.png").write_bytes(b"\x89PNG")
         (tmp_path / "code.py").write_text("code")
         result = glob_tool.execute(pattern="**/*", file_path=str(tmp_path))
         assert result.status == ToolStatus.SUCCESS
-        assert ".png" not in result.output
+        assert "image.png" in result.output
+        assert "code.py" in result.output
 
 
 # ===========================================================================

@@ -199,6 +199,10 @@ class GrepTool(Tool):
 
     # Skip files larger than 10 MB to prevent OOM from readlines()
     MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
+    # Per-line character cap: prevents single-line bombs (minified JS, one-line JSON, binary-as-text)
+    MAX_LINE_CHARS = 2_000
+    # Total output character budget for CONTENT mode — stops collection before context window damage
+    MAX_OUTPUT_CHARS = 100_000
 
     def __init__(self):
         super().__init__(
@@ -341,19 +345,29 @@ class GrepTool(Tool):
             file_match_counts = {}
             skipped_files: list[str] = []  # Track files that couldn't be read
 
-            for file_path in files:
+            output_truncated = False
+            total_output_chars = 0
+
+            for fp in files:
                 matches = self._search_file(
-                    file_path, regex, mode, context_b, context_a, line_numbers,
+                    fp, regex, mode, context_b, context_a, line_numbers,
                     skipped_files, multiline,
                 )
 
                 if matches:
                     if mode == OutputMode.FILES_WITH_MATCHES:
-                        all_matches.append(str(file_path))
+                        all_matches.append(str(fp))
                     elif mode == OutputMode.COUNT:
-                        file_match_counts[str(file_path)] = len(matches)
+                        file_match_counts[str(fp)] = len(matches)
                     else:  # CONTENT
-                        all_matches.extend(matches)
+                        for m in matches:
+                            if total_output_chars + len(m) > self.MAX_OUTPUT_CHARS:
+                                output_truncated = True
+                                break
+                            total_output_chars += len(m)
+                            all_matches.append(m)
+                        if output_truncated:
+                            break
 
             # Apply offset and head_limit
             if mode == OutputMode.FILES_WITH_MATCHES:
@@ -396,6 +410,8 @@ class GrepTool(Tool):
                 total_matches = sum(file_match_counts.values())
             else:  # CONTENT
                 output = "\n".join(all_matches)
+                if output_truncated:
+                    output += f"\n[Stopped: {self.MAX_OUTPUT_CHARS:,}-char output budget reached. Use file_path or glob to narrow scope.]"
                 total_matches = len(all_matches)
 
             return ToolResult(
@@ -409,6 +425,7 @@ class GrepTool(Tool):
                     "skipped_details": skipped_files[:10],  # First 10 for debugging
                     "matches": total_matches,
                     "output_mode": output_mode,
+                    "output_truncated": output_truncated,
                 },
             )
 
@@ -430,21 +447,19 @@ class GrepTool(Tool):
             # Single file
             return [search_path]
 
-        # Directory search
+        # Directory search — all branches apply _should_skip to exclude node_modules,
+        # hidden dirs, build artifacts, and known binary extensions.
         if glob_pattern:
-            # Use glob pattern
-            files = list(search_path.glob(glob_pattern))
+            files = [f for f in search_path.glob(glob_pattern) if f.is_file() and not self._should_skip(f)]
         elif file_type:
-            # Use file type mapping
             if file_type in FILE_TYPE_MAP:
                 patterns = FILE_TYPE_MAP[file_type]
                 for pattern in patterns:
-                    files.extend(search_path.rglob(pattern))
+                    files.extend(f for f in search_path.rglob(pattern) if f.is_file() and not self._should_skip(f))
             else:
                 # Unknown file type - try as extension
-                files = list(search_path.rglob(f"*.{file_type}"))
+                files = [f for f in search_path.rglob(f"*.{file_type}") if f.is_file() and not self._should_skip(f)]
         else:
-            # All files (exclude common non-text patterns)
             files = [f for f in search_path.rglob("*") if f.is_file() and not self._should_skip(f)]
 
         # Remove duplicates, filter .claraityignore, and sort
@@ -454,8 +469,9 @@ class GrepTool(Tool):
 
     def _should_skip(self, file_path: Path) -> bool:
         """Check if file should be skipped."""
-        # Skip hidden files/directories
-        if any(part.startswith(".") for part in file_path.parts):
+        # Skip files inside hidden directories (.git/, .venv/, etc.)
+        # Hidden files themselves (.env, .gitignore, .eslintrc) are allowed through
+        if any(part.startswith(".") for part in file_path.parts[:-1]):
             return True
 
         # Skip common non-text directories
@@ -514,13 +530,26 @@ class GrepTool(Tool):
         """
         # Skip oversized files to prevent OOM
         try:
-            if file_path.stat().st_size > self.MAX_FILE_SIZE_BYTES:
+            size_bytes = file_path.stat().st_size
+            if size_bytes > self.MAX_FILE_SIZE_BYTES:
                 if skipped_files is not None:
-                    size_mb = file_path.stat().st_size / (1024 * 1024)
-                    skipped_files.append(f"{file_path} (Too large: {size_mb:.1f} MB)")
+                    skipped_files.append(f"{file_path} (Too large: {size_bytes / (1024 * 1024):.1f} MB)")
                 return []
         except OSError:
             pass  # stat failed, try to open anyway
+
+        # Detect binary files: null bytes in first 512 bytes reliably identify non-text content.
+        # Extension-based filtering misses extensionless binaries (compiled artifacts, DB dumps).
+        # errors="ignore" would silently garble binary content into arbitrarily long lines.
+        try:
+            with open(file_path, "rb") as f:
+                sample = f.read(512)
+            if b"\x00" in sample:
+                if skipped_files is not None:
+                    skipped_files.append(f"{file_path} (Binary file, skipped)")
+                return []
+        except OSError:
+            pass  # Fall through to text-open below
 
         try:
             with open(file_path, encoding="utf-8", errors="ignore") as f:
@@ -598,6 +627,9 @@ class GrepTool(Tool):
         matches = []
         for line_num in sorted(output_lines):
             line_content = lines[line_num].rstrip("\n")
+            if len(line_content) > self.MAX_LINE_CHARS:
+                overflow = len(line_content) - self.MAX_LINE_CHARS
+                line_content = line_content[: self.MAX_LINE_CHARS] + f" [...+{overflow} chars]"
 
             if show_line_numbers:
                 # Format: file:line_num: content
@@ -763,33 +795,20 @@ class GlobTool(Tool):
         return final_expanded
 
     def _should_skip(self, file_path: Path) -> bool:
-        """Check if file should be skipped (same logic as GrepTool)."""
-        # Skip hidden files/directories
-        if any(part.startswith(".") for part in file_path.parts):
+        """Check if file should be skipped.
+
+        Glob finds files by name pattern — never reads content — so binary
+        extensions are NOT filtered here. Only noisy dependency/build dirs
+        are excluded, same as GrepTool's directory skip list.
+        """
+        # Skip files inside hidden directories (.git/, .venv/, etc.)
+        # Hidden files themselves (.env, .gitignore, .eslintrc) are allowed through
+        if any(part.startswith(".") for part in file_path.parts[:-1]):
             return True
 
-        # Skip common non-text directories
+        # Skip common dependency/build directories
         skip_dirs = {"node_modules", "__pycache__", ".git", ".venv", "venv", "dist", "build"}
         if any(part in skip_dirs for part in file_path.parts):
-            return True
-
-        # Skip binary file extensions (but NOT .pdf/.docx -- read_file handles those)
-        skip_exts = {
-            ".pyc",
-            ".pyo",
-            ".so",
-            ".dll",
-            ".exe",
-            ".bin",
-            ".png",
-            ".jpg",
-            ".jpeg",
-            ".gif",
-            ".zip",
-            ".tar",
-            ".gz",
-        }
-        if file_path.suffix.lower() in skip_exts:
             return True
 
         return False

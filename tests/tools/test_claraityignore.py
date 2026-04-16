@@ -222,7 +222,7 @@ class TestSearchToolIntegration:
         _write_ignore(workspace, "*.env")
 
         tool = GrepTool()
-        result = tool.execute(pattern="TODO", path=str(workspace))
+        result = tool.execute(pattern="TODO", file_path=str(workspace))
         assert result.status.value == "success"
         assert "secret.env" not in (result.output or "")
 
@@ -234,7 +234,7 @@ class TestSearchToolIntegration:
         _write_ignore(workspace, "*.env")
 
         tool = GlobTool()
-        result = tool.execute(pattern="*", path=str(workspace))
+        result = tool.execute(pattern="*", file_path=str(workspace))
         assert result.status.value == "success"
         assert "secret.env" not in (result.output or "")
         assert "app.py" in (result.output or "")
@@ -246,7 +246,7 @@ class TestSearchToolIntegration:
         _write_ignore(workspace, "*.env")
 
         tool = GrepTool()
-        result = tool.execute(pattern="TODO", path=str(workspace))
+        result = tool.execute(pattern="TODO", file_path=str(workspace))
         # Should succeed (not error), just no results from blocked files
         assert result.status.value == "success"
 
@@ -257,9 +257,129 @@ class TestSearchToolIntegration:
         _write_ignore(workspace, "*.env")
 
         tool = GlobTool()
-        result = tool.execute(pattern="*.env", path=str(workspace))
+        result = tool.execute(pattern="*.env", file_path=str(workspace))
         # All matches blocked, so "no files found" but still SUCCESS
         assert result.status.value == "success"
+
+
+# ---------- Gitignore Integration ----------
+
+
+def _write_gitignore(workspace: Path, content: str) -> None:
+    (workspace / ".gitignore").write_text(content, encoding="utf-8")
+
+
+class TestGitignoreIntegration:
+    """filter_paths() respects .gitignore in addition to .claraityignore."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, workspace):
+        self.workspace = workspace
+
+    def _create_file(self, name: str, content: str = "findme") -> Path:
+        p = self.workspace / name
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content)
+        return p
+
+    def test_grep_excludes_gitignored_files(self, workspace):
+        """Files matched by .gitignore are silently excluded from grep results."""
+        from src.tools.search_tools import GrepTool
+
+        self._create_file("app.py", "findme")
+        self._create_file("data.db", "findme")
+        _write_gitignore(workspace, "*.db")
+
+        result = GrepTool().execute(
+            pattern="findme",
+            file_path=str(workspace),
+            output_mode="files_with_matches",
+        )
+        assert result.status.value == "success"
+        assert "app.py" in result.output
+        assert "data.db" not in result.output
+
+    def test_glob_excludes_gitignored_files(self, workspace):
+        """Files matched by .gitignore are silently excluded from glob results."""
+        from src.tools.search_tools import GlobTool
+
+        self._create_file("app.py")
+        self._create_file("data.db")
+        _write_gitignore(workspace, "*.db")
+
+        result = GlobTool().execute(pattern="*", file_path=str(workspace))
+        assert result.status.value == "success"
+        assert "app.py" in result.output
+        assert "data.db" not in result.output
+
+    def test_gitignore_directory_excluded(self, workspace):
+        """Directories matched by .gitignore have their contents excluded."""
+        from src.tools.search_tools import GrepTool
+
+        self._create_file("src/main.py", "findme")
+        self._create_file("dist/bundle.js", "findme")
+        _write_gitignore(workspace, "dist/")
+
+        result = GrepTool().execute(
+            pattern="findme",
+            file_path=str(workspace),
+            output_mode="files_with_matches",
+        )
+        assert result.status.value == "success"
+        assert "main.py" in result.output
+        assert "bundle.js" not in result.output
+
+    def test_gitignore_negation_pattern_allows_file(self, workspace):
+        """Negation patterns in .gitignore re-include specific files."""
+        from src.tools.search_tools import GrepTool
+
+        self._create_file("logs/app.log", "findme")
+        self._create_file("logs/important.log", "findme")
+        _write_gitignore(workspace, "*.log\n!important.log")
+
+        result = GrepTool().execute(
+            pattern="findme",
+            file_path=str(workspace),
+            output_mode="files_with_matches",
+        )
+        assert result.status.value == "success"
+        assert "important.log" in result.output
+        assert "app.log" not in result.output
+
+    def test_claraityignore_and_gitignore_both_applied(self, workspace):
+        """Both .claraityignore and .gitignore exclusions are applied together."""
+        from src.tools.search_tools import GrepTool
+
+        self._create_file("app.py", "findme")
+        self._create_file("secret.env", "findme")
+        self._create_file("data.db", "findme")
+        _write_gitignore(workspace, "*.db")
+        _write_ignore(workspace, "*.env")
+
+        result = GrepTool().execute(
+            pattern="findme",
+            file_path=str(workspace),
+            output_mode="files_with_matches",
+        )
+        assert result.status.value == "success"
+        assert "app.py" in result.output
+        assert "secret.env" not in result.output
+        assert "data.db" not in result.output
+
+    def test_no_gitignore_file_still_works(self, workspace):
+        """Absence of .gitignore does not cause errors — only .claraityignore applies."""
+        from src.tools.search_tools import GrepTool
+
+        self._create_file("app.py", "findme")
+        _write_ignore(workspace, "*.env")
+
+        result = GrepTool().execute(
+            pattern="findme",
+            file_path=str(workspace),
+            output_mode="files_with_matches",
+        )
+        assert result.status.value == "success"
+        assert "app.py" in result.output
 
 
 # ---------- List Directory Integration ----------
