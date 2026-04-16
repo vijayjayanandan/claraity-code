@@ -98,6 +98,10 @@ a = Analysis(
         "pymupdf",        # PyMuPDF alternate import name
         "docx",           # python-docx - Word extraction
         "bs4",
+        "bs4.builder",
+        "bs4.builder._htmlparser",
+        "bs4.formatter",
+        "bs4.element",
         "emoji",
         "aiohttp",
         "aiohttp.web",

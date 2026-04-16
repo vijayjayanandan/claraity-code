@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ClarAIty -- AI Coding Agent for VS Code</title>
+  <meta name="description" content="AI coding agent that brings visual clarity to your codebase and every AI interaction. Built for VS Code.">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d1117;
+      --surface:   #161b22;
+      --surface2:  #1c2128;
+      --border:    #30363d;
+      --fg:        #e6edf3;
+      --fg-muted:  #8b949e;
+      --accent:    #7c3aed;
+      --accent2:   #3b82f6;
+      --green:     #238636;
+      --green-h:   #2ea043;
+      --radius:    8px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      line-height: 1.6;
+    }
+
+    /* ── Nav ── */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 2rem;
+      height: 56px;
+      background: rgba(13, 17, 23, 0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-logo {
+      font-size: 1.1rem;
+      font-weight: 700;
+      background: linear-gradient(90deg, #a78bfa, #60a5fa);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      text-decoration: none;
+    }
+    .nav-links { display: flex; gap: 1.5rem; align-items: center; }
+    .nav-links a {
+      color: var(--fg-muted);
+      text-decoration: none;
+      font-size: 0.9rem;
+      transition: color 0.2s;
+    }
+    .nav-links a:hover { color: var(--fg); }
+    .btn-install {
+      background: var(--green);
+      color: #fff !important;
+      padding: 0.4rem 1rem;
+      border-radius: var(--radius);
+      font-weight: 600;
+      font-size: 0.85rem !important;
+      transition: background 0.2s !important;
+    }
+    .btn-install:hover { background: var(--green-h) !important; }
+
+    /* ── Hero ── */
+    .hero {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      padding: 6rem 2rem 4rem;
+      position: relative;
+      overflow: hidden;
+    }
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: -200px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 800px;
+      height: 600px;
+      background: radial-gradient(ellipse at center, rgba(124,58,237,0.15) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      background: rgba(124,58,237,0.15);
+      border: 1px solid rgba(124,58,237,0.3);
+      color: #a78bfa;
+      padding: 0.3rem 0.9rem;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      margin-bottom: 1.5rem;
+      letter-spacing: 0.03em;
+    }
+    .hero h1 {
+      font-size: clamp(2.5rem, 6vw, 4rem);
+      font-weight: 800;
+      line-height: 1.1;
+      letter-spacing: -0.02em;
+      margin-bottom: 1.25rem;
+      max-width: 720px;
+    }
+    .hero h1 span {
+      background: linear-gradient(135deg, #a78bfa 0%, #60a5fa 50%, #34d399 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .hero p {
+      font-size: 1.15rem;
+      color: var(--fg-muted);
+      max-width: 540px;
+      margin-bottom: 2.5rem;
+      line-height: 1.7;
+    }
+    .hero-cta {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: var(--accent);
+      color: #fff;
+      padding: 0.75rem 1.75rem;
+      border-radius: var(--radius);
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 1rem;
+      transition: background 0.2s, transform 0.1s;
+    }
+    .btn-primary:hover { background: #6d28d9; transform: translateY(-1px); }
+    .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: var(--surface);
+      color: var(--fg);
+      padding: 0.75rem 1.75rem;
+      border-radius: var(--radius);
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 1rem;
+      border: 1px solid var(--border);
+      transition: background 0.2s, transform 0.1s;
+    }
+    .btn-secondary:hover { background: var(--surface2); transform: translateY(-1px); }
+
+    /* ── Mock UI ── */
+    .hero-visual {
+      margin-top: 4rem;
+      width: 100%;
+      max-width: 880px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05);
+    }
+    .mock-titlebar {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.6rem 1rem;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+    }
+    .mock-dot { width: 12px; height: 12px; border-radius: 50%; }
+    .mock-dot.red { background: #ff5f57; }
+    .mock-dot.yellow { background: #febc2e; }
+    .mock-dot.green { background: #28c840; }
+    .mock-title { margin-left: 0.5rem; font-size: 0.75rem; color: var(--fg-muted); }
+    .mock-body {
+      display: grid;
+      grid-template-columns: 1fr 2fr;
+      min-height: 380px;
+    }
+    .mock-sidebar {
+      border-right: 1px solid var(--border);
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    .mock-sidebar-label {
+      font-size: 0.7rem;
+      font-weight: 700;
+      color: var(--fg-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 0.25rem;
+    }
+    .mock-msg {
+      background: var(--surface2);
+      border-radius: 6px;
+      padding: 0.5rem 0.75rem;
+      font-size: 0.75rem;
+      color: var(--fg-muted);
+      border: 1px solid var(--border);
+    }
+    .mock-msg.user { background: rgba(124,58,237,0.12); border-color: rgba(124,58,237,0.25); color: #c4b5fd; }
+    .mock-msg.assistant { color: var(--fg); background: var(--surface2); }
+    .mock-tool {
+      background: rgba(59,130,246,0.08);
+      border: 1px solid rgba(59,130,246,0.2);
+      border-radius: 6px;
+      padding: 0.4rem 0.75rem;
+      font-size: 0.7rem;
+      color: #93c5fd;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+    }
+    .mock-tool::before { content: '[ '; opacity: 0.5; }
+    .mock-tool::after { content: ' ]'; opacity: 0.5; }
+    .mock-main {
+      padding: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    .mock-code {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 0.72rem;
+      color: #e6edf3;
+      line-height: 1.6;
+    }
+    .mock-code .kw { color: #ff7b72; }
+    .mock-code .fn { color: #d2a8ff; }
+    .mock-code .str { color: #a5d6ff; }
+    .mock-code .cm { color: #8b949e; }
+    .mock-status {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.72rem;
+      color: #34d399;
+      padding: 0.4rem 0.75rem;
+      background: rgba(52,211,153,0.08);
+      border: 1px solid rgba(52,211,153,0.2);
+      border-radius: 6px;
+    }
+    .pulse {
+      width: 8px; height: 8px;
+      background: #34d399;
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    /* ── Sections ── */
+    section { padding: 5rem 2rem; max-width: 1100px; margin: 0 auto; }
+    .section-label {
+      display: inline-block;
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: #a78bfa;
+      margin-bottom: 0.75rem;
+    }
+    .section-title {
+      font-size: clamp(1.75rem, 3.5vw, 2.5rem);
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin-bottom: 1rem;
+    }
+    .section-sub {
+      color: var(--fg-muted);
+      font-size: 1.05rem;
+      max-width: 560px;
+      line-height: 1.7;
+      margin-bottom: 3rem;
+    }
+
+    /* ── Features grid ── */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1.25rem;
+    }
+    .feature-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.5rem;
+      transition: border-color 0.2s, transform 0.2s;
+    }
+    .feature-card:hover { border-color: #7c3aed; transform: translateY(-2px); }
+    .feature-icon {
+      width: 40px; height: 40px;
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.2rem;
+      margin-bottom: 1rem;
+    }
+    .feature-card h3 { font-size: 1rem; font-weight: 700; margin-bottom: 0.5rem; }
+    .feature-card p { font-size: 0.875rem; color: var(--fg-muted); line-height: 1.6; }
+
+    /* ── How it works ── */
+    .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.5rem; }
+    .step { text-align: center; padding: 1.5rem 1rem; }
+    .step-num {
+      width: 44px; height: 44px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #7c3aed, #3b82f6);
+      color: #fff;
+      font-weight: 800;
+      font-size: 1.1rem;
+      display: flex; align-items: center; justify-content: center;
+      margin: 0 auto 1rem;
+    }
+    .step h3 { font-size: 1rem; font-weight: 700; margin-bottom: 0.5rem; }
+    .step p { font-size: 0.875rem; color: var(--fg-muted); line-height: 1.6; }
+
+    /* ── Divider ── */
+    .divider { border: none; border-top: 1px solid var(--border); margin: 0; }
+
+    /* ── CTA band ── */
+    .cta-band {
+      text-align: center;
+      padding: 5rem 2rem;
+      background: linear-gradient(135deg, rgba(124,58,237,0.1) 0%, rgba(59,130,246,0.1) 100%);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+    .cta-band h2 { font-size: clamp(1.75rem, 3.5vw, 2.5rem); font-weight: 800; margin-bottom: 1rem; letter-spacing: -0.02em; }
+    .cta-band p { color: var(--fg-muted); font-size: 1.05rem; margin-bottom: 2rem; }
+
+    /* ── Footer ── */
+    footer {
+      text-align: center;
+      padding: 2rem;
+      color: var(--fg-muted);
+      font-size: 0.85rem;
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      align-items: center;
+    }
+    footer a { color: var(--fg-muted); text-decoration: none; }
+    footer a:hover { color: var(--fg); }
+    .footer-links { display: flex; gap: 1.5rem; }
+
+    @media (max-width: 640px) {
+      .mock-body { grid-template-columns: 1fr; }
+      .mock-sidebar { display: none; }
+      nav .nav-links a:not(.btn-install) { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Nav -->
+<nav>
+  <a class="nav-logo" href="#">ClarAIty</a>
+  <div class="nav-links">
+    <a href="#features">Features</a>
+    <a href="#how-it-works">How it works</a>
+    <a href="https://github.com/vijayjayanandan/claraity-code">GitHub</a>
+    <a class="btn-install" href="https://marketplace.visualstudio.com/items?itemName=claraity.claraity-code">Install Free</a>
+  </div>
+</nav>
+
+<!-- Hero -->
+<div class="hero">
+  <div class="badge">&#10024; Now available on VS Code Marketplace</div>
+  <h1>AI coding agent with<br><span>visual clarity</span></h1>
+  <p>ClarAIty brings a fully transparent AI coding agent directly into VS Code. Watch every tool call, trace every decision, and stay in control at every step.</p>
+  <div class="hero-cta">
+    <a class="btn-primary" href="https://marketplace.visualstudio.com/items?itemName=claraity.claraity-code">
+      &#8595; Install for VS Code
+    </a>
+    <a class="btn-secondary" href="https://github.com/vijayjayanandan/claraity-code">
+      View on GitHub
+    </a>
+  </div>
+
+  <!-- Mock UI -->
+  <div class="hero-visual">
+    <div class="mock-titlebar">
+      <div class="mock-dot red"></div>
+      <div class="mock-dot yellow"></div>
+      <div class="mock-dot green"></div>
+      <span class="mock-title">ClarAIty -- VS Code</span>
+    </div>
+    <div class="mock-body">
+      <div class="mock-sidebar">
+        <div class="mock-sidebar-label">Conversation</div>
+        <div class="mock-msg user">Refactor the auth module to use async/await</div>
+        <div class="mock-tool">read_file src/auth.py</div>
+        <div class="mock-tool">grep "def login"</div>
+        <div class="mock-tool">edit_file src/auth.py</div>
+        <div class="mock-msg assistant">Done. Converted 3 functions to async. Tests still pass.</div>
+        <div class="mock-status">
+          <div class="pulse"></div>
+          Agent running...
+        </div>
+      </div>
+      <div class="mock-main">
+        <div class="mock-sidebar-label">Live diff</div>
+        <div class="mock-code">
+          <span class="cm">- def login(user, password):</span><br>
+          <span class="cm">-     result = db.query(user)</span><br>
+          <span class="kw">+ async def</span> <span class="fn">login</span>(user, password):<br>
+          <span class="kw">+     result = await</span> db.<span class="fn">query</span>(user)<br>
+          <br>
+          <span class="kw">+     if not</span> result:<br>
+          <span class="kw">+         raise</span> <span class="fn">AuthError</span>(<span class="str">"Invalid credentials"</span>)<br>
+          <span class="kw">+     return</span> <span class="fn">create_session</span>(result)
+        </div>
+        <div class="mock-sidebar-label" style="margin-top:0.5rem">Tool trace</div>
+        <div class="mock-tool">read_file -- src/auth.py (42 lines)</div>
+        <div class="mock-tool">grep -- "def login" -- 3 matches</div>
+        <div class="mock-tool">edit_file -- applied 7-line patch</div>
+        <div class="mock-tool">run_command -- pytest tests/auth/ -- PASSED</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- Features -->
+<section id="features">
+  <div class="section-label">Features</div>
+  <div class="section-title">Everything you need, nothing hidden</div>
+  <p class="section-sub">ClarAIty is built on the principle that you should always know exactly what your AI agent is doing and why.</p>
+
+  <div class="features-grid">
+    <div class="feature-card">
+      <div class="feature-icon" style="background:rgba(124,58,237,0.15);">&#128269;</div>
+      <h3>Full Tool Transparency</h3>
+      <p>Every file read, every grep, every command -- displayed in real time as a live trace. No black box decisions.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon" style="background:rgba(59,130,246,0.15);">&#129302;</div>
+      <h3>Subagent Delegation</h3>
+      <p>Delegate focused tasks to specialized subagents -- code reviewer, test writer, doc writer -- each with their own isolated context.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon" style="background:rgba(52,211,153,0.15);">&#9889;</div>
+      <h3>Approval Workflow</h3>
+      <p>Destructive or sensitive operations pause for your approval. Auto-approve categories you trust, review the rest.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon" style="background:rgba(251,191,36,0.15);">&#128196;</div>
+      <h3>Session History</h3>
+      <p>Every conversation is persisted. Resume any past session, replay tool traces, and pick up exactly where you left off.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon" style="background:rgba(239,68,68,0.15);">&#8617;</div>
+      <h3>Undo Any Turn</h3>
+      <p>Made a mistake? Undo the last agent turn -- file changes are snapshotted before every edit, so recovery is instant.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon" style="background:rgba(124,58,237,0.15);">&#128279;</div>
+      <h3>MCP Integration</h3>
+      <p>Connect any Model Context Protocol server to extend the agent with custom tools, APIs, and data sources.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon" style="background:rgba(59,130,246,0.15);">&#128218;</div>
+      <h3>Knowledge Base</h3>
+      <p>Build a persistent knowledge graph of your codebase. Architecture, decisions, and invariants survive across sessions.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon" style="background:rgba(52,211,153,0.15);">&#127775;</div>
+      <h3>Task Tracker</h3>
+      <p>Built-in beads task system. Create, prioritize, and track work items without leaving the agent chat.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon" style="background:rgba(251,191,36,0.15);">&#128736;</div>
+      <h3>Bring Your Own Model</h3>
+      <p>Works with OpenAI, Anthropic, and any OpenAI-compatible endpoint. Configure model per session or per subagent.</p>
+    </div>
+  </div>
+</section>
+
+<hr class="divider">
+
+<!-- How it works -->
+<section id="how-it-works">
+  <div class="section-label">How it works</div>
+  <div class="section-title">From install to productive in minutes</div>
+  <p class="section-sub">No complex setup. Install the extension, add your API key, and start coding with AI that you can actually watch think.</p>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <h3>Install the extension</h3>
+      <p>One click from the VS Code Marketplace. The agent backend installs automatically via pip.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <h3>Add your API key</h3>
+      <p>Paste your OpenAI or Anthropic key into settings. Keys are stored securely in VS Code SecretStorage -- never in files.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <h3>Open the sidebar</h3>
+      <p>Click the ClarAIty icon in the activity bar. Type your first request and watch the agent get to work.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">4</div>
+      <h3>Stay in control</h3>
+      <p>Review diffs before they land, approve sensitive operations, undo anything, and trace every decision.</p>
+    </div>
+  </div>
+</section>
+
+<!-- CTA Band -->
+<div class="cta-band">
+  <h2>Ready to code with clarity?</h2>
+  <p>Free to install. Works with your existing API keys.</p>
+  <div style="display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;">
+    <a class="btn-primary" href="https://marketplace.visualstudio.com/items?itemName=claraity.claraity-code">
+      Install for VS Code -- Free
+    </a>
+    <a class="btn-secondary" href="https://github.com/vijayjayanandan/claraity-code">
+      View source on GitHub
+    </a>
+  </div>
+</div>
+
+<!-- Footer -->
+<footer>
+  <div style="font-weight:700;font-size:1rem;background:linear-gradient(90deg,#a78bfa,#60a5fa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;">ClarAIty</div>
+  <div class="footer-links">
+    <a href="https://marketplace.visualstudio.com/items?itemName=claraity.claraity-code">Marketplace</a>
+    <a href="https://github.com/vijayjayanandan/claraity-code">GitHub</a>
+    <a href="https://github.com/vijayjayanandan/claraity-code/issues">Support</a>
+  </div>
+  <div>MIT License &nbsp;&middot;&nbsp; &copy; 2025 ClarAIty</div>
+</footer>
+
+</body>
+</html>
