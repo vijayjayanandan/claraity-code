@@ -8,13 +8,6 @@ tiktoken>=0.7.0
 tree-sitter==0.25.2  # Required: v0.25+ has breaking changes
 tree-sitter-languages>=1.10.2
 
-# LSP Integration (Code Intelligence)
-multilspy>=0.1.0  # Microsoft's LSP client library
-jedi-language-server==0.46.0  # Python LSP server (required by multilspy)
-
-# NOTE: On Windows, jedi-language-server.exe must be in PATH
-# Location: C:\Users\<username>\AppData\Roaming\Python\Python3X\Scripts
-# If missing, create the Scripts directory and reinstall: pip install --force-reinstall jedi-language-server==0.41.3
 
 # SQLite upgrade for ChromaDB compatibility
 pysqlite3-binary

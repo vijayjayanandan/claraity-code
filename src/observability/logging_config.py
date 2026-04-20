@@ -891,7 +891,6 @@ def configure_logging(
         "httpx",
         "httpcore",
         "openai",
-        "multilspy",
         "urllib3",
         "asyncio",
         "hpack",
