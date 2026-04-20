@@ -14,5 +14,5 @@
     "types": ["vitest/globals"]
   },
   "include": ["src", "shared"],
-  "exclude": ["node_modules", ".vscode-test", "webview-ui"]
+  "exclude": ["node_modules", ".vscode-test", "webview-ui", "src/__tests__"]
 }

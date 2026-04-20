@@ -5,10 +5,9 @@
  * - compareSemver(): equality, greater, less, different lengths, multi-digit
  * - checkDevMode(): source present and absent
  * - checkInstalledPackage(): successful version, error/not installed, empty stdout
- * - resolveLaunchConfig(): all branches -- no python, dev mode variants,
- *   installed & up to date, outdated with upgrade, not installed with prompt, fallback null
- *
- * Total: 25+ tests covering all exported functions and their edge cases
+ * - resolveBundledBinary(): binary found (flat/PyInstaller layout), not found
+ * - resolveLaunchConfig(): all branches -- dev mode variants, bundled binary,
+ *   pip fallback, nothing found
  */
 
 import * as vscode from 'vscode';
@@ -18,6 +17,7 @@ import {
     compareSemver,
     checkDevMode,
     checkInstalledPackage,
+    resolveBundledBinary,
     resolveLaunchConfig,
     MIN_AGENT_VERSION,
     PYPI_PACKAGE,
@@ -35,7 +35,6 @@ const mockExistsSync = fs.existsSync as vi.Mock;
 
 /**
  * Configure the execFile mock to invoke its callback with the given results.
- * Supports multiple sequential calls by pushing handlers onto a queue.
  */
 function mockExecFileOnce(
     err: Error | null,
@@ -49,20 +48,19 @@ function mockExecFileOnce(
     );
 }
 
-/**
- * Set up execFile so the first call (checkPython) succeeds.
- * Many resolveLaunchConfig tests need Python to be "found" first.
- */
+/** Set up execFile so the next call (checkPython) succeeds. */
 function mockPythonFound(): void {
     mockExecFileOnce(null, 'Python 3.11.0\n');
 }
 
-/**
- * Set up execFile so the first call (checkPython) fails.
- */
+/** Set up execFile so the next call (checkPython) fails. */
 function mockPythonNotFound(): void {
     mockExecFileOnce(new Error('ENOENT'));
 }
+
+const PYTHON = 'python3';
+const WORKDIR = '/projects/claraity';
+const EXT_PATH = '/extensions/claraity';
 
 // ── compareSemver ────────────────────────────────────────────────────────────
 
@@ -112,7 +110,6 @@ describe('compareSemver', () => {
     });
 
     test('handles multi-digit version segments correctly', () => {
-        // 12 > 9 numerically, but "12" < "9" lexicographically
         expect(compareSemver('1.12.0', '1.9.0')).toBeGreaterThan(0);
     });
 
@@ -216,36 +213,57 @@ describe('checkInstalledPackage', () => {
     });
 });
 
+// ── resolveBundledBinary ────────────────────────────────────────────────────
+
+describe('resolveBundledBinary', () => {
+    test('returns path when flat layout binary exists', () => {
+        // First candidate (flat layout) exists
+        mockExistsSync.mockImplementation((p: string) =>
+            p.endsWith('claraity-server') || p.endsWith('claraity-server.exe'),
+        );
+
+        const result = resolveBundledBinary('/ext/path');
+
+        expect(result).not.toBeNull();
+        expect(result).toContain('bin');
+    });
+
+    test('returns path when PyInstaller layout binary exists', () => {
+        // Only second candidate (PyInstaller layout) exists
+        let callCount = 0;
+        mockExistsSync.mockImplementation(() => {
+            callCount++;
+            return callCount === 2; // Second candidate
+        });
+
+        const result = resolveBundledBinary('/ext/path');
+
+        expect(result).not.toBeNull();
+    });
+
+    test('returns null when no binary found', () => {
+        mockExistsSync.mockReturnValue(false);
+
+        const result = resolveBundledBinary('/ext/path');
+
+        expect(result).toBeNull();
+    });
+});
+
 // ── resolveLaunchConfig ──────────────────────────────────────────────────────
 
 describe('resolveLaunchConfig', () => {
-    const PYTHON = 'python3';
-    const PORT = 9120;
-    const WORKDIR = '/projects/claraity';
 
-    // -- Python not found --
+    // -- Dev mode: devMode='always' with source + Python present --
 
-    test('returns null and shows error when Python is not found', async () => {
-        mockPythonNotFound();
-
-        const result = await resolveLaunchConfig(
-            PYTHON, PORT, WORKDIR, 'auto', true,
-        );
-
-        expect(result).toBeNull();
-        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
-            expect.stringContaining('Python not found'),
-        );
-    });
-
-    // -- Dev mode: devMode='always' with source present --
-
-    test('returns dev mode config when devMode is "always" and source exists', async () => {
-        mockPythonFound();
+    test('returns dev mode when devMode="always", source exists, Python available', async () => {
+        // checkDevMode: source exists
         mockExistsSync.mockReturnValue(true);
+        // checkPython: available
+        mockPythonFound();
 
         const result = await resolveLaunchConfig(
-            PYTHON, PORT, WORKDIR, 'always', false,
+            PYTHON, WORKDIR, 'always', EXT_PATH,
         );
 
         expect(result).not.toBeNull();
@@ -255,30 +273,13 @@ describe('resolveLaunchConfig', () => {
         expect(result!.cwd).toBe(WORKDIR);
     });
 
-    // -- Dev mode: devMode='auto' with source present --
-
-    test('returns dev mode config when devMode is "auto" and source exists', async () => {
-        mockPythonFound();
-        mockExistsSync.mockReturnValue(true);
-
-        const result = await resolveLaunchConfig(
-            PYTHON, PORT, WORKDIR, 'auto', false,
-        );
-
-        expect(result).not.toBeNull();
-        expect(result!.mode).toBe('dev');
-        expect(result!.args).toContain('-m');
-        expect(result!.args).toContain('src.server');
-    });
-
     // -- Dev mode: devMode='always' but no source --
 
-    test('returns null and shows error when devMode is "always" but source is missing', async () => {
-        mockPythonFound();
+    test('returns null when devMode="always" but source missing', async () => {
         mockExistsSync.mockReturnValue(false);
 
         const result = await resolveLaunchConfig(
-            PYTHON, PORT, WORKDIR, 'always', false,
+            PYTHON, WORKDIR, 'always', EXT_PATH,
         );
 
         expect(result).toBeNull();
@@ -287,118 +288,82 @@ describe('resolveLaunchConfig', () => {
         );
     });
 
-    // -- Dev mode: devMode='auto' but no source, falls through --
+    // -- Dev mode: devMode='always', source exists but Python missing --
 
-    test('falls through dev mode when devMode is "auto" and source is missing', async () => {
-        mockPythonFound();
-        mockExistsSync.mockReturnValue(false);
-        // checkInstalledPackage call
-        mockExecFileOnce(null, '0.13.0\n');
+    test('returns null when devMode="always", source exists, but Python missing', async () => {
+        // checkDevMode: source exists (first call), binary check (subsequent calls)
+        mockExistsSync.mockReturnValue(true);
+        // checkPython: not available
+        mockPythonNotFound();
 
         const result = await resolveLaunchConfig(
-            PYTHON, PORT, WORKDIR, 'auto', false,
+            PYTHON, WORKDIR, 'always', EXT_PATH,
         );
 
-        // Should have fallen through to installed check
-        expect(result).not.toBeNull();
-        expect(result!.mode).toBe('installed');
+        expect(result).toBeNull();
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+            expect.stringContaining('Dev mode requires Python'),
+        );
     });
 
-    // -- Installed and up to date --
+    // -- Dev mode: devMode='auto' with source + Python --
 
-    test('returns installed config when package is installed and up to date', async () => {
+    test('returns dev mode when devMode="auto", source exists, Python available', async () => {
+        mockExistsSync.mockReturnValue(true);
         mockPythonFound();
-        mockExistsSync.mockReturnValue(false);
-        // checkInstalledPackage returns a version >= MIN_AGENT_VERSION
-        mockExecFileOnce(null, MIN_AGENT_VERSION + '\n');
 
         const result = await resolveLaunchConfig(
-            PYTHON, PORT, WORKDIR, 'auto', true,
+            PYTHON, WORKDIR, 'auto', EXT_PATH,
         );
 
         expect(result).not.toBeNull();
-        expect(result!.mode).toBe('installed');
-        expect(result!.command).toBe(PYTHON);
-        expect(result!.args).toEqual([
-            '-m', 'src.server', '--workdir', WORKDIR,
-        ]);
+        expect(result!.mode).toBe('dev');
+    });
+
+    // -- Dev mode: devMode='auto', source exists but Python missing, falls through to binary --
+
+    test('falls through to bundled binary when devMode="auto", source exists, but Python missing', async () => {
+        // checkDevMode needs __main__.py to exist, but binary check also uses existsSync
+        const path = require('path');
+        mockExistsSync.mockImplementation((p: string) => {
+            if (p.includes('__main__.py')) { return true; }
+            if (p.includes('bin')) { return true; } // bundled binary found
+            return false;
+        });
+        mockPythonNotFound();
+
+        const result = await resolveLaunchConfig(
+            PYTHON, WORKDIR, 'auto', EXT_PATH,
+        );
+
+        expect(result).not.toBeNull();
+        expect(result!.mode).toBe('bundled');
+    });
+
+    // -- Bundled binary: devMode='never' --
+
+    test('returns bundled config when devMode="never" and binary exists', async () => {
+        mockExistsSync.mockReturnValue(true);
+
+        const result = await resolveLaunchConfig(
+            PYTHON, WORKDIR, 'never', EXT_PATH,
+        );
+
+        expect(result).not.toBeNull();
+        expect(result!.mode).toBe('bundled');
+        expect(result!.args).toContain('--workdir');
         expect(result!.cwd).toBe(WORKDIR);
-        expect(result!.version).toBe(MIN_AGENT_VERSION);
     });
 
-    test('returns installed config with newer version', async () => {
+    // -- Pip fallback: no binary, Python + package available --
+
+    test('falls back to pip package when no binary and package installed', async () => {
+        mockExistsSync.mockReturnValue(false); // no source, no binary
         mockPythonFound();
-        mockExistsSync.mockReturnValue(false);
-        mockExecFileOnce(null, '99.0.0\n');
+        mockExecFileOnce(null, '0.13.0\n'); // checkInstalledPackage
 
         const result = await resolveLaunchConfig(
-            PYTHON, PORT, WORKDIR, 'never', true,
-        );
-
-        expect(result).not.toBeNull();
-        expect(result!.mode).toBe('installed');
-        expect(result!.version).toBe('99.0.0');
-    });
-
-    // -- Installed but outdated, user upgrades --
-
-    test('handles outdated package - user upgrades successfully', async () => {
-        mockPythonFound();
-        mockExistsSync.mockReturnValue(false);
-        // First checkInstalledPackage: outdated
-        mockExecFileOnce(null, '0.1.0\n');
-        // promptUpgrade: user clicks "Upgrade"
-        (vscode.window.showWarningMessage as vi.Mock).mockResolvedValueOnce('Upgrade');
-        // runPipInTerminal: user clicks "Retry"
-        (vscode.window.showInformationMessage as vi.Mock).mockResolvedValueOnce('Retry');
-        // Second checkInstalledPackage after upgrade
-        mockExecFileOnce(null, '0.14.0\n');
-
-        const result = await resolveLaunchConfig(
-            PYTHON, PORT, WORKDIR, 'auto', true,
-        );
-
-        expect(result).not.toBeNull();
-        expect(result!.mode).toBe('installed');
-        expect(result!.version).toBe('0.14.0');
-    });
-
-    // -- Installed but outdated, user continues anyway --
-
-    test('handles outdated package - user chooses "Continue Anyway"', async () => {
-        mockPythonFound();
-        mockExistsSync.mockReturnValue(false);
-        // checkInstalledPackage: outdated
-        mockExecFileOnce(null, '0.1.0\n');
-        // promptUpgrade: user clicks "Continue Anyway"
-        (vscode.window.showWarningMessage as vi.Mock).mockResolvedValueOnce('Continue Anyway');
-
-        const result = await resolveLaunchConfig(
-            PYTHON, PORT, WORKDIR, 'auto', true,
-        );
-
-        // Should still return an installed config with the old version
-        expect(result).not.toBeNull();
-        expect(result!.mode).toBe('installed');
-        expect(result!.version).toBe('0.1.0');
-    });
-
-    // -- Not installed, user installs via prompt --
-
-    test('handles not installed - user installs successfully', async () => {
-        mockPythonFound();
-        mockExistsSync.mockReturnValue(false);
-        // checkInstalledPackage: not installed
-        mockExecFileOnce(new Error('not installed'));
-        // promptInstall: user clicks "Install"
-        (vscode.window.showInformationMessage as vi.Mock)
-            .mockResolvedValueOnce('Install')  // promptInstall choice
-            .mockResolvedValueOnce('Retry');    // runPipInTerminal retry
-        // checkInstalledPackage after install succeeds
-        mockExecFileOnce(null, '0.13.0\n');
-
-        const result = await resolveLaunchConfig(
-            PYTHON, PORT, WORKDIR, 'auto', true,
+            PYTHON, WORKDIR, 'never', EXT_PATH,
         );
 
         expect(result).not.toBeNull();
@@ -406,99 +371,50 @@ describe('resolveLaunchConfig', () => {
         expect(result!.version).toBe('0.13.0');
     });
 
-    // -- Not installed, user cancels install --
+    // -- Nothing found: no binary, no Python --
 
-    test('returns null when not installed and user cancels install', async () => {
-        mockPythonFound();
-        mockExistsSync.mockReturnValue(false);
-        // checkInstalledPackage: not installed
-        mockExecFileOnce(new Error('not installed'));
-        // promptInstall: user clicks "Cancel"
-        (vscode.window.showInformationMessage as vi.Mock)
-            .mockResolvedValueOnce('Cancel');
+    test('returns null with reinstall message when nothing found', async () => {
+        mockExistsSync.mockReturnValue(false); // no source, no binary
+        mockPythonNotFound();
 
         const result = await resolveLaunchConfig(
-            PYTHON, PORT, WORKDIR, 'auto', true,
+            PYTHON, WORKDIR, 'never', EXT_PATH,
         );
 
         expect(result).toBeNull();
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
-            expect.stringContaining('not installed'),
+            expect.stringContaining('reinstall'),
         );
     });
 
-    // -- Not installed, autoInstall=false --
+    // -- Nothing found: no binary, Python available but no package --
 
-    test('returns null when not installed and autoInstall is false', async () => {
-        mockPythonFound();
+    test('returns null when no binary and pip package not installed', async () => {
         mockExistsSync.mockReturnValue(false);
-        // checkInstalledPackage: not installed
+        mockPythonFound();
         mockExecFileOnce(new Error('not installed'));
 
         const result = await resolveLaunchConfig(
-            PYTHON, PORT, WORKDIR, 'auto', false,
+            PYTHON, WORKDIR, 'never', EXT_PATH,
         );
 
         expect(result).toBeNull();
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
-            expect.stringContaining(PYPI_PACKAGE),
+            expect.stringContaining('reinstall'),
         );
     });
 
-    // -- devMode='never' skips dev mode detection --
+    // -- devMode='never' skips dev mode even if source exists --
 
-    test('skips dev mode when devMode is "never" even if source exists', async () => {
-        mockPythonFound();
-        // Source exists but devMode='never' should skip it
+    test('skips dev mode when devMode="never" even if source exists', async () => {
+        // Source exists AND binary exists
         mockExistsSync.mockReturnValue(true);
-        // checkInstalledPackage returns good version
-        mockExecFileOnce(null, MIN_AGENT_VERSION + '\n');
 
         const result = await resolveLaunchConfig(
-            PYTHON, PORT, WORKDIR, 'never', false,
+            PYTHON, WORKDIR, 'never', EXT_PATH,
         );
 
         expect(result).not.toBeNull();
-        expect(result!.mode).toBe('installed');
-    });
-
-    // -- Outdated package with autoInstall=false --
-
-    test('returns null when package is outdated and autoInstall is false', async () => {
-        mockPythonFound();
-        mockExistsSync.mockReturnValue(false);
-        // checkInstalledPackage: outdated version
-        mockExecFileOnce(null, '0.1.0\n');
-
-        const result = await resolveLaunchConfig(
-            PYTHON, PORT, WORKDIR, 'auto', false,
-        );
-
-        // autoInstall=false means no upgrade prompt; installedVersion is truthy
-        // so the "not installed" error branch is skipped, returns null
-        expect(result).toBeNull();
-    });
-
-    // -- Install succeeds but version check fails afterward --
-
-    test('returns null when install succeeds but version check returns null', async () => {
-        mockPythonFound();
-        mockExistsSync.mockReturnValue(false);
-        // checkInstalledPackage: not installed
-        mockExecFileOnce(new Error('not installed'));
-        // promptInstall: user clicks "Install"
-        (vscode.window.showInformationMessage as vi.Mock)
-            .mockResolvedValueOnce('Install')
-            .mockResolvedValueOnce('Retry');
-        // checkInstalledPackage after install: still fails
-        mockExecFileOnce(new Error('still broken'));
-
-        const result = await resolveLaunchConfig(
-            PYTHON, PORT, WORKDIR, 'auto', true,
-        );
-
-        // newVersion is null, so the inner if(newVersion) is false,
-        // falls through to the "nothing worked" block
-        expect(result).toBeNull();
+        expect(result!.mode).toBe('bundled'); // Not dev
     });
 });

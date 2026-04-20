@@ -1,10 +1,10 @@
 /**
- * Python Environment Detection & Package Management
+ * Server Launch Resolution
  *
  * Resolves how to launch the ClarAIty server:
- *   1. Dev mode  - source repo detected in workspace (python -m src.server)
- *   2. Installed - claraity-code package installed via pip
- *   3. Prompt    - offer to install the package
+ *   1. Dev mode       - explicit opt-in via devMode setting (python -m src.server)
+ *   2. Bundled binary - claraity-server.exe shipped with the extension (no Python needed)
+ *   3. Pip package    - claraity-code installed via pip (silent fallback, no prompts)
  */
 
 import * as vscode from 'vscode';
@@ -15,7 +15,7 @@ import { execFile } from 'child_process';
 // ── Types ──────────────────────────────────────────────────────────────────
 
 export interface LaunchConfig {
-    mode: 'dev' | 'installed';
+    mode: 'bundled' | 'dev' | 'installed';
     command: string;
     args: string[];
     cwd: string;
@@ -32,32 +32,33 @@ export const PYPI_PACKAGE = 'claraity-code';
 /**
  * Determine how to launch the ClarAIty server.
  *
- * Priority: dev mode (source in workspace) > installed package > prompt install.
+ * Priority:
+ *   1. Dev mode (devMode="always" or "auto" with source present) — requires Python
+ *   2. Bundled binary (claraity-server.exe in extension bin/) — no Python needed
+ *   3. Pip package (claraity-code installed) — silent fallback, no install prompts
+ *
  * Returns null if no viable launch method is found.
  */
 export async function resolveLaunchConfig(
     pythonPath: string,
-    port: number,
     workDir: string,
     devMode: string,
-    autoInstall: boolean,
+    extensionPath: string,
 ): Promise<LaunchConfig | null> {
-    // 1. Verify Python is available
-    const pythonOk = await checkPython(pythonPath);
-    if (!pythonOk) {
-        vscode.window.showErrorMessage(
-            `ClarAIty: Python not found at "${pythonPath}". ` +
-            'Set "claraity.pythonPath" in VS Code settings.',
-        );
-        return null;
-    }
-
-    // 2. Dev mode check
-    if (devMode === 'always' || (devMode === 'auto' && checkDevMode(workDir))) {
-        if (devMode === 'always' && !checkDevMode(workDir)) {
+    // 1. Dev mode — only when explicitly requested
+    if (devMode === 'always') {
+        if (!checkDevMode(workDir)) {
             vscode.window.showErrorMessage(
                 'ClarAIty: devMode is "always" but source files not found in workspace. ' +
                 'Ensure src/server/__main__.py exists.',
+            );
+            return null;
+        }
+        const pythonOk = await checkPython(pythonPath);
+        if (!pythonOk) {
+            vscode.window.showErrorMessage(
+                `ClarAIty: Dev mode requires Python. Python not found at "${pythonPath}". ` +
+                'Set "claraity.pythonPath" in VS Code settings or switch devMode to "never".',
             );
             return null;
         }
@@ -69,70 +70,50 @@ export async function resolveLaunchConfig(
         };
     }
 
-    // 3. Check installed package
-    const installedVersion = await checkInstalledPackage(pythonPath);
-
-    if (installedVersion) {
-        if (compareSemver(installedVersion, MIN_AGENT_VERSION) >= 0) {
-            // Installed and up to date
+    if (devMode === 'auto' && checkDevMode(workDir)) {
+        const pythonOk = await checkPython(pythonPath);
+        if (pythonOk) {
             return {
-                mode: 'installed',
+                mode: 'dev',
                 command: pythonPath,
-                args: ['-m', 'src.server', '--workdir', workDir],
+                args: ['-m', 'src.server'],
                 cwd: workDir,
-                version: installedVersion,
             };
         }
-
-        // Installed but outdated
-        if (autoInstall) {
-            const upgraded = await promptUpgrade(pythonPath, installedVersion);
-            if (upgraded) {
-                const newVersion = await checkInstalledPackage(pythonPath);
-                return {
-                    mode: 'installed',
-                    command: pythonPath,
-                    args: ['-m', 'src.server', '--workdir', workDir],
-                    cwd: workDir,
-                    version: newVersion ?? installedVersion,
-                };
-            }
-
-            // User chose "Continue Anyway"
-            return {
-                mode: 'installed',
-                command: pythonPath,
-                args: ['-m', 'src.server', '--workdir', workDir],
-                cwd: workDir,
-                version: installedVersion,
-            };
-        }
+        // Python not available — fall through to bundled binary
     }
 
-    // 4. Not installed -- prompt
-    if (autoInstall) {
-        const installed = await promptInstall(pythonPath);
-        if (installed) {
-            const newVersion = await checkInstalledPackage(pythonPath);
-            if (newVersion) {
-                return {
-                    mode: 'installed',
-                    command: pythonPath,
-                    args: ['-m', 'src.server', '--workdir', workDir],
-                    cwd: workDir,
-                    version: newVersion,
-                };
-            }
+    // 2. Bundled binary — no Python needed
+    const bundledPath = resolveBundledBinary(extensionPath);
+    if (bundledPath) {
+        return {
+            mode: 'bundled',
+            command: bundledPath,
+            args: ['--workdir', workDir],
+            cwd: workDir,
+        };
+    }
+
+    // 3. Pip package — silent fallback (no install prompts)
+    const pythonOk = await checkPython(pythonPath);
+    if (pythonOk) {
+        const installedVersion = await checkInstalledPackage(pythonPath);
+        if (installedVersion) {
+            return {
+                mode: 'installed',
+                command: pythonPath,
+                args: ['-m', 'src.server', '--workdir', workDir],
+                cwd: workDir,
+                version: installedVersion,
+            };
         }
     }
 
     // Nothing worked
-    if (!installedVersion) {
-        vscode.window.showErrorMessage(
-            `ClarAIty: The "${PYPI_PACKAGE}" package is not installed. ` +
-            `Run: pip install ${PYPI_PACKAGE}`,
-        );
-    }
+    vscode.window.showErrorMessage(
+        'ClarAIty: Server binary not found. Please reinstall the ClarAIty extension. ' +
+        'If the issue persists, contact the team.',
+    );
     return null;
 }
 
@@ -152,6 +133,30 @@ export function checkDevMode(workDir: string): boolean {
     return fs.existsSync(path.join(workDir, 'src', 'server', '__main__.py'));
 }
 
+/**
+ * Check for the bundled server binary in the extension's bin/ directory.
+ * Supports both flat layout (bin/claraity-server.exe) and
+ * PyInstaller one-folder layout (bin/claraity-server/claraity-server.exe).
+ * Returns the binary path if found, null otherwise.
+ */
+export function resolveBundledBinary(extensionPath: string): string | null {
+    const binaryName = process.platform === 'win32'
+        ? 'claraity-server.exe'
+        : 'claraity-server';
+
+    const candidates = [
+        path.join(extensionPath, 'bin', binaryName),
+        path.join(extensionPath, 'bin', binaryName.replace(/\.exe$/, ''), binaryName),
+    ];
+
+    for (const binPath of candidates) {
+        if (fs.existsSync(binPath)) {
+            return binPath;
+        }
+    }
+    return null;
+}
+
 /** Return the installed version of claraity-code, or null if not installed. */
 export function checkInstalledPackage(pythonPath: string): Promise<string | null> {
     return new Promise((resolve) => {
@@ -167,74 +172,6 @@ export function checkInstalledPackage(pythonPath: string): Promise<string | null
             resolve(version || null);
         });
     });
-}
-
-/**
- * Show a notification prompting the user to install the package.
- * Opens a terminal so the user can see pip output.
- * Returns true if the user confirmed a successful install via the Retry button.
- */
-async function promptInstall(pythonPath: string): Promise<boolean> {
-    const choice = await vscode.window.showInformationMessage(
-        `ClarAIty: The "${PYPI_PACKAGE}" package is not installed.`,
-        'Install',
-        'Cancel',
-    );
-
-    if (choice !== 'Install') {
-        return false;
-    }
-
-    return runPipInTerminal(pythonPath, 'install');
-}
-
-/**
- * Show a notification prompting the user to upgrade the package.
- * Returns true if the user chose to upgrade and confirmed success.
- * Returns false if the user chose "Continue Anyway" or "Cancel".
- */
-async function promptUpgrade(
-    pythonPath: string,
-    currentVersion: string,
-): Promise<boolean> {
-    const choice = await vscode.window.showWarningMessage(
-        `ClarAIty: Installed version ${currentVersion} is older than ` +
-        `minimum ${MIN_AGENT_VERSION}.`,
-        'Upgrade',
-        'Continue Anyway',
-        'Cancel',
-    );
-
-    if (choice === 'Continue Anyway' || choice === 'Cancel' || !choice) {
-        return false;
-    }
-
-    return runPipInTerminal(pythonPath, 'upgrade');
-}
-
-/**
- * Run pip install/upgrade in a visible terminal and wait for user confirmation.
- */
-async function runPipInTerminal(
-    pythonPath: string,
-    action: 'install' | 'upgrade',
-): Promise<boolean> {
-    const pipArgs = action === 'upgrade'
-        ? `install --upgrade ${PYPI_PACKAGE}`
-        : `install ${PYPI_PACKAGE}`;
-
-    const terminal = vscode.window.createTerminal('ClarAIty Install');
-    terminal.show();
-    terminal.sendText(`${pythonPath} -m pip ${pipArgs}`);
-
-    // Wait for user to confirm the install succeeded
-    const retry = await vscode.window.showInformationMessage(
-        `ClarAIty: Click "Retry" after pip finishes to continue.`,
-        'Retry',
-        'Cancel',
-    );
-
-    return retry === 'Retry';
 }
 
 // ── Version Comparison ─────────────────────────────────────────────────────

@@ -26,8 +26,7 @@ export function activate(context: vscode.ExtensionContext) {
     // Read configuration
     const config = vscode.workspace.getConfiguration('claraity');
     const pythonPath = config.get<string>('pythonPath', 'python');
-    const devMode = config.get<string>('devMode', 'auto');
-    const autoInstallAgent = config.get<boolean>('autoInstallAgent', true);
+    const devMode = config.get<string>('devMode', 'never');
 
     // Create file decoration provider for marking agent-modified files
     const fileDecorations = new ClarAItyFileDecorationProvider();
@@ -295,14 +294,11 @@ export function activate(context: vscode.ExtensionContext) {
         statusBar.text = '$(loading~spin) ClarAIty (checking...)';
         statusBar.tooltip = 'ClarAIty - Detecting environment...';
 
-        // Port is passed for resolveLaunchConfig compatibility (not used in stdio)
-        const port = 9120;
-
-        resolveLaunchConfig(pythonPath, port, workDir, devMode, autoInstallAgent)
+        resolveLaunchConfig(pythonPath, workDir, devMode, context.extensionPath)
             .then(async (launchConfig) => {
                 if (!launchConfig) {
-                    statusBar.text = '$(error) ClarAIty (not installed)';
-                    statusBar.tooltip = 'ClarAIty - Agent not found';
+                    statusBar.text = '$(error) ClarAIty (server missing)';
+                    statusBar.tooltip = 'ClarAIty - Server binary not found. Reinstall the extension.';
                     return;
                 }
 
@@ -313,6 +309,7 @@ export function activate(context: vscode.ExtensionContext) {
                 // Create stdio connection with the resolved launch config
                 const stdioConn = new StdioConnection(
                     {
+                        mode: launchConfig.mode,
                         command: launchConfig.command,
                         args: launchConfig.args,
                         cwd: launchConfig.cwd,

@@ -288,7 +288,7 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
         }
 
         if (msg.type === 'tool_list') {
-            this.postToWebview({ type: 'toolList', tools: (msg as any).tools });
+            this.postToWebview({ type: 'toolList', tools: msg.tools });
         }
 
         // Handle VS Code terminal execution
@@ -698,15 +698,15 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             }
 
             case 'setTraceEnabled':
-                this.connection?.send({ type: 'set_trace_enabled', enabled: msg.enabled } as any);
+                this.connection?.send({ type: 'set_trace_enabled', enabled: msg.enabled });
                 break;
 
             case 'getTraceEnabled':
-                this.connection?.send({ type: 'get_trace_enabled' } as any);
+                this.connection?.send({ type: 'get_trace_enabled' });
                 break;
 
             case 'getToolList':
-                this.connection?.send({ type: 'get_tool_list' } as any);
+                this.connection?.send({ type: 'get_tool_list' });
                 break;
 
             case 'approveKnowledge':

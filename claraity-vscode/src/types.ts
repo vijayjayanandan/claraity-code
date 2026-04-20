@@ -308,7 +308,12 @@ export type WebViewMessage =
     | { type: 'restoreTurn'; anchorUuid: string }
     // Server connection control
     | { type: 'disconnectServer' }
-    | { type: 'reconnectServer' };
+    | { type: 'reconnectServer' }
+    // Trace Viewer
+    | { type: 'clearTrace'; sessionId: string }
+    | { type: 'setTraceEnabled'; enabled: boolean }
+    | { type: 'getTraceEnabled' }
+    | { type: 'getToolList' };
 
 // ============================================================================
 // Exhaustive check helper

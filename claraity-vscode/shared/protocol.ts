@@ -362,4 +362,7 @@ export type ServerMessage =
   // Prompt Enrichment
   | { type: "enrichment_delta"; delta: string }
   | { type: "enrichment_complete"; original: string; enriched: string }
-  | { type: "enrichment_error"; message: string };
+  | { type: "enrichment_error"; message: string }
+  // Trace Viewer
+  | { type: "trace_enabled"; enabled: boolean }
+  | { type: "tool_list"; tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }> };

@@ -2,7 +2,7 @@
   "name": "claraity-code",
   "displayName": "ClarAIty Code",
   "description": "AI coding agent that brings visual clarity to your codebase and every AI interaction",
-  "version": "0.8.8",
+  "version": "0.8.9",
   "publisher": "claraity",
   "license": "MIT",
   "author": {
@@ -228,11 +228,6 @@
           "default": true,
           "description": "Automatically start the agent on activation"
         },
-        "claraity.autoInstallAgent": {
-          "type": "boolean",
-          "default": true,
-          "description": "Prompt to install or upgrade the claraity-code package when not found or outdated"
-        },
         "claraity.devMode": {
           "type": "string",
           "enum": [
@@ -240,8 +235,8 @@
             "always",
             "never"
           ],
-          "default": "auto",
-          "description": "Server launch mode. 'auto' detects source vs installed, 'always' forces source mode, 'never' skips source detection"
+          "default": "never",
+          "description": "Server launch mode. 'never' uses bundled binary (default), 'auto' detects source in workspace, 'always' forces Python source mode"
         }
       }
     }

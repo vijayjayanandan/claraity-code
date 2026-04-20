@@ -5,9 +5,10 @@
  * - stdin: sends commands TO agent (chat_message, interrupt, etc.)
  * - TCP socket: receives events FROM agent (text_delta, stream_end, etc.)
  *
- * Binary resolution order:
- * 1. Bundled binary: <extensionPath>/bin/claraity-server.exe (or claraity-server on Unix)
- * 2. Python fallback: python -m src.server (dev mode)
+ * Launch mode is resolved by resolveLaunchConfig() in python-env.ts:
+ * 1. Dev mode: python -m src.server (when devMode setting is "always" or "auto")
+ * 2. Bundled binary: claraity-server.exe shipped with the extension
+ * 3. Pip package: claraity-code installed via pip (silent fallback)
  *
  * Why TCP instead of stdout pipes?
  * On Windows, the VS Code Extension Host has a libuv issue where pipe data
@@ -18,12 +19,11 @@
 import * as vscode from 'vscode';
 import * as net from 'net';
 import { spawn, ChildProcess, execFile } from 'child_process';
-import * as fs from 'fs';
-import * as path from 'path';
 import { ServerMessage, ClientMessage } from './types';
 import { wrapNotification, isJsonRpc, unwrapMessage } from './jsonrpc';
 
 export interface LaunchConfig {
+    mode: 'bundled' | 'dev' | 'installed';
     command: string;
     args: string[];
     cwd: string;
@@ -89,40 +89,22 @@ export class StdioConnection implements vscode.Disposable {
     }
 
     /**
-     * Resolve the agent binary path.
-     * Returns bundled binary if it exists, otherwise falls back to Python.
-     * Respects claraity.devMode setting: "always" forces Python source mode.
+     * Resolve the agent command and args.
+     * Uses the launch config directly — binary resolution is handled by
+     * resolveLaunchConfig() in python-env.ts. For dev/installed modes,
+     * prepends -u (unbuffered) to Python args.
      */
     private resolveAgent(): { command: string; args: string[] } {
-        const devMode = vscode.workspace.getConfiguration('claraity').get<string>('devMode', 'auto');
-
-        if (devMode !== 'always' && this.extensionPath) {
-            const binaryName = process.platform === 'win32'
-                ? 'claraity-server.exe'
-                : 'claraity-server';
-
-            // Check both flat layout (bin/claraity-server.exe) and
-            // PyInstaller one-folder layout (bin/claraity-server/claraity-server.exe)
-            const candidates = [
-                path.join(this.extensionPath, 'bin', binaryName),
-                path.join(this.extensionPath, 'bin', binaryName.replace(/\.exe$/, ''), binaryName),
-            ];
-
-            for (const binPath of candidates) {
-                if (fs.existsSync(binPath)) {
-                    this.logLine(`[STDIO] Using bundled binary: ${binPath}`);
-                    return {
-                        command: binPath,
-                        args: ['--workdir', this.launchConfig.cwd],
-                    };
-                }
-            }
-        } else if (devMode === 'always') {
-            this.logLine('[STDIO] devMode=always — skipping binary, using Python source');
+        if (this.launchConfig.mode === 'bundled') {
+            this.logLine(`[STDIO] Using bundled binary: ${this.launchConfig.command}`);
+            return {
+                command: this.launchConfig.command,
+                args: [...this.launchConfig.args],
+            };
         }
 
-        // Fallback: Python mode (dev)
-        this.logLine('[STDIO] Using Python fallback');
+        // Dev or installed mode — Python with unbuffered output
+        this.logLine(`[STDIO] Using Python (${this.launchConfig.mode} mode)`);
         return {
             command: this.launchConfig.command,
             args: ['-u', ...this.launchConfig.args],
