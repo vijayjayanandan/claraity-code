@@ -254,7 +254,7 @@
     "publish": "vsce publish --no-dependencies"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
+    "@types/node": "^25.6.0",
     "@types/vscode": "^1.85.0",
     "@vscode/codicons": "^0.0.44",
     "@vscode/vsce": "^3.0.0",
