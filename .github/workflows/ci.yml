@@ -85,6 +85,23 @@ jobs:
         run: mypy src/ --ignore-missing-imports --no-error-summary
         continue-on-error: true  # Don't fail build on type errors initially
 
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Audit extension dependencies
+        run: cd claraity-vscode && npm audit --audit-level=moderate
+
+      - name: Audit webview dependencies
+        run: cd claraity-vscode/webview-ui && npm audit --audit-level=moderate
+
   build:
     name: Build Package
     runs-on: ubuntu-latest

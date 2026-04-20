@@ -9,6 +9,9 @@ Excludes Textual/rich/trio (TUI-only) to keep size down (~58MB).
 Build:
     .venv-build/Scripts/pyinstaller claraity-server.spec
     # Then copy dist/claraity-server/ -> claraity-vscode/bin/
+
+Pre-release checklist:
+    .venv-build/Scripts/python -m pip_audit  # Must show 0 vulnerabilities
 """
 
 import sys
