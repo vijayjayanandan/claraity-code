@@ -19,6 +19,11 @@ updates:
     labels:
       - "dependencies"
       - "npm"
+    groups:
+      npm-dev:
+        dependency-type: "development"
+      npm-prod:
+        dependency-type: "production"
 
   # Webview UI (npm)
   - package-ecosystem: "npm"
@@ -29,6 +34,11 @@ updates:
     labels:
       - "dependencies"
       - "npm"
+    groups:
+      webview-dev:
+        dependency-type: "development"
+      webview-prod:
+        dependency-type: "production"
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
