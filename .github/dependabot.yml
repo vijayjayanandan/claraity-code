@@ -10,6 +10,26 @@ updates:
       - "dependencies"
       - "python"
 
+  # VS Code extension (npm)
+  - package-ecosystem: "npm"
+    directory: "/claraity-vscode"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "npm"
+
+  # Webview UI (npm)
+  - package-ecosystem: "npm"
+    directory: "/claraity-vscode/webview-ui"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "npm"
+
   # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
