@@ -189,15 +189,38 @@ class TestGrepToolOutputModes:
         # Content mode includes line content
         assert "def main" in result.output
 
-    def test_auto_detect_dir_files_mode(self, grep, sample_project):
-        """When targeting a directory with no output_mode, should default to files_with_matches."""
+    def test_auto_detect_broad_dir_files_mode(self, grep, sample_project):
+        """Broad directory search (no glob/file_type) defaults to files_with_matches."""
         result = grep.execute(
             pattern="import os",
             file_path=str(sample_project / "src"),
         )
         assert result.status == ToolStatus.SUCCESS
-        # files_with_matches mode - output is file paths
         assert result.metadata["output_mode"] == "files_with_matches"
+        # Hint should be appended to guide the LLM
+        assert "output_mode='content'" in result.output
+
+    def test_auto_detect_narrowed_dir_content_mode(self, grep, sample_project):
+        """Directory search narrowed by file_type defaults to content mode."""
+        result = grep.execute(
+            pattern="import os",
+            file_path=str(sample_project / "src"),
+            file_type="py",
+        )
+        assert result.status == ToolStatus.SUCCESS
+        assert result.metadata["output_mode"] == "content"
+        assert "import os" in result.output
+
+    def test_auto_detect_narrowed_dir_glob_content_mode(self, grep, sample_project):
+        """Directory search narrowed by glob defaults to content mode."""
+        result = grep.execute(
+            pattern="import os",
+            file_path=str(sample_project / "src"),
+            glob="*.py",
+        )
+        assert result.status == ToolStatus.SUCCESS
+        assert result.metadata["output_mode"] == "content"
+        assert "import os" in result.output
 
 
 class TestGrepToolFilters:

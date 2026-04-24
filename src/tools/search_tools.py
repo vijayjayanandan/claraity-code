@@ -280,12 +280,18 @@ class GrepTool(Tool):
                     error=f"Path not found: {file_path}",
                 )
 
-            # Auto-detect output_mode based on whether target is a file or directory.
-            # File  -> content:           you already know which file, you want the lines.
-            # Dir   -> files_with_matches: narrow down first; also prevents 7MB+ explosions
-            #          when the LLM forgets file_path and searches ".".
+            # Auto-detect output_mode based on target type and search scope.
+            # File                              -> content (you know the file, you want lines)
+            # Directory + glob or file_type     -> content (already narrowed, safe to show lines)
+            # Directory, broad (no narrowing)   -> files_with_matches (prevents 7MB+ explosions
+            #                                      when LLM forgets file_path and searches ".")
             if output_mode is None:
-                output_mode = "content" if search_path.is_file() else "files_with_matches"
+                if search_path.is_file():
+                    output_mode = "content"
+                elif glob or file_type:
+                    output_mode = "content"
+                else:
+                    output_mode = "files_with_matches"
 
             # Validate output mode
             try:
@@ -407,7 +413,8 @@ class GrepTool(Tool):
 
             # Build output based on mode
             if mode == OutputMode.FILES_WITH_MATCHES:
-                output = "\n".join(all_matches)
+                hint = "\n[Use output_mode='content' to see matching lines]"
+                output = "\n".join(all_matches) + hint
                 total_matches = len(all_matches)
             elif mode == OutputMode.COUNT:
                 output_lines = [f"{file}:{count}" for file, count in file_match_counts.items()]

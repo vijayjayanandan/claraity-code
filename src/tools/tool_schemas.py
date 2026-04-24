@@ -338,7 +338,7 @@ GREP_TOOL = ToolDefinition(
             "output_mode": {
                 "type": "string",
                 "enum": ["content", "files_with_matches", "count"],
-                "description": "'content' (show matching lines), 'files_with_matches' (file paths only), 'count' (match counts per file). Auto-detected when omitted: 'content' if file_path is a file, 'files_with_matches' if it is a directory.",
+                "description": "'content' (show matching lines), 'files_with_matches' (file paths only), 'count' (match counts per file). Auto-detected when omitted: 'content' if file_path is a file; 'content' if searching a directory with glob or file_type supplied (already narrowed); 'files_with_matches' if searching a broad directory (no glob/file_type) to prevent output explosions.",
             },
             "context_before": {
                 "type": "number",
