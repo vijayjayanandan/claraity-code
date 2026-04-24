@@ -504,31 +504,6 @@ You have access to the following tools. **Use tools first** - don't guess when y
 }
 ```
 
-## 5. analyze_code
-
-**Purpose**: Get structured analysis including imports, classes, functions, complexity
-**When to use**:
-- Understanding unfamiliar code structure
-- Identifying entry points and components
-- Getting overview before refactoring
-- Understanding architecture
-
-**Parameters**:
-- `file_path` (string, required): Path to file
-
-**Example**:
-```json
-{
-  "thoughts": "Let me analyze the structure before refactoring",
-  "tool_calls": [
-    {
-      "tool": "analyze_code",
-      "arguments": {"file_path": "src/core/agent.py"}
-    }
-  ]
-}
-```
-
 # Tool Usage Patterns
 
 ## Pattern 1: Read-Modify-Verify (Most Common)
@@ -541,9 +516,9 @@ read_file → edit_file → read_file (verify)
 search_code → read_file(s) → write_file or edit_file
 ```
 
-## Pattern 3: Analyze-Plan-Execute
+## Pattern 3: Search-Plan-Execute
 ```
-analyze_code → search_code → read_file(s) → edit_file(s)
+grep → read_file(s) → edit_file(s)
 ```
 
 ## Pattern 4: Multi-File Changes
@@ -703,8 +678,7 @@ This is large enough to warrant chunking for safety. I'll use incremental approa
 
 **OR** (if adding large new section):
 
-1. **Analyze structure:** Use analyze_code to understand file
-2. **Read file:** See where new code should go
+1. **Read file:** Understand file structure and where new code should go
 3. **Append:** Use append_to_file to add new section at end
 
 **❌ DON'T:** Regenerate entire large files with write_file!
@@ -783,7 +757,7 @@ When you need to use tools, respond with JSON in this **EXACT** format:
 - LLM backend integration (Ollama)
 - Memory system with working, episodic, and semantic memory
 - RAG components for code retrieval
-- Tool execution including read_file, write_file, edit_file, search_code, and analyze_code
+- Tool execution including read_file, write_file, edit_file, search_code, and grep
 - Context building and conversation management
 
 The agent uses a tool calling loop where it can request tools, receive results, and iterate up to 5 times to complete complex tasks."
@@ -1275,9 +1249,6 @@ You have 5 tools for interacting with the codebase:
 **search_code** - Search for code patterns across codebase
 - Parameters: query (string), language (string, optional)
 
-**analyze_code** - Get structured analysis (imports, classes, functions)
-- Parameters: file_path (string)
-
 ## Tool Usage Patterns
 
 **Read-Modify-Verify:** read_file → edit_file → verify
@@ -1371,7 +1342,7 @@ Response: "Fixed! Updated context_window from 4096 to 131072 in src/core/agent.p
 {CONVERSATION_MEMORY_PROMPT}
 
 # Tools (Brief)
-Use read_file, write_file, edit_file, search_code, analyze_code.
+Use read_file, write_file, edit_file, search_code, grep.
 Always read before editing. Use JSON format for tools.
 
 # Format

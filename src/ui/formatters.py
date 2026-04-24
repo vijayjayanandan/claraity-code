@@ -244,7 +244,6 @@ class ToolOutputFormatter:
             "append_to_file": "[APPEND]",
             "list_directory": "[LIST]",
             "search_code": "[SEARCH]",
-            "analyze_code": "[ANALYZE]",
             "run_command": "[RUN]",
             "todo_write": "[TODO]",
             "git_status": "[GIT]",
@@ -254,7 +253,7 @@ class ToolOutputFormatter:
         icon = tool_icons.get(tool_name, "[CALL]")
 
         # Extract key parameter for display
-        if tool_name in ["write_file", "edit_file", "read_file", "append_to_file", "analyze_code"]:
+        if tool_name in ["write_file", "edit_file", "read_file", "append_to_file"]:
             file_path = arguments.get("file_path", "")
             if file_path and self._validate_file_path(file_path):
                 return f"\n{icon} {Path(file_path).name}\n"
@@ -694,7 +693,7 @@ class StreamingToolCallFormatter:
             # (the tool result will show it)
             return None
 
-        elif tool_name in ["search_code", "analyze_code", "list_directory"]:
+        elif tool_name in ["search_code", "list_directory"]:
             # Don't display for query tools
             # (the tool result will show findings)
             return None

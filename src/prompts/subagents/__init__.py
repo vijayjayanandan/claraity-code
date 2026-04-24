@@ -877,7 +877,6 @@ KNOWLEDGE_BUILDER_TOOLS = [
     "search_code",
     "grep",
     "glob",
-    "analyze_code",
     # Read/search existing knowledge (unified query tool)
     "knowledge_query",
     # Write knowledge (batch create/update/delete)
@@ -1156,7 +1155,6 @@ EXPLORE_TOOLS = [
     "read_file",
     "list_directory",
     "search_code",
-    "analyze_code",
     "grep",
     "glob",
     *KNOWLEDGE_READ_TOOLS,
@@ -1309,7 +1307,6 @@ Explore systematically, not randomly. Start broad, then narrow:
 
 **Depth pass (understand the details):**
 - `read_file` to examine specific implementations you will reference
-- `analyze_code` for AST-level structure (classes, methods, imports)
 - Goal: understand the actual code you will recommend modifying
 
 **Cross-reference pass (trace connections):**
@@ -1575,7 +1572,6 @@ stall waiting for clarification that may not come.
 Gather the information you need:
 - `glob` and `grep` to find relevant files and code patterns
 - `read_file` to understand existing implementations
-- `analyze_code` for detailed code structure
 - `list_directory` to understand project layout
 - `web_search` / `web_fetch` for external information when needed
 
@@ -1600,7 +1596,7 @@ Carry out each step using the right tool:
 |------|------|
 | Find files by name/pattern | `glob` |
 | Search file contents | `grep`, `search_code` |
-| Understand code structure | `analyze_code`, `read_file` |
+| Understand code structure | `read_file`, `grep` |
 | Read specific code | `read_file` |
 | Make precise edits | `edit_file` |
 | Create new files | `write_file` |

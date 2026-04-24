@@ -60,8 +60,6 @@ READ_ONLY_TOOLS = frozenset(
         "search_code",
         "grep",
         "glob",
-        # Analysis tools (read-only)
-        "analyze_code",
         # Web tools (read-only)
         "web_fetch",
         "web_search",
