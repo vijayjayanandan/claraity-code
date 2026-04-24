@@ -126,6 +126,12 @@ test-ai-engineer-workspace/
 !.claraity/config.yaml
 !.claraity/claraity_beads.jsonl
 !.claraity/claraity_knowledge.jsonl
+!.claraity/memory/
+.claraity/memory/*
+!.claraity/memory/*.md
+!.claraity/plans/
+.claraity/plans/*
+!.claraity/plans/*.md
 
 # Legacy and subdirectory .clarity/.claraity (fully ignored)
 **/.clarity/

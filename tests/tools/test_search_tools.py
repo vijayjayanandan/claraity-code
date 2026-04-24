@@ -477,10 +477,16 @@ class TestGrepToolSkipping:
         result_lines = result.output.strip().split("\n")
         assert not any("index.js" in line for line in result_lines)
 
-    def test_skips_hidden_directories(self, grep, tmp_path):
-        hidden = tmp_path / ".hidden"
-        hidden.mkdir()
-        (hidden / "secret.txt").write_text("findme")
+    def test_skips_explicit_skip_dirs(self, grep, tmp_path):
+        """Only explicit skip_dirs are excluded; generic dot-dirs are searchable."""
+        # .git IS in skip_dirs -- files inside should be excluded
+        git_dir = tmp_path / ".git"
+        git_dir.mkdir()
+        (git_dir / "config").write_text("findme")
+        # .claraity is NOT in skip_dirs -- should be searchable
+        claraity_dir = tmp_path / ".claraity"
+        claraity_dir.mkdir()
+        (claraity_dir / "notes.txt").write_text("findme")
         (tmp_path / "visible.txt").write_text("findme")
         result = grep.execute(
             pattern="findme",
@@ -489,7 +495,22 @@ class TestGrepToolSkipping:
         )
         assert result.status == ToolStatus.SUCCESS
         assert "visible.txt" in result.output
-        assert ".hidden" not in result.output
+        assert "notes.txt" in result.output
+        assert "config" not in result.output
+
+    def test_files_with_matches_includes_count(self, grep, tmp_path):
+        """files_with_matches output includes per-file match count."""
+        (tmp_path / "a.txt").write_text("findme\nfindme\n")
+        (tmp_path / "b.txt").write_text("findme\n")
+        result = grep.execute(
+            pattern="findme",
+            file_path=str(tmp_path),
+            output_mode="files_with_matches",
+        )
+        assert result.status == ToolStatus.SUCCESS
+        lines = result.output.strip().split("\n")
+        assert any("a.txt" in l and "2 matches" in l for l in lines)
+        assert any("b.txt" in l and "1 match" in l for l in lines)
 
     def test_skips_binary_file_with_text_extension(self, grep, tmp_path):
         """A .txt file containing null bytes is detected as binary and skipped."""

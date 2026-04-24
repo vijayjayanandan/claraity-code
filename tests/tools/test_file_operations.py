@@ -444,6 +444,30 @@ class TestListDirectoryTool:
         assert result.status == ToolStatus.ERROR
         assert "not a directory" in result.error
 
+    def test_shows_gitignore_hidden_entries(self, tmp_path, monkeypatch):
+        """list_directory ignores .gitignore -- user explicitly chose this path."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".gitignore").write_text("secret/\n")
+        subdir = tmp_path / "secret"
+        subdir.mkdir()
+        (subdir / "data.txt").write_text("hello")
+        tool = ListDirectoryTool()
+        result = tool.execute(directory_path=str(subdir))
+        assert result.status == ToolStatus.SUCCESS
+        assert "data.txt" in result.output
+
+    def test_hides_claraityignore_blocked_entries(self, tmp_path, monkeypatch):
+        """.claraityignore-blocked entries are omitted from list_directory."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".claraityignore").write_text("secret.txt\n")
+        (tmp_path / "secret.txt").write_text("blocked")
+        (tmp_path / "visible.txt").write_text("allowed")
+        tool = ListDirectoryTool()
+        result = tool.execute(directory_path=str(tmp_path))
+        assert result.status == ToolStatus.SUCCESS
+        assert "visible.txt" in result.output
+        assert "secret.txt" not in result.output
+
 
 class TestRunCommandTool:
     """Tests for RunCommandTool."""

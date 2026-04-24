@@ -614,13 +614,12 @@ class ListDirectoryTool(FileOperationTool):
                 )
 
             entries = []
-            # Filter out .claraityignore-blocked files (silent omit)
-            all_entries = list(path.iterdir())
-            allowed_entries = filter_paths(all_entries)
-            allowed_set = set(allowed_entries)
-
+            # Only .claraityignore policy applies here -- gitignore is intentionally
+            # not used. The user explicitly named this directory; gitignore should not
+            # censor its contents.
             for entry in path.iterdir():
-                if entry not in allowed_set:
+                blocked, _ = is_blocked(entry)
+                if blocked:
                     continue
                 stat = entry.stat()
                 mtime_iso = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()

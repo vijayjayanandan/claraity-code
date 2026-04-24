@@ -349,14 +349,19 @@ class GrepTool(Tool):
             total_output_chars = 0
 
             for fp in files:
+                # For FILES_WITH_MATCHES, use COUNT mode internally to get the real
+                # per-file match count so output is "path (N matches)" not just "path".
+                search_mode = OutputMode.COUNT if mode == OutputMode.FILES_WITH_MATCHES else mode
                 matches = self._search_file(
-                    fp, regex, mode, context_b, context_a, line_numbers,
+                    fp, regex, search_mode, context_b, context_a, line_numbers,
                     skipped_files, multiline,
                 )
 
                 if matches:
                     if mode == OutputMode.FILES_WITH_MATCHES:
-                        all_matches.append(str(fp))
+                        count = len(matches)
+                        label = "match" if count == 1 else "matches"
+                        all_matches.append(f"{fp} ({count} {label})")
                     elif mode == OutputMode.COUNT:
                         file_match_counts[str(fp)] = len(matches)
                     else:  # CONTENT
@@ -469,13 +474,16 @@ class GrepTool(Tool):
 
     def _should_skip(self, file_path: Path) -> bool:
         """Check if file should be skipped."""
-        # Skip files inside hidden directories (.git/, .venv/, etc.)
-        # Hidden files themselves (.env, .gitignore, .eslintrc) are allowed through
-        if any(part.startswith(".") for part in file_path.parts[:-1]):
-            return True
-
-        # Skip common non-text directories
-        skip_dirs = {"node_modules", "__pycache__", ".git", ".venv", "venv", "dist", "build"}
+        # Skip known noisy/build/vcs directories by explicit name.
+        # Generic dot-dirs (e.g. .claraity) are NOT skipped here --
+        # filter_paths() applies .gitignore/.claraityignore for broad searches.
+        skip_dirs = {
+            "node_modules", "__pycache__", ".git", ".venv", "venv",
+            "dist", "build",
+            ".next", ".nuxt", ".svelte-kit", ".turbo", ".yarn",
+            ".idea", ".vscode",
+            ".pytest_cache", ".mypy_cache", ".ruff_cache",
+        }
         if any(part in skip_dirs for part in file_path.parts):
             return True
 
@@ -801,13 +809,15 @@ class GlobTool(Tool):
         extensions are NOT filtered here. Only noisy dependency/build dirs
         are excluded, same as GrepTool's directory skip list.
         """
-        # Skip files inside hidden directories (.git/, .venv/, etc.)
-        # Hidden files themselves (.env, .gitignore, .eslintrc) are allowed through
-        if any(part.startswith(".") for part in file_path.parts[:-1]):
-            return True
-
-        # Skip common dependency/build directories
-        skip_dirs = {"node_modules", "__pycache__", ".git", ".venv", "venv", "dist", "build"}
+        # Skip known noisy/build/vcs directories by explicit name.
+        # Generic dot-dirs (e.g. .claraity) are NOT skipped here.
+        skip_dirs = {
+            "node_modules", "__pycache__", ".git", ".venv", "venv",
+            "dist", "build",
+            ".next", ".nuxt", ".svelte-kit", ".turbo", ".yarn",
+            ".idea", ".vscode",
+            ".pytest_cache", ".mypy_cache", ".ruff_cache",
+        }
         if any(part in skip_dirs for part in file_path.parts):
             return True
 
