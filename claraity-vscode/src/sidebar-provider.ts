@@ -336,6 +336,8 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                 });
                 // Free diff content memory after approval/rejection
                 this.diffProvider.clear(msg.callId);
+                // Close the diff preview tab for this call
+                this.closeDiffTab(msg.callId);
                 break;
 
             case 'interrupt':
@@ -1006,6 +1008,26 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             await vscode.commands.executeCommand('vscode.diff', originalUri, modifiedUri, title);
         } catch (err) {
             this.log?.appendLine('[ERROR] Failed to open diff editor: ' + err);
+        }
+    }
+
+    /**
+     * Close the diff preview tab opened for a specific call_id, if still open.
+     */
+    private closeDiffTab(callId: string): void {
+        const originalUri = vscode.Uri.parse(`claraity-diff:/${callId}/original`).toString();
+        const modifiedUri = vscode.Uri.parse(`claraity-diff:/${callId}/modified`).toString();
+        for (const tabGroup of vscode.window.tabGroups.all) {
+            for (const tab of tabGroup.tabs) {
+                if (tab.input instanceof vscode.TabInputTextDiff) {
+                    const o = tab.input.original.toString();
+                    const m = tab.input.modified.toString();
+                    if (o === originalUri || m === modifiedUri) {
+                        vscode.window.tabGroups.close(tab);
+                        return;
+                    }
+                }
+            }
         }
     }
 
