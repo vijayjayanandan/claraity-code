@@ -83,8 +83,10 @@ previous_distinct_attempts:
 
 rules:
 - Do NOT repeat an identical call
-- If retrying, change tool OR args OR add diagnostic step first
-- If blocked, ask user for clarification or explain stop
+- If retrying, fix the args (wrong path, invalid pattern, etc.) and retry the SAME tool
+- Do NOT switch to run_command as a fallback for grep/glob/read_file -- fix the args instead
+- Only switch tools if the tool itself cannot do what is needed (not just because args were wrong)
+- If blocked after 3 attempts, ask user for clarification or explain stop
 </tool_failure>"""
 
     def to_dict(self) -> dict[str, Any]:
