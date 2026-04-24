@@ -321,7 +321,7 @@ GREP_TOOL = ToolDefinition(
         "properties": {
             "pattern": {
                 "type": "string",
-                "description": r"Regex pattern to search for (e.g., '^class \w+', 'TODO|FIXME', 'def authenticate')",
+                "description": r"Regex pattern to search for (e.g., '^class \w+', 'TODO|FIXME', 'def authenticate'). Uses Python regex syntax: use '|' for OR (not '\|' which is bash grep syntax).",
             },
             "file_path": {
                 "type": "string",
