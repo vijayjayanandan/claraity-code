@@ -14,6 +14,7 @@ Security:
 - Workspace boundary enforcement
 """
 
+import asyncio
 import json
 import os
 import platform
@@ -831,6 +832,49 @@ class RunCommandTool(Tool):
         _def = _SCHEMA_REGISTRY["run_command"]
         super().__init__(name=_def.name, description=_def.description)
         self._registry = registry
+        self._ui_protocol = None
+
+    def set_ui_protocol(self, protocol) -> None:
+        """Wire UIProtocol for interrupt detection during foreground execution.
+
+        Called post-registration by stdio_server.py (VS Code) and
+        subagent_coordinator.py (TUI), mirroring DelegateToSubagentTool pattern.
+        """
+        self._ui_protocol = protocol
+        logger.info("RunCommandTool: UIProtocol wired")
+
+    async def _kill_process(self, process: asyncio.subprocess.Process) -> None:
+        """Kill process and wait for exit. Kills entire process tree on both platforms."""
+        if platform.system() == "Windows":
+            # taskkill /F /T kills the shell and all its child processes.
+            # process.kill() alone only kills the direct child, leaving
+            # grandchildren running with pipe handles open.
+            try:
+                kill_proc = await asyncio.create_subprocess_exec(
+                    "taskkill", "/F", "/T", "/PID", str(process.pid),
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await asyncio.wait_for(kill_proc.wait(), timeout=5.0)
+            except Exception:
+                pass
+        else:
+            # On Unix, kill the entire process group so grandchildren are also
+            # terminated. The subprocess was launched with start_new_session=True,
+            # making process.pid the process group leader -- os.killpg targets all
+            # members of that group. process.kill() would only kill the shell.
+            import os
+            import signal
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            except Exception:
+                pass
+        try:
+            await asyncio.wait_for(process.wait(), timeout=5.0)
+        except asyncio.TimeoutError:
+            pass
 
     async def execute_async(
         self,
@@ -845,16 +889,14 @@ class RunCommandTool(Tool):
 
         Execution order:
         1. If background=True -> delegate to BackgroundTaskRegistry
-        2. Otherwise -> capture output via subprocess
+        2. Otherwise -> run as interruptible asyncio subprocess
         """
-        # --- FOREGROUND EXECUTION ---
+        # --- FOREGROUND EXECUTION (interruptible async path) ---
         if not background:
-            # Foreground: delegate to sync execute() (will be run in thread pool by ToolExecutor)
-            return self.execute(
+            return await self._execute_foreground_async(
                 command=command,
                 working_directory=working_directory,
                 timeout=timeout,
-                **kwargs,
             )
 
         # --- Background path ---
@@ -931,6 +973,264 @@ class RunCommandTool(Tool):
                 "Do NOT call check_background_task — continue with other work."
             ),
         )
+
+    async def _execute_foreground_async(
+        self,
+        command: str,
+        working_directory: str | None = None,
+        timeout: int = 120,
+    ) -> ToolResult:
+        """Interruptible async foreground execution via asyncio subprocess.
+
+        Mirrors DelegateToSubagentTool.execute_async() interrupt pattern:
+        polls _ui_protocol.check_interrupted() while streaming output,
+        terminates the process tree on user interrupt, returns partial output.
+        """
+        # --- INPUT VALIDATION (mirrors sync execute()) ---
+        if not command or not command.strip():
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.ERROR,
+                output=None,
+                error="Command cannot be empty",
+            )
+
+        from src.tools.command_safety import CommandSafety
+        safety_result = check_command_safety(command)
+        if safety_result.safety == CommandSafety.BLOCK:
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.ERROR,
+                output=None,
+                error=(
+                    f"[BLOCKED] Command rejected by safety controls: {safety_result.reason}\n"
+                    "This command cannot be executed."
+                ),
+            )
+
+        cmd_blocked, cmd_reason = check_command(command)
+        if cmd_blocked:
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.ERROR,
+                output=None,
+                error=cmd_reason,
+            )
+
+        timeout = clamp_timeout(timeout)
+
+        cwd = None
+        if working_directory:
+            cwd_path = Path(working_directory)
+            if not cwd_path.exists():
+                return ToolResult(
+                    tool_name=self.name,
+                    status=ToolStatus.ERROR,
+                    output=None,
+                    error=f"Working directory does not exist: {working_directory}",
+                )
+            if not cwd_path.is_dir():
+                return ToolResult(
+                    tool_name=self.name,
+                    status=ToolStatus.ERROR,
+                    output=None,
+                    error=f"Working directory path is not a directory: {working_directory}",
+                )
+            cwd = str(cwd_path.absolute())
+
+        # --- SHELL SELECTION (mirrors sync execute()) ---
+        from src.platform import detect_preferred_shell, get_bash_env
+
+        shell_info = detect_preferred_shell()
+        if shell_info["syntax"] == "powershell":
+            command = sanitize_for_powershell(command)
+
+        def _ensure_pythonioencoding(env: dict | None) -> dict:
+            e = env if env is not None else os.environ.copy()
+            e.setdefault("PYTHONIOENCODING", "utf-8")
+            return e
+
+        # --- LAUNCH ASYNC SUBPROCESS ---
+        process: asyncio.subprocess.Process
+        try:
+            if platform.system() == "Windows":
+                import subprocess as _sp
+                if shell_info["shell"] == "bash":
+                    bash_env = get_bash_env(shell_info["path"])
+                    bash_env = _ensure_pythonioencoding(bash_env)
+                    process = await asyncio.create_subprocess_exec(
+                        shell_info["path"], "-c", command,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                        stdin=asyncio.subprocess.DEVNULL,
+                        cwd=cwd,
+                        creationflags=_sp.CREATE_NO_WINDOW,
+                        env=bash_env,
+                    )
+                else:
+                    ps_env = _ensure_pythonioencoding(None)
+                    process = await asyncio.create_subprocess_exec(
+                        "powershell", "-NoProfile", "-Command", command,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                        stdin=asyncio.subprocess.DEVNULL,
+                        cwd=cwd,
+                        creationflags=_sp.CREATE_NO_WINDOW,
+                        env=ps_env,
+                    )
+            else:
+                process = await asyncio.create_subprocess_shell(
+                    command,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    stdin=asyncio.subprocess.DEVNULL,
+                    cwd=cwd,
+                    start_new_session=True,
+                )
+        except Exception as e:
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.ERROR,
+                output=None,
+                error=f"Failed to launch command: {e}",
+            )
+
+        # --- STREAM OUTPUT WITH INTERRUPT POLLING ---
+        stdout_chunks: list[str] = []
+        stderr_chunks: list[str] = []
+
+        async def _read_stream(stream: asyncio.StreamReader, chunks: list[str]) -> None:
+            while True:
+                chunk = await stream.read(4096)
+                if not chunk:
+                    break
+                chunks.append(chunk.decode("utf-8", errors="replace"))
+
+        def _assemble_partial() -> str:
+            parts = []
+            if stdout_chunks:
+                parts.append("STDOUT:\n" + "".join(stdout_chunks))
+            if stderr_chunks:
+                parts.append("STDERR:\n" + "".join(stderr_chunks))
+            return "\n\n".join(parts) if parts else "(no output)"
+
+        stdout_task = asyncio.create_task(_read_stream(process.stdout, stdout_chunks))
+        stderr_task = asyncio.create_task(_read_stream(process.stderr, stderr_chunks))
+
+        try:
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + timeout
+            while True:
+                # Check for user interrupt
+                if self._ui_protocol and self._ui_protocol.check_interrupted():
+                    logger.info("RunCommandTool: interrupt detected -- terminating subprocess")
+                    await self._kill_process(process)
+                    stdout_task.cancel()
+                    stderr_task.cancel()
+                    for t in (stdout_task, stderr_task):
+                        try:
+                            await t
+                        except (asyncio.CancelledError, Exception):
+                            pass
+                    return ToolResult(
+                        tool_name=self.name,
+                        status=ToolStatus.ERROR,
+                        output=_assemble_partial(),
+                        error="Command cancelled by user interrupt",
+                        metadata={"command": command, "working_directory": cwd or "current", "interrupted": True},
+                    )
+
+                # Check for timeout
+                if loop.time() >= deadline:
+                    logger.warning("RunCommandTool: foreground command timed out")
+                    await self._kill_process(process)
+                    stdout_task.cancel()
+                    stderr_task.cancel()
+                    for t in (stdout_task, stderr_task):
+                        try:
+                            await t
+                        except (asyncio.CancelledError, Exception):
+                            pass
+                    return ToolResult(
+                        tool_name=self.name,
+                        status=ToolStatus.ERROR,
+                        output=_assemble_partial(),
+                        error=f"Command timed out after {timeout} seconds. "
+                              f"Use a longer timeout if the command needs more time (max 600s).",
+                        metadata={"command": command, "timeout": timeout,
+                                  "working_directory": cwd or "current",
+                                  "partial_output": bool(stdout_chunks or stderr_chunks)},
+                    )
+
+                # Poll: wait up to 0.2s for process to finish
+                try:
+                    await asyncio.wait_for(asyncio.shield(asyncio.gather(stdout_task, stderr_task)), timeout=0.2)
+                    break  # Both stream readers finished -> process done
+                except asyncio.TimeoutError:
+                    pass  # Still running, loop again to check interrupt/timeout
+                except asyncio.CancelledError:
+                    raise
+
+            # Wait for process exit code
+            await process.wait()
+
+        except asyncio.CancelledError:
+            # Hard cancel from task.cancel() -- e.g. Stop button in VS Code cancels the
+            # entire streaming task immediately, raising CancelledError here before the
+            # interrupt-poll loop gets a chance to fire. Kill the subprocess and return
+            # a ToolResult so _run_one can store it and the LLM sees the cancellation.
+            # Do NOT re-raise: the caller (stream_response) checks check_interrupted()
+            # on the next iteration and exits cleanly.
+            logger.info("RunCommandTool: hard cancel -- terminating subprocess")
+            await self._kill_process(process)
+            stdout_task.cancel()
+            stderr_task.cancel()
+            for t in (stdout_task, stderr_task):
+                try:
+                    await t
+                except (asyncio.CancelledError, Exception):
+                    pass
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.ERROR,
+                output=_assemble_partial(),
+                error="Command cancelled by user (Stop pressed)",
+                metadata={"command": command, "working_directory": cwd or "current",
+                          "interrupted": True},
+            )
+
+        # --- BUILD RESULT ---
+        output = _assemble_partial()
+
+        logger.info(
+            f"[COMMAND_AUDIT] Executed: {command[:200]}, exit_code={process.returncode}, timeout={timeout}s"
+        )
+
+        if process.returncode == 0:
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.SUCCESS,
+                output=output,
+                metadata={
+                    "command": command,
+                    "exit_code": process.returncode,
+                    "working_directory": cwd or "current",
+                    "has_stdout": bool(stdout_chunks),
+                    "has_stderr": bool(stderr_chunks),
+                },
+            )
+        else:
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.ERROR,
+                output=output,
+                error=f"Command failed with exit code {process.returncode}",
+                metadata={
+                    "command": command,
+                    "exit_code": process.returncode,
+                    "working_directory": cwd or "current",
+                },
+            )
 
     def execute(
         self, command: str, working_directory: str | None = None, timeout: int = 120, **kwargs: Any

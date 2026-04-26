@@ -103,6 +103,10 @@ class _MockToolCall:
 class _MockMeta:
     """Minimal mock of MessageMeta."""
     stop_reason: str | None = None
+    deleted: bool = False
+    is_compact_summary: bool = False
+    status: str | None = None
+    duration_ms: int | None = None
 
 
 @dataclass
@@ -113,6 +117,11 @@ class _MockMessage:
     tool_calls: list = field(default_factory=list)
     tool_call_id: str | None = None
     meta: _MockMeta | None = None
+    uuid: str = "mock-uuid"
+
+    @property
+    def is_tool(self) -> bool:
+        return self.role == "tool"
 
 
 class _MockStore:
@@ -139,7 +148,9 @@ class TestBuildReplayMessages:
         ])
         result = _build_replay_messages(store)
         assert len(result) == 1
-        assert result[0] == {"role": "user", "content": "Hello"}
+        assert result[0]["role"] == "user"
+        assert result[0]["content"] == "Hello"
+        assert result[0]["uuid"] == "mock-uuid"
 
     def test_multimodal_content_extracts_text(self):
         """Multimodal content (list of parts) should join text parts only."""
@@ -156,6 +167,7 @@ class TestBuildReplayMessages:
         result = _build_replay_messages(store)
         assert len(result) == 1
         assert result[0]["content"] == "Look at this and this"
+        assert len(result[0]["images"]) == 1
 
     def test_multimodal_no_text_parts(self):
         """Multimodal content with zero text parts returns empty string."""
@@ -169,6 +181,7 @@ class TestBuildReplayMessages:
         ])
         result = _build_replay_messages(store)
         assert result[0]["content"] == ""
+        assert len(result[0]["images"]) == 1
 
     def test_none_content(self):
         """None content (e.g. assistant tool_call-only message) becomes empty string."""
@@ -1036,3 +1049,59 @@ class TestHandleEnrichPrompt:
     def test_enrich_prompt_handler_maps_to_correct_method(self):
         """_HANDLERS['enrich_prompt'] must point to _handle_enrich_prompt."""
         assert StdioProtocol._HANDLERS["enrich_prompt"] == "_handle_enrich_prompt"
+
+
+# ============================================================================
+# RunCommandTool wiring in wire_delegation_tool()
+# ============================================================================
+
+
+class TestRunCommandToolWiring:
+    """Verify wire_delegation_tool() wires UIProtocol into RunCommandTool."""
+
+    def _make_protocol_with_tools(self, tools: dict) -> StdioProtocol:
+        """Create a minimal StdioProtocol with a mock agent holding given tools."""
+        protocol = StdioProtocol.__new__(StdioProtocol)
+        agent = MagicMock()
+        agent.tool_executor.tools = tools
+        agent._trace = MagicMock()
+        protocol._agent = agent
+        return protocol
+
+    def test_wire_delegation_tool_also_wires_run_command(self):
+        """wire_delegation_tool() wires UIProtocol into RunCommandTool."""
+        from src.tools.file_operations import RunCommandTool
+
+        run_command_tool = RunCommandTool()
+        assert run_command_tool._ui_protocol is None
+
+        delegation_tool = MagicMock()
+        delegation_tool.set_registry = MagicMock()
+        delegation_tool.set_ui_protocol = MagicMock()
+        delegation_tool.set_trace = MagicMock()
+
+        protocol = self._make_protocol_with_tools({
+            "delegate_to_subagent": delegation_tool,
+            "run_command": run_command_tool,
+        })
+
+        # ServerSubagentBridge is a lazy import inside wire_delegation_tool()
+        with patch("src.server.subagent_bridge.ServerSubagentBridge"):
+            protocol.wire_delegation_tool()
+
+        assert run_command_tool._ui_protocol is protocol
+
+    def test_wire_delegation_tool_safe_when_run_command_absent(self):
+        """wire_delegation_tool() does not crash if run_command is not registered."""
+        delegation_tool = MagicMock()
+        delegation_tool.set_registry = MagicMock()
+        delegation_tool.set_ui_protocol = MagicMock()
+        delegation_tool.set_trace = MagicMock()
+
+        protocol = self._make_protocol_with_tools({
+            "delegate_to_subagent": delegation_tool,
+        })
+
+        with patch("src.server.subagent_bridge.ServerSubagentBridge"):
+            # Should not raise
+            protocol.wire_delegation_tool()

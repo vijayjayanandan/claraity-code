@@ -105,6 +105,12 @@ class SubagentCoordinator:
                     f"tools: {list(agent.tool_executor.tools.keys())}"
                 )
 
+            # Wire UIProtocol into RunCommandTool for interrupt support
+            run_command_tool = agent.tool_executor.tools.get("run_command")
+            if run_command_tool and hasattr(run_command_tool, "set_ui_protocol"):
+                run_command_tool.set_ui_protocol(ui_protocol)
+                logger.info("Wired UIProtocol to RunCommandTool")
+
     def cleanup(self) -> None:
         """Unsubscribe from all registry events and subagent stores."""
         if self._unsubscribe_registry_reg:

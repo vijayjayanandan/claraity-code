@@ -584,6 +584,12 @@ class StdioProtocol(UIProtocol):
             delegation_tool.set_trace(self._agent._trace)
         logger.info("stdio_delegation_tool_wired")
 
+        # Wire UIProtocol into RunCommandTool for interrupt support
+        run_command_tool = self._agent.tool_executor.tools.get("run_command")
+        if run_command_tool and hasattr(run_command_tool, "set_ui_protocol"):
+            run_command_tool.set_ui_protocol(self)
+            logger.info("stdio_run_command_tool_wired")
+
     # -- Receiving (Client -> Agent) via stdin ------------------------------
 
     async def receive_loop(self) -> None:

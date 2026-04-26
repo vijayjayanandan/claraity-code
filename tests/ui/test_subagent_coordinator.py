@@ -215,3 +215,73 @@ class TestCleanup:
         coord, _ = make_coordinator()
         # Should not raise
         coord.cleanup()
+
+
+# ---- RunCommandTool wiring ----
+
+class TestRunCommandToolWiring:
+    """Verify setup_registry() wires UIProtocol into RunCommandTool."""
+
+    def _make_agent(self, tools: dict):
+        agent = MagicMock()
+        agent.tool_executor.tools = tools
+        return agent
+
+    def test_run_command_tool_gets_ui_protocol_wired(self):
+        """setup_registry() calls set_ui_protocol() on RunCommandTool."""
+        from src.tools.file_operations import RunCommandTool
+
+        run_command_tool = RunCommandTool()
+        assert run_command_tool._ui_protocol is None
+
+        delegation_tool = MagicMock()
+        delegation_tool.set_registry = MagicMock()
+        delegation_tool.set_ui_protocol = MagicMock()
+
+        agent = self._make_agent({
+            "delegate_to_subagent": delegation_tool,
+            "run_command": run_command_tool,
+        })
+
+        coord, _ = make_coordinator()
+        registry = MagicMock()
+        registry.subscribe_on_registered = MagicMock(return_value=lambda: None)
+        registry.subscribe_on_unregistered = MagicMock(return_value=lambda: None)
+        registry.subscribe_on_notification = MagicMock(return_value=lambda: None)
+
+        ui_protocol = MagicMock()
+        ui_protocol.set_pause_requested_callback = MagicMock()
+
+        coord.setup_registry(
+            registry=registry,
+            agent=agent,
+            ui_protocol=ui_protocol,
+            pause_callback=MagicMock(),
+        )
+
+        assert run_command_tool._ui_protocol is ui_protocol
+
+    def test_run_command_tool_wiring_is_safe_when_tool_absent(self):
+        """setup_registry() does not crash if run_command is not registered."""
+        delegation_tool = MagicMock()
+        delegation_tool.set_registry = MagicMock()
+        delegation_tool.set_ui_protocol = MagicMock()
+
+        agent = self._make_agent({"delegate_to_subagent": delegation_tool})
+
+        coord, _ = make_coordinator()
+        registry = MagicMock()
+        registry.subscribe_on_registered = MagicMock(return_value=lambda: None)
+        registry.subscribe_on_unregistered = MagicMock(return_value=lambda: None)
+        registry.subscribe_on_notification = MagicMock(return_value=lambda: None)
+
+        ui_protocol = MagicMock()
+        ui_protocol.set_pause_requested_callback = MagicMock()
+
+        # Should not raise
+        coord.setup_registry(
+            registry=registry,
+            agent=agent,
+            ui_protocol=ui_protocol,
+            pause_callback=MagicMock(),
+        )

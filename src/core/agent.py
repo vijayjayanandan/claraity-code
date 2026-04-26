@@ -1330,7 +1330,7 @@ class CodingAgent(AgentInterface):
                 "role": "tool",
                 "tool_call_id": tc_id,
                 "name": tc_name,
-                "content": "Tool call rejected by user.",
+                "content": "Tool call was interrupted.",
             }
             existing_tool_results[tc_id] = synthetic_msg
 
