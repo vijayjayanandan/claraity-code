@@ -37,6 +37,7 @@ def make_message(role="user", content="Hello", meta=None, tool_calls=None, tool_
         meta=meta,
         tool_calls=tool_calls or [],
         tool_call_id=tool_call_id,
+        get_text_content=lambda: content if isinstance(content, str) else "",
     )
     return msg
 

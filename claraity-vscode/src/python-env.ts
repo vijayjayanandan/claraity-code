@@ -10,7 +10,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { execFile } from 'child_process';
+import { execFile, execFileSync } from 'child_process';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -24,7 +24,7 @@ export interface LaunchConfig {
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
-export const MIN_AGENT_VERSION = '0.12.5';
+export const MIN_AGENT_VERSION = '1.0.0';
 export const PYPI_PACKAGE = 'claraity-code';
 
 // ── Main Orchestrator ──────────────────────────────────────────────────────
@@ -151,6 +151,25 @@ export function resolveBundledBinary(extensionPath: string): string | null {
 
     for (const binPath of candidates) {
         if (fs.existsSync(binPath)) {
+            // Unix: restore execute permission (lost during VSIX ZIP packaging)
+            if (process.platform !== 'win32') {
+                try {
+                    fs.chmodSync(binPath, 0o755);
+                } catch {
+                    // Best-effort — may fail on read-only filesystem
+                }
+            }
+            // macOS: clear quarantine attribute set on downloaded binaries
+            if (process.platform === 'darwin') {
+                try {
+                    execFileSync('xattr', ['-cr', path.dirname(binPath)], {
+                        timeout: 30_000,
+                        stdio: 'ignore',
+                    });
+                } catch {
+                    // Attribute may not exist — ignore
+                }
+            }
             return binPath;
         }
     }

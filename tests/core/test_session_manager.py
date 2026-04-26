@@ -126,11 +126,6 @@ class TestSessionManager:
                     {"role": "assistant", "content": "Hi there!"},
                 ]
             },
-            "episodic_memory": {
-                "turns": [
-                    {"user": "Hello", "assistant": "Hi there!"}
-                ]
-            },
             "task_context": {
                 "task_id": "task-123",
                 "description": "Test task"
@@ -197,7 +192,6 @@ class TestSessionManager:
         # Check all files exist
         assert (session_dir / "metadata.json").exists()
         assert (session_dir / "working_memory.json").exists()
-        assert (session_dir / "episodic_memory.json").exists()
         assert (session_dir / "task_context.json").exists()
         assert (session_dir / "file_memories.txt").exists()
 
@@ -266,7 +260,6 @@ class TestSessionManager:
 
         assert "metadata" in loaded_state
         assert "working_memory" in loaded_state
-        assert "episodic_memory" in loaded_state
         assert "task_context" in loaded_state
         assert "file_memories" in loaded_state
 
@@ -300,9 +293,6 @@ class TestSessionManager:
 
         # Check working memory
         assert loaded_state["working_memory"] == sample_state["working_memory"]
-
-        # Check episodic memory
-        assert loaded_state["episodic_memory"] == sample_state["episodic_memory"]
 
         # Check task context
         assert loaded_state["task_context"] == sample_state["task_context"]

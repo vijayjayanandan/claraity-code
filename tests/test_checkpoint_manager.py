@@ -197,17 +197,17 @@ class TestCheckpointManager:
     def test_load_checkpoint_nonexistent_file(self, checkpoint_manager):
         """Test loading a checkpoint that doesn't exist"""
         with pytest.raises(FileNotFoundError):
-            checkpoint_manager.load_checkpoint("nonexistent")
+            checkpoint_manager.load_checkpoint("deadbeef")
 
     def test_load_checkpoint_corrupted_file(self, checkpoint_manager, temp_checkpoint_dir):
         """Test loading a corrupted checkpoint file"""
-        # Create a corrupted checkpoint file
-        corrupted_file = Path(temp_checkpoint_dir) / "checkpoint_corrupted.json"
+        # Create a corrupted checkpoint file (ID must be 8-char hex)
+        corrupted_file = Path(temp_checkpoint_dir) / "checkpoint_baadf00d.json"
         with open(corrupted_file, 'w') as f:
             f.write("{ invalid json }")
 
         with pytest.raises(json.JSONDecodeError):
-            checkpoint_manager.load_checkpoint("corrupted")
+            checkpoint_manager.load_checkpoint("baadf00d")
 
     def test_restore_to_agent(self, checkpoint_manager, mock_agent):
         """Test restoring checkpoint state to agent"""

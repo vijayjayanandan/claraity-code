@@ -56,7 +56,7 @@ class TestGrepToolPathSecurity:
         """GrepTool rejects paths outside workspace via validate_path_security."""
         from src.tools.search_tools import GrepTool
         tool = GrepTool()
-        result = tool.execute(pattern="test", path="../../../etc")
+        result = tool.execute(pattern="test", file_path="../../../etc")
         assert result.status == ToolStatus.ERROR
         assert "security" in result.error.lower() or "outside" in result.error.lower()
 
@@ -66,7 +66,7 @@ class TestGrepToolPathSecurity:
         monkeypatch.chdir(tmp_path)
         from src.tools.search_tools import GrepTool
         tool = GrepTool()
-        result = tool.execute(pattern="hello", path=str(tmp_path))
+        result = tool.execute(pattern="hello", file_path=str(tmp_path))
         assert result.status == ToolStatus.SUCCESS
 
 
@@ -147,14 +147,14 @@ class TestSessionManagerPathSecurity:
         assert mgr._find_session_dir("subagent") is None
         assert mgr._find_session_dir("<script>") is None
 
-    def test_accepts_valid_uuid_format(self, tmp_path):
-        """Valid UUID session IDs should be accepted."""
+    def test_accepts_valid_session_id_format(self, tmp_path):
+        """Valid session IDs (session-YYYYMMDD-HHMMSS-hex) should be accepted."""
         from src.core.session_manager import SessionManager
         mgr = SessionManager.__new__(SessionManager)
         mgr.sessions_dir = tmp_path
 
-        # Create a valid session directory
-        session_id = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        # Create a valid session directory matching SESSION_ID_RE
+        session_id = "session-20260425-143022-a1b2c3d4"
         session_dir = tmp_path / session_id
         session_dir.mkdir()
 

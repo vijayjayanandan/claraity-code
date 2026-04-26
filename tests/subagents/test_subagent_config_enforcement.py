@@ -599,7 +599,7 @@ class TestSubAgentLLMConfig:
     def test_invalid_backend_type_raises(self):
         """Unrecognized backend_type should raise ValueError."""
         with pytest.raises(ValueError, match="Invalid backend_type"):
-            SubAgentLLMConfig(backend_type="anthropic")
+            SubAgentLLMConfig(backend_type="nonexistent-backend")
 
     def test_backend_type_normalized_to_lowercase(self):
         """backend_type should be case-insensitive."""

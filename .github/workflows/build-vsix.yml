@@ -1,0 +1,143 @@
+# Multi-platform VSIX build pipeline
+#
+# Builds the ClarAIty server binary on each target OS using PyInstaller,
+# packages platform-targeted VSIXes, and optionally publishes to the
+# VS Code Marketplace.
+#
+# PyInstaller cannot cross-compile — it bundles the native Python runtime
+# and shared libraries from the build machine. So each platform needs its
+# own runner.
+#
+# Triggers:
+#   - workflow_dispatch: manual trigger (e.g. for testing). Set publish=true
+#     to push to the marketplace.
+#   - Tag push (v*): automated release. Always publishes.
+
+name: Build & Package VSIX
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish to VS Code Marketplace'
+        type: boolean
+        default: false
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '20'
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: win32-x64
+          - os: macos-13
+            target: darwin-x64
+          - os: macos-14
+            target: darwin-arm64
+          - os: ubuntu-latest
+            target: linux-x64
+
+    steps:
+      - uses: actions/checkout@v6
+
+      # ── Python + PyInstaller ───────────────────────────────────────
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install .
+          pip install pyinstaller
+
+      - name: Build server binary
+        run: pyinstaller claraity-server.spec --noconfirm
+
+      - name: Verify binary
+        run: |
+          echo "--- dist/claraity-server/ contents ---"
+          ls -la dist/claraity-server/
+          if [ "$RUNNER_OS" != "Windows" ]; then
+            file dist/claraity-server/claraity-server
+          fi
+
+      - name: Copy binary to extension bin/
+        run: |
+          rm -rf claraity-vscode/bin/*
+          mkdir -p claraity-vscode/bin
+          cp -r dist/claraity-server/* claraity-vscode/bin/
+
+      # ── Node.js + Extension Build ──────────────────────────────────
+
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install extension dependencies
+        run: cd claraity-vscode && npm ci
+
+      - name: Build webview
+        run: cd claraity-vscode/webview-ui && npm ci && npm run build
+
+      - name: Compile extension
+        run: cd claraity-vscode && npm run compile
+
+      # ── Package ────────────────────────────────────────────────────
+
+      - name: Package platform-targeted VSIX
+        run: |
+          cd claraity-vscode
+          npx @vscode/vsce package --target ${{ matrix.target }} --no-dependencies
+          echo "--- Packaged VSIX ---"
+          ls -la *.vsix
+
+      - name: Upload VSIX
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix-${{ matrix.target }}
+          path: claraity-vscode/*.vsix
+          retention-days: 30
+
+  # ── Publish (only on tag push or manual opt-in) ──────────────────
+
+  publish:
+    name: Publish to Marketplace
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all VSIX artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: vsix-*
+          merge-multiple: true
+          path: vsix/
+
+      - name: List VSIX packages
+        run: ls -la vsix/
+
+      - name: Publish all platform packages
+        run: npx @vscode/vsce publish --packagePath vsix/*.vsix
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}

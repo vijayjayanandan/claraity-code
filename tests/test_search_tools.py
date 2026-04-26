@@ -346,8 +346,8 @@ class TestGrepTool:
         assert result.status == ToolStatus.ERROR
         assert "Path not found" in result.error or "SECURITY" in result.error
 
-    def test_skips_hidden_files(self, temp_codebase):
-        """Test that hidden files are skipped."""
+    def test_finds_dotfiles(self, temp_codebase):
+        """Test that dotfiles like .env are searchable (not hidden from grep)."""
         tool = GrepTool()
         result = tool.execute(
             pattern="SECRET",
@@ -356,8 +356,8 @@ class TestGrepTool:
         )
 
         assert result.status == ToolStatus.SUCCESS
-        # Should not find .env file
-        assert ".env" not in result.output
+        # .env files are NOT skipped — only skip_dirs and binary extensions are filtered
+        assert ".env" in result.output
 
     def test_skips_node_modules(self, temp_codebase):
         """Test that node_modules is skipped when no file_type filter."""
