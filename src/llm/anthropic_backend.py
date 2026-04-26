@@ -255,19 +255,23 @@ class AnthropicBackend(LLMBackend):
                                 media_type = header.replace("data:", "")
                                 if media_type not in _SAFE_IMAGE_TYPES:
                                     continue  # reject unknown/malformed media types
-                                anthropic_content.append({
-                                    "type": "image",
-                                    "source": {
-                                        "type": "base64",
-                                        "media_type": media_type,
-                                        "data": b64_data,
-                                    },
-                                })
+                                anthropic_content.append(
+                                    {
+                                        "type": "image",
+                                        "source": {
+                                            "type": "base64",
+                                            "media_type": media_type,
+                                            "data": b64_data,
+                                        },
+                                    }
+                                )
                         elif isinstance(block, dict) and block.get("type") == "text":
-                            anthropic_content.append({
-                                "type": "text",
-                                "text": block.get("text", ""),
-                            })
+                            anthropic_content.append(
+                                {
+                                    "type": "text",
+                                    "text": block.get("text", ""),
+                                }
+                            )
                         # Skip unknown block types (defense against JSONL tampering)
 
                     tool_result_block = {

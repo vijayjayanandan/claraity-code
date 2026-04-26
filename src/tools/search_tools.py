@@ -359,8 +359,14 @@ class GrepTool(Tool):
                 # per-file match count so output is "path (N matches)" not just "path".
                 search_mode = OutputMode.COUNT if mode == OutputMode.FILES_WITH_MATCHES else mode
                 matches = self._search_file(
-                    fp, regex, search_mode, context_b, context_a, line_numbers,
-                    skipped_files, multiline,
+                    fp,
+                    regex,
+                    search_mode,
+                    context_b,
+                    context_a,
+                    line_numbers,
+                    skipped_files,
+                    multiline,
                 )
 
                 if matches:
@@ -462,15 +468,27 @@ class GrepTool(Tool):
         # Directory search — all branches apply _should_skip to exclude node_modules,
         # hidden dirs, build artifacts, and known binary extensions.
         if glob_pattern:
-            files = [f for f in search_path.glob(glob_pattern) if f.is_file() and not self._should_skip(f)]
+            files = [
+                f
+                for f in search_path.glob(glob_pattern)
+                if f.is_file() and not self._should_skip(f)
+            ]
         elif file_type:
             if file_type in FILE_TYPE_MAP:
                 patterns = FILE_TYPE_MAP[file_type]
                 for pattern in patterns:
-                    files.extend(f for f in search_path.rglob(pattern) if f.is_file() and not self._should_skip(f))
+                    files.extend(
+                        f
+                        for f in search_path.rglob(pattern)
+                        if f.is_file() and not self._should_skip(f)
+                    )
             else:
                 # Unknown file type - try as extension
-                files = [f for f in search_path.rglob(f"*.{file_type}") if f.is_file() and not self._should_skip(f)]
+                files = [
+                    f
+                    for f in search_path.rglob(f"*.{file_type}")
+                    if f.is_file() and not self._should_skip(f)
+                ]
         else:
             files = [f for f in search_path.rglob("*") if f.is_file() and not self._should_skip(f)]
 
@@ -485,11 +503,23 @@ class GrepTool(Tool):
         # Generic dot-dirs (e.g. .claraity) are NOT skipped here --
         # filter_paths() applies .gitignore/.claraityignore for broad searches.
         skip_dirs = {
-            "node_modules", "__pycache__", ".git", ".venv", "venv",
-            "dist", "build",
-            ".next", ".nuxt", ".svelte-kit", ".turbo", ".yarn",
-            ".idea", ".vscode",
-            ".pytest_cache", ".mypy_cache", ".ruff_cache",
+            "node_modules",
+            "__pycache__",
+            ".git",
+            ".venv",
+            "venv",
+            "dist",
+            "build",
+            ".next",
+            ".nuxt",
+            ".svelte-kit",
+            ".turbo",
+            ".yarn",
+            ".idea",
+            ".vscode",
+            ".pytest_cache",
+            ".mypy_cache",
+            ".ruff_cache",
         }
         if any(part in skip_dirs for part in file_path.parts):
             return True
@@ -548,7 +578,9 @@ class GrepTool(Tool):
             size_bytes = file_path.stat().st_size
             if size_bytes > self.MAX_FILE_SIZE_BYTES:
                 if skipped_files is not None:
-                    skipped_files.append(f"{file_path} (Too large: {size_bytes / (1024 * 1024):.1f} MB)")
+                    skipped_files.append(
+                        f"{file_path} (Too large: {size_bytes / (1024 * 1024):.1f} MB)"
+                    )
                 return []
         except OSError:
             pass  # stat failed, try to open anyway
@@ -819,15 +851,25 @@ class GlobTool(Tool):
         # Skip known noisy/build/vcs directories by explicit name.
         # Generic dot-dirs (e.g. .claraity) are NOT skipped here.
         skip_dirs = {
-            "node_modules", "__pycache__", ".git", ".venv", "venv",
-            "dist", "build",
-            ".next", ".nuxt", ".svelte-kit", ".turbo", ".yarn",
-            ".idea", ".vscode",
-            ".pytest_cache", ".mypy_cache", ".ruff_cache",
+            "node_modules",
+            "__pycache__",
+            ".git",
+            ".venv",
+            "venv",
+            "dist",
+            "build",
+            ".next",
+            ".nuxt",
+            ".svelte-kit",
+            ".turbo",
+            ".yarn",
+            ".idea",
+            ".vscode",
+            ".pytest_cache",
+            ".mypy_cache",
+            ".ruff_cache",
         }
         if any(part in skip_dirs for part in file_path.parts):
             return True
 
         return False
-
-

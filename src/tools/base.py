@@ -147,6 +147,7 @@ class Tool(ABC):
         """
         if self._SCHEMA_NAME is not None:
             from src.tools.tool_schemas import _SCHEMA_REGISTRY
+
             return _SCHEMA_REGISTRY[self._SCHEMA_NAME].parameters
         raise NotImplementedError(
             f"{type(self).__name__} must either set _SCHEMA_NAME or override _get_parameters()"

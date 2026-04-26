@@ -605,6 +605,7 @@ class WebFetchTool(Tool):
             max_content_bytes: Maximum bytes to read (default: 100KB)
         """
         from src.tools.tool_schemas import _SCHEMA_REGISTRY
+
         _def = _SCHEMA_REGISTRY["web_fetch"]
         super().__init__(name=_def.name, description=_def.description)
         self.cache = TTLCache(ttl_seconds=cache_ttl_seconds)
@@ -856,6 +857,7 @@ class WebSearchTool(Tool):
             rate_limit_per_minute: Max requests per minute (default: 10)
         """
         from src.tools.tool_schemas import _SCHEMA_REGISTRY
+
         _def = _SCHEMA_REGISTRY["web_search"]
         super().__init__(name=_def.name, description=_def.description)
         self._provider = provider  # Lazy init if None
@@ -1100,5 +1102,3 @@ class WebSearchTool(Tool):
             parts.append("")  # Blank line between results
 
         return "\n".join(parts)
-
-

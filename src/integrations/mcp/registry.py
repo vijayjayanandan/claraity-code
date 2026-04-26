@@ -47,7 +47,9 @@ class McpToolRegistry:
         self._adapter = McpToolAdapter(config)
         self._tool_definitions: list[ToolDefinition] = []
         self._mcp_tool_names: set = set()
-        self._all_tool_descriptions: dict[str, str] = {}  # raw_name -> description (ALL tools, including disabled)
+        self._all_tool_descriptions: dict[
+            str, str
+        ] = {}  # raw_name -> description (ALL tools, including disabled)
         self._last_discovery: float = 0.0
         self._enabled = False
 
@@ -117,8 +119,7 @@ class McpToolRegistry:
         # Collect all discovered tool names and descriptions for settings merge + UI
         all_discovered_names = [t.get("name", "unknown") for t in raw_tools]
         self._all_tool_descriptions = {
-            t.get("name", "unknown"): t.get("description", "")
-            for t in raw_tools
+            t.get("name", "unknown"): t.get("description", "") for t in raw_tools
         }
 
         # Adapt schemas (adds prefix)
@@ -134,7 +135,9 @@ class McpToolRegistry:
 
             # Check user-level tool visibility first
             if mcp_name in disabled:
-                logger.debug("mcp_tool_disabled_by_user", tool_name=tool_def.name, mcp_name=mcp_name)
+                logger.debug(
+                    "mcp_tool_disabled_by_user", tool_name=tool_def.name, mcp_name=mcp_name
+                )
                 continue
 
             # Register tool in policy gate using MCP annotations

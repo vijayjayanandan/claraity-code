@@ -85,9 +85,19 @@ def _find_git_bash() -> str | None:
 
     # 2. Probe well-known Git for Windows install locations
     candidates = [
-        os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "Git", "usr", "bin", "bash.exe"),
-        os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"), "Git", "usr", "bin", "bash.exe"),
-        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Git", "usr", "bin", "bash.exe"),
+        os.path.join(
+            os.environ.get("ProgramFiles", r"C:\Program Files"), "Git", "usr", "bin", "bash.exe"
+        ),
+        os.path.join(
+            os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+            "Git",
+            "usr",
+            "bin",
+            "bash.exe",
+        ),
+        os.path.join(
+            os.environ.get("LOCALAPPDATA", ""), "Programs", "Git", "usr", "bin", "bash.exe"
+        ),
         # git.exe is typically on PATH even when bash.exe isn't -- derive from it
     ]
 
@@ -154,7 +164,9 @@ def detect_preferred_shell() -> dict[str, str | None]:
         if bash_path:
             _preferred_shell.update({"shell": "bash", "path": bash_path, "syntax": "unix"})
         else:
-            _preferred_shell.update({"shell": "powershell", "path": "powershell", "syntax": "powershell"})
+            _preferred_shell.update(
+                {"shell": "powershell", "path": "powershell", "syntax": "powershell"}
+            )
     else:
         # Unix: use system default
         shell_env = os.environ.get("SHELL", "/bin/bash")

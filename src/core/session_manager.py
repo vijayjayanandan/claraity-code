@@ -158,6 +158,7 @@ class SessionManager:
         """
         # Generate session ID
         from src.session.scanner import generate_session_id
+
         session_id = generate_session_id()
 
         # Create metadata

@@ -737,9 +737,7 @@ class MemoryManager:
             "total_available": self.total_context_tokens,
             "system_prompt_reserved": self.system_prompt_tokens,
             "working_memory": working_tokens,
-            "remaining": self.total_context_tokens
-            - self.system_prompt_tokens
-            - working_tokens,
+            "remaining": self.total_context_tokens - self.system_prompt_tokens - working_tokens,
         }
 
     def save_session(

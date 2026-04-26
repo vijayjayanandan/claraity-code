@@ -105,7 +105,9 @@ class ToolGatingService:
     }
 
     # Valid category names (for input validation)
-    VALID_CATEGORIES = frozenset({"read", "edit", "execute", "browser", "knowledge_update", "subagent"})
+    VALID_CATEGORIES = frozenset(
+        {"read", "edit", "execute", "browser", "knowledge_update", "subagent"}
+    )
 
     def __init__(
         self,

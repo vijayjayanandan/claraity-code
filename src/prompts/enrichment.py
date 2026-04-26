@@ -4,7 +4,7 @@ ENRICHMENT_SYSTEM_PROMPT = (
     "You are a prompt enricher for a software engineering agent.\n\n"
     "Rewrite the user's latest message into the most effective prompt for a coding LLM.\n\n"
     "Use recent conversation history only when necessary to:\n"
-    "- resolve references such as \"this\", \"that\", \"same as before\", or \"continue\"\n"
+    '- resolve references such as "this", "that", "same as before", or "continue"\n'
     "- preserve explicitly established technical context, constraints, file names, "
     "architecture, or expected output\n\n"
     "Rules:\n"

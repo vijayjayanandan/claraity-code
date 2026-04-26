@@ -66,6 +66,7 @@ def _create_llm_backend(llm_config_dict, api_key):
         return OpenAIBackend(config=config, api_key=api_key)
     elif backend_type == "anthropic":
         from src.llm.anthropic_backend import AnthropicBackend
+
         return AnthropicBackend(config=config, api_key=api_key)
     else:
         raise ValueError(f"Unsupported backend_type: {backend_type}")
@@ -253,6 +254,7 @@ def main():
         subagent_name = input_data.config.get("name", "")
         if subagent_name != "knowledge-builder":
             from src.prompts.subagents import KNOWLEDGE_WRITE_TOOLS
+
             tools_blocklist = KNOWLEDGE_WRITE_TOOLS
         else:
             tools_blocklist = None
@@ -320,9 +322,7 @@ def main():
             trace_sessions_dir = Path(input_data.transcript_path).parent
             trace.init_session(trace_session_id, trace_sessions_dir)
             subagent.set_trace(trace)
-            logger.info(
-                f"Runner: Trace enabled (session={trace_session_id})"
-            )
+            logger.info(f"Runner: Trace enabled (session={trace_session_id})")
 
         # 6. Set up cancellation signal handler
         def _on_sigterm(signum, frame):

@@ -14,8 +14,8 @@ from .windows import (
     create_virtualenv_command,
     # Shell detection
     detect_preferred_shell,
-    get_bash_env,
     get_activation_script,
+    get_bash_env,
     # Encoding safety
     get_console_encoding,
     # Utilities

@@ -245,16 +245,10 @@ class ContextBuilder:
 
         # Should we emit detailed source events?
         # First build: show all 5 sources. Subsequent: condensed.
-        _emit_sources = (
-            self._trace is not None
-            and self._trace._ok
-            and self._trace.is_first_build
-        )
+        _emit_sources = self._trace is not None and self._trace._ok and self._trace.is_first_build
 
         # 1. Build system prompt using gold-standard prompts (based on Claude Code)
-        system_prompt = get_system_prompt(
-            language=language, task_type=task_type
-        )
+        system_prompt = get_system_prompt(language=language, task_type=task_type)
 
         # Inject plan mode context if active
         if plan_mode_state and plan_mode_state.is_active:
@@ -273,7 +267,10 @@ class ContextBuilder:
 
         if _emit_sources:
             self._trace.on_context_source(
-                "System Prompt", system_prompt, True, iteration,
+                "System Prompt",
+                system_prompt,
+                True,
+                iteration,
             )
 
         logger.debug(
@@ -326,7 +323,11 @@ class ContextBuilder:
 
         # Emit memory files source (loaded once at startup, cached in MemoryManager)
         if _emit_sources:
-            mem_files = self.memory.file_memory_content if hasattr(self.memory, "file_memory_content") else ""
+            mem_files = (
+                self.memory.file_memory_content
+                if hasattr(self.memory, "file_memory_content")
+                else ""
+            )
             self._trace.on_context_source(
                 "Memory Files",
                 mem_files if mem_files else "(no memory files loaded)",
@@ -336,7 +337,11 @@ class ContextBuilder:
 
         # Emit persistent memory source (agent-managed, cross-session)
         if _emit_sources:
-            persistent_mem = self.memory.persistent_memory_content if hasattr(self.memory, "persistent_memory_content") else ""
+            persistent_mem = (
+                self.memory.persistent_memory_content
+                if hasattr(self.memory, "persistent_memory_content")
+                else ""
+            )
             self._trace.on_context_source(
                 "Persistent Memory",
                 persistent_mem if persistent_mem else "(no persistent memories)",
@@ -347,20 +352,14 @@ class ContextBuilder:
         # Inject persistent memory management instructions + actual memory content
         if hasattr(self.memory, "persistent_memory_dir"):
             memory_dir = str(self.memory.persistent_memory_dir)
-            system_prompt = (
-                system_prompt + "\n\n" + get_persistent_memory_injection(memory_dir)
-            )
+            system_prompt = system_prompt + "\n\n" + get_persistent_memory_injection(memory_dir)
             # Inject actual MEMORY.md content into the system prompt so the
             # agent sees its memories without needing a tool call.
             # (get_context_for_llm injects it as a system message, but
             # build_context filters out system messages from memory context.)
             persistent_mem = getattr(self.memory, "persistent_memory_content", "")
             if persistent_mem:
-                system_prompt = (
-                    system_prompt
-                    + "\n\n## Your Current Memories\n\n"
-                    + persistent_mem
-                )
+                system_prompt = system_prompt + "\n\n## Your Current Memories\n\n" + persistent_mem
 
         # Compress if needed
         if self.optimizer.count_tokens(system_prompt) > system_prompt_budget:
@@ -397,7 +396,9 @@ class ContextBuilder:
                 r = msg.get("role", "?")
                 roles[r] = roles.get(r, 0) + 1
             self._trace.on_context_store_fetch(
-                len(memory_context), roles, iteration,
+                len(memory_context),
+                roles,
+                iteration,
             )
             # Estimate tokens for the return event
             store_tokens = 0
@@ -406,7 +407,9 @@ class ContextBuilder:
                 if isinstance(c, str):
                     store_tokens += self.optimizer.count_tokens(c)
             self._trace.on_context_store_return(
-                len(memory_context), store_tokens, iteration,
+                len(memory_context),
+                store_tokens,
+                iteration,
             )
             self._trace.mark_build_complete()
 
@@ -548,7 +551,9 @@ class ContextBuilder:
                         logger.debug("Loaded project instructions", file=str(filepath))
                         return content
             except (OSError, UnicodeDecodeError) as e:
-                logger.warning("Failed to read project instructions", file=str(filepath), error=str(e))
+                logger.warning(
+                    "Failed to read project instructions", file=str(filepath), error=str(e)
+                )
         return ""
 
     def _load_knowledge_brief(self) -> str:

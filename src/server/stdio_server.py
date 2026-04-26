@@ -64,7 +64,12 @@ from src.server.serializers import (
     serialize_store_notification,
 )
 from src.session.persistence.writer import SessionWriter
-from src.session.scanner import SESSION_ID_RE as _SESSION_ID_RE, generate_session_id as _generate_session_id
+from src.session.scanner import (
+    SESSION_ID_RE as _SESSION_ID_RE,
+)
+from src.session.scanner import (
+    generate_session_id as _generate_session_id,
+)
 from src.session.store.memory_store import StoreNotification
 
 logger = get_logger("server.stdio")
@@ -541,10 +546,12 @@ class StdioProtocol(UIProtocol):
         # Dismiss the pause widget — main agent does this by yielding
         # PausePromptEnd in stream_response(), but the delegation tool
         # calls request_pause() outside the streaming pipeline.
-        await self.send_event(PausePromptEnd(
-            continue_work=result.continue_work,
-            feedback=result.feedback,
-        ))
+        await self.send_event(
+            PausePromptEnd(
+                continue_work=result.continue_work,
+                feedback=result.feedback,
+            )
+        )
         return result
 
     async def send_clarify_request(self, call_id, questions, context):
@@ -805,11 +812,13 @@ class StdioProtocol(UIProtocol):
             return
         tools = []
         for td in self._agent._get_tools():
-            tools.append({
-                "name": td.name,
-                "description": td.description,
-                "parameters": td.parameters,
-            })
+            tools.append(
+                {
+                    "name": td.name,
+                    "description": td.description,
+                    "parameters": td.parameters,
+                }
+            )
         logger.debug("tool_list_response", total=len(tools))
         await self._send_json({"type": "tool_list", "tools": tools})
 
@@ -981,12 +990,26 @@ class StdioProtocol(UIProtocol):
 
         session_id = data.get("session_id", "")
         if not session_id:
-            await self._send_json({"type": "session_deleted", "session_id": "", "success": False, "message": "session_id is required"})
+            await self._send_json(
+                {
+                    "type": "session_deleted",
+                    "session_id": "",
+                    "success": False,
+                    "message": "session_id is required",
+                }
+            )
             return
 
         # Refuse to delete the currently active session
         if session_id == self._session_id:
-            await self._send_json({"type": "session_deleted", "session_id": session_id, "success": False, "message": "Cannot delete the active session"})
+            await self._send_json(
+                {
+                    "type": "session_deleted",
+                    "session_id": session_id,
+                    "success": False,
+                    "message": "Cannot delete the active session",
+                }
+            )
             return
 
         sessions_dir = Path(self._working_directory) / ".claraity" / "sessions"
@@ -994,10 +1017,19 @@ class StdioProtocol(UIProtocol):
             manager = SessionManager(sessions_dir=sessions_dir)
             deleted = manager.delete_session(session_id)
             if not deleted:
-                await self._send_json({"type": "session_deleted", "session_id": session_id, "success": False, "message": f"Session not found: {session_id}"})
+                await self._send_json(
+                    {
+                        "type": "session_deleted",
+                        "session_id": session_id,
+                        "success": False,
+                        "message": f"Session not found: {session_id}",
+                    }
+                )
                 return
 
-            await self._send_json({"type": "session_deleted", "session_id": session_id, "success": True})
+            await self._send_json(
+                {"type": "session_deleted", "session_id": session_id, "success": True}
+            )
 
             # Send refreshed session list so UI updates immediately
             sessions = scan_sessions(sessions_dir, limit=50)
@@ -1018,7 +1050,14 @@ class StdioProtocol(UIProtocol):
 
         except Exception as e:
             logger.error("stdio_delete_session_error", error=str(e))
-            await self._send_json({"type": "session_deleted", "session_id": session_id, "success": False, "message": "Failed to delete session. Check server logs."})
+            await self._send_json(
+                {
+                    "type": "session_deleted",
+                    "session_id": session_id,
+                    "success": False,
+                    "message": "Failed to delete session. Check server logs.",
+                }
+            )
 
     # -----------------------------------------------------------------
     # Jira integration handlers
@@ -1695,7 +1734,12 @@ class StdioProtocol(UIProtocol):
                 import json as _json
 
                 ready, in_progress, blocked, deferred, pinned, closed = (
-                    [], [], [], [], [], [],
+                    [],
+                    [],
+                    [],
+                    [],
+                    [],
+                    [],
                 )
                 for bead in all_beads:
                     tags = []
@@ -1878,8 +1922,9 @@ class StdioProtocol(UIProtocol):
     async def _handle_approve_knowledge(self, data: dict) -> None:
         """Review the knowledge DB - approve or reject with comments."""
         try:
-            from src.claraity.claraity_db import ClaraityStore
             from datetime import datetime, timezone
+
+            from src.claraity.claraity_db import ClaraityStore
 
             approved_by = data.get("approved_by", "unknown")
             status = data.get("status", "approved")
@@ -1983,18 +2028,22 @@ class StdioProtocol(UIProtocol):
                 key=lambda a: (a["source"] != "project", a["name"]),
             )
 
-            await self._send_json({
-                "type": "subagents_list",
-                "subagents": subagents,
-                "available_tools": self._SUBAGENT_STATIC_TOOLS,
-            })
+            await self._send_json(
+                {
+                    "type": "subagents_list",
+                    "subagents": subagents,
+                    "available_tools": self._SUBAGENT_STATIC_TOOLS,
+                }
+            )
         except Exception as e:
             logger.warning("stdio_list_subagents_error", error=str(e))
-            await self._send_json({
-                "type": "subagents_list",
-                "subagents": [],
-                "available_tools": self._SUBAGENT_STATIC_TOOLS,
-            })
+            await self._send_json(
+                {
+                    "type": "subagents_list",
+                    "subagents": [],
+                    "available_tools": self._SUBAGENT_STATIC_TOOLS,
+                }
+            )
 
     async def _handle_save_subagent(self, data: dict) -> None:
         """Save or update a custom subagent config to .claraity/agents/<name>.md."""
@@ -2046,6 +2095,7 @@ class StdioProtocol(UIProtocol):
 
             # Build .md content with properly escaped YAML frontmatter
             import yaml as _yaml
+
             frontmatter: dict = {"name": name, "description": description}
             if tools:
                 frontmatter["tools"] = tools  # written as a proper YAML list
@@ -2161,9 +2211,7 @@ class StdioProtocol(UIProtocol):
         try:
             from src.claraity.claraity_db import ClaraityStore
 
-            kb_path = os.path.join(
-                self._working_directory, ".claraity", "claraity_knowledge.db"
-            )
+            kb_path = os.path.join(self._working_directory, ".claraity", "claraity_knowledge.db")
             if not os.path.exists(kb_path):
                 await self._send_error("export_error", "No knowledge database to export")
                 return
@@ -2200,9 +2248,7 @@ class StdioProtocol(UIProtocol):
         try:
             from src.claraity.claraity_db import ClaraityStore
 
-            db_path = os.path.join(
-                self._working_directory, ".claraity", "claraity_knowledge.db"
-            )
+            db_path = os.path.join(self._working_directory, ".claraity", "claraity_knowledge.db")
 
             # Write content to a temp file for import_jsonl
             with tempfile.NamedTemporaryFile(
@@ -2250,6 +2296,7 @@ class StdioProtocol(UIProtocol):
         )
         if cfg.backend_type == "anthropic":
             from src.llm.anthropic_backend import AnthropicBackend
+
             return AnthropicBackend(llm_config, api_key=cfg.api_key)
 
         else:
@@ -2259,9 +2306,7 @@ class StdioProtocol(UIProtocol):
         """Rewrite a short user prompt into a clear, precise instruction using streaming LLM."""
         content = data.get("content", "").strip()
         if not content:
-            await self._send_json(
-                {"type": "enrichment_error", "message": "Empty prompt"}
-            )
+            await self._send_json({"type": "enrichment_error", "message": "Empty prompt"})
             return
 
         try:
@@ -2271,6 +2316,7 @@ class StdioProtocol(UIProtocol):
             pe = cfg.prompt_enrichment
             backend = self._build_enrichment_backend(pe, cfg)
             from src.prompts.enrichment import ENRICHMENT_SYSTEM_PROMPT
+
             system_prompt = pe.system_prompt or ENRICHMENT_SYSTEM_PROMPT
 
             # Build conversation history context from the last few chat turns.
@@ -2298,14 +2344,10 @@ class StdioProtocol(UIProtocol):
             ]
 
             accumulated = []
-            async for delta in backend.generate_provider_deltas_async(
-                messages, max_tokens=200
-            ):
+            async for delta in backend.generate_provider_deltas_async(messages, max_tokens=200):
                 if delta.text_delta:
                     accumulated.append(delta.text_delta)
-                    await self._send_json(
-                        {"type": "enrichment_delta", "delta": delta.text_delta}
-                    )
+                    await self._send_json({"type": "enrichment_delta", "delta": delta.text_delta})
 
             enriched = "".join(accumulated) or content
             await self._send_json(
@@ -2323,9 +2365,7 @@ class StdioProtocol(UIProtocol):
 
         except Exception as e:
             logger.warning("enrich_prompt_error", error=str(e))
-            await self._send_json(
-                {"type": "enrichment_error", "message": str(e)}
-            )
+            await self._send_json({"type": "enrichment_error", "message": str(e)})
 
     # -----------------------------------------------------------------
     # -----------------------------------------------------------------
@@ -2461,6 +2501,7 @@ async def run_stdio_server(
 
     # Load config and create agent
     from src.llm.config_loader import load_trace_enabled
+
     llm_config = load_llm_config(config_path)
     sys.stderr.write(f"[STDIO] Model: {llm_config.model}\n")
     sys.stderr.flush()
@@ -2538,7 +2579,11 @@ async def run_stdio_server(
         task_blocks = []
         for completed_task in tasks:
             desc = completed_task.description or completed_task.command[:80]
-            exit_info = f" (exit code {completed_task.exit_code})" if completed_task.exit_code is not None else ""
+            exit_info = (
+                f" (exit code {completed_task.exit_code})"
+                if completed_task.exit_code is not None
+                else ""
+            )
             summary = f'Background command "{desc}" {completed_task.status.value}{exit_info}'
 
             stdout = (completed_task.stdout or "").strip()
@@ -2569,8 +2614,9 @@ async def run_stdio_server(
         try:
             protocol._chat_queue.put_nowait({"content": notification})
         except asyncio.QueueFull:
-            logger.warning("stdio_bg_notification_dropped_queue_full",
-                           task_ids=[t.task_id for t in tasks])
+            logger.warning(
+                "stdio_bg_notification_dropped_queue_full", task_ids=[t.task_id for t in tasks]
+            )
 
     def _on_bg_task_update(active_count: int, completed_task=None) -> None:
         # Always refresh the panel
@@ -2585,6 +2631,7 @@ async def run_stdio_server(
         # premature callback fires — the finally block in _run_command should prevent
         # this, but this is a second line of defence).
         from src.core.background_tasks import BackgroundTaskStatus
+
         if completed_task.status == BackgroundTaskStatus.RUNNING:
             logger.warning(
                 "stdio_bg_notification_skipped_still_running",

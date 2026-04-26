@@ -30,6 +30,7 @@ NPM_SEARCH_BASE = "https://registry.npmjs.org"
 # Data models
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class McpMarketplaceEntry:
     """A single MCP server from the marketplace."""
@@ -43,12 +44,16 @@ class McpMarketplaceEntry:
     # Install info — stdio (local)
     transport: str = "stdio"  # "stdio", "sse", or "streamable-http"
     command: str | None = None  # e.g. "npx"
-    args: list[str] = field(default_factory=list)  # e.g. ["-y", "@modelcontextprotocol/server-github"]
+    args: list[str] = field(
+        default_factory=list
+    )  # e.g. ["-y", "@modelcontextprotocol/server-github"]
     env_vars: list[str] = field(default_factory=list)  # Required env var names
 
     # Install info — remote (hosted)
     remote_url: str = ""  # e.g. "https://mcp.atlassian.com/v1/sse"
-    remote_headers: dict[str, str] = field(default_factory=dict)  # e.g. {"Authorization": "Bearer ..."}
+    remote_headers: dict[str, str] = field(
+        default_factory=dict
+    )  # e.g. {"Authorization": "Bearer ..."}
 
     # Metadata
     tags: list[str] = field(default_factory=list)
@@ -105,6 +110,7 @@ class McpMarketplaceSearchResult:
 # ---------------------------------------------------------------------------
 # Official registry parsing
 # ---------------------------------------------------------------------------
+
 
 def _parse_official_entry(raw: dict[str, Any]) -> McpMarketplaceEntry:
     """Parse a server entry from the official MCP registry."""
@@ -216,6 +222,7 @@ def _parse_official_entry(raw: dict[str, Any]) -> McpMarketplaceEntry:
 # Marketplace client
 # ---------------------------------------------------------------------------
 
+
 class McpMarketplace:
     """Client for browsing and searching MCP servers.
 
@@ -283,7 +290,10 @@ class McpMarketplace:
             # Check it's not already in official results
             official_names = {e.name.lower() for e in official_result.entries}
             official_ids = {e.id.lower() for e in official_result.entries}
-            if npm_entry.name.lower() not in official_names and npm_entry.id.lower() not in official_ids:
+            if (
+                npm_entry.name.lower() not in official_names
+                and npm_entry.id.lower() not in official_ids
+            ):
                 merged.append(npm_entry)
                 seen_names.add(npm_entry.name.lower())
 
@@ -308,7 +318,9 @@ class McpMarketplace:
             return await self._search_official(query, page, page_size)
         except Exception as e:
             logger.warning("mcp_registry_search_failed", error=str(e), query=query)
-            return McpMarketplaceSearchResult(entries=[], total_count=0, page=page, page_size=page_size)
+            return McpMarketplaceSearchResult(
+                entries=[], total_count=0, page=page, page_size=page_size
+            )
 
     async def _lookup_mcp_official_package(self, query: str) -> McpMarketplaceEntry | None:
         """Direct npm lookup for @modelcontextprotocol/server-{query}.
@@ -425,9 +437,7 @@ class McpMarketplace:
         if cursor:
             params["cursor"] = cursor
 
-        response = await client.get(
-            f"{OFFICIAL_REGISTRY_BASE}/v0/servers", params=params
-        )
+        response = await client.get(f"{OFFICIAL_REGISTRY_BASE}/v0/servers", params=params)
         response.raise_for_status()
         data = response.json()
 
@@ -506,6 +516,7 @@ class McpMarketplace:
         """
         # Generate toolPrefix from entry ID (strip "npm:" prefix, sanitize)
         import re
+
         clean_id = entry.id.split(":", 1)[-1] if ":" in entry.id else entry.id
         prefix = re.sub(r"[^a-zA-Z0-9_-]", "_", clean_id)
         config: dict[str, Any] = {

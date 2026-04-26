@@ -27,6 +27,7 @@ class CreateCheckpointTool(Tool):
             controller: LongRunningController instance (optional, can be set later)
         """
         from src.tools.tool_schemas import _SCHEMA_REGISTRY
+
         _def = _SCHEMA_REGISTRY["create_checkpoint"]
         super().__init__(name=_def.name, description=_def.description)
         self.controller = controller
@@ -115,5 +116,3 @@ class CreateCheckpointTool(Tool):
                 output=None,
                 error=f"Checkpoint creation failed: {str(e)}",
             )
-
-

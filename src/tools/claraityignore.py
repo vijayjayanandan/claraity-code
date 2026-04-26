@@ -22,7 +22,7 @@ CLARAITYIGNORE_FILENAME = ".claraityignore"
 GITIGNORE_FILENAME = ".gitignore"
 
 
-def _load_gitignore() -> Optional[pathspec.PathSpec]:
+def _load_gitignore() -> pathspec.PathSpec | None:
     """Read root-level .gitignore and return compiled spec, or None if absent/empty.
 
     Only the project-root .gitignore is read (same scope as .claraityignore).
@@ -45,7 +45,7 @@ def _load_gitignore() -> Optional[pathspec.PathSpec]:
     return pathspec.PathSpec.from_lines("gitwildmatch", lines) if lines else None
 
 
-def _load_patterns() -> tuple[list[str], Optional[pathspec.PathSpec]]:
+def _load_patterns() -> tuple[list[str], pathspec.PathSpec | None]:
     """Read .claraityignore and return (raw_lines, compiled_spec).
 
     Returns ([], None) if file doesn't exist or is empty.
@@ -84,7 +84,7 @@ def _normalize_path(file_path: str | Path) -> str:
     return str(rel).replace("\\", "/")
 
 
-def is_blocked(file_path: str | Path) -> tuple[bool, Optional[str]]:
+def is_blocked(file_path: str | Path) -> tuple[bool, str | None]:
     """Check if a file path is blocked by .claraityignore.
 
     Args:
@@ -137,7 +137,7 @@ def filter_paths(paths: list[Path]) -> list[Path]:
     return result
 
 
-def check_command(command: str) -> tuple[bool, Optional[str]]:
+def check_command(command: str) -> tuple[bool, str | None]:
     """Check if a shell command references any blocked files.
 
     Tokenizes the command via shlex.split and checks each token against

@@ -57,7 +57,10 @@ _HARD_BLOCK_PATTERNS: list[tuple[re.Pattern, str]] = [
     # Data exfiltration via upload
     (re.compile(r"\bcurl\b.*[-][-]upload", re.IGNORECASE), "curl upload"),
     (re.compile(r"\bcurl\b.*\s+-[^\s]*T\b", re.IGNORECASE), "curl -T upload"),
-    (re.compile(r"\bcurl\b.*\s+-[^\s]*d\b.*\$\(", re.IGNORECASE), "curl -d with command substitution"),
+    (
+        re.compile(r"\bcurl\b.*\s+-[^\s]*d\b.*\$\(", re.IGNORECASE),
+        "curl -d with command substitution",
+    ),
     # Reverse shells
     (re.compile(r"\b(nc|ncat|netcat)\b.*-[^\s]*e\b"), "netcat reverse shell"),
     (re.compile(r"/dev/tcp/", re.IGNORECASE), "bash reverse shell"),
@@ -68,7 +71,10 @@ _HARD_BLOCK_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"Set-ExecutionPolicy", re.IGNORECASE), "PowerShell Set-ExecutionPolicy"),
     (re.compile(r"New-Service", re.IGNORECASE), "PowerShell New-Service"),
     # Windows registry modification
-    (re.compile(r"\breg\s+(add|delete|import|export)\b", re.IGNORECASE), "Windows registry modification"),
+    (
+        re.compile(r"\breg\s+(add|delete|import|export)\b", re.IGNORECASE),
+        "Windows registry modification",
+    ),
     # Environment variable exfiltration
     (re.compile(r"\b(env|printenv|set)\b.*\|\s*(curl|wget|nc)", re.IGNORECASE), "env exfiltration"),
     # Encoded payload execution

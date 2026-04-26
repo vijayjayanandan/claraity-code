@@ -135,6 +135,7 @@ class KnowledgeUpdateTool(Tool):
 
     def execute(self, operations: str, summary: str = "", **kwargs: Any) -> ToolResult:
         import json
+
         from src.claraity.claraity_db import ClaraityStore
 
         try:
@@ -194,11 +195,11 @@ class KnowledgeUpdateTool(Tool):
                     "description": (
                         'JSON array of operations. Each object must have an "op" field. '
                         "Supported ops and their fields:\n"
-                        '- add_node: node_id, node_type, name, layer, description, file_path, line_count, risk_level, properties\n'
-                        '- update_node: node_id, description, risk_level, line_count, properties\n'
-                        '- add_edge: from_id, to_id, edge_type, label, weight\n'
-                        '- remove_node: node_id\n'
-                        '- remove_edge: from_id, to_id, edge_type\n'
+                        "- add_node: node_id, node_type, name, layer, description, file_path, line_count, risk_level, properties\n"
+                        "- update_node: node_id, description, risk_level, line_count, properties\n"
+                        "- add_edge: from_id, to_id, edge_type, label, weight\n"
+                        "- remove_node: node_id\n"
+                        "- remove_edge: from_id, to_id, edge_type\n"
                         "Example: "
                         '[{"op":"add_node","node_id":"comp-x","node_type":"component","name":"X","description":"..."},'
                         '{"op":"add_edge","from_id":"mod-a","to_id":"comp-x","edge_type":"contains"}]'
@@ -290,7 +291,7 @@ class KnowledgeQueryTool(Tool):
                     "description": (
                         "Full-text search (FTS5). Supports: keywords ('streaming'), "
                         "boolean ('async AND NOT test'), prefix ('stream*'), "
-                        'phrases (\'"message store"\'). Results ranked by relevance with snippets.'
+                        "phrases ('\"message store\"'). Results ranked by relevance with snippets."
                     ),
                 },
                 "node_id": {
@@ -366,7 +367,7 @@ class KnowledgeSetMetadataTool(Tool):
                     tool_name=self.name,
                     status=ToolStatus.ERROR,
                     output=None,
-                    error="'metadata' must be a non-empty JSON object, e.g. {\"repo_name\": \"MyProject\", \"architecture_overview\": \"...\"}",
+                    error='\'metadata\' must be a non-empty JSON object, e.g. {"repo_name": "MyProject", "architecture_overview": "..."}',
                 )
         except (_json.JSONDecodeError, TypeError) as e:
             return ToolResult(
@@ -420,7 +421,7 @@ class KnowledgeSetMetadataTool(Tool):
                     "type": "string",
                     "description": (
                         "JSON object of key-value pairs to store. Example: "
-                        '{\"repo_name\": \"MyProject\", \"architecture_overview\": \"A web app that...\"}. '
+                        '{"repo_name": "MyProject", "architecture_overview": "A web app that..."}. '
                         "Standard keys: "
                         "'architecture_overview' (1500-2000 char narrative of the system), "
                         "'repo_name' (human-readable project name), "
@@ -698,7 +699,8 @@ class BeadUpdateTool(Tool):
                 )
             elif action == "close":
                 store.update_status(
-                    bead_id, "closed",
+                    bead_id,
+                    "closed",
                     summary=summary or None,
                     close_reason=close_reason or None,
                 )
@@ -855,9 +857,16 @@ class BeadLinkTool(Tool):
                 "dep_type": {
                     "type": "string",
                     "enum": [
-                        "blocks", "conditional-blocks", "waits-for",
-                        "related", "discovered-from", "caused-by",
-                        "tracks", "validates", "supersedes", "duplicates",
+                        "blocks",
+                        "conditional-blocks",
+                        "waits-for",
+                        "related",
+                        "discovered-from",
+                        "caused-by",
+                        "tracks",
+                        "validates",
+                        "supersedes",
+                        "duplicates",
                     ],
                     "description": "Dependency type (default: blocks). Blocking types affect the ready queue.",
                 },
@@ -932,8 +941,8 @@ class KnowledgeExportTool(Tool):
         )
 
     def execute(self, **kwargs: Any) -> ToolResult:
-        from src.claraity.claraity_db import ClaraityStore
         from src.claraity.claraity_beads import BeadStore
+        from src.claraity.claraity_db import ClaraityStore
 
         results = []
         try:

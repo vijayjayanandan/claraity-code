@@ -47,12 +47,12 @@ from src.core.protocol import (
     RetrySignal,
     UserAction,
 )
+from src.observability import get_logger
 from src.session.store.memory_store import (
     StoreEvent,
     StoreNotification,
     ToolExecutionState,
 )
-from src.observability import get_logger
 
 logger = get_logger(__name__)
 
@@ -68,9 +68,7 @@ def _content_to_str(content) -> str:
         return content
     if isinstance(content, list):
         return " ".join(
-            p.get("text", "")
-            for p in content
-            if isinstance(p, dict) and p.get("type") == "text"
+            p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text"
         )
     return str(content) if content else ""
 
@@ -277,10 +275,15 @@ def serialize_store_notification(notification: StoreNotification) -> dict | None
         # turn_deleted/turn_restored are suppressed here because the store
         # already emits dedicated TURN_DELETED/TURN_RESTORED events with
         # structured data (serialized below).
-        if msg.is_system and msg.meta and msg.meta.event_type in (
-            "compact_boundary",
-            "turn_deleted",
-            "turn_restored",
+        if (
+            msg.is_system
+            and msg.meta
+            and msg.meta.event_type
+            in (
+                "compact_boundary",
+                "turn_deleted",
+                "turn_restored",
+            )
         ):
             return None
 

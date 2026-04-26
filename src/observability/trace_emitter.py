@@ -125,22 +125,34 @@ class TraceEmitter:
                         if block.get("type") == "text":
                             text_parts.append(block.get("text", ""))
                         elif block.get("type") == "tool_use":
-                            text_parts.append(f'<tool_call: {block.get("name", "?")}(...)>')
+                            text_parts.append(f"<tool_call: {block.get('name', '?')}(...)>")
                         elif block.get("type") == "tool_result":
-                            text_parts.append(f'<tool_result: {str(block.get("content", ""))[:200]}>')
+                            text_parts.append(
+                                f"<tool_result: {str(block.get('content', ''))[:200]}>"
+                            )
                 content = "\n".join(text_parts) if text_parts else str(content)
             else:
                 content = str(content) if content else ""
 
             # Handle tool_calls in assistant messages (may be dicts or Pydantic objects)
-            tool_calls = msg.get("tool_calls") if isinstance(msg, dict) else getattr(msg, "tool_calls", None)
+            tool_calls = (
+                msg.get("tool_calls") if isinstance(msg, dict) else getattr(msg, "tool_calls", None)
+            )
             if tool_calls:
                 tc_strs = []
                 for tc in tool_calls:
                     if isinstance(tc, dict):
                         func = tc.get("function", tc)
-                        name = func.get("name", "?") if isinstance(func, dict) else getattr(func, "name", "?")
-                        args = str(func.get("arguments", "") if isinstance(func, dict) else getattr(func, "arguments", ""))
+                        name = (
+                            func.get("name", "?")
+                            if isinstance(func, dict)
+                            else getattr(func, "name", "?")
+                        )
+                        args = str(
+                            func.get("arguments", "")
+                            if isinstance(func, dict)
+                            else getattr(func, "arguments", "")
+                        )
                     else:
                         func = getattr(tc, "function", tc)
                         name = getattr(func, "name", "?")
@@ -162,8 +174,14 @@ class TraceEmitter:
         for t in tools:
             if isinstance(t, dict):
                 func = t.get("function", t)
-                name = func.get("name", "?") if isinstance(func, dict) else getattr(func, "name", "?")
-                desc = func.get("description", "") if isinstance(func, dict) else getattr(func, "description", "")
+                name = (
+                    func.get("name", "?") if isinstance(func, dict) else getattr(func, "name", "?")
+                )
+                desc = (
+                    func.get("description", "")
+                    if isinstance(func, dict)
+                    else getattr(func, "description", "")
+                )
             else:
                 # Pydantic ToolDefinition: t.function.name / t.function.description
                 func = getattr(t, "function", t)

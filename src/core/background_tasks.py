@@ -115,8 +115,7 @@ class BackgroundTaskRegistry:
             return None, f"[BLOCKED] {safety_result.reason}"
         if safety_result.safety == CommandSafety.NEEDS_APPROVAL:
             return None, (
-                f"[BLOCKED] {safety_result.reason} "
-                "(background tasks cannot request user approval)"
+                f"[BLOCKED] {safety_result.reason} (background tasks cannot request user approval)"
             )
 
         # Capacity check

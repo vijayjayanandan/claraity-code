@@ -81,10 +81,11 @@ def get_config_response(config_path: str, working_directory: str = "") -> dict:
     if working_directory:
         try:
             from pathlib import Path
+
             from src.subagents.config import SubAgentConfigLoader
 
             loader = SubAgentConfigLoader(working_directory=Path(working_directory))
-            for name, config in loader.discover_all().items():
+            for name, _config in loader.discover_all().items():
                 if name not in all_names:
                     all_names.append(name)
         except Exception as e:
@@ -103,6 +104,7 @@ def get_config_response(config_path: str, working_directory: str = "") -> dict:
 
     # Prompt enrichment config
     from src.prompts.enrichment import ENRICHMENT_SYSTEM_PROMPT
+
     pe = cfg.prompt_enrichment
     config_dict["prompt_enrichment"] = {
         "model": pe.model,
@@ -153,6 +155,7 @@ def save_config_from_request(data: dict, config_path: str) -> dict:
 
         # Prompt enrichment overrides
         from src.llm.config_loader import PromptEnrichmentConfig
+
         pe_raw = raw.get("prompt_enrichment", {})
         if isinstance(pe_raw, dict):
             cfg.prompt_enrichment = PromptEnrichmentConfig(
@@ -339,7 +342,11 @@ def save_limits_from_request(data: dict, config_path: str) -> dict:
                 },
             }
         else:
-            return {"type": "limits_saved", "success": False, "message": "Failed to write config file."}
+            return {
+                "type": "limits_saved",
+                "success": False,
+                "message": "Failed to write config file.",
+            }
 
     except Exception as exc:
         logger.error(f"[CONFIG] Save limits error: {exc}")

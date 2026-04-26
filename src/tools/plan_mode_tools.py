@@ -38,6 +38,7 @@ class EnterPlanModeTool(Tool):
             session_id: Current session ID for plan file naming
         """
         from src.tools.tool_schemas import _SCHEMA_REGISTRY
+
         _def = _SCHEMA_REGISTRY["enter_plan_mode"]
         super().__init__(name=_def.name, description=_def.description)
         self.plan_mode_state = plan_mode_state
@@ -135,6 +136,7 @@ class RequestPlanApprovalTool(Tool):
             plan_mode_state: The PlanModeState instance to use
         """
         from src.tools.tool_schemas import _SCHEMA_REGISTRY
+
         _def = _SCHEMA_REGISTRY["request_plan_approval"]
         super().__init__(name=_def.name, description=_def.description)
         self.plan_mode_state = plan_mode_state
@@ -201,8 +203,6 @@ class RequestPlanApprovalTool(Tool):
                 output=None,
                 error=f"Failed to request plan approval: {str(e)}",
             )
-
-
 
 
 # Export all

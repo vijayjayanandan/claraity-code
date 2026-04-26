@@ -149,11 +149,13 @@ def _extract_page_images_inline(
 
             total_bytes[0] += len(png_bytes)
             lines.append(f"[IMAGE:{len(images)}]")
-            images.append({
-                "base64": base64.b64encode(png_bytes).decode("ascii"),
-                "media_type": "image/png",
-                "source": f"page_{page_num + 1}",
-            })
+            images.append(
+                {
+                    "base64": base64.b64encode(png_bytes).decode("ascii"),
+                    "media_type": "image/png",
+                    "source": f"page_{page_num + 1}",
+                }
+            )
         except Exception:
             continue
 
@@ -218,9 +220,7 @@ def extract_pdf(
                 for line in text.splitlines():
                     lines.append(line)
                     if len(lines) >= max_lines:
-                        lines.append(
-                            f"[... extraction stopped: exceeded {max_lines:,} lines.]"
-                        )
+                        lines.append(f"[... extraction stopped: exceeded {max_lines:,} lines.]")
                         return lines, images, None
 
             # Extract tables
@@ -246,14 +246,21 @@ def extract_pdf(
                 if extract_images and len(images) < max_images:
                     # Extract mode: individual images at original resolution
                     _extract_page_images_inline(
-                        doc, page, page_num, lines, images, seen_xrefs,
-                        total_bytes, max_images, max_image_bytes, max_total_image_bytes,
+                        doc,
+                        page,
+                        page_num,
+                        lines,
+                        images,
+                        seen_xrefs,
+                        total_bytes,
+                        max_images,
+                        max_image_bytes,
+                        max_total_image_bytes,
                     )
                 else:
                     # Scout mode: hint line only
                     lines.append(
-                        f"[{img_count} image(s) on this page"
-                        f" -- use extract_images=true to see]"
+                        f"[{img_count} image(s) on this page -- use extract_images=true to see]"
                     )
 
             lines.append("")
@@ -334,11 +341,13 @@ def _extract_paragraph_images_inline(
 
                 total_bytes[0] += len(blob)
                 lines.append(f"[IMAGE:{len(images)}]")
-                images.append({
-                    "base64": base64.b64encode(blob).decode("ascii"),
-                    "media_type": media_type,
-                    "source": f"rel_{r_embed}",
-                })
+                images.append(
+                    {
+                        "base64": base64.b64encode(blob).decode("ascii"),
+                        "media_type": media_type,
+                        "source": f"rel_{r_embed}",
+                    }
+                )
             except Exception:
                 continue
     except Exception:
@@ -377,7 +386,11 @@ def extract_docx(
         from docx.table import Table
         from docx.text.paragraph import Paragraph
     except ImportError:
-        return [], [], "python-docx is required to read Word files. Install it: pip install python-docx"
+        return (
+            [],
+            [],
+            "python-docx is required to read Word files. Install it: pip install python-docx",
+        )
 
     try:
         doc = Document(str(path))
@@ -399,9 +412,7 @@ def extract_docx(
             para = para_map[elem_id]
             lines.append(para.text)
             if len(lines) >= max_lines:
-                lines.append(
-                    f"[... extraction stopped: exceeded {max_lines:,} lines.]"
-                )
+                lines.append(f"[... extraction stopped: exceeded {max_lines:,} lines.]")
                 return lines, images, None
 
             # Image handling: scout hints or inline extraction
@@ -409,8 +420,14 @@ def extract_docx(
             if img_count > 0:
                 if extract_images and len(images) < max_images:
                     _extract_paragraph_images_inline(
-                        doc, para, lines, images, total_bytes,
-                        max_images, max_image_bytes, max_total_image_bytes,
+                        doc,
+                        para,
+                        lines,
+                        images,
+                        total_bytes,
+                        max_images,
+                        max_image_bytes,
+                        max_total_image_bytes,
                     )
                 else:
                     lines.append(
@@ -427,9 +444,7 @@ def extract_docx(
                 cells = [cell.text.strip() for cell in row.cells]
                 lines.append("| " + " | ".join(cells) + " |")
                 if len(lines) >= max_lines:
-                    lines.append(
-                        f"[... extraction stopped: exceeded {max_lines:,} lines.]"
-                    )
+                    lines.append(f"[... extraction stopped: exceeded {max_lines:,} lines.]")
                     return lines, images, None
             lines.append("")
 
@@ -441,15 +456,34 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description="Extract text and images from PDF/DOCX files")
     parser.add_argument("file_path", help="Path to the document")
-    parser.add_argument("--format", choices=["pdf", "docx"], help="Document format (auto-detected from extension if omitted)")
+    parser.add_argument(
+        "--format",
+        choices=["pdf", "docx"],
+        help="Document format (auto-detected from extension if omitted)",
+    )
     parser.add_argument("--max-lines", type=int, default=10_000, help="Max lines to extract")
-    parser.add_argument("--max-zip-size", type=int, default=200 * 1024 * 1024, help="Max DOCX decompressed size")
+    parser.add_argument(
+        "--max-zip-size", type=int, default=200 * 1024 * 1024, help="Max DOCX decompressed size"
+    )
     parser.add_argument("--max-zip-ratio", type=int, default=100, help="Max DOCX compression ratio")
-    parser.add_argument("--extract-images", action="store_true", help="Render pages with images (PDF) or extract inline images (DOCX)")
+    parser.add_argument(
+        "--extract-images",
+        action="store_true",
+        help="Render pages with images (PDF) or extract inline images (DOCX)",
+    )
     parser.add_argument("--max-images", type=int, default=20, help="Max images to extract")
-    parser.add_argument("--max-image-bytes", type=int, default=1_048_576, help="Max bytes per image (1MB default)")
-    parser.add_argument("--max-total-image-bytes", type=int, default=5_242_880, help="Max total image bytes (5MB default)")
-    parser.add_argument("--pages", type=str, default=None, help="PDF pages to process: '3', '1-5', '3,7,9'")
+    parser.add_argument(
+        "--max-image-bytes", type=int, default=1_048_576, help="Max bytes per image (1MB default)"
+    )
+    parser.add_argument(
+        "--max-total-image-bytes",
+        type=int,
+        default=5_242_880,
+        help="Max total image bytes (5MB default)",
+    )
+    parser.add_argument(
+        "--pages", type=str, default=None, help="PDF pages to process: '3', '1-5', '3,7,9'"
+    )
     args = parser.parse_args()
 
     # Suppress library messages (e.g. PyMuPDF's "Consider using pymupdf_layout")
@@ -478,7 +512,8 @@ def main() -> None:
                 pages_filter = _parse_pages(args.pages, 10_000)
 
             lines, images, error = extract_pdf(
-                path, args.max_lines,
+                path,
+                args.max_lines,
                 extract_images=args.extract_images,
                 max_images=args.max_images,
                 max_image_bytes=args.max_image_bytes,
@@ -487,7 +522,10 @@ def main() -> None:
             )
         elif fmt == "docx":
             lines, images, error = extract_docx(
-                path, args.max_lines, args.max_zip_size, args.max_zip_ratio,
+                path,
+                args.max_lines,
+                args.max_zip_size,
+                args.max_zip_ratio,
                 extract_images=args.extract_images,
                 max_images=args.max_images,
                 max_image_bytes=args.max_image_bytes,

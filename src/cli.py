@@ -132,7 +132,9 @@ def main() -> None:
     )
 
     parser.add_argument(
-        "--url", default=None, help="Backend API URL (from .env: LLM_HOST, or .claraity/config.yaml)"
+        "--url",
+        default=None,
+        help="Backend API URL (from .env: LLM_HOST, or .claraity/config.yaml)",
     )
 
     parser.add_argument(

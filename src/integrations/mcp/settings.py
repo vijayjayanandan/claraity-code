@@ -59,7 +59,9 @@ class McpServerSettings:
     #   url          → remote (SSE/HTTP)
     transport: str = "stdio"  # "stdio", "sse", or "streamable-http"
     command: str | None = None  # For stdio: e.g. "npx"
-    args: list[str] = field(default_factory=list)  # For stdio: e.g. ["-y", "@modelcontextprotocol/server-github"]
+    args: list[str] = field(
+        default_factory=list
+    )  # For stdio: e.g. ["-y", "@modelcontextprotocol/server-github"]
     server_url: str | None = None  # For remote: e.g. "https://mcp.atlassian.com/v1/sse"
     headers: dict[str, str] = field(default_factory=dict)  # For remote: auth headers
     env: dict[str, str] = field(default_factory=dict)  # Environment variables (stdio)
@@ -132,7 +134,9 @@ class McpServerSettings:
         """
         tools_raw = data.get("tools", {})
         tools = {
-            tool_name: McpToolOverride.from_dict(tool_data) if isinstance(tool_data, dict) else McpToolOverride(enabled=bool(tool_data))
+            tool_name: McpToolOverride.from_dict(tool_data)
+            if isinstance(tool_data, dict)
+            else McpToolOverride(enabled=bool(tool_data))
             for tool_name, tool_data in tools_raw.items()
         }
 
@@ -174,12 +178,15 @@ class McpServerSettings:
         if self.transport == "stdio" and self.command:
             # Build full command with args for the StdioTransport
             import sys
+
             parts = [self.command] + self.args
             if sys.platform == "win32":
                 import subprocess
+
                 full_command = subprocess.list2cmdline(parts)
             else:
                 import shlex
+
                 full_command = " ".join(shlex.quote(p) for p in parts)
         else:
             full_command = self.command
@@ -297,10 +304,7 @@ class McpSettingsManager:
             logger.error("mcp_settings_load_error", path=str(path), error=str(e))
             return {}
         servers_raw = raw.get("mcpServers", {})
-        return {
-            name: McpServerSettings.from_dict(name, data)
-            for name, data in servers_raw.items()
-        }
+        return {name: McpServerSettings.from_dict(name, data) for name, data in servers_raw.items()}
 
     def load(self) -> None:
         """Load and merge settings from both project and global files.
@@ -336,12 +340,7 @@ class McpSettingsManager:
     def _save_file(self, path: Path, servers: dict[str, McpServerSettings]) -> None:
         """Save servers to a specific config file (atomic write)."""
         path.parent.mkdir(parents=True, exist_ok=True)
-        data = {
-            "mcpServers": {
-                name: server.to_dict()
-                for name, server in servers.items()
-            }
-        }
+        data = {"mcpServers": {name: server.to_dict() for name, server in servers.items()}}
         content = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
         tmp_path = path.with_suffix(".tmp")
         tmp_path.write_text(content, encoding="utf-8")

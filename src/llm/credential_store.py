@@ -29,10 +29,7 @@ def load_api_key(api_key_env: str = "OPENAI_API_KEY") -> str:
     Returns:
         The API key string, or empty string if not found
     """
-    return (
-        os.environ.get("CLARAITY_API_KEY", "")
-        or os.environ.get(api_key_env, "")
-    )
+    return os.environ.get("CLARAITY_API_KEY", "") or os.environ.get(api_key_env, "")
 
 
 def has_api_key(api_key_env: str = "OPENAI_API_KEY") -> bool:

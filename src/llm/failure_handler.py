@@ -119,7 +119,9 @@ class InvalidAPIKeyError(LLMError):
     """Invalid API key -- fatal config error."""
 
     def __init__(self, message: str = "", **kwargs: Any) -> None:
-        kwargs.setdefault("user_message", "API key is invalid or missing. Check the API Key in Settings.")
+        kwargs.setdefault(
+            "user_message", "API key is invalid or missing. Check the API Key in Settings."
+        )
         kwargs.setdefault("event_type", "config_error")
         kwargs.setdefault("retryable", False)
         super().__init__(message, **kwargs)
@@ -170,45 +172,83 @@ class ContentPolicyViolationError(LLMError):
 # Single source of truth -- agent.py no longer duplicates these.
 # ---------------------------------------------------------------------------
 
-_TIMEOUT_SIGNALS: frozenset[str] = frozenset({
-    "timeout", "timed out",
-})
+_TIMEOUT_SIGNALS: frozenset[str] = frozenset(
+    {
+        "timeout",
+        "timed out",
+    }
+)
 
-_RATE_LIMIT_SIGNALS: frozenset[str] = frozenset({
-    "rate_limit", "rate limit", "too many requests", "429",
-})
+_RATE_LIMIT_SIGNALS: frozenset[str] = frozenset(
+    {
+        "rate_limit",
+        "rate limit",
+        "too many requests",
+        "429",
+    }
+)
 
-_NETWORK_SIGNALS: frozenset[str] = frozenset({
-    "connection", "network", "service unavailable", "temporarily unavailable",
-    "overloaded", "502", "503", "504",
-})
+_NETWORK_SIGNALS: frozenset[str] = frozenset(
+    {
+        "connection",
+        "network",
+        "service unavailable",
+        "temporarily unavailable",
+        "overloaded",
+        "502",
+        "503",
+        "504",
+    }
+)
 
 # Specific auth signals only -- bare "authentication" / "unauthorized" removed
 # to prevent false positives on user code that mentions those words.
-_AUTH_SIGNALS: frozenset[str] = frozenset({
-    "invalid_api_key", "invalid api key", "incorrect api key",
-    "authentication_error", "401",
-})
+_AUTH_SIGNALS: frozenset[str] = frozenset(
+    {
+        "invalid_api_key",
+        "invalid api key",
+        "incorrect api key",
+        "authentication_error",
+        "401",
+    }
+)
 
-_CONTENT_POLICY_SIGNALS: frozenset[str] = frozenset({
-    "content_policy_violation", "content policy",
-})
+_CONTENT_POLICY_SIGNALS: frozenset[str] = frozenset(
+    {
+        "content_policy_violation",
+        "content policy",
+    }
+)
 
-_MODEL_SIGNALS: frozenset[str] = frozenset({
-    "invalid_model", "invalid model", "model not found", "404",
-    # 403 PermissionDeniedError from providers that gate models per-org
-    "403", "modelauthorizationerror", "authorization failed for model",
-    "model may be unavailable", "permissiondenied",
-})
+_MODEL_SIGNALS: frozenset[str] = frozenset(
+    {
+        "invalid_model",
+        "invalid model",
+        "model not found",
+        "404",
+        # 403 PermissionDeniedError from providers that gate models per-org
+        "403",
+        "modelauthorizationerror",
+        "authorization failed for model",
+        "model may be unavailable",
+        "permissiondenied",
+    }
+)
 
 # Full phrases only -- no bare "invalid_request" (too broad, catches content policy)
-_INVALID_REQUEST_SIGNALS: frozenset[str] = frozenset({
-    "invalid_request_error",
-    "invalid value for", "must be between", "must be a",
-    "max_tokens must", "temperature must", "top_p must",
-    "top_p not supported",
-    "budget_tokens",  # Anthropic thinking budget validation errors
-})
+_INVALID_REQUEST_SIGNALS: frozenset[str] = frozenset(
+    {
+        "invalid_request_error",
+        "invalid value for",
+        "must be between",
+        "must be a",
+        "max_tokens must",
+        "temperature must",
+        "top_p must",
+        "top_p not supported",
+        "budget_tokens",  # Anthropic thinking budget validation errors
+    }
+)
 
 # Generic validation phrases that only count as invalid-request when a known
 # config field is also present in the error text.
@@ -220,24 +260,38 @@ _CONDITIONAL_INVALID_REQUEST_PHRASES: tuple[str, ...] = (
 
 # Config field names used to gate _CONDITIONAL_INVALID_REQUEST_PHRASES
 _CONFIG_FIELD_NAMES: tuple[str, ...] = (
-    "budget_tokens", "temperature", "max_tokens", "top_p", "context_window",
+    "budget_tokens",
+    "temperature",
+    "max_tokens",
+    "top_p",
+    "context_window",
 )
 
-_CONTEXT_LENGTH_SIGNALS: frozenset[str] = frozenset({
-    "context_length_exceeded", "maximum context length",
-})
+_CONTEXT_LENGTH_SIGNALS: frozenset[str] = frozenset(
+    {
+        "context_length_exceeded",
+        "maximum context length",
+    }
+)
 
 # Backward-compat aliases (kept in case external code imports them)
-RETRYABLE_ERROR_KEYWORDS: dict[str, bool] = {s: True for s in _TIMEOUT_SIGNALS | _RATE_LIMIT_SIGNALS | _NETWORK_SIGNALS}
+RETRYABLE_ERROR_KEYWORDS: dict[str, bool] = {
+    s: True for s in _TIMEOUT_SIGNALS | _RATE_LIMIT_SIGNALS | _NETWORK_SIGNALS
+}
 FATAL_ERROR_KEYWORDS: dict[str, bool] = {
-    s: True for s in _AUTH_SIGNALS | _CONTENT_POLICY_SIGNALS | _MODEL_SIGNALS
-    | _INVALID_REQUEST_SIGNALS | _CONTEXT_LENGTH_SIGNALS
+    s: True
+    for s in _AUTH_SIGNALS
+    | _CONTENT_POLICY_SIGNALS
+    | _MODEL_SIGNALS
+    | _INVALID_REQUEST_SIGNALS
+    | _CONTEXT_LENGTH_SIGNALS
 }
 
 
 # ---------------------------------------------------------------------------
 # Private helpers for root-cause extraction
 # ---------------------------------------------------------------------------
+
 
 def _extract_root_cause_message(exc: Exception) -> str:
     """Walk the __cause__ chain and return the cleanest error message.
@@ -285,12 +339,12 @@ def _extract_root_cause_message(exc: Exception) -> str:
 
 # Maps known SDK field path fragments to the Settings label the user sees.
 _FIELD_TO_SETTING: list[tuple[str, str]] = [
-    ("budget_tokens",  "Settings > Thinking Budget"),
-    ("temperature",    "Settings > Temperature"),
-    ("max_tokens",     "Settings > Max Tokens"),
-    ("top_p",          "Settings"),
-    ("model",          "Settings > Model"),
-    ("base_url",       "Settings > Base URL"),
+    ("budget_tokens", "Settings > Thinking Budget"),
+    ("temperature", "Settings > Temperature"),
+    ("max_tokens", "Settings > Max Tokens"),
+    ("top_p", "Settings"),
+    ("model", "Settings > Model"),
+    ("base_url", "Settings > Base URL"),
 ]
 
 
@@ -328,7 +382,7 @@ def _humanize_config_error(provider_msg: str) -> str:
                 msg[end] in ".!?" and end + 1 < len(msg) and msg[end + 1] == " "
             ):
                 end += 1
-            sentence = msg[pos: end + 1].strip()
+            sentence = msg[pos : end + 1].strip()
             if truncated and len(truncated) + 1 + len(sentence) > 300:
                 break
             truncated = (truncated + " " + sentence).strip()
@@ -423,10 +477,9 @@ def classify_provider_error(exc: Exception) -> LLMError:
     # 7. Invalid request / bad params
     # Unconditional signals match on their own; conditional phrases only match
     # when a known config field name is also present (prevents false positives).
-    _conditional_match = (
-        any(phrase in combined for phrase in _CONDITIONAL_INVALID_REQUEST_PHRASES)
-        and any(field in combined for field in _CONFIG_FIELD_NAMES)
-    )
+    _conditional_match = any(
+        phrase in combined for phrase in _CONDITIONAL_INVALID_REQUEST_PHRASES
+    ) and any(field in combined for field in _CONFIG_FIELD_NAMES)
     if any(s in combined for s in _INVALID_REQUEST_SIGNALS) or _conditional_match:
         root_msg = _extract_root_cause_message(exc)
         friendly = _humanize_config_error(root_msg)

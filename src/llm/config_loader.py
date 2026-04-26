@@ -205,7 +205,9 @@ def load_llm_config(config_path: str = DEFAULT_CONFIG_PATH) -> LLMConfigData:
 
     # -- api_key in YAML is not supported -- warn and ignore --
     if "api_key" in llm_data and llm_data["api_key"]:
-        _safe_stderr("api_key in config.yaml is not supported. Use environment variable or OS credential store.")
+        _safe_stderr(
+            "api_key in config.yaml is not supported. Use environment variable or OS credential store."
+        )
 
     # -- api_key_env (env var name, fallback) --
     if "api_key_env" in llm_data and llm_data["api_key_env"]:
@@ -562,6 +564,7 @@ def load_trace_enabled(config_path: str = DEFAULT_CONFIG_PATH) -> bool:
         return False
     try:
         import yaml
+
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
         if isinstance(data, dict):
             return bool(data.get("trace_enabled", False))
@@ -590,7 +593,9 @@ def save_trace_enabled(enabled: bool, config_path: str = DEFAULT_CONFIG_PATH) ->
     existing["trace_enabled"] = enabled
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(yaml.dump(existing, default_flow_style=False, sort_keys=False), encoding="utf-8")
+        path.write_text(
+            yaml.dump(existing, default_flow_style=False, sort_keys=False), encoding="utf-8"
+        )
         return True
     except Exception:
         return False

@@ -22,6 +22,7 @@ class ClarifyTool(Tool):
 
     def __init__(self):
         from src.tools.tool_schemas import _SCHEMA_REGISTRY
+
         _def = _SCHEMA_REGISTRY["clarify"]
         super().__init__(name=_def.name, description=_def.description)
 

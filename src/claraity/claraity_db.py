@@ -11,15 +11,14 @@ Usage:
     python -m src.claraity.claraity_db all
 """
 
+import hashlib
 import json
 import sqlite3
-import hashlib
 import sys
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
-
 
 # ---------------------------------------------------------------------------
 # ClaraityStore - thin wrapper around SQLite
@@ -71,7 +70,7 @@ class ClaraityStore:
     def __init__(self, db_path: str = ".claraity/claraity_knowledge.db"):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn: Optional[sqlite3.Connection] = None
+        self.conn: sqlite3.Connection | None = None
         # Auto-import: if DB missing but JSONL exists, rebuild
         if not self.db_path.exists():
             jsonl_path = self.db_path.with_suffix(".jsonl")
@@ -158,8 +157,15 @@ class ClaraityStore:
                     parts.extend(str(item) for item in v)
         return " ".join(parts)
 
-    def _upsert_fts(self, cur, node_id: str, node_type: str, name: str,
-                    description: str, properties: dict = None) -> None:
+    def _upsert_fts(
+        self,
+        cur,
+        node_id: str,
+        node_type: str,
+        name: str,
+        description: str,
+        properties: dict = None,
+    ) -> None:
         """Insert or replace a node's FTS entry."""
         extra = self._build_extra_text(cur, node_id, properties)
         cur.execute("DELETE FROM nodes_fts WHERE node_id=?", (node_id,))
@@ -183,9 +189,7 @@ class ClaraityStore:
     def _rebuild_fts_index(self, cur) -> None:
         """Full rebuild of FTS index from nodes table."""
         cur.execute("DELETE FROM nodes_fts")
-        rows = cur.execute(
-            "SELECT id, type, name, description, properties FROM nodes"
-        ).fetchall()
+        rows = cur.execute("SELECT id, type, name, description, properties FROM nodes").fetchall()
         for row in rows:
             props = json.loads(row[4]) if row[4] else {}
             extra = self._build_extra_text(cur, row[0], props)
@@ -335,9 +339,16 @@ class ClaraityStore:
     ) -> str:
         with self._cursor() as cur:
             self._add_node_impl(
-                cur, node_id=id, node_type=type, layer=layer, name=name,
-                description=description, file_path=file_path, line_count=line_count,
-                risk_level=risk_level, properties=properties,
+                cur,
+                node_id=id,
+                node_type=type,
+                layer=layer,
+                name=name,
+                description=description,
+                file_path=file_path,
+                line_count=line_count,
+                risk_level=risk_level,
+                properties=properties,
             )
         return id
 
@@ -352,8 +363,13 @@ class ClaraityStore:
     ) -> str:
         with self._cursor() as cur:
             eid = self._add_edge_impl(
-                cur, from_id=from_id, to_id=to_id, edge_type=type,
-                weight=weight, label=label, properties=properties,
+                cur,
+                from_id=from_id,
+                to_id=to_id,
+                edge_type=type,
+                weight=weight,
+                label=label,
+                properties=properties,
             )
         return eid
 
@@ -378,8 +394,12 @@ class ClaraityStore:
         """
         with self._cursor() as cur:
             rowcount = self._update_node_impl(
-                cur, node_id=node_id, description=description,
-                risk_level=risk_level, line_count=line_count, properties=properties,
+                cur,
+                node_id=node_id,
+                description=description,
+                risk_level=risk_level,
+                line_count=line_count,
+                properties=properties,
             )
             return rowcount > 0
 
@@ -439,7 +459,9 @@ class ClaraityStore:
                         )
                         if rowcount == 0:
                             failed += 1
-                            errors.append(f"[{i}] update_node: node '{op_dict['node_id']}' not found")
+                            errors.append(
+                                f"[{i}] update_node: node '{op_dict['node_id']}' not found"
+                            )
                             continue
                         succeeded += 1
 
@@ -562,6 +584,7 @@ class ClaraityStore:
         # -- Dispatchers that return immediately (no graph needed) --
         if show == "brief":
             from src.claraity.claraity_db import render_compact_briefing
+
             return render_compact_briefing(self)
         if show == "overview":
             return self._query_overview()
@@ -571,21 +594,25 @@ class ClaraityStore:
         # -- FTS search --
         if search:
             from src.claraity.claraity_db import render_search
+
             sections.append(render_search(self, search, node_type=node_type))
 
         # -- Module detail --
         if module_id:
             from src.claraity.claraity_db import render_module_detail
+
             sections.append(render_module_detail(self, module_id))
 
         # -- File detail --
         if file_path:
             from src.claraity.claraity_db import render_file_detail
+
             sections.append(render_file_detail(self, file_path))
 
         # -- Impact analysis --
         if impact:
             from src.claraity.claraity_db import render_impact
+
             sections.append(render_impact(self, impact))
 
         # If any of the above produced results, append node_id/keyword/type
@@ -715,11 +742,12 @@ class ClaraityStore:
             lines.append(f"- **{n['name']}** (`{n['id']}`): {desc}")
         return "\n".join(lines)
 
-    def _query_related(self, related_to: str, node_map: dict, all_edges: list[dict], show: str) -> str:
+    def _query_related(
+        self, related_to: str, node_map: dict, all_edges: list[dict], show: str
+    ) -> str:
         if show == "constraints":
             constraint_edges = [
-                e for e in all_edges
-                if e["type"] == "constrains" and e["to_id"] == related_to
+                e for e in all_edges if e["type"] == "constrains" and e["to_id"] == related_to
             ]
             if not constraint_edges:
                 return f"No constraints found for '{related_to}'."
@@ -727,7 +755,9 @@ class ClaraityStore:
             for e in constraint_edges:
                 src = node_map.get(e["from_id"])
                 if src:
-                    lines.append(f"- **{src['name']}** ({src['type']}): {src.get('description', '')}")
+                    lines.append(
+                        f"- **{src['name']}** ({src['type']}): {src.get('description', '')}"
+                    )
             return "\n".join(lines)
         else:
             edges = [e for e in all_edges if e["from_id"] == related_to or e["to_id"] == related_to]
@@ -747,9 +777,13 @@ class ClaraityStore:
         lines.append(f"- **Nodes**: {stats['total_nodes']}")
         lines.append(f"- **Edges**: {stats['total_edges']}")
         if stats["node_types"]:
-            lines.append(f"- **Node types**: {', '.join(f'{t}={c}' for t, c in stats['node_types'].items())}")
+            lines.append(
+                f"- **Node types**: {', '.join(f'{t}={c}' for t, c in stats['node_types'].items())}"
+            )
         if stats["edge_types"]:
-            lines.append(f"- **Edge types**: {', '.join(f'{t}={c}' for t, c in stats['edge_types'].items())}")
+            lines.append(
+                f"- **Edge types**: {', '.join(f'{t}={c}' for t, c in stats['edge_types'].items())}"
+            )
         return "\n".join(lines)
 
     # -- Full-text search (FTS5) ----------------------------------------------
@@ -830,13 +864,15 @@ class ClaraityStore:
 
             results = []
             for row in rows:
-                results.append({
-                    "node_id": row[0],
-                    "node_type": row[1],
-                    "name": row[2],
-                    "snippet": row[3],
-                    "rank": row[4],
-                })
+                results.append(
+                    {
+                        "node_id": row[0],
+                        "node_type": row[1],
+                        "name": row[2],
+                        "snippet": row[3],
+                        "rank": row[4],
+                    }
+                )
             return results
 
     def auto_layout(self) -> dict:
@@ -996,7 +1032,7 @@ class ClaraityStore:
 
         # Assign flow_col within each rank
         mod_col: dict[str, int] = {}
-        for rank, mods in ranks.items():
+        for _rank, mods in ranks.items():
             for i, mod_id in enumerate(mods):
                 mod_col[mod_id] = i
 
@@ -1107,7 +1143,7 @@ class ClaraityStore:
         db.parent.mkdir(parents=True, exist_ok=True)
         db.touch()
         store = cls(db_path)
-        with open(jsonl_path, "r", encoding="utf-8") as f:
+        with open(jsonl_path, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -1156,7 +1192,12 @@ class ClaraityStore:
                                (id, from_id, to_id, type, weight, label, properties)
                                VALUES (?, ?, ?, ?, ?, ?, ?)""",
                             (
-                                rec.get("id", store._make_id("e", f"{rec['from_id']}:{rec['to_id']}:{rec['type']}")),
+                                rec.get(
+                                    "id",
+                                    store._make_id(
+                                        "e", f"{rec['from_id']}:{rec['to_id']}:{rec['type']}"
+                                    ),
+                                ),
                                 rec["from_id"],
                                 rec["to_id"],
                                 rec["type"],
@@ -1501,7 +1542,7 @@ def populate(store: ClaraityStore):
         ),
     ]
 
-    for mid, mtype, fpath, desc, files, lines, risk, props in modules:
+    for mid, _mtype, fpath, desc, _files, lines, risk, props in modules:
         store.add_node(
             id=mid,
             type="module",
@@ -2230,7 +2271,7 @@ def populate(store: ClaraityStore):
         ),
     ]
 
-    for did, dtype, name, desc, props in decisions:
+    for did, _dtype, name, desc, props in decisions:
         store.add_node(
             id=did,
             type="decision",
@@ -2288,7 +2329,7 @@ def populate(store: ClaraityStore):
         ),
     ]
 
-    for iid, itype, name, desc, props in invariants:
+    for iid, _itype, name, desc, props in invariants:
         store.add_node(
             id=iid,
             type="invariant",
@@ -2405,7 +2446,7 @@ def populate(store: ClaraityStore):
         ),
     ]
 
-    for fid, ftype, name, desc, props in flows:
+    for fid, _ftype, name, desc, props in flows:
         store.add_node(
             id=fid,
             type="flow",
@@ -2458,22 +2499,24 @@ def scan_files(store: ClaraityStore, root: str = "src", extensions: list[str] = 
         if not child.is_dir():
             continue
         if child.name.startswith(".") or child.name in {
-            "__pycache__", "node_modules", ".git", ".venv", "dist", "build",
-            ".tox", ".mypy_cache",
+            "__pycache__",
+            "node_modules",
+            ".git",
+            ".venv",
+            "dist",
+            "build",
+            ".tox",
+            ".mypy_cache",
         }:
             continue
         # Only create a module if the directory contains at least one source file
-        has_source = any(
-            f.suffix in scan_exts_early
-            for f in child.rglob("*")
-            if f.is_file()
-        )
+        has_source = any(f.suffix in scan_exts_early for f in child.rglob("*") if f.is_file())
         if has_source:
             prefix = f"{root_str}/{child.name}/"
             mod_id = f"mod-{child.name}"
             MODULE_MAP[prefix] = mod_id
 
-    def get_module_id(file_path: str) -> Optional[str]:
+    def get_module_id(file_path: str) -> str | None:
         """Find which module a file belongs to."""
         fp = file_path.replace("\\", "/")
         for prefix, mod_id in MODULE_MAP.items():
@@ -2594,7 +2637,7 @@ def scan_files(store: ClaraityStore, root: str = "src", extensions: list[str] = 
     # Index: node_id -> node for name lookups
     node_map = {n["id"]: n for n in all_nodes}
 
-    def enrich_file_entry(file_path: str, module_id: Optional[str]) -> dict:
+    def enrich_file_entry(file_path: str, module_id: str | None) -> dict:
         """Build enriched drift entry with component, edges, and constraints."""
         entry: dict = {"path": file_path, "module": module_id}
 
@@ -2715,7 +2758,7 @@ def scan_files(store: ClaraityStore, root: str = "src", extensions: list[str] = 
         file_count += 1
 
     # Detect deleted files: in DB but not on disk
-    for path, node in existing_file_nodes.items():
+    for path, _node in existing_file_nodes.items():
         if path not in seen_paths:
             mod_id = get_module_id(path)
             drift["deleted"].append(enrich_file_entry(path, mod_id))
@@ -2730,9 +2773,16 @@ def scan_files(store: ClaraityStore, root: str = "src", extensions: list[str] = 
     # Detect primary language from file extension frequency
     if ext_counts:
         ext_to_lang = {
-            ".py": "Python", ".ts": "TypeScript", ".tsx": "TypeScript",
-            ".js": "JavaScript", ".jsx": "JavaScript", ".go": "Go",
-            ".java": "Java", ".rs": "Rust", ".rb": "Ruby", ".cs": "C#",
+            ".py": "Python",
+            ".ts": "TypeScript",
+            ".tsx": "TypeScript",
+            ".js": "JavaScript",
+            ".jsx": "JavaScript",
+            ".go": "Go",
+            ".java": "Java",
+            ".rs": "Rust",
+            ".rb": "Ruby",
+            ".cs": "C#",
         }
         top_ext = max(ext_counts, key=ext_counts.get)
         store.set_metadata("repo_language", ext_to_lang.get(top_ext, top_ext))
@@ -3048,11 +3098,13 @@ def render_search(store: ClaraityStore, keyword: str, node_type: str = None) -> 
         nid = m["node_id"]
         if m["node_type"] in ("component", "module"):
             outgoing = [
-                e for e in all_edges
+                e
+                for e in all_edges
                 if e["from_id"] == nid and e["type"] not in ("contains", "constrains")
             ]
             incoming = [
-                e for e in all_edges
+                e
+                for e in all_edges
                 if e["to_id"] == nid and e["type"] not in ("contains", "constrains")
             ]
             if outgoing:
@@ -3071,9 +3123,7 @@ def render_search(store: ClaraityStore, keyword: str, node_type: str = None) -> 
     return "\n".join(lines)
 
 
-def _fallback_search(
-    store: ClaraityStore, keyword: str, node_type: str = None
-) -> list[dict]:
+def _fallback_search(store: ClaraityStore, keyword: str, node_type: str = None) -> list[dict]:
     """Simple LIKE-based search when FTS5 query syntax is invalid."""
     all_nodes = store.get_all_nodes()
     kw = keyword.lower()
@@ -3086,13 +3136,15 @@ def _fallback_search(
         name_match = kw in (n.get("name") or "").lower()
         desc_match = kw in (n.get("description") or "").lower()
         if name_match or desc_match:
-            results.append({
-                "node_id": n["id"],
-                "node_type": n["type"],
-                "name": n["name"],
-                "snippet": (n.get("description") or "")[:200],
-                "rank": 0,
-            })
+            results.append(
+                {
+                    "node_id": n["id"],
+                    "node_type": n["type"],
+                    "name": n["name"],
+                    "snippet": (n.get("description") or "")[:200],
+                    "rank": 0,
+                }
+            )
     return results[:20]
 
 

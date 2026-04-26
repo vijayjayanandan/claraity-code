@@ -63,6 +63,7 @@ class TraceIntegration:
             return
         try:
             from src.observability.trace_emitter import TraceEmitter
+
             self._emitter = TraceEmitter(session_id, sessions_dir)
             self._llm_call_n = 0
             self._context_build_n = 0
@@ -109,7 +110,8 @@ class TraceIntegration:
             return
         try:
             self._emitter.emit(
-                "user", "agent",
+                "user",
+                "agent",
                 "Request received",
                 "request",
                 data=user_input,
@@ -139,7 +141,8 @@ class TraceIntegration:
             status = "loaded" if found else "not found"
             iter_tag = f" (iter {iteration})" if iteration else ""
             self._emitter.emit(
-                "context_builder", "context_builder",
+                "context_builder",
+                "context_builder",
                 f"{source_name}: {status}{iter_tag}",
                 "context_source",
                 data=content if content else f"({source_name} not available)",
@@ -161,7 +164,8 @@ class TraceIntegration:
             breakdown = ", ".join(f"{v} {k}" for k, v in roles.items())
             iter_tag = f" (iter {iteration})" if iteration else ""
             self._emitter.emit(
-                "context_builder", "store",
+                "context_builder",
+                "store",
                 f"Fetch conversation ({msg_count} msgs){iter_tag}",
                 "context_source",
                 data=(
@@ -185,7 +189,8 @@ class TraceIntegration:
         try:
             iter_tag = f" (iter {iteration})" if iteration else ""
             self._emitter.emit(
-                "store", "context_builder",
+                "store",
+                "context_builder",
                 f"Returned {msg_count} messages{iter_tag}",
                 "context_source",
                 data=(
@@ -219,7 +224,8 @@ class TraceIntegration:
             breakdown = ", ".join(f"{v} {k}" for k, v in roles.items())
             iter_tag = f" (iter {iteration})" if iteration else ""
             self._emitter.emit(
-                "agent", "context_builder",
+                "agent",
+                "context_builder",
                 f"Context ready ({n_msgs} msgs){iter_tag}",
                 "context_assembly",
                 data=f"Sending to LLM:\n\n{breakdown}\n\nTotal messages: {n_msgs}",
@@ -242,14 +248,19 @@ class TraceIntegration:
             for msg in context:
                 role = msg.get("role") if isinstance(msg, dict) else getattr(msg, "role", "")
                 if role == "system":
-                    c = msg.get("content", "") if isinstance(msg, dict) else getattr(msg, "content", "")
+                    c = (
+                        msg.get("content", "")
+                        if isinstance(msg, dict)
+                        else getattr(msg, "content", "")
+                    )
                     sys_prompt = c if isinstance(c, str) else str(c)[:5000]
                     break
 
             n_tools = len(tools) if tools else 0
             iter_tag = f" (iter {iteration})" if iteration else ""
             self._emitter.emit(
-                "context_builder", "llm",
+                "context_builder",
+                "llm",
                 f"LLM call #{self._llm_call_n}{iter_tag}",
                 "llm_call",
                 data=f"[System Prompt] + [{n_tools} Tools] + [{len(context)} Messages]",
@@ -294,7 +305,8 @@ class TraceIntegration:
             sections["Response"] = response_text
 
             self._emitter.emit(
-                "llm", "agent",
+                "llm",
+                "agent",
                 label,
                 "llm_response",
                 data=label,
@@ -309,7 +321,9 @@ class TraceIntegration:
     # 4a. agent -> gating (per-tool gate evaluation)
     # ------------------------------------------------------------------
 
-    def on_gate_check(self, tool_name: str, gate_action: str, gate_message: str | None = None, iteration: int = 0) -> None:
+    def on_gate_check(
+        self, tool_name: str, gate_action: str, gate_message: str | None = None, iteration: int = 0
+    ) -> None:
         """Emitted per-tool at the point gating.evaluate() returns."""
         if not self._ok:
             return
@@ -320,7 +334,8 @@ class TraceIntegration:
                 detail += f"\n{gate_message}"
             detail += "\n\nChecks: repeat -> plan_mode -> director -> approval"
             self._emitter.emit(
-                "agent", "gating",
+                "agent",
+                "gating",
                 f"Gate: {tool_name} -> {gate_action}{iter_tag}",
                 "gate_check",
                 data=detail,
@@ -343,7 +358,8 @@ class TraceIntegration:
                 args_str = args_str[:400] + "..."
             iter_tag = f" (iter {iteration})" if iteration else ""
             self._emitter.emit(
-                "gating", "tools",
+                "gating",
+                "tools",
                 f"Execute: {tool_name}{iter_tag}",
                 "tool_execute",
                 data=f"{tool_name}({args_str})",
@@ -364,11 +380,15 @@ class TraceIntegration:
             n = len(tool_messages)
             names = [msg.get("name", "?") for msg in tool_messages]
             iter_tag = f" (iter {iteration})" if iteration else ""
-            label = (f"Results: {', '.join(names)}{iter_tag}" if n <= 3
-                     else f"{n} tool results{iter_tag}")
+            label = (
+                f"Results: {', '.join(names)}{iter_tag}"
+                if n <= 3
+                else f"{n} tool results{iter_tag}"
+            )
 
             self._emitter.emit(
-                "tools", "agent",
+                "tools",
+                "agent",
                 label,
                 "tool_result",
                 data=self._emitter.format_tool_results(tool_messages),
@@ -387,7 +407,8 @@ class TraceIntegration:
         try:
             sid = session_id or "?"
             self._emitter.emit(
-                "agent", "store",
+                "agent",
+                "store",
                 "Session persisted",
                 "persist",
                 data=f"MessageStore updated (in-memory) + appended to:\n.claraity/sessions/{sid}.jsonl",
@@ -404,7 +425,8 @@ class TraceIntegration:
             return
         try:
             self._emitter.emit(
-                "agent", "user",
+                "agent",
+                "user",
                 "Response delivered",
                 "request",
                 data="Response sent back to user in VS Code.",
@@ -435,14 +457,11 @@ class TraceIntegration:
 
             reason = safety_reason or "Category-based approval required"
             self._emitter.emit(
-                "gating", "user",
+                "gating",
+                "user",
                 f"Approval required: {tool_name}{iter_tag}",
                 "approval",
-                data=(
-                    f"Tool: {tool_name}\n"
-                    f"Reason: {reason}\n\n"
-                    f"Waiting for user decision..."
-                ),
+                data=(f"Tool: {tool_name}\nReason: {reason}\n\nWaiting for user decision..."),
                 sections={
                     "Tool": tool_name,
                     "Arguments": args_str,
@@ -481,7 +500,8 @@ class TraceIntegration:
                 data_lines.append("\nTool rejected. Turn will end.")
 
             self._emitter.emit(
-                "user", "gating",
+                "user",
+                "gating",
                 f"User {decision.lower()}: {tool_name}{iter_tag}",
                 "approval",
                 data="\n".join(data_lines),
@@ -508,7 +528,8 @@ class TraceIntegration:
         try:
             iter_tag = f" (iter {iteration})" if iteration else ""
             self._emitter.emit(
-                "agent", "store",
+                "agent",
+                "store",
                 f"Store: {write_type}{iter_tag}",
                 "persist",
                 data=detail,
@@ -538,7 +559,8 @@ class TraceIntegration:
             iter_tag = f" (iter {iteration})" if iteration else ""
             task_preview = task[:200] + "..." if len(task) > 200 else task
             self._emitter.emit(
-                "agent", "agent",
+                "agent",
+                "agent",
                 f"SubAgent: {subagent_name}{iter_tag}",
                 "subagent_start",
                 data=f"Delegating to subagent '{subagent_name}':\n\n{task_preview}",
@@ -566,7 +588,8 @@ class TraceIntegration:
             status = "[OK] Success" if success else "[FAIL] Failed"
             iter_tag = f" (iter {iteration})" if iteration else ""
             self._emitter.emit(
-                "agent", "agent",
+                "agent",
+                "agent",
                 f"SubAgent done: {subagent_name} {status}{iter_tag}",
                 "subagent_end",
                 data=(

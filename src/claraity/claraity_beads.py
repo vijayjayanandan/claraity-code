@@ -25,9 +25,9 @@ Usage:
     python -m src.claraity.claraity_beads claim <id> [--as NAME]
 """
 
+import hashlib
 import json
 import sqlite3
-import hashlib
 import sys
 import uuid
 from contextlib import contextmanager
@@ -38,8 +38,12 @@ from typing import Optional
 # -- Constants -----------------------------------------------------------------
 
 VALID_STATUSES = (
-    "open", "in_progress", "blocked", "deferred",
-    "closed", "pinned",
+    "open",
+    "in_progress",
+    "blocked",
+    "deferred",
+    "closed",
+    "pinned",
     "hooked",  # Reserved for future multi-agent locking. No codepath sets this yet.
 )
 
@@ -57,8 +61,14 @@ BLOCKING_DEP_TYPES = ("blocks", "conditional-blocks", "waits-for")
 
 # Non-blocking dependency types (accepted, don't affect ready)
 ASSOCIATION_DEP_TYPES = (
-    "related", "discovered-from", "caused-by", "tracks",
-    "validates", "supersedes", "duplicates", "parent-child",
+    "related",
+    "discovered-from",
+    "caused-by",
+    "tracks",
+    "validates",
+    "supersedes",
+    "duplicates",
+    "parent-child",
 )
 
 VALID_DEP_TYPES = BLOCKING_DEP_TYPES + ASSOCIATION_DEP_TYPES
@@ -182,7 +192,7 @@ class BeadStore:
     def __init__(self, db_path: str = ".claraity/claraity_beads.db"):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn: Optional[sqlite3.Connection] = None
+        self.conn: sqlite3.Connection | None = None
         # Auto-import: if DB missing but JSONL exists, rebuild
         if not self.db_path.exists():
             jsonl_path = self.db_path.with_suffix(".jsonl")
@@ -343,9 +353,7 @@ class BeadStore:
     ):
         """Update bead status. See VALID_STATUSES for allowed values."""
         if status not in VALID_STATUSES:
-            raise ValueError(
-                f"Invalid status '{status}'. Must be one of: {VALID_STATUSES}"
-            )
+            raise ValueError(f"Invalid status '{status}'. Must be one of: {VALID_STATUSES}")
 
         now = self._now()
         with self._cursor() as cur:
@@ -384,9 +392,7 @@ class BeadStore:
         """
         now = self._now()
         with self._cursor() as cur:
-            cur.execute(
-                "SELECT assignee, status, issue_type FROM beads WHERE id=?", (bead_id,)
-            )
+            cur.execute("SELECT assignee, status, issue_type FROM beads WHERE id=?", (bead_id,))
             row = cur.fetchone()
             if row is None:
                 raise ValueError(f"Bead '{bead_id}' not found")
@@ -410,8 +416,11 @@ class BeadStore:
                 return False
 
             self._record_event(
-                cur, bead_id, "claimed",
-                row["assignee"], claimant,
+                cur,
+                bead_id,
+                "claimed",
+                row["assignee"],
+                claimant,
             )
             return True
 
@@ -448,7 +457,11 @@ class BeadStore:
                 (until, now, now, bead_id),
             )
             self._record_event(
-                cur, bead_id, "status_changed", old_status, "deferred",
+                cur,
+                bead_id,
+                "status_changed",
+                old_status,
+                "deferred",
                 comment=f"defer_until={until}" if until else None,
             )
 
@@ -462,9 +475,7 @@ class BeadStore:
     ) -> str:
         """Add dependency: from_id relates to to_id via dep_type."""
         if dep_type not in VALID_DEP_TYPES:
-            raise ValueError(
-                f"Invalid dep_type '{dep_type}'. Must be one of: {VALID_DEP_TYPES}"
-            )
+            raise ValueError(f"Invalid dep_type '{dep_type}'. Must be one of: {VALID_DEP_TYPES}")
         did = self._make_id(f"{from_id}:{to_id}:{dep_type}")
         now = self._now()
         with self._cursor() as cur:
@@ -472,8 +483,7 @@ class BeadStore:
                 """INSERT OR IGNORE INTO dependencies
                    (id, from_id, to_id, dep_type, created_at, created_by, metadata)
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (did, from_id, to_id, dep_type, now, created_by,
-                 json.dumps(metadata or {})),
+                (did, from_id, to_id, dep_type, now, created_by, json.dumps(metadata or {})),
             )
         return did
 
@@ -592,8 +602,11 @@ class BeadStore:
             # Record events
             for bid in bead_ids:
                 self._record_event(
-                    cur, bid, "released",
-                    claimant, "agent",
+                    cur,
+                    bid,
+                    "released",
+                    claimant,
+                    "agent",
                     comment=f"session {session_id} ended",
                 )
 
@@ -601,7 +614,7 @@ class BeadStore:
 
     # -- Read ------------------------------------------------------------------
 
-    def get_bead(self, bead_id: str) -> Optional[dict]:
+    def get_bead(self, bead_id: str) -> dict | None:
         with self._cursor() as cur:
             cur.execute("SELECT * FROM beads WHERE id=?", (bead_id,))
             row = cur.fetchone()
@@ -733,8 +746,7 @@ class BeadStore:
         placeholders = ",".join("?" for _ in BLOCKING_DEP_TYPES)
         # Compute stale threshold as ISO8601 string for comparison
         stale_threshold = (
-            datetime.now(timezone.utc)
-            - timedelta(minutes=self.STALE_CLAIM_MINUTES)
+            datetime.now(timezone.utc) - timedelta(minutes=self.STALE_CLAIM_MINUTES)
         ).isoformat()
         with self._cursor() as cur:
             cur.execute(
@@ -845,7 +857,7 @@ class BeadStore:
         if db.exists():
             db.unlink()
         store = cls(db_path)
-        with open(jsonl_path, "r", encoding="utf-8") as f:
+        with open(jsonl_path, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -994,7 +1006,9 @@ def render_tasks_md(store: BeadStore) -> str:
         for b in ready:
             tags = json.loads(b["tags"]) if b["tags"] else []
             tag_str = f" [{', '.join(tags)}]" if tags else ""
-            type_str = f" ({b['issue_type']})" if b.get("issue_type") and b["issue_type"] != "task" else ""
+            type_str = (
+                f" ({b['issue_type']})" if b.get("issue_type") and b["issue_type"] != "task" else ""
+            )
             lines.append(f"- **P{b['priority']}**{type_str} `{b['id']}` {b['title']}{tag_str}")
             if b["description"]:
                 desc = b["description"][:100]
@@ -1026,9 +1040,9 @@ def render_tasks_md(store: BeadStore) -> str:
     ready_ids = {b["id"] for b in ready}
     ip_ids = {b["id"] for b in in_progress}
     blocked = [
-        b for b in beads
-        if (b["status"] == "blocked")
-        or (b["status"] == "open" and b["id"] not in ready_ids)
+        b
+        for b in beads
+        if (b["status"] == "blocked") or (b["status"] == "open" and b["id"] not in ready_ids)
     ]
     if blocked:
         all_blockers = store.get_all_blockers()
@@ -1373,7 +1387,11 @@ Commands:
             if ready:
                 print(f"Ready tasks ({len(ready)}):\n")
                 for b in ready:
-                    type_str = f" ({b['issue_type']})" if b.get("issue_type") and b["issue_type"] != "task" else ""
+                    type_str = (
+                        f" ({b['issue_type']})"
+                        if b.get("issue_type") and b["issue_type"] != "task"
+                        else ""
+                    )
                     print(f"  P{b['priority']}{type_str} [{b['id']}] {b['title']}")
             else:
                 print("No ready tasks.")
@@ -1382,7 +1400,11 @@ Commands:
             beads = store.get_all_beads()
             for b in beads:
                 icon = _STATUS_ICONS.get(b["status"], "[?]")
-                type_str = f" ({b['issue_type']})" if b.get("issue_type") and b["issue_type"] != "task" else ""
+                type_str = (
+                    f" ({b['issue_type']})"
+                    if b.get("issue_type") and b["issue_type"] != "task"
+                    else ""
+                )
                 print(f"  {icon} P{b['priority']}{type_str} [{b['id']}] {b['title']}")
 
         elif cmd == "brief":
@@ -1396,8 +1418,10 @@ Commands:
 
         elif cmd == "create":
             if len(sys.argv) < 3:
-                print('Usage: create <title> [--priority N] [--desc "..."] [--parent <id>]'
-                      ' [--tags t1,t2] [--type TYPE] [--ref EXT_REF] [--due DATE]')
+                print(
+                    'Usage: create <title> [--priority N] [--desc "..."] [--parent <id>]'
+                    " [--tags t1,t2] [--type TYPE] [--ref EXT_REF] [--due DATE]"
+                )
                 sys.exit(1)
             title = sys.argv[2]
             # Parse optional args

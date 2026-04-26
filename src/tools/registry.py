@@ -15,6 +15,15 @@ def get_stateless_tools() -> list:
     Lazy import to avoid circular dependencies at module load time.
     Each tool opens/closes its own resources per execute() call.
     """
+    from src.tools.clarify_tool import ClarifyTool
+    from src.tools.file_operations import (
+        AppendToFileTool,
+        EditFileTool,
+        ListDirectoryTool,
+        ReadFileTool,
+        RunCommandTool,
+        WriteFileTool,
+    )
     from src.tools.knowledge_tools import (
         BeadCreateTool,
         BeadLinkTool,
@@ -27,15 +36,6 @@ def get_stateless_tools() -> list:
         KnowledgeScanFilesTool,
         KnowledgeSetMetadataTool,
         KnowledgeUpdateTool,
-    )
-    from src.tools.clarify_tool import ClarifyTool
-    from src.tools.file_operations import (
-        AppendToFileTool,
-        EditFileTool,
-        ListDirectoryTool,
-        ReadFileTool,
-        RunCommandTool,
-        WriteFileTool,
     )
     from src.tools.search_tools import GlobTool, GrepTool
     from src.tools.web_tools import WebFetchTool, WebSearchTool

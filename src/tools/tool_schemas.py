@@ -167,6 +167,7 @@ LIST_DIRECTORY_TOOL = ToolDefinition(
     },
 )
 
+
 def _build_run_command_description() -> str:
     """Build run_command description dynamically based on detected shell.
 
@@ -260,10 +261,12 @@ def _build_run_command_description() -> str:
         "- Prefer creating new commits over amending existing ones.\n"
         "- When staging files, prefer specific file names over 'git add -A' or 'git add .'.\n"
         "- Use HEREDOC for multi-line commit messages:\n"
-        '  git commit -m "$(cat <<\'EOF\'\\nMessage\\n\\nCo-Authored-By: AI Coding Agent <agent@example.com>\\nEOF\\n)"\n'
+        "  git commit -m \"$(cat <<'EOF'\\nMessage\\n\\nCo-Authored-By: AI Coding Agent <agent@example.com>\\nEOF\\n)\"\n"
     )
 
-    return base + shell_section + dont_use + paths + multi_cmd + background + guardrails + git_safety
+    return (
+        base + shell_section + dont_use + paths + multi_cmd + background + guardrails + git_safety
+    )
 
 
 RUN_COMMAND_TOOL = ToolDefinition(
@@ -762,7 +765,10 @@ KNOWLEDGE_SCAN_FILES_TOOL = ToolDefinition(
         "type": "object",
         "properties": {
             "root": {"type": "string", "description": "Root directory to scan (default: 'src')"},
-            "extensions": {"type": "string", "description": "Comma-separated extensions (default: .py,.ts,.tsx,.js,.jsx,.go,.java,.rs)"},
+            "extensions": {
+                "type": "string",
+                "description": "Comma-separated extensions (default: .py,.ts,.tsx,.js,.jsx,.go,.java,.rs)",
+            },
         },
         "required": [],
     },
@@ -829,14 +835,20 @@ KNOWLEDGE_QUERY_TOOL = ToolDefinition(
                 "description": "Filter: module, component, decision, invariant, flow, file, system",
             },
             "module_id": {"type": "string", "description": "Module detail (e.g., mod-core)"},
-            "file_path": {"type": "string", "description": "File context (e.g., src/core/agent.py)"},
+            "file_path": {
+                "type": "string",
+                "description": "File context (e.g., src/core/agent.py)",
+            },
             "impact": {"type": "string", "description": "Blast radius for component ID"},
             "related_to": {"type": "string", "description": "Show edges for node ID"},
             "show": {
                 "type": "string",
                 "description": "Output: detail, brief, overview, metadata, constraints, edges",
             },
-            "keyword": {"type": "string", "description": "Simple substring search (prefer search=)"},
+            "keyword": {
+                "type": "string",
+                "description": "Simple substring search (prefer search=)",
+            },
         },
         "required": [],
     },
@@ -848,7 +860,10 @@ KNOWLEDGE_SET_METADATA_TOOL = ToolDefinition(
     parameters={
         "type": "object",
         "properties": {
-            "metadata": {"type": "string", "description": 'JSON object of key-value pairs. Example: {"repo_name": "MyProject", "architecture_overview": "A web app that..."}. Standard keys: architecture_overview, repo_name, scanned_by.'},
+            "metadata": {
+                "type": "string",
+                "description": 'JSON object of key-value pairs. Example: {"repo_name": "MyProject", "architecture_overview": "A web app that..."}. Standard keys: architecture_overview, repo_name, scanned_by.',
+            },
         },
         "required": ["metadata"],
     },
@@ -884,16 +899,31 @@ TASK_CREATE_TOOL = ToolDefinition(
         "type": "object",
         "properties": {
             "title": {"type": "string", "description": "Task title"},
-            "description": {"type": "string", "description": "Why this issue exists and what needs to be done"},
-            "priority": {"type": "integer", "description": "Priority (0=highest, 5=default, 9=lowest)"},
+            "description": {
+                "type": "string",
+                "description": "Why this issue exists and what needs to be done",
+            },
+            "priority": {
+                "type": "integer",
+                "description": "Priority (0=highest, 5=default, 9=lowest)",
+            },
             "parent_id": {"type": "string", "description": "Parent task ID for subtasks"},
             "tags": {"type": "string", "description": "Comma-separated tags"},
-            "issue_type": {"type": "string", "enum": ["bug", "feature", "task", "epic", "chore", "decision"]},
-            "external_ref": {"type": "string", "description": "External reference (e.g., jira-CC-42)"},
+            "issue_type": {
+                "type": "string",
+                "enum": ["bug", "feature", "task", "epic", "chore", "decision"],
+            },
+            "external_ref": {
+                "type": "string",
+                "description": "External reference (e.g., jira-CC-42)",
+            },
             "design": {"type": "string", "description": "Technical design notes"},
             "acceptance_criteria": {"type": "string", "description": "Definition of done"},
             "estimated_minutes": {"type": "integer", "description": "Effort estimate in minutes"},
-            "deps": {"type": "string", "description": "Dependencies: 'type:id,...' (e.g., 'discovered-from:bd-a1b2')"},
+            "deps": {
+                "type": "string",
+                "description": "Dependencies: 'type:id,...' (e.g., 'discovered-from:bd-a1b2')",
+            },
         },
         "required": ["title"],
     },
@@ -906,9 +936,18 @@ TASK_UPDATE_TOOL = ToolDefinition(
         "type": "object",
         "properties": {
             "bead_id": {"type": "string", "description": "Task ID (e.g., bd-a1b2)"},
-            "action": {"type": "string", "enum": ["start", "close", "note", "defer", "reopen", "claim"]},
-            "summary": {"type": "string", "description": "For close: what was done. For note: content."},
-            "close_reason": {"type": "string", "description": "For close: why (resolved, wontfix, duplicate)"},
+            "action": {
+                "type": "string",
+                "enum": ["start", "close", "note", "defer", "reopen", "claim"],
+            },
+            "summary": {
+                "type": "string",
+                "description": "For close: what was done. For note: content.",
+            },
+            "close_reason": {
+                "type": "string",
+                "description": "For close: why (resolved, wontfix, duplicate)",
+            },
             "defer_until": {"type": "string", "description": "For defer: ISO8601 date to reappear"},
             "claimant": {"type": "string", "description": "For claim: identity of claimer"},
         },
@@ -924,7 +963,21 @@ TASK_LINK_TOOL = ToolDefinition(
         "properties": {
             "from_id": {"type": "string", "description": "Source task ID"},
             "to_id": {"type": "string", "description": "Target task ID"},
-            "dep_type": {"type": "string", "enum": ["blocks", "conditional-blocks", "waits-for", "related", "discovered-from", "caused-by", "tracks", "validates", "supersedes", "duplicates"]},
+            "dep_type": {
+                "type": "string",
+                "enum": [
+                    "blocks",
+                    "conditional-blocks",
+                    "waits-for",
+                    "related",
+                    "discovered-from",
+                    "caused-by",
+                    "tracks",
+                    "validates",
+                    "supersedes",
+                    "duplicates",
+                ],
+            },
         },
         "required": ["from_id", "to_id"],
     },
@@ -1023,6 +1076,7 @@ CODE_TOOLS = [
 EXECUTION_TOOLS = [
     RUN_COMMAND_TOOL,
 ]
+
 
 def get_tools_for_task(task_type: str) -> list[ToolDefinition]:
     """

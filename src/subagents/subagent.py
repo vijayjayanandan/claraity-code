@@ -204,6 +204,7 @@ class SubAgent:
 
         # Trace integration (default no-op; replaced by set_trace in subprocess mode)
         from src.core.trace_integration import TraceIntegration
+
         self._trace = TraceIntegration(enabled=False)
 
         # Store subscription unsubscribe function
@@ -296,6 +297,7 @@ class SubAgent:
                 )
             elif backend_type == "anthropic":
                 from src.llm.anthropic_backend import AnthropicBackend
+
                 override_llm = AnthropicBackend(
                     config=override_config,
                     api_key=api_key,
@@ -886,7 +888,10 @@ class SubAgent:
 
             # Trace: LLM response
             self._trace.on_llm_response(
-                tool_calls, response_content, None, iteration,
+                tool_calls,
+                response_content,
+                None,
+                iteration,
             )
 
             if not tool_calls:
@@ -983,7 +988,9 @@ class SubAgent:
                 self._trace.on_gate_check(tool_name, gate_action, None, iteration)
 
                 if needs_approval:
-                    self._trace.on_approval_request(tool_name, tool_args, "Write operation", iteration)
+                    self._trace.on_approval_request(
+                        tool_name, tool_args, "Write operation", iteration
+                    )
                     self._message_store.update_tool_state(
                         tool_call_id=tool_call_id,
                         status=ToolStatus.AWAITING_APPROVAL,
@@ -1052,7 +1059,9 @@ class SubAgent:
                     status=ToolStatus.RUNNING,
                     tool_name=tool_name,
                     extra_metadata=build_tool_metadata(
-                        tool_name, tool_args, args_summary,
+                        tool_name,
+                        tool_args,
+                        args_summary,
                         context_tokens=self._context_tokens,
                     ),
                 )
@@ -1089,7 +1098,9 @@ class SubAgent:
 
                     if result.is_success():
                         # Preserve list output (multimodal) -- only stringify scalars
-                        output = result.output if isinstance(result.output, list) else str(result.output)
+                        output = (
+                            result.output if isinstance(result.output, list) else str(result.output)
+                        )
                         tool_messages.append(
                             {
                                 "role": "tool",

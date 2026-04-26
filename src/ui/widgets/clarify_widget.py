@@ -331,7 +331,9 @@ class ClarifyWidget(Container, can_focus=True):
         self.option_indices: dict[int, int] = {}  # tab_index -> current option index
 
         # Tab labels: one per question + "Submit"
-        self._tab_labels = [q.get("id", q.get("label", f"Q{i + 1}")) for i, q in enumerate(questions)]
+        self._tab_labels = [
+            q.get("id", q.get("label", f"Q{i + 1}")) for i, q in enumerate(questions)
+        ]
         self._tab_labels.append("Submit")
         self._tab_count = len(self._tab_labels)
         self._completed_tabs: set[int] = set()

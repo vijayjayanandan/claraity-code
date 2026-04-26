@@ -239,14 +239,10 @@ Use this tool proactively when appropriate!"""
         effective_max_iterations = max_iterations if iteration_limit_enabled else 200
 
         # Subagent trace file path (parallel to transcript, different extension)
-        subagent_trace_path = str(
-            Path(transcript_path).with_suffix(".trace.jsonl")
-        )
+        subagent_trace_path = str(Path(transcript_path).with_suffix(".trace.jsonl"))
 
         # Determine if trace is enabled on the parent
-        trace_enabled = (
-            self._trace and self._trace.enabled
-        )
+        trace_enabled = self._trace and self._trace.enabled
 
         subprocess_input = SubprocessInput(
             config=asdict(config),
@@ -429,7 +425,10 @@ Use this tool proactively when appropriate!"""
             # Emit trace bookend: subagent finished
             if self._trace:
                 self._trace.on_subagent_end(
-                    subagent, subagent_trace_path, sa_success, sa_execution_time,
+                    subagent,
+                    subagent_trace_path,
+                    sa_success,
+                    sa_execution_time,
                 )
 
             # Close stdin (signals EOF to child if still waiting for approval)
@@ -716,4 +715,5 @@ Use this tool proactively when appropriate!"""
         Only the parameters (subagent, task) are canonical and stable.
         """
         from src.tools.tool_schemas import _SCHEMA_REGISTRY
+
         return _SCHEMA_REGISTRY["delegate_to_subagent"].parameters

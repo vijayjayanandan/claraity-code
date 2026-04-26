@@ -417,6 +417,7 @@ Co-Authored-By: AI Coding Agent <agent@example.com>
 # Command Execution Safety
 # ---------------------------------------------------------------------------
 
+
 def _build_command_execution() -> str:
     """Build COMMAND_EXECUTION section dynamically based on detected shell."""
     from src.platform import detect_preferred_shell

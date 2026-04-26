@@ -122,6 +122,7 @@ class ReadFileTool(FileOperationTool):
 
     def __init__(self):
         from src.tools.tool_schemas import _SCHEMA_REGISTRY
+
         _def = _SCHEMA_REGISTRY["read_file"]
         super().__init__(name=_def.name, description=_def.description)
 
@@ -181,7 +182,9 @@ class ReadFileTool(FileOperationTool):
         )
 
     def _build_multimodal_result(
-        self, text_result: ToolResult, images: list[dict],
+        self,
+        text_result: ToolResult,
+        images: list[dict],
     ) -> ToolResult:
         """Build a multimodal ToolResult with images interleaved at their document positions.
 
@@ -218,17 +221,21 @@ class ReadFileTool(FileOperationTool):
                     img = images[img_idx]
                     b64 = img.get("base64", "")
                     media_type = img.get("media_type", "image/png")
-                    content_blocks.append({
-                        "type": "image_url",
-                        "image_url": {"url": f"data:{media_type};base64,{b64}"},
-                    })
+                    content_blocks.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{media_type};base64,{b64}"},
+                        }
+                    )
                     image_count += 1
 
         if image_count:
-            content_blocks.append({
-                "type": "text",
-                "text": f"[{image_count} embedded image(s) extracted from document]",
-            })
+            content_blocks.append(
+                {
+                    "type": "text",
+                    "text": f"[{image_count} embedded image(s) extracted from document]",
+                }
+            )
 
         metadata = dict(text_result.metadata)
         metadata["image_count"] = image_count
@@ -320,10 +327,7 @@ class ReadFileTool(FileOperationTool):
                         tool_name=self.name,
                         status=ToolStatus.ERROR,
                         output=None,
-                        error=(
-                            f"Document too large: {size_mb:.1f} MB "
-                            f"(limit: {limit_mb:.0f} MB)."
-                        ),
+                        error=(f"Document too large: {size_mb:.1f} MB (limit: {limit_mb:.0f} MB)."),
                     )
 
                 # Run extraction in a subprocess for C-library crash isolation.
@@ -335,13 +339,19 @@ class ReadFileTool(FileOperationTool):
                         cmd = [sys.executable, "--extract-doc"]
                     else:
                         cmd = [sys.executable, "-m", "src.server", "--extract-doc"]
-                    cmd.extend([
-                        str(path),
-                        "--format", suffix.lstrip("."),
-                        "--max-lines", str(self.MAX_EXTRACTED_LINES),
-                        "--max-zip-size", str(self.MAX_ZIP_DECOMPRESSED_BYTES),
-                        "--max-zip-ratio", str(self.MAX_ZIP_RATIO),
-                    ])
+                    cmd.extend(
+                        [
+                            str(path),
+                            "--format",
+                            suffix.lstrip("."),
+                            "--max-lines",
+                            str(self.MAX_EXTRACTED_LINES),
+                            "--max-zip-size",
+                            str(self.MAX_ZIP_DECOMPRESSED_BYTES),
+                            "--max-zip-ratio",
+                            str(self.MAX_ZIP_RATIO),
+                        ]
+                    )
                     if extract_images:
                         cmd.append("--extract-images")
                     if pages and suffix == ".pdf":
@@ -398,7 +408,11 @@ class ReadFileTool(FileOperationTool):
                     all_lines = data["lines"]
                     images = data.get("images", [])
                     text_result = self._format_extracted_lines(
-                        all_lines, path, start, end, effective_max,
+                        all_lines,
+                        path,
+                        start,
+                        end,
+                        effective_max,
                     )
 
                     # If images were extracted, build multimodal content
@@ -411,7 +425,7 @@ class ReadFileTool(FileOperationTool):
                         tool_name=self.name,
                         status=ToolStatus.ERROR,
                         output=None,
-                        error=f"Document extraction timed out after 30 seconds.",
+                        error="Document extraction timed out after 30 seconds.",
                     )
                 except (json.JSONDecodeError, KeyError) as e:
                     logger.warning(
@@ -542,6 +556,7 @@ class WriteFileTool(FileOperationTool):
 
     def __init__(self):
         from src.tools.tool_schemas import _SCHEMA_REGISTRY
+
         _def = _SCHEMA_REGISTRY["write_file"]
         super().__init__(name=_def.name, description=_def.description)
 
@@ -585,6 +600,7 @@ class ListDirectoryTool(FileOperationTool):
 
     def __init__(self):
         from src.tools.tool_schemas import _SCHEMA_REGISTRY
+
         _def = _SCHEMA_REGISTRY["list_directory"]
         super().__init__(name=_def.name, description=_def.description)
 
@@ -672,12 +688,17 @@ class EditFileTool(FileOperationTool):
 
     def __init__(self):
         from src.tools.tool_schemas import _SCHEMA_REGISTRY
+
         _def = _SCHEMA_REGISTRY["edit_file"]
         super().__init__(name=_def.name, description=_def.description)
 
     def execute(
-        self, file_path: str, old_text: str, new_text: str,
-        replace_all: bool = False, **kwargs: Any,
+        self,
+        file_path: str,
+        old_text: str,
+        new_text: str,
+        replace_all: bool = False,
+        **kwargs: Any,
     ) -> ToolResult:
         """Edit file with find/replace."""
         try:
@@ -737,7 +758,10 @@ class EditFileTool(FileOperationTool):
                 tool_name=self.name,
                 status=ToolStatus.SUCCESS,
                 output=f"Successfully edited {file_path}",
-                metadata={"file_path": str(path), "replacements": occurrence_count if replace_all else 1},
+                metadata={
+                    "file_path": str(path),
+                    "replacements": occurrence_count if replace_all else 1,
+                },
             )
 
         except Exception as e:
@@ -756,6 +780,7 @@ class AppendToFileTool(FileOperationTool):
 
     def __init__(self):
         from src.tools.tool_schemas import _SCHEMA_REGISTRY
+
         _def = _SCHEMA_REGISTRY["append_to_file"]
         super().__init__(name=_def.name, description=_def.description)
 
@@ -829,6 +854,7 @@ class RunCommandTool(Tool):
 
     def __init__(self, registry=None):
         from src.tools.tool_schemas import _SCHEMA_REGISTRY
+
         _def = _SCHEMA_REGISTRY["run_command"]
         super().__init__(name=_def.name, description=_def.description)
         self._registry = registry
@@ -851,7 +877,11 @@ class RunCommandTool(Tool):
             # grandchildren running with pipe handles open.
             try:
                 kill_proc = await asyncio.create_subprocess_exec(
-                    "taskkill", "/F", "/T", "/PID", str(process.pid),
+                    "taskkill",
+                    "/F",
+                    "/T",
+                    "/PID",
+                    str(process.pid),
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.DEVNULL,
                 )
@@ -865,6 +895,7 @@ class RunCommandTool(Tool):
             # members of that group. process.kill() would only kill the shell.
             import os
             import signal
+
             try:
                 os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
@@ -996,6 +1027,7 @@ class RunCommandTool(Tool):
             )
 
         from src.tools.command_safety import CommandSafety
+
         safety_result = check_command_safety(command)
         if safety_result.safety == CommandSafety.BLOCK:
             return ToolResult(
@@ -1055,11 +1087,14 @@ class RunCommandTool(Tool):
         try:
             if platform.system() == "Windows":
                 import subprocess as _sp
+
                 if shell_info["shell"] == "bash":
                     bash_env = get_bash_env(shell_info["path"])
                     bash_env = _ensure_pythonioencoding(bash_env)
                     process = await asyncio.create_subprocess_exec(
-                        shell_info["path"], "-c", command,
+                        shell_info["path"],
+                        "-c",
+                        command,
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.PIPE,
                         stdin=asyncio.subprocess.DEVNULL,
@@ -1070,7 +1105,10 @@ class RunCommandTool(Tool):
                 else:
                     ps_env = _ensure_pythonioencoding(None)
                     process = await asyncio.create_subprocess_exec(
-                        "powershell", "-NoProfile", "-Command", command,
+                        "powershell",
+                        "-NoProfile",
+                        "-Command",
+                        command,
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.PIPE,
                         stdin=asyncio.subprocess.DEVNULL,
@@ -1137,7 +1175,11 @@ class RunCommandTool(Tool):
                         status=ToolStatus.ERROR,
                         output=_assemble_partial(),
                         error="Command cancelled by user interrupt",
-                        metadata={"command": command, "working_directory": cwd or "current", "interrupted": True},
+                        metadata={
+                            "command": command,
+                            "working_directory": cwd or "current",
+                            "interrupted": True,
+                        },
                     )
 
                 # Check for timeout
@@ -1156,15 +1198,20 @@ class RunCommandTool(Tool):
                         status=ToolStatus.ERROR,
                         output=_assemble_partial(),
                         error=f"Command timed out after {timeout} seconds. "
-                              f"Use a longer timeout if the command needs more time (max 600s).",
-                        metadata={"command": command, "timeout": timeout,
-                                  "working_directory": cwd or "current",
-                                  "partial_output": bool(stdout_chunks or stderr_chunks)},
+                        f"Use a longer timeout if the command needs more time (max 600s).",
+                        metadata={
+                            "command": command,
+                            "timeout": timeout,
+                            "working_directory": cwd or "current",
+                            "partial_output": bool(stdout_chunks or stderr_chunks),
+                        },
                     )
 
                 # Poll: wait up to 0.2s for process to finish
                 try:
-                    await asyncio.wait_for(asyncio.shield(asyncio.gather(stdout_task, stderr_task)), timeout=0.2)
+                    await asyncio.wait_for(
+                        asyncio.shield(asyncio.gather(stdout_task, stderr_task)), timeout=0.2
+                    )
                     break  # Both stream readers finished -> process done
                 except asyncio.TimeoutError:
                     pass  # Still running, loop again to check interrupt/timeout
@@ -1195,8 +1242,11 @@ class RunCommandTool(Tool):
                 status=ToolStatus.ERROR,
                 output=_assemble_partial(),
                 error="Command cancelled by user (Stop pressed)",
-                metadata={"command": command, "working_directory": cwd or "current",
-                          "interrupted": True},
+                metadata={
+                    "command": command,
+                    "working_directory": cwd or "current",
+                    "interrupted": True,
+                },
             )
 
         # --- BUILD RESULT ---
