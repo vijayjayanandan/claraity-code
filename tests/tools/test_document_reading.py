@@ -12,6 +12,7 @@ Tests are organized into:
 - TestAnthropicMultimodalToolResult: Anthropic backend multimodal tool results
 """
 
+import importlib.util
 import json
 import subprocess
 import zipfile
@@ -53,6 +54,10 @@ def _make_subprocess_result(lines, error=None, returncode=0, images=None):
 # ---------------------------------------------------------------------------
 
 
+_has_fitz = bool(importlib.util.find_spec("fitz"))
+
+
+@pytest.mark.skipif(not _has_fitz, reason="PyMuPDF (fitz) not installed")
 class TestExtractorModule:
     """Direct tests for document_extractor.py extraction functions."""
 
@@ -609,6 +614,7 @@ class TestDocumentEdgeCases:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(not _has_fitz, reason="PyMuPDF (fitz) not installed")
 class TestMultimodalExtraction:
     """Tests for scout-then-render image extraction from documents."""
 

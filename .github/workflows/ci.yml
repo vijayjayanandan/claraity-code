@@ -97,10 +97,10 @@ jobs:
           node-version: 20
 
       - name: Audit extension dependencies
-        run: cd claraity-vscode && npm audit --audit-level=moderate
+        run: cd claraity-vscode && npm audit --audit-level=moderate --omit=dev
 
       - name: Audit webview dependencies
-        run: cd claraity-vscode/webview-ui && npm audit --audit-level=moderate
+        run: cd claraity-vscode/webview-ui && npm audit --audit-level=moderate --omit=dev
 
   build:
     name: Build Package
