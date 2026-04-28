@@ -104,6 +104,8 @@ tmpclaude-*
 
 # Screenshots / images (keep in docs/ if needed)
 *.png
+# Exception: VS Code extension icon must be in git for VSIX packaging
+!claraity-vscode/media/icon.png
 
 # Validation results (generated)
 validation-results/
