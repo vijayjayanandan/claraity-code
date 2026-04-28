@@ -136,6 +136,6 @@ jobs:
         run: ls -la vsix/
 
       - name: Publish all platform packages
-        run: npx @vscode/vsce publish --packagePath vsix/*.vsix
+        run: npx @vscode/vsce publish --packagePath vsix/claraity-code-*.vsix
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
