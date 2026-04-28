@@ -97,6 +97,7 @@ a = Analysis(
         # Testing
         "src.testing.test_runner",
         # Third-party hidden imports
+        "anthropic",      # Anthropic LLM backend
         "fitz",           # PyMuPDF - PDF extraction
         "pymupdf",        # PyMuPDF alternate import name
         "docx",           # python-docx - Word extraction
@@ -106,6 +107,9 @@ a = Analysis(
         "bs4.formatter",
         "bs4.element",
         "emoji",
+        "pathspec",        # .claraityignore / .gitignore pattern matching
+        "keyring",         # Credential store
+        "cryptography",    # Fernet encryption for secrets
         "aiohttp",
         "aiohttp.web",
         "openai",
