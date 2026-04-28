@@ -57,11 +57,6 @@ from .error_context import ErrorContext
 from .error_recovery import ErrorRecoveryTracker
 from .file_reference_parser import FileReferenceParser
 
-# Director mode (lazy import to avoid circular dependency)
-# src.director.adapter -> prompts -> src.core.plan_mode -> src.core -> agent
-if TYPE_CHECKING:
-    from src.director.adapter import DirectorAdapter, DirectorGateDecision
-
 # Subagent components (lazy import to avoid circular dependency)
 if TYPE_CHECKING:
     from src.subagents import SubAgentManager, SubAgentResult
@@ -414,11 +409,6 @@ class CodingAgent(AgentInterface):
 
         self._trace = TraceIntegration()
 
-        # Initialize director adapter (disciplined workflow mode)
-        from src.director.adapter import DirectorAdapter
-
-        self.director_adapter = DirectorAdapter()
-
         # Initialize background task registry (always available)
         self._bg_registry = BackgroundTaskRegistry()
 
@@ -472,13 +462,12 @@ class CodingAgent(AgentInterface):
 
         self._gating = ToolGatingService(
             plan_mode_state=self.plan_mode_state,
-            director_adapter=self.director_adapter,
             permission_manager=self.permission_manager,
             error_tracker=self._error_tracker,
             mcp_manager=self._mcp_manager,
         )
 
-        # Special tool handlers (clarify, plan approval, director plan approval)
+        # Special tool handlers (clarify, plan approval)
         from src.core.special_tool_handlers import SpecialToolHandlers
 
         # Callback initially None; set after _on_auto_approve_changed is initialized.
@@ -487,7 +476,6 @@ class CodingAgent(AgentInterface):
         self._special_handlers = SpecialToolHandlers(
             memory=self.memory,
             plan_mode_state=self.plan_mode_state,
-            director_adapter=self.director_adapter,
             tool_executor=self.tool_executor,
             permission_manager=self.permission_manager,
             set_auto_approve_fn=self.set_auto_approve_categories,
@@ -508,19 +496,6 @@ class CodingAgent(AgentInterface):
 
         # Register delegation tool (now that subagent_manager is initialized)
         self.tool_executor.register_tool(DelegateToSubagentTool(self.subagent_manager))
-
-        # Register director checkpoint tools
-        from src.director.tools import (
-            DirectorCompleteIntegrationTool,
-            DirectorCompletePlanTool,
-            DirectorCompleteSliceTool,
-            DirectorCompleteUnderstandTool,
-        )
-
-        self.tool_executor.register_tool(DirectorCompleteUnderstandTool(self.director_adapter))
-        self.tool_executor.register_tool(DirectorCompletePlanTool(self.director_adapter))
-        self.tool_executor.register_tool(DirectorCompleteSliceTool(self.director_adapter))
-        self.tool_executor.register_tool(DirectorCompleteIntegrationTool(self.director_adapter))
 
         # SESSION START HOOK
         if self.hook_manager:
@@ -785,12 +760,11 @@ class CodingAgent(AgentInterface):
         self._compaction_failed = False
         self.tool_execution_history.clear()
 
-        # 4. Pause/resume metadata reset + Director
+        # 4. Pause/resume metadata reset
         self.last_stop_reason = None
         self.current_todo_id = None
         self._error_budget_resume_count = 0
         self._successful_tools_since_resume = 0
-        self.director_adapter.reset()
 
         logger.info(f"Session reset to {new_session_id}")
 
@@ -798,38 +772,8 @@ class CodingAgent(AgentInterface):
         """Check if currently in plan mode."""
         return self.plan_mode_state.is_active
 
-    # NOTE: _check_plan_mode_gate and _check_director_gate moved to
+    # NOTE: _check_plan_mode_gate moved to
     # src/core/tool_gating.py -> ToolGatingService (Phase 2 refactor)
-
-    def _refresh_director_context(self, current_context: list) -> None:
-        """
-        Refresh the director mode injection in the system prompt.
-
-        Called after director checkpoint tools change the phase so the LLM
-        sees the new phase instructions on its next iteration without
-        rebuilding the entire context.
-        """
-        if not current_context or not self.director_adapter.is_active:
-            return
-
-        system_msg = current_context[0]
-        if system_msg.get("role") != "system":
-            return
-
-        content = system_msg.get("content", "")
-
-        # Remove old director injection (from <director-mode to end of content)
-        marker = "<director-mode"
-        idx = content.find(marker)
-        if idx > 0:
-            content = content[:idx].rstrip()
-
-        # Append fresh injection for the current phase
-        new_injection = self.director_adapter.get_prompt_injection()
-        if new_injection:
-            content = content + "\n\n" + new_injection
-
-        system_msg["content"] = content
 
     def _sync_plan_mode_from_store(self) -> None:
         """
@@ -1403,9 +1347,8 @@ class CodingAgent(AgentInterface):
 
         return result_context
 
-    # NOTE: _handle_clarify_tool, _handle_request_plan_approval_tool, and
-    # _handle_director_plan_approval moved to src/core/special_tool_handlers.py
-    # -> SpecialToolHandlers (Phase 3 refactor)
+    # NOTE: _handle_clarify_tool and _handle_request_plan_approval_tool moved to
+    # src/core/special_tool_handlers.py -> SpecialToolHandlers (Phase 3 refactor)
 
     def _prepare_error_budget_pause(
         self,
@@ -1572,6 +1515,7 @@ class CodingAgent(AgentInterface):
         user_input: str,
         ui: "UIProtocol",
         attachments: "list | None" = None,
+        active_skills: "list[str] | None" = None,
     ) -> "AsyncIterator[UIEvent]":
         """
         Stream response to UI as typed UIEvent objects.
@@ -1701,8 +1645,9 @@ class CodingAgent(AgentInterface):
                 file_references=file_references if file_references else None,
                 agent_state=_todo_state if _todo_state.get("todos") else None,
                 plan_mode_state=self.plan_mode_state,
-                director_adapter=self.director_adapter,
+
                 iteration=0,
+                active_skill_ids=active_skills,
             )
             logger.debug(
                 "stream_response_phase",
@@ -1730,6 +1675,9 @@ class CodingAgent(AgentInterface):
             loop_start_time = time.monotonic()
             iteration = 0
             pause_continue_count = 0  # Track how many times user continued after pause
+            # System reminders state tracking
+            _reminder_tools_used: set[str] = set()
+            _reminder_last_task_tool_iter: int = -1
             current_context = context.copy()
 
             while True:  # Budgets checked inside loop
@@ -1996,8 +1944,9 @@ class CodingAgent(AgentInterface):
                                         if _todo_state.get("todos")
                                         else None,
                                         plan_mode_state=self.plan_mode_state,
-                                        director_adapter=self.director_adapter,
+                        
                                         iteration=iteration,
+                                        active_skill_ids=active_skills,
                                     )
                             except Exception as compact_err:
                                 logger.error(f"[COMPACTION] Failed: {compact_err}", exc_info=True)
@@ -2547,109 +2496,6 @@ class CodingAgent(AgentInterface):
                                 user_rejected = True
                                 break
 
-                        elif tc.function.name == "director_complete_plan":
-                            try:
-                                dcp_kwargs = tc.function.get_parsed_arguments()
-                            except Exception as parse_err:
-                                logger.error(
-                                    "director_complete_plan: failed to parse arguments: %s",
-                                    parse_err,
-                                )
-                                dcp_kwargs = {}
-                            result = await self.tool_executor.execute_tool_async(
-                                tc.function.name, **dcp_kwargs
-                            )
-
-                            if result.is_success():
-                                self.memory.persist_system_event(
-                                    event_type="director_phase_changed",
-                                    content="Director phase: AWAITING_APPROVAL",
-                                    extra={"phase": "AWAITING_APPROVAL"},
-                                    include_in_llm_context=False,
-                                )
-                                (
-                                    approval_result,
-                                    plan_rejected,
-                                ) = await self._special_handlers.handle_director_plan_approval(
-                                    call_id, result, ui
-                                )
-                                duration_ms = int((time.monotonic() - start_time) * 1000)
-                                tool_status = (
-                                    CoreToolStatus.REJECTED
-                                    if plan_rejected
-                                    else CoreToolStatus.SUCCESS
-                                )
-                                result_status = "rejected" if plan_rejected else "success"
-                                if self.memory.message_store:
-                                    self.memory.message_store.update_tool_state(
-                                        call_id,
-                                        tool_status,
-                                        result=approval_result,
-                                        duration_ms=duration_ms,
-                                    )
-                                self.memory.add_tool_result(
-                                    tool_call_id=call_id,
-                                    content=approval_result,
-                                    tool_name=tc.function.name,
-                                    status=result_status,
-                                    duration_ms=duration_ms,
-                                )
-                                resolved.append(
-                                    (
-                                        idx,
-                                        call_id,
-                                        tc,
-                                        {
-                                            "role": "tool",
-                                            "tool_call_id": call_id,
-                                            "name": tc.function.name,
-                                            "content": approval_result,
-                                        },
-                                    )
-                                )
-                                new_phase = self.director_adapter.phase.name
-                                self.memory.persist_system_event(
-                                    event_type="director_phase_changed",
-                                    content=f"Director phase: {new_phase}",
-                                    extra={"phase": new_phase},
-                                    include_in_llm_context=False,
-                                )
-                                if not plan_rejected:
-                                    self._refresh_director_context(current_context)
-                                if plan_rejected:
-                                    user_rejected = True
-                                    break
-                            else:
-                                duration_ms = int((time.monotonic() - start_time) * 1000)
-                                error_msg = result.error or "director_complete_plan failed"
-                                if self.memory.message_store:
-                                    self.memory.message_store.update_tool_state(
-                                        call_id,
-                                        CoreToolStatus.ERROR,
-                                        error=error_msg,
-                                        duration_ms=duration_ms,
-                                    )
-                                self.memory.add_tool_result(
-                                    tool_call_id=call_id,
-                                    content=error_msg,
-                                    tool_name=tc.function.name,
-                                    status="error",
-                                    duration_ms=duration_ms,
-                                )
-                                resolved.append(
-                                    (
-                                        idx,
-                                        call_id,
-                                        tc,
-                                        {
-                                            "role": "tool",
-                                            "tool_call_id": call_id,
-                                            "name": tc.function.name,
-                                            "content": error_msg,
-                                        },
-                                    )
-                                )
-
                 if not user_rejected and executable:
                     # ----------------------------------------------------------
                     # Phase B2: Normal tools (parallel via asyncio.gather)
@@ -2663,17 +2509,14 @@ class CodingAgent(AgentInterface):
                     for p_idx, p_call_id, p_tc, p_outcome in parallel_results:
                         # Deferred side effects: task notifications
                         tool_name = p_outcome.get("_tool_name", "")
+                        # Track tool usage for system reminders
+                        if tool_name:
+                            _reminder_tools_used.add(tool_name)
+                            if tool_name in ("task_create", "task_update", "task_link", "task_block"):
+                                _reminder_last_task_tool_iter = iteration
                         if tool_name in ("task_create", "task_update", "task_link", "task_block"):
                             ui.notify_todos_updated(self._get_bead_todos())
                             ui.notify_beads_updated()
-                        # Deferred side effects: director context refresh
-                        if tool_name in (
-                            "director_complete_understand",
-                            "director_complete_slice",
-                            "director_complete_integration",
-                        ):
-                            self._refresh_director_context(current_context)
-
                         # Handle error budget pause (needs await + yield)
                         if p_outcome.get("_needs_error_budget_pause"):
                             elapsed_seconds = time.monotonic() - loop_start_time
@@ -2845,6 +2688,22 @@ class CodingAgent(AgentInterface):
                     from src.core.background_context import inject_background_task_completions
 
                     inject_background_task_completions(current_context, completed)
+
+                # Inject system reminders (ephemeral contextual guidance)
+                from src.core.reminders import (
+                    REMINDERS,
+                    build_reminder_state,
+                    inject_reminders,
+                )
+
+                _reminder_state = build_reminder_state(
+                    iteration=iteration,
+                    tools_used=_reminder_tools_used,
+                    last_task_tool_iteration=_reminder_last_task_tool_iter,
+                    skills_exist=bool(active_skills),
+                    working_directory=str(self.working_directory),
+                )
+                inject_reminders(current_context, _reminder_state, REMINDERS)
 
         except Exception as e:
             # Outer exception handler - catches any exceptions not handled by inner handlers
@@ -3381,7 +3240,7 @@ class CodingAgent(AgentInterface):
             if self._error_budget_resume_count > 0:
                 self._successful_tools_since_resume += 1
 
-            # Side effects: task notifications, mode changes, director phases
+            # Side effects: task notifications, mode changes
             # NOTE: ui.notify_todos_updated cannot run here (no ui reference);
             # these are deferred to Phase C in stream_response via _post_exec flags.
             if tc.function.name == "enter_plan_mode":
@@ -3389,18 +3248,6 @@ class CodingAgent(AgentInterface):
                     event_type="permission_mode_changed",
                     content="Mode: -> plan",
                     extra={"old_mode": "normal", "new_mode": "plan"},
-                    include_in_llm_context=False,
-                )
-            if tc.function.name in (
-                "director_complete_understand",
-                "director_complete_slice",
-                "director_complete_integration",
-            ):
-                new_phase = self.director_adapter.phase.name
-                self.memory.persist_system_event(
-                    event_type="director_phase_changed",
-                    content=f"Director phase: {new_phase}",
-                    extra={"phase": new_phase},
                     include_in_llm_context=False,
                 )
 
