@@ -48,7 +48,7 @@ jobs:
             target: win32-x64
           - os: macos-14
             target: darwin-arm64
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             target: linux-x64
 
     steps:
