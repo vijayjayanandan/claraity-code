@@ -20,7 +20,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional, Union
 
 from src.observability import get_logger
-from src.security import redact_dict, redact_secrets
 from src.security.file_permissions import secure_file
 
 if TYPE_CHECKING:
@@ -321,12 +320,7 @@ class SessionWriter:
                     secure_file(self._file_path)
                     logger.info(f"SessionWriter file created on first write: {self._file_path}")
 
-                # Redact secrets before persistence
-                safe_data = redact_dict(data)
-                if "content" in safe_data and isinstance(safe_data["content"], str):
-                    safe_data["content"] = redact_secrets(safe_data["content"])
-
-                line = json.dumps(safe_data, ensure_ascii=False)
+                line = json.dumps(data, ensure_ascii=False)
                 self._file.write(line + "\n")
 
                 self._total_writes += 1
@@ -407,12 +401,7 @@ async def append_to_session(
         else:
             raw_data = message.to_dict()
 
-        # Redact secrets before persistence
-        safe_data = redact_dict(raw_data)
-        if "content" in safe_data and isinstance(safe_data["content"], str):
-            safe_data["content"] = redact_secrets(safe_data["content"])
-
-        line = json.dumps(safe_data, ensure_ascii=False)
+        line = json.dumps(raw_data, ensure_ascii=False)
 
         with open(path, "a", encoding="utf-8") as f:
             f.write(line + "\n")

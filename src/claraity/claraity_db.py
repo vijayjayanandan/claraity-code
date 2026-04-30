@@ -2011,17 +2011,6 @@ def populate(store: ClaraityStore):
             "low",
             {},
         ),
-        # -- Director --
-        (
-            "comp-director-adapter",
-            "component",
-            "DirectorAdapter",
-            "State machine enforcing disciplined workflow phases",
-            "src/director/adapter.py",
-            None,
-            "medium",
-            {"phases": ["IDLE", "UNDERSTAND", "PLAN", "EXECUTE", "COMPLETE"]},
-        ),
         # -- Observability --
         (
             "comp-logging",

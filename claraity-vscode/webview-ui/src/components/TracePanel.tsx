@@ -137,7 +137,7 @@ const MOCK_STEPS: TraceStep[] = [
       "Response": `{ "tool": "read_file", "parameters": { "path": "utils.py" } }`,
     } },
   { id: 11, from: "agent", to: "gating", label: "Gate check: read_file (iter 1)", type: "gate_check", durationMs: 900,
-    data: `Tools entering 4-check pipeline:\n\n  [1] read_file\n\nChecks: repeat -> plan_mode -> director -> approval\nResult: ALLOW (auto-approved read)` },
+    data: `Tools entering 3-check pipeline:\n\n  [1] read_file\n\nChecks: repeat -> plan_mode -> approval\nResult: ALLOW (auto-approved read)` },
   { id: 12, from: "gating", to: "tools", label: "Approved: read_file (iter 1)", type: "tool_execute", durationMs: 800,
     data: `read_file({ "path": "utils.py" })` },
   { id: 13, from: "tools", to: "agent", label: "Results: read_file (iter 1)", type: "tool_result", durationMs: 1000,
@@ -160,7 +160,7 @@ const MOCK_STEPS: TraceStep[] = [
       "Response": `{ "tool": "edit_file", "parameters": { "path": "utils.py", "old_string": "    return x * 2", "new_string": "    return x * 3" } }`,
     } },
   { id: 17, from: "agent", to: "gating", label: "Gate check: edit_file (iter 2)", type: "gate_check", durationMs: 900,
-    data: `Tools entering 4-check pipeline:\n\n  [1] edit_file\n\nChecks: repeat -> plan_mode -> director -> approval\nResult: NEEDS_APPROVAL (write operation)` },
+    data: `Tools entering 3-check pipeline:\n\n  [1] edit_file\n\nChecks: repeat -> plan_mode -> approval\nResult: NEEDS_APPROVAL (write operation)` },
   // ── Approval flow: Gating asks User, User approves ──
   { id: 18, from: "gating", to: "user", label: "Approval required: edit_file", type: "approval", durationMs: 1200,
     data: `Tool: edit_file\nPath: utils.py\nOperation: write\n\nReason: Write operations require user approval.\n\nWaiting for user decision...`,

@@ -92,7 +92,7 @@ class StoreRenderer:
             current_message: The currently active streaming AssistantMessage (live path)
             pre_mounted_user_widget: Eagerly-mounted UserMessage widget (live path)
             is_replaying: True during session replay
-            status_bar: StatusBar widget for director phase updates
+            status_bar: StatusBar widget for mode updates
 
         Returns:
             The pre_mounted_user_widget (may be consumed/cleared) or None
@@ -225,7 +225,7 @@ class StoreRenderer:
         conversation: Any,
         status_bar: Any = None,
     ) -> None:
-        """Handle system message types (clarify, plan, director, compaction, etc.)."""
+        """Handle system message types (clarify, plan, compaction, etc.)."""
         from .events import ToolStatus
 
         event_type = message.meta.event_type if message.meta else None
@@ -243,21 +243,6 @@ class StoreRenderer:
         elif event_type == "plan_submitted":
             await self._handle_plan_submitted(message, "PLAN")
 
-        elif event_type == "director_plan_submitted":
-            await self._handle_plan_submitted(message, "DIRECTOR")
-
-        elif event_type == "director_phase_changed":
-            extra = message.meta.extra if message.meta else {}
-            new_phase = extra.get("phase", "") if extra else ""
-            if status_bar:
-                try:
-                    if new_phase:
-                        status_bar.set_director_phase(new_phase)
-                    else:
-                        status_bar.clear_director_phase()
-                except Exception:
-                    pass
-
         elif event_type == "permission_mode_changed":
             if self._message_store:
                 new_mode = self._message_store.current_mode
@@ -271,7 +256,7 @@ class StoreRenderer:
                     pass
 
     async def _handle_plan_submitted(self, message: "Message", label: str) -> None:
-        """Handle plan_submitted / director_plan_submitted system messages."""
+        """Handle plan_submitted system messages."""
         extra = message.meta.extra if message.meta else {}
         plan_hash = extra.get("plan_hash") if extra else None
         call_id = extra.get("call_id") if extra else None

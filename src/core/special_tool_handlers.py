@@ -8,7 +8,6 @@ result to the LLM. They were extracted from CodingAgent to reduce its size.
 Handled tools:
 - clarify: Ask the user structured questions before proceeding
 - request_plan_approval: Submit a plan for user approval
-- director_complete_plan: Submit a director plan for user approval
 """
 
 import asyncio
@@ -23,14 +22,13 @@ if TYPE_CHECKING:
     from src.core.permission_mode import PermissionManager
     from src.core.plan_mode import PlanModeState
     from src.core.protocol import UIProtocol
-    from src.director.adapter import DirectorAdapter
     from src.memory import MemoryManager
     from src.tools import ToolExecutor
 
 logger = get_logger(__name__)
 
 # The set of tool names handled by this module
-HANDLED_TOOLS = frozenset({"clarify", "request_plan_approval", "director_complete_plan"})
+HANDLED_TOOLS = frozenset({"clarify", "request_plan_approval"})
 
 
 class SpecialToolHandlers:
@@ -48,14 +46,12 @@ class SpecialToolHandlers:
         self,
         memory: "MemoryManager",
         plan_mode_state: "PlanModeState",
-        director_adapter: "DirectorAdapter",
         tool_executor: "ToolExecutor",
         permission_manager: "PermissionManager",
         set_auto_approve_fn: Any = None,
     ):
         self._memory = memory
         self._plan_mode_state = plan_mode_state
-        self._director_adapter = director_adapter
         self._tool_executor = tool_executor
         self._permission_manager = permission_manager
         # Callback: set_auto_approve_fn(categories: dict[str, bool]) -> dict[str, bool]
@@ -286,95 +282,3 @@ class SpecialToolHandlers:
         except asyncio.CancelledError:
             return ("Plan approval was cancelled.", True)
 
-    # ------------------------------------------------------------------
-    # Handler: director_complete_plan
-    # ------------------------------------------------------------------
-
-    async def handle_director_plan_approval(
-        self,
-        call_id: str,
-        tool_result,
-        ui_protocol: "UIProtocol",
-    ) -> tuple[str, bool]:
-        """Handle director plan approval flow after director_complete_plan executes.
-
-        Returns:
-            tuple of (result_text, rejected_without_feedback).
-        """
-        # Build plan excerpt for the approval widget
-        plan = self._director_adapter._protocol.plan
-        plan_summary = plan.summary if plan else "Director plan"
-
-        # Read the plan document file if available (rich markdown)
-        excerpt = ""
-        if plan and plan.plan_document:
-            try:
-                if os.path.isfile(plan.plan_document):
-                    with open(plan.plan_document, encoding="utf-8") as f:
-                        excerpt = f.read()
-                    logger.info(
-                        "director_plan_approval: read plan document (%d chars)",
-                        len(excerpt),
-                    )
-            except Exception as e:
-                logger.error("director_plan_approval: failed to read plan file: %s", e)
-
-        # Fallback: build excerpt from structured data if no plan file
-        if not excerpt:
-            slices_text = ""
-            if plan:
-                for s in plan.slices:
-                    slices_text += f"\n- Slice {s.id}: {s.title}"
-            excerpt = f"## Director Plan\n\n{plan_summary}\n\n### Vertical Slices:{slices_text}"
-        plan_hash = hashlib.sha256(excerpt.encode()).hexdigest()
-
-        # Persist event for TUI to mount approval widget
-        if self._memory.has_message_store:
-            self._memory.persist_system_event(
-                event_type="director_plan_submitted",
-                content="[Director plan submitted for approval]",
-                extra={
-                    "call_id": call_id,
-                    "plan_hash": plan_hash,
-                    "excerpt": excerpt,
-                    "truncated": False,
-                },
-                include_in_llm_context=False,
-            )
-
-        # Wait for user approval via UIProtocol
-        try:
-            from src.core.protocol import PlanApprovalResult
-
-            approval = await ui_protocol.wait_for_plan_approval(plan_hash)
-
-            if approval.approved:
-                self._director_adapter.approve_plan()
-                result_text = (
-                    "Plan approved! Moving to EXECUTE phase.\n\n"
-                    "Implement each slice using RED-GREEN-REFACTOR:\n"
-                    "1. Write a failing test (RED)\n"
-                    "2. Write minimum code to pass (GREEN)\n"
-                    "3. Call director_complete_slice when done\n\n"
-                    f"{excerpt}"
-                )
-                return (result_text, False)
-            else:
-                feedback = approval.feedback
-                self._director_adapter.reject_plan(feedback)
-                if feedback is None:
-                    return ("Director plan approval cancelled.", True)
-                else:
-                    plan_doc_path = plan.plan_document if plan else ""
-                    result_text = (
-                        "Plan rejected. Revise based on feedback and resubmit.\n\n"
-                        f"User feedback: {feedback}\n\n"
-                        f"To revise: update the plan document"
-                        f"{' at ' + plan_doc_path if plan_doc_path else ''}"
-                        f" using write_file, then call director_complete_plan again "
-                        f"with the updated file path and slices."
-                    )
-                    return (result_text, False)
-
-        except asyncio.CancelledError:
-            return ("Director plan approval was cancelled.", True)

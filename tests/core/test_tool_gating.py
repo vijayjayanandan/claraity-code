@@ -1,7 +1,7 @@
 """
 Unit tests for ToolGatingService.
 
-Tests all four gating checks and the combined evaluate() method.
+Tests all gating checks and the combined evaluate() method.
 No API calls needed - all dependencies are mocked.
 """
 
@@ -25,14 +25,6 @@ def plan_mode_state():
     # Default: gate_tool returns ALLOW
     from src.core.plan_mode import PlanGateDecision
     mock.gate_tool.return_value = PlanGateDecision.ALLOW
-    return mock
-
-
-@pytest.fixture
-def director_adapter():
-    """Mock DirectorAdapter that is inactive by default."""
-    mock = MagicMock()
-    mock.is_active = False
     return mock
 
 
@@ -64,11 +56,10 @@ def mcp_manager():
 
 
 @pytest.fixture
-def gating(plan_mode_state, director_adapter, permission_manager, error_tracker, mcp_manager):
+def gating(plan_mode_state, permission_manager, error_tracker, mcp_manager):
     """Build a ToolGatingService with all mock dependencies."""
     return ToolGatingService(
         plan_mode_state=plan_mode_state,
-        director_adapter=director_adapter,
         permission_manager=permission_manager,
         error_tracker=error_tracker,
         mcp_manager=mcp_manager,
@@ -126,38 +117,6 @@ class TestCheckPlanModeGate:
         assert result is not None
         assert result.action == GateAction.DENY
         assert "PLAN_APPROVAL_REQUIRED" in result.gate_response["error_code"]
-
-
-# ---------------------------------------------------------------------------
-# Test: check_director_gate
-# ---------------------------------------------------------------------------
-
-class TestCheckDirectorGate:
-
-    def test_inactive_returns_none(self, gating):
-        result = gating.check_director_gate("write_file", {"file_path": "/tmp/x.txt"})
-        assert result is None
-
-    def test_active_allowed_returns_none(self, gating, director_adapter):
-        director_adapter.is_active = True
-        from src.director.adapter import DirectorGateDecision
-        director_adapter.gate_tool.return_value = DirectorGateDecision.ALLOW
-
-        result = gating.check_director_gate("read_file", {"file_path": "/tmp/a.txt"})
-        assert result is None
-
-    def test_active_denied_returns_gate_result(self, gating, director_adapter):
-        director_adapter.is_active = True
-        from src.director.adapter import DirectorGateDecision
-        director_adapter.gate_tool.return_value = DirectorGateDecision.DENY
-        director_adapter.phase.name = "UNDERSTAND"
-
-        result = gating.check_director_gate("write_file", {"file_path": "/tmp/x.txt"})
-
-        assert result is not None
-        assert result.action == GateAction.DENY
-        assert "DIRECTOR_MODE_GATED" in result.gate_response["error_code"]
-        assert "UNDERSTAND" in result.message
 
 
 # ---------------------------------------------------------------------------
@@ -219,7 +178,7 @@ class TestEvaluate:
         assert result.action == GateAction.ALLOW
 
     def test_repeat_takes_priority(self, gating, error_tracker, plan_mode_state):
-        """Repeat check runs before plan/director gates."""
+        """Repeat check runs before plan gate."""
         error_tracker.is_repeated_failed_call.return_value = (True, "write_file(/tmp/x)")
         from src.core.plan_mode import PlanGateDecision
         plan_mode_state.gate_tool.return_value = PlanGateDecision.DENY
@@ -227,12 +186,11 @@ class TestEvaluate:
         result = gating.evaluate("write_file", {"file_path": "/tmp/x"})
         assert result.action == GateAction.BLOCKED_REPEAT
 
-    def test_plan_mode_gate_before_director(self, gating, plan_mode_state, director_adapter):
-        """Plan mode gate runs before director gate."""
+    def test_plan_mode_gate_before_command_safety(self, gating, plan_mode_state):
+        """Plan mode gate runs before command safety gate."""
         from src.core.plan_mode import PlanGateDecision
         plan_mode_state.gate_tool.return_value = PlanGateDecision.DENY
         plan_mode_state.plan_file_path = "/tmp/plan.md"
-        director_adapter.is_active = True
 
         result = gating.evaluate("write_file", {"file_path": "/tmp/x"})
         assert result.action == GateAction.DENY

@@ -205,9 +205,9 @@ class ContextBuilder:
         file_references: list[FileReference] | None = None,
         agent_state: dict[str, Any] | None = None,
         plan_mode_state: Any | None = None,
-        director_adapter: Any | None = None,
         log_report: bool = True,
         iteration: int = 0,
+        active_skill_ids: list[str] | None = None,
     ) -> list[dict[str, str]]:
         """
         Build complete context for LLM.
@@ -224,7 +224,6 @@ class ContextBuilder:
             agent_state: Optional agent state (todos, current_todo_id, last_stop_reason)
                         for task continuation support
             plan_mode_state: Optional PlanModeState instance for plan mode injection
-            director_adapter: Optional DirectorAdapter for director mode injection
             log_report: Whether to log the context assembly report (default True)
 
         Returns:
@@ -259,12 +258,6 @@ class ContextBuilder:
             )
             system_prompt = system_prompt + "\n\n" + plan_injection
 
-        # Inject director mode context if active
-        if director_adapter and director_adapter.is_active:
-            director_injection = director_adapter.get_prompt_injection()
-            if director_injection:
-                system_prompt = system_prompt + "\n\n" + director_injection
-
         if _emit_sources:
             self._trace.on_context_source(
                 "System Prompt",
@@ -296,6 +289,31 @@ class ContextBuilder:
                 bool(project_instructions),
                 iteration,
             )
+
+        # Inject active skills (user-selected procedural instructions)
+        if active_skill_ids:
+            from src.skills.skill_loader import SkillLoader
+
+            skill_loader = SkillLoader(working_directory=self.project_root)
+            skills_injected = 0
+            for skill_id in active_skill_ids[:2]:  # Max 2 active skills
+                skill = skill_loader.get_skill(skill_id)
+                if skill and skill.body.strip():
+                    system_prompt = (
+                        system_prompt
+                        + "\n\n"
+                        + f'<active-skill name="{skill.name}">\n'
+                        + skill.body.strip()
+                        + "\n</active-skill>"
+                    )
+                    skills_injected += 1
+            if _emit_sources and skills_injected:
+                self._trace.on_context_source(
+                    "Active Skills",
+                    f"{skills_injected} skill(s) injected",
+                    True,
+                    iteration,
+                )
 
         # Inject architecture brief from knowledge DB (cached at startup)
         knowledge_brief = self._cached_knowledge_brief or ""

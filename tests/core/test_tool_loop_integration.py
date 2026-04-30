@@ -134,37 +134,7 @@ class TestStreamResponsePlanModeGate:
 
 
 # ---------------------------------------------------------------------------
-# Test 4: stream_response director gate
-# ---------------------------------------------------------------------------
-
-@requires_api
-class TestStreamResponseDirectorGate:
-
-    @pytest.mark.asyncio
-    async def test_mutating_tool_gated_in_understand_phase(self, live_agent):
-        """Mutating tool in UNDERSTAND phase is gated."""
-        agent = live_agent()
-
-        # Activate director in UNDERSTAND phase
-        agent.director_adapter._is_active = True
-        from src.director.adapter import DirectorPhase
-        agent.director_adapter._phase = DirectorPhase.UNDERSTAND
-
-        ui = MockUIProtocol()
-
-        events = await collect_events(
-            agent,
-            "Write the text 'test' to /tmp/test.txt using write_file tool.",
-            ui,
-        )
-
-        types = [type(e) for e in events]
-        assert StreamStart in types
-        assert StreamEnd in types
-
-
-# ---------------------------------------------------------------------------
-# Test 5: stream_response user rejection
+# Test 4: stream_response user rejection
 # ---------------------------------------------------------------------------
 
 @requires_api

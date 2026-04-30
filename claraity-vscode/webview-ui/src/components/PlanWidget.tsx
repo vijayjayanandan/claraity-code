@@ -13,7 +13,6 @@ interface PlanWidgetProps {
   excerpt: string;
   truncated: boolean;
   planPath?: string;
-  isDirector?: boolean;
   postMessage: (msg: WebViewMessage) => void;
   onDismiss: () => void;
 }
@@ -23,7 +22,6 @@ export function PlanWidget({
   excerpt,
   truncated,
   planPath,
-  isDirector,
   postMessage,
   onDismiss,
 }: PlanWidgetProps) {
@@ -56,7 +54,7 @@ export function PlanWidget({
 
   return (
     <div className="interactive-widget plan-widget">
-      <div className="widget-header">{isDirector ? "Director Plan Approval" : "Plan Approval"}</div>
+      <div className="widget-header">Plan Approval</div>
       <div className="widget-body">
         <div
           className="plan-content"

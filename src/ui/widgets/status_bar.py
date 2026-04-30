@@ -86,7 +86,6 @@ class StatusBar(Static):
     spinner_frame = reactive(0)
     current_tool = reactive("")  # Name of currently executing tool
     current_mode = reactive("normal")  # Permission mode: plan, normal, auto
-    director_phase = reactive("")  # Director phase (empty = inactive)
     current_task_name = reactive("")  # activeForm of in_progress todo task
     bg_task_count = reactive(0)  # Number of active background tasks
 
@@ -138,7 +137,7 @@ class StatusBar(Static):
             and not self.error_message
             and not self.info_message
         ):
-            # Minimal idle state - show model name, mode and director badges
+            # Minimal idle state - show model name and mode badges
             result = Text()
             if self.model_name:
                 result.append(f" {self.model_name} ", style="#9cdcfe")
@@ -146,13 +145,6 @@ class StatusBar(Static):
                 result.append(" PLAN ", style="bold #1e1e1e on #cca700")
             elif self.current_mode == "auto":
                 result.append(" AUTO ", style="bold #1e1e1e on #73c991")
-            if self.director_phase:
-                if result.plain:
-                    result.append(" ", style="")
-                result.append(
-                    f" DIRECTOR: {self.director_phase} ",
-                    style="bold #1e1e1e on #b392f0",
-                )
             if self.bg_task_count > 0:
                 if result.plain:
                     result.append(" ", style="")
@@ -233,14 +225,6 @@ class StatusBar(Static):
         elif self.current_mode == "auto":
             result.append(" ", style="")
             result.append(" AUTO ", style="bold #1e1e1e on #73c991")
-
-        # Director mode indicator
-        if self.director_phase:
-            result.append(" ", style="")
-            result.append(
-                f" DIRECTOR: {self.director_phase} ",
-                style="bold #1e1e1e on #b392f0",
-            )
 
         # Background tasks indicator
         if self.bg_task_count > 0:
@@ -524,20 +508,6 @@ class StatusBar(Static):
         """
         self.current_mode = mode
 
-    def set_director_phase(self, phase: str) -> None:
-        """
-        Update director mode phase display.
-
-        Args:
-            phase: Director phase name (e.g., "UNDERSTAND", "PLAN", "EXECUTE")
-                   or empty string to clear.
-        """
-        self.director_phase = phase
-
-    def clear_director_phase(self) -> None:
-        """Clear director phase indicator."""
-        self.director_phase = ""
-
     def set_tool(self, tool_name: str) -> None:
         """
         Set currently executing tool name.
@@ -584,7 +554,6 @@ class StatusBar(Static):
         self.countdown = 0
         self.spinner_frame = 0
         self.current_tool = ""
-        self.director_phase = ""
         self.current_task_name = ""
         self.bg_task_count = 0
         self._stream_start_time = 0

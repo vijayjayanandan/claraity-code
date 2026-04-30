@@ -625,27 +625,6 @@ class TestSerializeInteractiveNotifications:
         assert result["data"]["truncated"] is False
         assert result["data"]["plan_path"] == ".claraity/plans/plan.md"
 
-    def test_director_plan_submitted(self):
-        msg = self._make_system_message(
-            event_type="director_plan_submitted",
-            extra={
-                "call_id": "dp_001",
-                "plan_hash": "sha256-def",
-                "excerpt": "## Director Plan\nSlice 1: Auth",
-                "truncated": False,
-            },
-        )
-        notification = StoreNotification(
-            event=StoreEvent.MESSAGE_ADDED,
-            message=msg,
-        )
-        result = serialize_store_notification(notification)
-        assert result["type"] == "interactive"
-        assert result["event"] == "director_plan_submitted"
-        assert result["data"]["call_id"] == "dp_001"
-        assert result["data"]["plan_hash"] == "sha256-def"
-        assert result["data"]["plan_path"] is None  # not provided
-
     def test_clarify_request_missing_extra_defaults(self):
         """clarify_request with empty extra still serializes with defaults."""
         msg = self._make_system_message(

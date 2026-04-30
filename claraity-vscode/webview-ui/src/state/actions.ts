@@ -4,7 +4,7 @@
  * Each action represents a user interaction or server event
  * that triggers a state transition.
  */
-import type { ToolStateData, SessionSummary, ReplayMessage, FileAttachment, ImageAttachment, JiraProfile, McpServerInfo, McpMarketplaceEntry, BeadsResponse, ArchitectureResponse, SubAgentInfo, LimitsData, BackgroundTaskData } from "../types";
+import type { ToolStateData, SessionSummary, ReplayMessage, FileAttachment, ImageAttachment, JiraProfile, McpServerInfo, McpMarketplaceEntry, BeadsResponse, ArchitectureResponse, SubAgentInfo, SkillInfo, LimitsData, BackgroundTaskData } from "../types";
 import type { AppState, SubagentInfo } from "./state";
 
 export type Action =
@@ -39,7 +39,7 @@ export type Action =
   | { type: "PAUSE_PROMPT_END" }
   | { type: "CLARIFY_REQUEST"; callId: string; questions: unknown[]; context?: string }
   | { type: "CLARIFY_DISMISS" }
-  | { type: "PLAN_APPROVAL"; callId: string; planHash: string; excerpt: string; truncated: boolean; planPath?: string; isDirector?: boolean }
+  | { type: "PLAN_APPROVAL"; callId: string; planHash: string; excerpt: string; truncated: boolean; planPath?: string }
   | { type: "PLAN_APPROVAL_DISMISS" }
   | { type: "PERMISSION_MODE_CHANGED"; mode: string }
   // Context
@@ -96,6 +96,10 @@ export type Action =
   // Limits
   | { type: "LIMITS_LOADED"; limits: LimitsData }
   | { type: "LIMITS_SAVED"; success: boolean; message: string; limits?: LimitsData }
+  // Skills
+  | { type: "SKILLS_LOADED"; skills: SkillInfo[] }
+  | { type: "TOGGLE_SKILL"; skillId: string }
+  | { type: "CLEAR_ACTIVE_SKILLS" }
   // Prompt Enrichment
   | { type: "SET_ENRICHMENT_ENABLED"; enabled: boolean }
   | { type: "SET_ENRICHMENT_LOADING"; loading: boolean }

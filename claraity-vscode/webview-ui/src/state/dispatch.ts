@@ -155,7 +155,6 @@ export function dispatchServerMessage(
           });
           break;
         case "plan_submitted":
-        case "director_plan_submitted":
           dispatch({
             type: "PLAN_APPROVAL",
             callId: msg.data.call_id,
@@ -163,7 +162,6 @@ export function dispatchServerMessage(
             excerpt: msg.data.excerpt,
             truncated: msg.data.truncated,
             planPath: msg.data.plan_path,
-            isDirector: msg.event === "director_plan_submitted",
           });
           break;
         case "permission_mode_changed":
@@ -310,6 +308,15 @@ export function dispatchServerMessage(
 
     case "subagent_deleted":
       dispatch({ type: "SUBAGENT_NOTIFICATION", success: msg.success, message: msg.message });
+      break;
+
+    // ── Skills ──
+    case "skills_list":
+      dispatch({ type: "SKILLS_LOADED", skills: msg.skills ?? [] });
+      break;
+
+    case "skill_saved":
+      // Skill created — could trigger a refresh; the picker will re-fetch on open
       break;
 
     // ── ClarAIty Knowledge & Beads ──

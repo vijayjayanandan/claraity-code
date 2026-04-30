@@ -37,10 +37,6 @@ const SILENT_TOOLS = new Set([
   "task_list",
   "task_get",
   "enter_plan_mode",
-  "director_complete_understand",
-  "director_complete_plan",
-  "director_complete_slice",
-  "director_complete_integration",
 ]);
 
 // ============================================================================
@@ -549,7 +545,7 @@ export function appReducer(state: AppState, action: Action): AppState {
     case "CLARIFY_DISMISS":
       return { ...state, clarifyRequest: null };
     case "PLAN_APPROVAL":
-      return { ...state, planApproval: { callId: action.callId, planHash: action.planHash, excerpt: action.excerpt, truncated: action.truncated, planPath: action.planPath, isDirector: action.isDirector } };
+      return { ...state, planApproval: { callId: action.callId, planHash: action.planHash, excerpt: action.excerpt, truncated: action.truncated, planPath: action.planPath } };
     case "PLAN_APPROVAL_DISMISS":
       return { ...state, planApproval: null };
     case "PERMISSION_MODE_CHANGED":
@@ -897,6 +893,23 @@ export function appReducer(state: AppState, action: Action): AppState {
       return { ...state, subagentNotification: { message: action.message, success: action.success } };
     case "CLEAR_SUBAGENT_NOTIFICATION":
       return { ...state, subagentNotification: null };
+
+    // ── Skills ──
+    case "SKILLS_LOADED":
+      return { ...state, skillsList: action.skills };
+    case "TOGGLE_SKILL": {
+      const id = action.skillId;
+      const isActive = state.activeSkills.includes(id);
+      if (isActive) {
+        return { ...state, activeSkills: state.activeSkills.filter(s => s !== id) };
+      }
+      if (state.activeSkills.length >= 2) {
+        return state; // Max 2 active skills
+      }
+      return { ...state, activeSkills: [...state.activeSkills, id] };
+    }
+    case "CLEAR_ACTIVE_SKILLS":
+      return { ...state, activeSkills: [] };
 
     // ── Limits ──
     case "LIMITS_LOADED":

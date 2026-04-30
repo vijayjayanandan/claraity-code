@@ -80,6 +80,7 @@ export const BottomBar = memo(function BottomBar({
             onClick={() => onSetMode("plan")}
             role="radio"
             aria-checked={permissionMode === "plan"}
+            title="Plan mode: read-only exploration, no file edits"
           >
             Plan
           </button>
@@ -88,6 +89,7 @@ export const BottomBar = memo(function BottomBar({
             onClick={() => onSetMode("normal")}
             role="radio"
             aria-checked={permissionMode !== "plan"}
+            title="Act mode: full read/write access, risky tools require approval"
           >
             Act
           </button>

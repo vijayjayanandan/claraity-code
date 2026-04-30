@@ -106,10 +106,6 @@ SILENT_TOOLS = {
     "task_link",
     "task_block",
     "enter_plan_mode",
-    "director_complete_understand",
-    "director_complete_plan",
-    "director_complete_slice",
-    "director_complete_integration",
 }
 
 # =============================================================================
@@ -740,9 +736,6 @@ class CodingAgentApp(App):
         self._last_status_update_ts: float = 0.0
         self._status_update_interval_sec: float = 0.2  # Update at most every 200ms
 
-        # Director mode: pending activation (user typed /director with no task)
-        self._director_pending: bool = False
-
         # Phase 6: Store-driven rendering
         # TUI renders from MessageStore notifications. UIEvents are forwarded
         # to StoreAdapter for persistence; store notifications handle rendering.
@@ -1290,44 +1283,6 @@ class CodingAgentApp(App):
             )
             return
 
-        # Handle /director command (activate director, strip prefix, send task as message)
-        if user_input.lower().startswith("/director") and not user_input.lower().startswith(
-            "/director-"
-        ):
-            task = user_input[len("/director") :].strip()
-            if not task:
-                # Bare /director -- activate pending mode, wait for next message as task
-                self._director_pending = True
-                self.notify("Director mode ready. Type your task to begin.")
-                try:
-                    status_bar = self.query_one("#status", StatusBar)
-                    status_bar.set_director_phase("READY")
-                except Exception:
-                    pass
-                return
-            if self.agent:
-                self.agent.director_adapter.start(task)
-                self._director_pending = False
-                self.notify("Director mode: UNDERSTAND phase")
-                try:
-                    status_bar = self.query_one("#status", StatusBar)
-                    status_bar.set_director_phase("UNDERSTAND")
-                except Exception:
-                    pass
-                user_input = task  # Strip prefix, fall through to send as message
-
-        # Handle pending director activation -- next message becomes the task
-        if self._director_pending and self.agent and not user_input.startswith("/"):
-            self.agent.director_adapter.start(user_input)
-            self._director_pending = False
-            self.notify("Director mode: UNDERSTAND phase")
-            try:
-                status_bar = self.query_one("#status", StatusBar)
-                status_bar.set_director_phase("UNDERSTAND")
-            except Exception:
-                pass
-            # Fall through to send as message
-
         # Handle slash commands
         if user_input.startswith("/"):
             handled = await self._handle_slash_command(user_input)
@@ -1451,16 +1406,6 @@ class CodingAgentApp(App):
         async def _do_disconnect_jira():
             self.run_worker(self._disconnect_jira(), exclusive=False, group="jira")
 
-        async def _do_director_reset():
-            if self.agent:
-                self.agent.director_adapter.reset()
-            self.notify("Director mode reset")
-            try:
-                status_bar = self.query_one("#status", StatusBar)
-                status_bar.clear_director_phase()
-            except Exception:
-                pass
-
         async def _do_connect_jira(command: str):
             parts = command.strip().split(maxsplit=1)
             profile = parts[1].strip() if len(parts) > 1 else None
@@ -1473,7 +1418,6 @@ class CodingAgentApp(App):
                 "/config-llm": _do_configure_llm,
                 "/config-jira": _do_configure_jira,
                 "/disconnect-jira": _do_disconnect_jira,
-                "/director-reset": _do_director_reset,
             },
             prefix_commands={
                 "/connect-jira": _do_connect_jira,

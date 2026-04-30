@@ -431,20 +431,22 @@ button, .toolbar-icon, .session-card, .mention-item, .tool-badge {
 /* ── Compaction Summary Card ── */
 
 .compaction-summary-card {
-  border: 1px solid var(--app-border);
+  border: 1px solid color-mix(in srgb, var(--app-accent) 40%, var(--app-border));
+  border-left: 3px solid var(--app-accent);
   border-radius: var(--radius-md);
   overflow: hidden;
-  margin: var(--space-sm) 0;
+  margin: var(--space-md) 0;
   box-shadow: var(--shadow-sm);
   font-size: var(--font-size-sm);
 }
 
 .compaction-summary-card > summary {
-  padding: var(--space-xs) 10px;
-  background: var(--app-tool-bg);
+  padding: var(--space-sm) 10px;
+  background: color-mix(in srgb, var(--app-accent) 10%, var(--app-tool-bg));
   cursor: pointer;
   user-select: none;
-  color: var(--app-fg-muted);
+  color: var(--app-fg);
+  font-weight: 500;
   display: flex;
   align-items: center;
   gap: var(--space-xs);
@@ -1690,6 +1692,184 @@ button, .toolbar-icon, .session-card, .mention-item, .tool-badge {
 .attach-menu-item .codicon {
   font-size: 14px;
   opacity: 0.8;
+}
+
+/* ── Skill Picker ── */
+
+.skill-wrapper {
+  position: relative;
+}
+
+.input-icon-btn.skills-active {
+  color: var(--app-accent);
+  background: color-mix(in srgb, var(--app-accent) 15%, transparent);
+}
+
+.skill-picker {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  right: 0;
+  width: 280px;
+  max-height: 340px;
+  display: flex;
+  flex-direction: column;
+  background: var(--vscode-editorSuggestWidget-background, var(--vscode-dropdown-background));
+  border: 1px solid var(--vscode-editorSuggestWidget-border, var(--app-border));
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  z-index: 200;
+  animation: fadeIn 0.12s ease-in-out;
+}
+
+.skill-search {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--app-border);
+  flex-shrink: 0;
+}
+
+.skill-search input {
+  width: 100%;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, var(--app-border));
+  border-radius: 3px;
+  padding: 4px 6px;
+  font-size: 12px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.skill-search input:focus {
+  border-color: var(--app-accent);
+}
+
+.skill-list {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.skill-empty {
+  padding: var(--space-md);
+  text-align: center;
+  color: var(--app-fg-muted);
+  font-size: var(--font-size-sm);
+}
+
+.skill-category-header {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--app-fg-muted);
+  padding: 6px 10px 2px;
+}
+
+.skill-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.skill-item:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.skill-item.active {
+  background: color-mix(in srgb, var(--app-accent) 10%, transparent);
+}
+
+.skill-item.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.skill-checkbox {
+  flex-shrink: 0;
+  margin-top: 2px;
+  accent-color: var(--app-accent);
+}
+
+.skill-item-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.skill-item-text .skill-name {
+  font-weight: 500;
+  font-size: 12px;
+}
+
+.skill-item-text .skill-desc {
+  font-size: 11px;
+  color: var(--app-fg-muted);
+  margin-top: 1px;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-picker-footer {
+  border-top: 1px solid var(--app-border);
+  padding: 4px;
+  flex-shrink: 0;
+}
+
+.skill-picker-footer button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 8px;
+  background: none;
+  border: none;
+  color: var(--app-accent);
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+  border-radius: var(--radius-sm);
+}
+
+.skill-picker-footer button:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+/* Skill badges above textarea */
+
+.skill-badge-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 8px;
+}
+
+.skill-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--app-accent) 15%, transparent);
+  color: var(--app-accent);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.skill-badge .codicon {
+  font-size: 12px;
+}
+
+.skill-badge-remove {
+  cursor: pointer;
+  margin-left: 2px;
+  opacity: 0.7;
+  font-size: 11px;
+}
+
+.skill-badge-remove:hover {
+  opacity: 1;
 }
 
 .send-icon-btn {

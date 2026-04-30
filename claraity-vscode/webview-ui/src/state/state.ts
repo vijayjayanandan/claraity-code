@@ -15,6 +15,7 @@ import type {
   BeadsResponse,
   ArchitectureResponse,
   SubAgentInfo,
+  SkillInfo,
   LimitsData,
   BackgroundTaskData,
 } from "../types";
@@ -127,7 +128,7 @@ export interface AppState {
   pendingApproval: ToolStateData | null;
   pausePrompt: { reason: string; reasonCode: string; stats: Record<string, unknown>; pendingTodos?: string[] } | null;
   clarifyRequest: { callId: string; questions: unknown[]; context?: string } | null;
-  planApproval: { callId: string; planHash: string; excerpt: string; truncated: boolean; planPath?: string; isDirector?: boolean } | null;
+  planApproval: { callId: string; planHash: string; excerpt: string; truncated: boolean; planPath?: string } | null;
 
   // Chat input draft — preserved across panel switches
   chatDraft: string;
@@ -189,6 +190,10 @@ export interface AppState {
   beadsData: BeadsResponse | null;
   architectureData: ArchitectureResponse | null;
 
+  // Skills
+  skillsList: SkillInfo[];
+  activeSkills: string[];
+
   // Trace
   traceSteps: import('../types').TraceStepData[] | null;
   traceEnabled: boolean;
@@ -208,6 +213,7 @@ export interface AppState {
   enrichmentLoading: boolean;
   enrichedPromptPreview: string | null;
   enrichedPromptOriginal: string | null;
+
 }
 
 // ============================================================================
@@ -287,6 +293,8 @@ export const initialState: AppState = {
 
   beadsData: null,
   architectureData: null,
+  skillsList: [],
+  activeSkills: [],
   traceSteps: null,
   traceEnabled: false,
   toolList: null,
@@ -305,4 +313,5 @@ export const initialState: AppState = {
   enrichmentLoading: false,
   enrichedPromptPreview: null,
   enrichedPromptOriginal: null,
+
 };

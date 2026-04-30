@@ -1,19 +1,18 @@
 """
 Tool Gating Service - Centralized tool call gating logic.
 
-Consolidates the five gating checks used by stream_response():
+Consolidates the four gating checks used by stream_response():
 
 1. Repeat detection: blocks calls that failed with identical args before
 2. Plan mode gate: restricts writes when plan mode is active
-3. Director gate: restricts writes based on director phase
-4. Command safety gate: blocks/escalates dangerous shell commands
-5. Approval check: determines if user approval is needed
+3. Command safety gate: blocks/escalates dangerous shell commands
+4. Approval check: determines if user approval is needed
 
-The command safety gate (check 4) is a safety floor that cannot be bypassed
+The command safety gate (check 3) is a safety floor that cannot be bypassed
 by auto-approve settings. It runs before the category-based approval check.
 
 Usage:
-    gating = ToolGatingService(plan_mode_state, director_adapter,
+    gating = ToolGatingService(plan_mode_state,
                                permission_manager, error_tracker, mcp_manager)
     result = gating.evaluate(tool_name, tool_args)
     # result.action tells you what to do: ALLOW, DENY, NEEDS_APPROVAL, BLOCKED_REPEAT
@@ -30,7 +29,6 @@ if TYPE_CHECKING:
     from src.core.error_recovery import ErrorRecoveryTracker
     from src.core.permission_mode import PermissionManager
     from src.core.plan_mode import PlanModeState
-    from src.director.adapter import DirectorAdapter
     from src.mcp.connection_manager import McpConnectionManager
 
 logger = get_logger(__name__)
@@ -112,13 +110,11 @@ class ToolGatingService:
     def __init__(
         self,
         plan_mode_state: "PlanModeState",
-        director_adapter: "DirectorAdapter",
         permission_manager: Optional["PermissionManager"],
         error_tracker: "ErrorRecoveryTracker",
         mcp_manager: "McpConnectionManager",
     ):
         self._plan_mode_state = plan_mode_state
-        self._director_adapter = director_adapter
         self._permission_manager = permission_manager
         self._error_tracker = error_tracker
         self._mcp_manager = mcp_manager
@@ -229,38 +225,6 @@ class ToolGatingService:
 
         return None  # Allowed
 
-    def check_director_gate(self, tool_name: str, tool_args: dict[str, Any]) -> GateResult | None:
-        """Check if tool is restricted by director phase.
-
-        Returns GateResult with DENY if gated, else None.
-        """
-        if not self._director_adapter.is_active:
-            return None
-
-        from src.director.adapter import DirectorGateDecision
-
-        decision = self._director_adapter.gate_tool(tool_name, tool_args)
-
-        if decision == DirectorGateDecision.DENY:
-            phase = self._director_adapter.phase.name
-            response = {
-                "status": "denied",
-                "error_code": "DIRECTOR_MODE_GATED",
-                "message": (
-                    f"Tool '{tool_name}' is not allowed in Director "
-                    f"{phase} phase. Use read-only tools or the "
-                    f"appropriate director checkpoint tool."
-                ),
-                "phase": phase,
-            }
-            return GateResult(
-                action=GateAction.DENY,
-                message=response["message"],
-                gate_response=response,
-            )
-
-        return None  # Allowed
-
     def check_command_safety_gate(
         self, tool_name: str, tool_args: dict[str, Any]
     ) -> GateResult | None:
@@ -362,7 +326,7 @@ class ToolGatingService:
     def evaluate(self, tool_name: str, tool_args: dict[str, Any]) -> GateResult:
         """Run all gating checks in priority order.
 
-        Order: repeat -> plan mode -> director -> command safety -> approval -> allow.
+        Order: repeat -> plan mode -> command safety -> approval -> allow.
 
         The command safety gate (check 4) is a safety floor that fires even
         when auto-approve is enabled for the "execute" category.
@@ -379,17 +343,12 @@ class ToolGatingService:
         if result:
             return result
 
-        # 3. Director gate
-        result = self.check_director_gate(tool_name, tool_args)
-        if result:
-            return result
-
-        # 4. Command safety gate (safety floor - cannot be bypassed by auto-approve)
+        # 3. Command safety gate (safety floor - cannot be bypassed by auto-approve)
         result = self.check_command_safety_gate(tool_name, tool_args)
         if result:
             return result
 
-        # 5. Category-based approval check
+        # 4. Category-based approval check
         if self.needs_approval(tool_name, tool_args):
             return GateResult(action=GateAction.NEEDS_APPROVAL)
 

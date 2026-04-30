@@ -65,7 +65,7 @@ python -m src.claraity.claraity_beads note bd-xxxx "Progress update"
 ```
 
 ### Module IDs
-`mod-core`, `mod-memory`, `mod-session`, `mod-ui`, `mod-tools`, `mod-llm`, `mod-server`, `mod-observability`, `mod-prompts`, `mod-subagents`, `mod-director`, `mod-code-intel`, `mod-integrations`, `mod-platform`, `mod-hooks`
+`mod-core`, `mod-memory`, `mod-session`, `mod-ui`, `mod-tools`, `mod-llm`, `mod-server`, `mod-observability`, `mod-prompts`, `mod-subagents`, `mod-code-intel`, `mod-integrations`, `mod-platform`, `mod-hooks`
 
 ---
 
@@ -78,7 +78,7 @@ src/
 │   ├── agent.py                # CodingAgent facade (~2,617 lines) - see cheat sheet below
 │   ├── tool_loop_state.py      # ToolLoopState dataclass (86 lines) - loop iteration state
 │   ├── tool_gating.py          # ToolGatingService (289 lines) - tool gating checks
-│   ├── special_tool_handlers.py # SpecialToolHandlers (417 lines) - clarify/plan/director approval
+│   ├── special_tool_handlers.py # SpecialToolHandlers - clarify/plan approval
 │   ├── stream_phases.py        # Helper functions (154 lines) - context/constraint/results builders
 │   └── error_recovery.py       # Error recovery logic
 ├── ui/app.py                   # AgentApp (3300 lines) - see cheat sheet below
@@ -111,8 +111,8 @@ src/
 **Control Flow:**
 ```
 User Input → stream_response() [async only]
-    → ToolGatingService.evaluate() — gating (repeat/plan/director/approval)
-    → SpecialToolHandlers — clarify, plan approval, director approval
+    → ToolGatingService.evaluate() — gating (repeat/plan/approval)
+    → SpecialToolHandlers — clarify, plan approval
     → execute_tool() for normal tools
     → stream_phases helpers — context/constraint/results builders
     → loop until no more tool_calls
@@ -134,8 +134,8 @@ User Input → stream_response() [async only]
 **Extracted Modules (see `docs/AGENT_DECOMPOSITION.md` for details):**
 | Module | Purpose |
 |--------|---------|
-| `tool_gating.py` | 4-check gating (repeat, plan mode, director, approval) |
-| `special_tool_handlers.py` | Async handlers that pause for UI (clarify, plan approval, director approval) |
+| `tool_gating.py` | 3-check gating (repeat, plan mode, approval) |
+| `special_tool_handlers.py` | Async handlers that pause for UI (clarify, plan approval) |
 | `stream_phases.py` | Helpers: context message, constraint injection, skipped results, pause stats |
 | `tool_loop_state.py` | Dataclass replacing 12+ local variables in stream_response |
 
@@ -189,8 +189,8 @@ Store updates → _handle_store_notification() → UI refresh
 | Class | File | Purpose |
 |-------|------|---------|
 | `CodingAgent` | `src/core/agent.py` | Main agent facade - delegates to gating, handlers, phases |
-| `ToolGatingService` | `src/core/tool_gating.py` | Tool gating: repeat/plan/director/approval checks |
-| `SpecialToolHandlers` | `src/core/special_tool_handlers.py` | Async UI-pausing handlers: clarify, plan approval, director |
+| `ToolGatingService` | `src/core/tool_gating.py` | Tool gating: repeat/plan/approval checks |
+| `SpecialToolHandlers` | `src/core/special_tool_handlers.py` | Async UI-pausing handlers: clarify, plan approval |
 | `ToolLoopState` | `src/core/tool_loop_state.py` | Dataclass carrying loop state through iterations |
 | `MemoryManager` | `src/memory/memory_manager.py` | Orchestrates persistence - ONLY component that writes to store |
 | `MessageStore` | `src/session/store/memory_store.py` | In-memory message storage + JSONL file append |

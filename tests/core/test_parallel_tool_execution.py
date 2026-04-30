@@ -124,7 +124,7 @@ class MockSpecialHandlers:
     """Mock for SpecialToolHandlers."""
 
     def handles(self, tool_name: str) -> bool:
-        return tool_name in ('clarify', 'request_plan_approval', 'director_complete_plan')
+        return tool_name in ('clarify', 'request_plan_approval')
 
     async def handle_clarify(self, call_id, tool_args, ui):
         return {"answer": "user response"}
@@ -253,8 +253,6 @@ def make_agent(agent_parts):
         agent.tool_execution_history = []
         agent._max_tool_output_chars = 100_000
         agent.permission_manager = None
-        agent.director_adapter = MagicMock()
-        agent.director_adapter.is_active = False
         agent._awaiting_approval = False
         agent._error_budget_resume_count = 0
         agent._successful_tools_since_resume = 0
@@ -485,7 +483,6 @@ class TestPhasedToolLoop:
         special = agent_parts['special']
         assert special.handles("clarify") is True
         assert special.handles("request_plan_approval") is True
-        assert special.handles("director_complete_plan") is True
         assert special.handles("read_file") is False
         assert special.handles("write_file") is False
 

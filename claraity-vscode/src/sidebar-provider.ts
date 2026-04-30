@@ -319,7 +319,7 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
     private async handleWebviewMessage(msg: WebViewMessage): Promise<void> {
         switch (msg.type) {
             case 'chatMessage':
-                this.sendChatWithAttachments(msg.content, msg.attachments, msg.images, msg.systemContext);
+                this.sendChatWithAttachments(msg.content, msg.attachments, msg.images, msg.systemContext, msg.activeSkills);
                 break;
 
             case 'searchFiles':
@@ -788,6 +788,22 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                 break;
             }
 
+            // ── Skills ──
+            case 'getSkills':
+                this.connection?.send({ type: 'get_skills' } as ClientMessage);
+                break;
+
+            case 'createSkill':
+                this.connection?.send({
+                    type: 'create_skill',
+                    name: msg.name,
+                    description: msg.description,
+                    category: msg.category,
+                    tags: msg.tags,
+                    body: msg.body,
+                } as ClientMessage);
+                break;
+
             case 'webviewError':
                 this.log?.appendLine(`[ClarAIty] Webview error: ${msg.error}\n${msg.stack ?? ''}`);
                 this.connection?.send({
@@ -1073,6 +1089,7 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
         attachments?: FileAttachment[],
         images?: ImageAttachment[],
         systemContext?: string,
+        activeSkills?: string[],
     ): Promise<void> {
         // Prepend system context (hidden from UI, visible to agent)
         let finalContent = content;
@@ -1128,6 +1145,7 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             type: 'chat_message',
             content: finalContent,
             ...(imagePayload ? { images: imagePayload } : {}),
+            ...(activeSkills && activeSkills.length > 0 ? { active_skills: activeSkills } : {}),
         } as ClientMessage);
     }
 

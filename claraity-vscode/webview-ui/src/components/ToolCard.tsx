@@ -98,13 +98,13 @@ export const ToolCard = memo(function ToolCard({ data, postMessage }: ToolCardPr
     : [];
   const hasParams = visibleParams.length > 0;
 
-  // Unified result content: prefer data.result (actual output), fall back to
-  // data.error string. For run_command errors, result contains the actual
-  // stderr/stdout while error only has "Command failed with exit code N".
+  // Combine result and error for display. On error, both may be present:
+  // result = stdout/stderr (or "(no output)"), error = "Command failed ...".
   const isError = displayStatus === "error";
-  const resultContent = data.result != null
-    ? String(data.result)
-    : (isError && data.error ? data.error : null);
+  const rawResult = data.result != null ? String(data.result) : null;
+  const resultContent = isError && data.error
+    ? [rawResult, data.error].filter(Boolean).join("\n")
+    : rawResult;
   const hasResult = resultContent != null;
 
   return (

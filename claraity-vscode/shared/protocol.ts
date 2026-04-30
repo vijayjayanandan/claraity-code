@@ -243,6 +243,18 @@ export interface SubAgentInfo {
 }
 
 // ============================================================================
+// Skill data shapes
+// ============================================================================
+
+export interface SkillInfo {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  tags: string[];
+}
+
+// ============================================================================
 // Limits data shapes
 // ============================================================================
 
@@ -319,7 +331,6 @@ export type ServerMessage =
   // Interactive
   | { type: "interactive"; event: "clarify_request"; data: { uuid: string; call_id: string; questions: unknown[]; context?: string } }
   | { type: "interactive"; event: "plan_submitted"; data: { uuid: string; call_id: string; plan_hash: string; excerpt: string; truncated: boolean; plan_path?: string } }
-  | { type: "interactive"; event: "director_plan_submitted"; data: { uuid: string; call_id: string; plan_hash: string; excerpt: string; truncated: boolean; plan_path?: string } }
   | { type: "interactive"; event: "permission_mode_changed"; data: { uuid?: string; old_mode?: string; new_mode: string } }
   // Pause
   | { type: "pause_prompt_start"; reason: string; reason_code: string; stats: Record<string, unknown>; pending_todos?: string[] }
@@ -359,6 +370,9 @@ export type ServerMessage =
   | { type: "subagents_list"; subagents: SubAgentInfo[]; available_tools: string[] }
   | { type: "subagent_saved"; success: boolean; name: string; message: string }
   | { type: "subagent_deleted"; success: boolean; name: string; message: string }
+  // Skills
+  | { type: "skills_list"; skills: SkillInfo[] }
+  | { type: "skill_saved"; success: boolean; name: string; message: string }
   // Prompt Enrichment
   | { type: "enrichment_delta"; delta: string }
   | { type: "enrichment_complete"; original: string; enriched: string }

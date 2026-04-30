@@ -28,6 +28,7 @@ export type {
   ArchitectureResponse,
   KnowledgeApproval,
   SubAgentInfo,
+  SkillInfo,
   LimitsData,
   BackgroundTaskData,
 } from "../../shared/protocol";
@@ -85,7 +86,7 @@ export interface TraceStepData {
 import type { FileAttachment, ImageAttachment, LimitsData } from "../../shared/protocol";
 
 export type WebViewMessage =
-  | { type: "chatMessage"; content: string; attachments?: FileAttachment[]; images?: ImageAttachment[]; systemContext?: string }
+  | { type: "chatMessage"; content: string; attachments?: FileAttachment[]; images?: ImageAttachment[]; systemContext?: string; activeSkills?: string[] }
   | { type: "searchFiles"; query: string }
   | { type: "approvalResult"; callId: string; approved: boolean; autoApproveFuture?: boolean; feedback?: string }
   | { type: "interrupt" }
@@ -143,6 +144,9 @@ export type WebViewMessage =
   // Limits
   | { type: "getLimits" }
   | { type: "saveLimits"; limits: LimitsData }
+  // Skills
+  | { type: "getSkills" }
+  | { type: "createSkill"; name: string; description: string; category: string; tags: string[]; body: string }
   // Prompt Enrichment
   | { type: "enrichPrompt"; content: string; history?: Array<{ role: string; content: string }> }
   // Background tasks

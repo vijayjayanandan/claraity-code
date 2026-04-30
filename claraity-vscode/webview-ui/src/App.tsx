@@ -65,6 +65,8 @@ export function App() {
           autoApprove: msg.autoApproveCategories,
           limits: msg.limits,
         });
+        // Fetch available skills on connection
+        postMessage({ type: "getSkills" });
         break;
 
       case "sessionsList":
@@ -187,6 +189,7 @@ export function App() {
       content,
       attachments: resolvedAttachments.length > 0 ? resolvedAttachments : undefined,
       images: resolvedImages.length > 0 ? resolvedImages : undefined,
+      activeSkills: state.activeSkills.length > 0 ? state.activeSkills : undefined,
     });
     dispatch({ type: "CLEAR_INPUT" });
   };
@@ -460,13 +463,22 @@ export function App() {
         onClearEnrichment={() => dispatch({ type: "CLEAR_ENRICHED_PREVIEW" })}
         draft={state.chatDraft}
         onDraftChange={(draft) => dispatch({ type: "SET_CHAT_DRAFT", draft })}
+        skillsList={state.skillsList}
+        activeSkills={state.activeSkills}
+        onToggleSkill={(skillId) => dispatch({ type: "TOGGLE_SKILL", skillId })}
+        onRequestSkills={() => postMessage({ type: "getSkills" })}
+        onCreateSkill={() => {
+          handleSendMessage("I want to create a new skill. Help me define it.");
+        }}
       />
 
       <BottomBar
         connected={state.connected}
         modelName={state.modelName}
         permissionMode={state.permissionMode}
-        onSetMode={(mode) => postMessage({ type: "setMode", mode })}
+        onSetMode={(mode) => {
+          postMessage({ type: "setMode", mode });
+        }}
         onShowArchitecture={() => {
           postMessage({ type: "getArchitecture" });
           dispatch({ type: "SET_ACTIVE_PANEL", panel: "architecture" });

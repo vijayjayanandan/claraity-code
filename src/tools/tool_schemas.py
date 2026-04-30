@@ -609,127 +609,6 @@ CLARIFY_TOOL = ToolDefinition(
 )
 
 
-# =============================================================================
-# Director Mode Tools - Phase checkpoint tools for Director workflow
-# =============================================================================
-
-DIRECTOR_COMPLETE_UNDERSTAND_TOOL = ToolDefinition(
-    name="director_complete_understand",
-    description="Signal that the UNDERSTAND phase is complete. Submit your findings about the codebase and task. This is the ONLY way to advance from UNDERSTAND to PLAN phase.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "task_description": {
-                "type": "string",
-                "description": "Summary of the task being worked on",
-            },
-            "affected_files": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "File paths that will be affected by this task",
-            },
-            "existing_patterns": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Patterns found in the codebase relevant to this task",
-            },
-            "constraints": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Constraints to respect during implementation",
-            },
-            "risks": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Risks or potential issues identified",
-            },
-            "dependencies": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Dependencies relevant to this task",
-            },
-        },
-        "required": ["task_description"],
-    },
-)
-
-DIRECTOR_COMPLETE_PLAN_TOOL = ToolDefinition(
-    name="director_complete_plan",
-    description=(
-        "Signal that the PLAN phase is complete. "
-        "BEFORE calling this tool, write your full implementation plan "
-        "(with rationale, decisions, trade-offs) to a markdown file using write_file "
-        "at .claraity/plans/director_plan.md. Then call this tool with the file path "
-        "and a list of slice titles for execution tracking."
-    ),
-    parameters={
-        "type": "object",
-        "properties": {
-            "plan_document": {
-                "type": "string",
-                "description": "Path to the markdown plan file you wrote (e.g. .claraity/plans/director_plan.md)",
-            },
-            "summary": {
-                "type": "string",
-                "description": "Brief one-line summary of the plan",
-            },
-            "slices": {
-                "type": "array",
-                "description": "list of vertical slices for execution tracking (3-5 recommended)",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "title": {
-                            "type": "string",
-                            "description": "Short name for this slice",
-                        },
-                    },
-                    "required": ["title"],
-                },
-            },
-        },
-        "required": ["plan_document", "slices"],
-    },
-)
-
-DIRECTOR_COMPLETE_SLICE_TOOL = ToolDefinition(
-    name="director_complete_slice",
-    description="Signal that a vertical slice is complete and all its tests pass. This advances to the next slice or to INTEGRATE phase if all slices are done.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "slice_id": {
-                "type": "integer",
-                "description": "ID of the completed slice",
-            },
-            "test_results_summary": {
-                "type": "string",
-                "description": "Summary of test results for this slice",
-            },
-        },
-        "required": ["slice_id"],
-    },
-)
-
-DIRECTOR_COMPLETE_INTEGRATION_TOOL = ToolDefinition(
-    name="director_complete_integration",
-    description="Signal that integration is complete -- all tests pass and all slices work together. This finishes Director mode.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "test_results_summary": {
-                "type": "string",
-                "description": "Summary of the full test suite results",
-            },
-            "issues": {
-                "type": "string",
-                "description": "Any known issues or follow-up items (empty if none)",
-            },
-        },
-        "required": [],
-    },
-)
-
 # Background Task Tools
 
 CHECK_BACKGROUND_TASK_TOOL = ToolDefinition(
@@ -1042,10 +921,6 @@ ALL_TOOLS = [
     CLARIFY_TOOL,
     ENTER_PLAN_MODE_TOOL,
     EXIT_PLAN_MODE_TOOL,
-    DIRECTOR_COMPLETE_UNDERSTAND_TOOL,
-    DIRECTOR_COMPLETE_PLAN_TOOL,
-    DIRECTOR_COMPLETE_SLICE_TOOL,
-    DIRECTOR_COMPLETE_INTEGRATION_TOOL,
     # ClarAIty Knowledge & Task tools
     *KNOWLEDGE_TOOLS,
 ]

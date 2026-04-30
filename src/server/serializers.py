@@ -246,7 +246,7 @@ def serialize_store_notification(notification: StoreNotification) -> dict | None
                     },
                 }
 
-            elif event_type in ("plan_submitted", "director_plan_submitted"):
+            elif event_type == "plan_submitted":
                 return {
                     "type": "interactive",
                     "event": event_type,

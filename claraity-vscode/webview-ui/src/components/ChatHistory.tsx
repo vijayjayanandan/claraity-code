@@ -54,7 +54,6 @@ interface ChatHistoryProps {
     excerpt: string;
     truncated: boolean;
     planPath?: string;
-    isDirector?: boolean;
   } | null;
   undoAvailable: { turnId: string; files: string[] } | null;
   undoCompleted: boolean;
@@ -418,7 +417,6 @@ export function ChatHistory({
           excerpt={planApproval.excerpt}
           truncated={planApproval.truncated}
           planPath={planApproval.planPath}
-          isDirector={planApproval.isDirector}
           postMessage={postMessage}
           onDismiss={onDismissPlan ?? (() => {})}
         />

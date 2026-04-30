@@ -21,6 +21,7 @@ export type {
   ImageAttachment,
   ServerMessage,
   SubAgentInfo,
+  SkillInfo,
 } from '../shared/protocol';
 
 // Import for use in local type definitions
@@ -35,6 +36,7 @@ export interface ChatMessagePayload {
     content: string;
     attachments?: FileAttachment[];
     images?: ImageAttachment[];
+    active_skills?: string[];
 }
 
 export interface ApprovalResultPayload {
@@ -203,6 +205,9 @@ export type ClientMessage =
     | { type: 'save_subagent'; name: string; description: string; system_prompt: string; tools?: string[] | null; is_fork?: boolean }
     | { type: 'delete_subagent'; name: string }
     | { type: 'reload_subagents' }
+    // Skills
+    | { type: 'get_skills' }
+    | { type: 'create_skill'; name: string; description: string; category: string; tags: string[]; body: string }
     // Limits
     | { type: 'get_limits' }
     | { type: 'save_limits'; limits: import('../shared/protocol').LimitsData }
@@ -244,7 +249,7 @@ export type ExtensionMessage =
     | { type: 'toolList'; tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }> };
 
 export type WebViewMessage =
-    | { type: 'chatMessage'; content: string; attachments?: FileAttachment[]; images?: ImageAttachment[]; systemContext?: string }
+    | { type: 'chatMessage'; content: string; attachments?: FileAttachment[]; images?: ImageAttachment[]; systemContext?: string; activeSkills?: string[] }
     | { type: 'searchFiles'; query: string }
     | { type: 'approvalResult'; callId: string; approved: boolean; autoApproveFuture?: boolean; feedback?: string }
     | { type: 'interrupt' }
@@ -299,6 +304,9 @@ export type WebViewMessage =
     // Limits
     | { type: 'getLimits' }
     | { type: 'saveLimits'; limits: import('../shared/protocol').LimitsData }
+    // Skills
+    | { type: 'getSkills' }
+    | { type: 'createSkill'; name: string; description: string; category: string; tags: string[]; body: string }
     // Prompt Enrichment
     | { type: 'enrichPrompt'; content: string; history?: Array<{ role: string; content: string }> }
     // Background tasks

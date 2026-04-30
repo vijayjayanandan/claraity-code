@@ -52,6 +52,11 @@ function defaultProps(overrides: Partial<Parameters<typeof InputBox>[0]> = {}) {
     onClearEnrichment: vi.fn(),
     draft: "",
     onDraftChange: vi.fn(),
+    skillsList: [],
+    activeSkills: [],
+    onToggleSkill: vi.fn(),
+    onRequestSkills: vi.fn(),
+    onCreateSkill: vi.fn(),
     ...overrides,
   };
 }

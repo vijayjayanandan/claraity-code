@@ -1236,24 +1236,6 @@ describe("dispatchServerMessage", () => {
       excerpt: "Plan text",
       truncated: false,
       planPath: undefined,
-      isDirector: false,
-    });
-  });
-
-  test("interactive director_plan_submitted dispatches PLAN_APPROVAL", () => {
-    dispatchMsg({
-      type: "interactive",
-      event: "director_plan_submitted",
-      data: { uuid: "u2", call_id: "c2", plan_hash: "h2", excerpt: "Dir plan", truncated: true, plan_path: "/p" },
-    });
-    expect(dispatch).toHaveBeenCalledWith({
-      type: "PLAN_APPROVAL",
-      callId: "c2",
-      planHash: "h2",
-      excerpt: "Dir plan",
-      truncated: true,
-      planPath: "/p",
-      isDirector: true,
     });
   });
 
@@ -1495,5 +1477,56 @@ describe("appReducer — MESSAGE_FINALIZED flushes buffer (Fix 5)", () => {
 
     expect(s.timeline).toHaveLength(0);
     expect(s.messages[0].finalized).toBe(true);
+  });
+});
+
+// ============================================================================
+// Skills actions
+// ============================================================================
+
+describe("Skills", () => {
+  test("SKILLS_LOADED populates skillsList", () => {
+    const skills = [
+      { id: "tdd", name: "TDD", description: "Test first", category: "dev", tags: ["test"] },
+      { id: "review", name: "Review", description: "Code review", category: "review", tags: [] },
+    ];
+    const s = reduce({ type: "SKILLS_LOADED", skills });
+    expect(s.skillsList).toHaveLength(2);
+    expect(s.skillsList[0].id).toBe("tdd");
+  });
+
+  test("TOGGLE_SKILL adds skill to activeSkills", () => {
+    const s = reduce({ type: "TOGGLE_SKILL", skillId: "tdd" });
+    expect(s.activeSkills).toEqual(["tdd"]);
+  });
+
+  test("TOGGLE_SKILL removes already-active skill", () => {
+    let s: AppState = { ...initialState, activeSkills: ["tdd", "review"] };
+    s = reduce({ type: "TOGGLE_SKILL", skillId: "tdd" }, s);
+    expect(s.activeSkills).toEqual(["review"]);
+  });
+
+  test("TOGGLE_SKILL enforces max 2 limit", () => {
+    let s: AppState = { ...initialState, activeSkills: ["tdd", "review"] };
+    s = reduce({ type: "TOGGLE_SKILL", skillId: "new-skill" }, s);
+    // Should not add a third — state unchanged
+    expect(s.activeSkills).toEqual(["tdd", "review"]);
+  });
+
+  test("CLEAR_ACTIVE_SKILLS resets to empty", () => {
+    let s: AppState = { ...initialState, activeSkills: ["tdd", "review"] };
+    s = reduce({ type: "CLEAR_ACTIVE_SKILLS" }, s);
+    expect(s.activeSkills).toEqual([]);
+  });
+
+  test("skills_list server message dispatches SKILLS_LOADED", () => {
+    const actions: Action[] = [];
+    const mockDispatch = (a: Action) => actions.push(a);
+    dispatchServerMessage(mockDispatch, {
+      type: "skills_list",
+      skills: [{ id: "tdd", name: "TDD", description: "Test first", category: "dev", tags: [] }],
+    } as unknown as ServerMessage);
+    expect(actions).toHaveLength(1);
+    expect(actions[0].type).toBe("SKILLS_LOADED");
   });
 });

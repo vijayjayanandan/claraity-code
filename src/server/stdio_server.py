@@ -297,6 +297,9 @@ class StdioProtocol(UIProtocol):
         # Turn deletion (context cleanup)
         "delete_turn": "_handle_delete_turn",
         "restore_turn": "_handle_restore_turn",
+        # Skills
+        "get_skills": "_handle_get_skills",
+        "create_skill": "_handle_create_skill",
     }
 
     def __init__(
@@ -660,13 +663,14 @@ class StdioProtocol(UIProtocol):
     async def _handle_chat_message(self, data: dict) -> None:
         content = data.get("content", "")
         images = data.get("images", [])
+        active_skills = data.get("active_skills", [])
         if len(content) > _MAX_CHAT_MESSAGE_LEN:
             await self._send_error(
                 "message_too_large", "Message too large. Maximum 100,000 characters."
             )
             return
         if content.strip() or images:
-            await self._chat_queue.put({"content": content, "images": images})
+            await self._chat_queue.put({"content": content, "images": images, "active_skills": active_skills})
 
     # -----------------------------------------------------------------
     # Config handlers
@@ -2206,6 +2210,121 @@ class StdioProtocol(UIProtocol):
             logger.warning("stdio_reload_subagents_error", error=str(e))
             await self._send_json({"type": "subagents_list", "subagents": []})
 
+    # -----------------------------------------------------------------
+    # Skill handlers
+    # -----------------------------------------------------------------
+
+    async def _handle_get_skills(self, data: dict) -> None:
+        """Return all available skills from .claraity/skills/."""
+        try:
+            from src.skills.skill_loader import SkillLoader
+
+            working_dir = Path(self._working_directory) if self._working_directory else Path.cwd()
+            loader = SkillLoader(working_directory=working_dir)
+            skills = loader.load_all()
+            await self._send_json(
+                {
+                    "type": "skills_list",
+                    "skills": [
+                        {
+                            "id": s.id,
+                            "name": s.name,
+                            "description": s.description,
+                            "category": s.category,
+                            "tags": s.tags,
+                        }
+                        for s in skills
+                    ],
+                }
+            )
+        except Exception as e:
+            logger.warning("stdio_get_skills_error", error=str(e))
+            await self._send_json({"type": "skills_list", "skills": []})
+
+    async def _handle_create_skill(self, data: dict) -> None:
+        """Create a new skill file in .claraity/skills/."""
+        import re as _re
+
+        import yaml as _yaml
+
+        name = str(data.get("name", "")).strip()
+        description = str(data.get("description", "")).strip()
+        category = str(data.get("category", "general")).strip()
+        tags = data.get("tags", [])
+        body = str(data.get("body", "")).strip()
+
+        if not name or not description:
+            await self._send_json(
+                {
+                    "type": "skill_saved",
+                    "success": False,
+                    "name": name,
+                    "message": "Name and description are required.",
+                }
+            )
+            return
+
+        if not body:
+            await self._send_json(
+                {
+                    "type": "skill_saved",
+                    "success": False,
+                    "name": name,
+                    "message": "Skill body (instructions) is required.",
+                }
+            )
+            return
+
+        # Slugify name for filename
+        slug = _re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+        if not slug:
+            await self._send_json(
+                {
+                    "type": "skill_saved",
+                    "success": False,
+                    "name": name,
+                    "message": "Could not derive a valid filename from the skill name.",
+                }
+            )
+            return
+
+        try:
+            working_dir = Path(self._working_directory) if self._working_directory else Path.cwd()
+            skills_dir = working_dir / ".claraity" / "skills"
+            skills_dir.mkdir(parents=True, exist_ok=True)
+
+            # Build frontmatter
+            fm: dict[str, Any] = {"name": name, "description": description}
+            if category and category != "general":
+                fm["category"] = category
+            if tags:
+                fm["tags"] = tags
+
+            fm_yaml = _yaml.dump(fm, default_flow_style=False, allow_unicode=True).strip()
+            content = f"---\n{fm_yaml}\n---\n\n{body}\n"
+
+            target = skills_dir / f"{slug}.md"
+            target.write_text(content, encoding="utf-8")
+
+            await self._send_json(
+                {
+                    "type": "skill_saved",
+                    "success": True,
+                    "name": name,
+                    "message": f"Skill '{name}' saved as {slug}.md",
+                }
+            )
+        except Exception as e:
+            logger.warning("stdio_create_skill_error", error=str(e))
+            await self._send_json(
+                {
+                    "type": "skill_saved",
+                    "success": False,
+                    "name": name,
+                    "message": f"Failed to create skill: {e}",
+                }
+            )
+
     async def _handle_export_knowledge(self, data: dict) -> None:
         """Export knowledge DB to JSONL. Accepts optional 'path' for Save As."""
         try:
@@ -2441,7 +2560,7 @@ class StdioProtocol(UIProtocol):
     # Streaming
     # -----------------------------------------------------------------
 
-    async def _stream_and_send(self, agent, chat_content: str, attachments=None) -> int:
+    async def _stream_and_send(self, agent, chat_content: str, attachments=None, active_skills=None) -> int:
         """Stream agent response and send each event to the client.
 
         Checks for TCP disconnect to avoid burning tokens when the client
@@ -2449,7 +2568,7 @@ class StdioProtocol(UIProtocol):
         """
         count = 0
         async for event in agent.stream_response(
-            user_input=chat_content, ui=self, attachments=attachments
+            user_input=chat_content, ui=self, attachments=attachments, active_skills=active_skills
         ):
             if self._closed:
                 logger.warning("stdio_tcp_disconnected_during_stream")
@@ -2709,11 +2828,12 @@ async def run_stdio_server(
                 # Reset protocol state for new turn
                 protocol.reset()
 
-                # Extract content and images
+                # Extract content, images, and active skills
                 chat_content = (
                     chat_msg.get("content", "") if isinstance(chat_msg, dict) else str(chat_msg)
                 )
                 raw_images = chat_msg.get("images", []) if isinstance(chat_msg, dict) else []
+                active_skills = chat_msg.get("active_skills", []) if isinstance(chat_msg, dict) else []
 
                 # Build attachments
                 attachments = None
@@ -2766,7 +2886,7 @@ async def run_stdio_server(
                 logger.debug("stdio_stream_start")
 
                 streaming_task = asyncio.create_task(
-                    protocol._stream_and_send(agent, chat_content, attachments)
+                    protocol._stream_and_send(agent, chat_content, attachments, active_skills=active_skills or None)
                 )
                 protocol.set_streaming_task(streaming_task)
                 try:

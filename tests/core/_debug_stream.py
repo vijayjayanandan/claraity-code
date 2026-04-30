@@ -48,7 +48,6 @@ def main():
         context = a.context_builder.build_context(
             user_query=user_input, task_type='chat', language='python',
             plan_mode_state=a.plan_mode_state,
-            director_adapter=a.director_adapter,
         )
         print(f'[OK] build_context: {len(context)} messages', file=sys.stderr)
 

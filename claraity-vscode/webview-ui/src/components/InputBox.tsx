@@ -2,7 +2,8 @@
  * Chat input box with @file mentions, file attachments, image paste, and send/interrupt.
  */
 import { useState, useRef, useCallback, useEffect } from "react";
-import type { FileAttachment, ImageAttachment, WebViewMessage } from "../types";
+import type { FileAttachment, ImageAttachment, SkillInfo, WebViewMessage } from "../types";
+import { SkillPicker } from "./SkillPicker";
 
 interface InputBoxProps {
   isStreaming: boolean;
@@ -28,6 +29,12 @@ interface InputBoxProps {
   onClearEnrichment: () => void;
   draft: string;
   onDraftChange: (draft: string) => void;
+  // Skills
+  skillsList: SkillInfo[];
+  activeSkills: string[];
+  onToggleSkill: (skillId: string) => void;
+  onRequestSkills: () => void;
+  onCreateSkill: () => void;
 }
 
 const MAX_IMAGES = 5;
@@ -68,6 +75,11 @@ export function InputBox({
   onClearEnrichment,
   draft,
   onDraftChange,
+  skillsList,
+  activeSkills,
+  onToggleSkill,
+  onRequestSkills,
+  onCreateSkill,
 }: InputBoxProps) {
   const text = draft;
   const setText = onDraftChange;
@@ -75,6 +87,7 @@ export function InputBox({
   const [mentionIndex, setMentionIndex] = useState(0);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [showAttachMenu, setShowAttachMenu] = useState(false);
+  const [showSkillPicker, setShowSkillPicker] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const attachMenuRef = useRef<HTMLDivElement>(null);
 
@@ -406,6 +419,22 @@ export function InputBox({
         ))}
       </div>
 
+      {/* Active skill badges */}
+      {activeSkills.length > 0 && (
+        <div className="skill-badge-bar">
+          {activeSkills.map((id) => {
+            const skill = skillsList.find((s) => s.id === id);
+            return skill ? (
+              <span key={id} className="skill-badge" title={skill.description}>
+                <i className="codicon codicon-lightbulb" />
+                {skill.name}
+                <span className="skill-badge-remove" onClick={() => onToggleSkill(id)}>x</span>
+              </span>
+            ) : null;
+          })}
+        </div>
+      )}
+
       {/* Attachment badges */}
       {attachments.length > 0 && (
         <div className="attachment-bar">
@@ -515,6 +544,26 @@ export function InputBox({
         >
           <i className="codicon codicon-sparkle" />
         </button>
+        <div className="skill-wrapper">
+          <button
+            className={`input-icon-btn${activeSkills.length > 0 ? " skills-active" : ""}`}
+            title={`Skills${activeSkills.length > 0 ? ` (${activeSkills.length}/2)` : ""}`}
+            onClick={() => setShowSkillPicker((v) => !v)}
+            disabled={isStreaming}
+          >
+            <i className="codicon codicon-lightbulb" />
+          </button>
+          {showSkillPicker && (
+            <SkillPicker
+              skills={skillsList}
+              activeSkills={activeSkills}
+              onToggle={onToggleSkill}
+              onRequestRefresh={onRequestSkills}
+              onCreateSkill={() => { setShowSkillPicker(false); onCreateSkill(); }}
+              onClose={() => setShowSkillPicker(false)}
+            />
+          )}
+        </div>
         <div className="attach-wrapper" ref={attachMenuRef}>
           <button
             className="input-icon-btn"
