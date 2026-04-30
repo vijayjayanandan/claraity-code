@@ -34,9 +34,9 @@ from src.llm.base import LLMConfig, LLMBackendType
 @pytest.fixture(autouse=True)
 def allow_test_workspace(tmp_path, monkeypatch):
     """Allow file operations in test tmp_path."""
-    monkeypatch.setattr(FileOperationTool, "_workspace_root", tmp_path)
+    monkeypatch.setattr(FileOperationTool, "_workspace_roots", [tmp_path])
     yield
-    monkeypatch.setattr(FileOperationTool, "_workspace_root", None)
+    monkeypatch.setattr(FileOperationTool, "_workspace_roots", None)
 
 
 def _make_subprocess_result(lines, error=None, returncode=0, images=None):

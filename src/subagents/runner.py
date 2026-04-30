@@ -260,12 +260,17 @@ def main():
             tools_blocklist = None
         tool_executor = _create_tool_executor(tools_allowlist, tools_blocklist)
 
-        # 3b. Set workspace root on file operation tools for path validation
-        # Without this, _workspace_root stays None and validate_path_security
+        # 3b. Set workspace roots on file operation tools for path validation.
+        # Without this, _workspace_roots stays None and validate_path_security
         # falls back to Path.cwd() which is fragile if any tool changes cwd.
+        # Subagents inherit the parent's workspace roots if available.
         from src.tools.file_operations import FileOperationTool
 
-        FileOperationTool._workspace_root = Path(input_data.working_directory)
+        workspace_roots = getattr(input_data, "workspace_roots", None)
+        if workspace_roots:
+            FileOperationTool._workspace_roots = [Path(r) for r in workspace_roots]
+        else:
+            FileOperationTool._workspace_roots = [Path(input_data.working_directory)]
 
         # 3c. Switch process cwd to the target project's working directory.
         # The subprocess starts with cwd=ClarAIty root (for correct src.* imports).

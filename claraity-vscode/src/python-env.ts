@@ -44,7 +44,14 @@ export async function resolveLaunchConfig(
     workDir: string,
     devMode: string,
     extensionPath: string,
+    additionalFolders: string[] = [],
 ): Promise<LaunchConfig | null> {
+    // Build --workspace-folders arg if multi-root workspace
+    const wsArgs: string[] = [];
+    if (additionalFolders.length > 0) {
+        wsArgs.push('--workspace-folders', [workDir, ...additionalFolders].join(','));
+    }
+
     // 1. Dev mode — only when explicitly requested
     if (devMode === 'always') {
         if (!checkDevMode(workDir)) {
@@ -65,7 +72,7 @@ export async function resolveLaunchConfig(
         return {
             mode: 'dev',
             command: pythonPath,
-            args: ['-m', 'src.server'],
+            args: ['-m', 'src.server', ...wsArgs],
             cwd: workDir,
         };
     }
@@ -76,7 +83,7 @@ export async function resolveLaunchConfig(
             return {
                 mode: 'dev',
                 command: pythonPath,
-                args: ['-m', 'src.server'],
+                args: ['-m', 'src.server', ...wsArgs],
                 cwd: workDir,
             };
         }
@@ -89,7 +96,7 @@ export async function resolveLaunchConfig(
         return {
             mode: 'bundled',
             command: bundledPath,
-            args: ['--workdir', workDir],
+            args: ['--workdir', workDir, ...wsArgs],
             cwd: workDir,
         };
     }
@@ -102,7 +109,7 @@ export async function resolveLaunchConfig(
             return {
                 mode: 'installed',
                 command: pythonPath,
-                args: ['-m', 'src.server', '--workdir', workDir],
+                args: ['-m', 'src.server', '--workdir', workDir, ...wsArgs],
                 cwd: workDir,
                 version: installedVersion,
             };

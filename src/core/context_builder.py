@@ -166,6 +166,9 @@ class ContextBuilder:
         # Trace integration (set via set_trace, optional)
         self._trace: Any = None
 
+        # Workspace roots (set via set_workspace_roots, optional)
+        self._workspace_roots: list[Path] | None = None
+
         # Store last assembly report for inspection
         self.last_report: ContextAssemblyReport | None = None
 
@@ -196,6 +199,10 @@ class ContextBuilder:
     def set_trace(self, trace: Any) -> None:
         """Set TraceIntegration for emitting context source events."""
         self._trace = trace
+
+    def set_workspace_roots(self, roots: list[Path]) -> None:
+        """Set workspace roots for multi-folder workspace context injection."""
+        self._workspace_roots = roots
 
     def build_context(
         self,
@@ -378,6 +385,19 @@ class ContextBuilder:
             persistent_mem = getattr(self.memory, "persistent_memory_content", "")
             if persistent_mem:
                 system_prompt = system_prompt + "\n\n## Your Current Memories\n\n" + persistent_mem
+
+        # Inject workspace folders context (multi-root workspace)
+        if self._workspace_roots and len(self._workspace_roots) > 1:
+            primary = str(self._workspace_roots[0])
+            others = [str(r) for r in self._workspace_roots[1:]]
+            workspace_block = (
+                "\n\n# Workspace Folders\n\n"
+                f"Primary: {primary}\n"
+                f"Additional: {', '.join(others)}\n"
+                "All folders are accessible for read/write/search. "
+                "Use file_path to target a specific folder when searching."
+            )
+            system_prompt = system_prompt + workspace_block
 
         # Compress if needed
         if self.optimizer.count_tokens(system_prompt) > system_prompt_budget:

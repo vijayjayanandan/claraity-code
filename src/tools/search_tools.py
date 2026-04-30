@@ -57,14 +57,19 @@ FILE_TYPE_MAP = {
 
 
 def validate_path_security(
-    path_str: str, workspace_root: Path | None = None, allow_files_outside_workspace: bool = False
+    path_str: str,
+    workspace_root: Path | list[Path] | None = None,
+    allow_files_outside_workspace: bool = False,
 ) -> Path:
     """
     Validate path for security (prevent path traversal attacks).
 
     Args:
         path_str: User-provided path string
-        workspace_root: Allowed workspace directory (default: current working directory)
+        workspace_root: Allowed workspace directory or list of directories
+                        (default: current working directory).  When a list is
+                        provided the path is accepted if it falls under *any*
+                        of the roots (multi-root workspace support).
         allow_files_outside_workspace: If True, allows paths outside workspace (use with caution)
 
     Returns:
@@ -78,29 +83,63 @@ def validate_path_security(
         - Checks if path is within workspace boundary
         - Prevents directory traversal attacks (../../../etc/passwd)
     """
+    # Normalise to a list of resolved roots
     if workspace_root is None:
-        workspace_root = Path.cwd()
+        roots = [Path.cwd()]
+    elif isinstance(workspace_root, list):
+        roots = [r.resolve() for r in workspace_root]
     else:
-        workspace_root = workspace_root.resolve()
+        roots = [workspace_root.resolve()]
 
     try:
         # Resolve to absolute path (follows symlinks, resolves ..)
         resolved_path = Path(path_str).resolve()
 
-        # Check if path is within workspace (prevent path traversal)
+        # Check if path is within any workspace root (prevent path traversal)
         if not allow_files_outside_workspace:
-            try:
-                resolved_path.relative_to(workspace_root)
-            except ValueError:
+            inside = any(_is_relative_to(resolved_path, root) for root in roots)
+            if not inside:
+                roots_str = ", ".join(str(r) for r in roots)
                 raise ValueError(
                     f"[SECURITY] Path traversal blocked: '{path_str}' resolves to '{resolved_path}' "
-                    f"which is outside workspace '{workspace_root}'"
+                    f"which is outside workspace roots: {roots_str}"
                 )
 
         return resolved_path
 
     except (OSError, RuntimeError) as e:
         raise ValueError(f"Invalid path: '{path_str}' - {e}")
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    """Check if *path* is equal to or a descendant of *root*."""
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _workspace_hint(searched_path: Path | None) -> str:
+    """Return a one-line hint about other workspace folders, or empty string.
+
+    The hint is appended to search results when:
+    1. Multiple workspace roots are configured (multi-folder workspace), AND
+    2. The search used the default path (primary root) rather than an explicit path.
+    """
+    from src.tools.file_operations import FileOperationTool
+
+    roots = FileOperationTool._workspace_roots
+    if not roots or len(roots) < 2:
+        return ""
+
+    primary = roots[0].resolve()
+    # If the user explicitly targeted a specific folder, no hint needed
+    if searched_path is not None and searched_path.resolve() != primary:
+        return ""
+
+    other = [str(r) for r in roots[1:]]
+    return f"\n(Workspace also contains: {', '.join(other)} -- search these with file_path if needed)"
 
 
 def validate_regex_safety(pattern: str, max_length: int = 500) -> None:
@@ -260,13 +299,16 @@ class GrepTool(Tool):
                     error="Unknown argument 'path'. Use 'file_path' instead.",
                 )
 
-            # Default path
+            # Default path — track whether the caller specified one explicitly
+            user_provided_path = file_path is not None
             if file_path is None:
                 file_path = "."
 
             # Validate path for security (prevent path traversal)
             try:
-                search_path = validate_path_security(file_path)
+                search_path = validate_path_security(
+                    file_path, allow_files_outside_workspace=True
+                )
             except ValueError as e:
                 return ToolResult(
                     tool_name=self.name, status=ToolStatus.ERROR, output=None, error=str(e)
@@ -431,6 +473,12 @@ class GrepTool(Tool):
                 if output_truncated:
                     output += f"\n[Stopped: {self.MAX_OUTPUT_CHARS:,}-char output budget reached. Use file_path or glob to narrow scope.]"
                 total_matches = len(all_matches)
+
+            # Append workspace hint when searching default path in multi-root workspace
+            if not user_provided_path:
+                hint = _workspace_hint(search_path)
+                if hint:
+                    output += hint
 
             return ToolResult(
                 tool_name=self.name,
@@ -740,13 +788,16 @@ class GlobTool(Tool):
                     error="Unknown argument 'path'. Use 'file_path' instead.",
                 )
 
-            # Default path
+            # Default path — track whether the caller specified one explicitly
+            user_provided_path = file_path is not None
             if file_path is None:
                 file_path = "."
 
             # Validate path for security (prevent path traversal)
             try:
-                search_path = validate_path_security(file_path)
+                search_path = validate_path_security(
+                    file_path, allow_files_outside_workspace=True
+                )
             except ValueError as e:
                 return ToolResult(
                     tool_name=self.name, status=ToolStatus.ERROR, output=None, error=str(e)
@@ -796,6 +847,12 @@ class GlobTool(Tool):
             # Format output
             output_lines = [str(f) for f in sorted_files]
             output = "\n".join(output_lines)
+
+            # Append workspace hint when searching default path in multi-root workspace
+            if not user_provided_path:
+                hint = _workspace_hint(search_path)
+                if hint:
+                    output += hint
 
             return ToolResult(
                 tool_name=self.name,

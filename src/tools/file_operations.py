@@ -44,9 +44,9 @@ class FileOperationTool(Tool):
     - Configurable workspace root for testing
     """
 
-    # Class-level workspace root override (for testing)
-    # Set this to allow operations in test directories
-    _workspace_root: Path | None = None
+    # Class-level workspace roots (multi-root workspace support).
+    # First entry is the primary root; all entries are valid workspace boundaries.
+    _workspace_roots: list[Path] | None = None
 
     def _validate_path(
         self, file_path: str, must_exist: bool = True, allow_outside_workspace: bool = False
@@ -66,8 +66,8 @@ class FileOperationTool(Tool):
             ValueError: If path fails security validation
             FileNotFoundError: If must_exist=True and path doesn't exist
         """
-        # Use class-level workspace root if set (for testing)
-        workspace = self._workspace_root
+        # Use class-level workspace roots if set
+        workspace = self._workspace_roots
 
         # Validate path security
         validated_path = validate_path_security(
@@ -280,9 +280,13 @@ class ReadFileTool(FileOperationTool):
             - end_line is EXCLUSIVE (standard Python semantics)
         """
         try:
-            # Validate path security
+            # Validate path security.
+            # Reads allow outside-workspace paths because the gating service
+            # enforces an approval prompt before execution reaches here.
             try:
-                path = self._validate_path(file_path, must_exist=True)
+                path = self._validate_path(
+                    file_path, must_exist=True, allow_outside_workspace=True
+                )
             except ValueError as e:
                 return ToolResult(
                     tool_name=self.name, status=ToolStatus.ERROR, output=None, error=str(e)
@@ -563,9 +567,13 @@ class WriteFileTool(FileOperationTool):
     def execute(self, file_path: str, content: str, **kwargs: Any) -> ToolResult:
         """Write content to file."""
         try:
-            # Validate path security (must_exist=False for new files)
+            # Validate path security (must_exist=False for new files).
+            # Outside-workspace writes are allowed here because the gating
+            # service enforces an approval prompt before execution.
             try:
-                path = self._validate_path(file_path, must_exist=False)
+                path = self._validate_path(
+                    file_path, must_exist=False, allow_outside_workspace=True
+                )
             except ValueError as e:
                 return ToolResult(
                     tool_name=self.name, status=ToolStatus.ERROR, output=None, error=str(e)
@@ -607,9 +615,13 @@ class ListDirectoryTool(FileOperationTool):
     def execute(self, directory_path: str, **kwargs: Any) -> ToolResult:
         """list directory contents."""
         try:
-            # Validate path security
+            # Validate path security.
+            # Reads allow outside-workspace paths because the gating service
+            # enforces an approval prompt before execution reaches here.
             try:
-                path = self._validate_path(directory_path, must_exist=True)
+                path = self._validate_path(
+                    directory_path, must_exist=True, allow_outside_workspace=True
+                )
             except ValueError as e:
                 return ToolResult(
                     tool_name=self.name, status=ToolStatus.ERROR, output=None, error=str(e)
@@ -702,9 +714,13 @@ class EditFileTool(FileOperationTool):
     ) -> ToolResult:
         """Edit file with find/replace."""
         try:
-            # Validate path security
+            # Validate path security.
+            # Outside-workspace edits are allowed here because the gating
+            # service enforces an approval prompt before execution.
             try:
-                path = self._validate_path(file_path, must_exist=True)
+                path = self._validate_path(
+                    file_path, must_exist=True, allow_outside_workspace=True
+                )
             except ValueError as e:
                 return ToolResult(
                     tool_name=self.name, status=ToolStatus.ERROR, output=None, error=str(e)
@@ -787,9 +803,13 @@ class AppendToFileTool(FileOperationTool):
     def execute(self, file_path: str, content: str, **kwargs: Any) -> ToolResult:
         """Append content to file."""
         try:
-            # Validate path security (must_exist=False for new files)
+            # Validate path security (must_exist=False for new files).
+            # Outside-workspace appends are allowed here because the gating
+            # service enforces an approval prompt before execution.
             try:
-                path = self._validate_path(file_path, must_exist=False)
+                path = self._validate_path(
+                    file_path, must_exist=False, allow_outside_workspace=True
+                )
             except ValueError as e:
                 return ToolResult(
                     tool_name=self.name, status=ToolStatus.ERROR, output=None, error=str(e)

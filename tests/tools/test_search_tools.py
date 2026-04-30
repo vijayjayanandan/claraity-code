@@ -846,12 +846,12 @@ class TestEditFileToolUniqueness:
     def _make_tool(self, tmp_path):
         from src.tools import EditFileTool
         from src.tools.file_operations import FileOperationTool
-        FileOperationTool._workspace_root = tmp_path
+        FileOperationTool._workspace_roots = [tmp_path]
         return EditFileTool()
 
     def _cleanup(self):
         from src.tools.file_operations import FileOperationTool
-        FileOperationTool._workspace_root = None
+        FileOperationTool._workspace_roots = None
 
     def test_rejects_non_unique_match(self, tmp_path):
         """Multiple occurrences without replace_all should error."""

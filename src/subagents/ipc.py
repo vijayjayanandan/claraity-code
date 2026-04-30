@@ -49,6 +49,7 @@ class SubprocessInput:
     api_key: str
     task_description: str
     working_directory: str
+    workspace_roots: list[str] = field(default_factory=list)
     max_iterations: int = 50
     max_wall_time: float | None = 300.0
     transcript_path: str = ""

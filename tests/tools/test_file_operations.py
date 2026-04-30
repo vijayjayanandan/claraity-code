@@ -25,11 +25,11 @@ def allow_test_workspace(tmp_path, monkeypatch):
     subclasses, allowing tests to operate on temporary files without
     triggering security violations.
     """
-    # Set workspace root to tmp_path for all file operation tools
-    monkeypatch.setattr(FileOperationTool, '_workspace_root', tmp_path)
+    # Set workspace roots to tmp_path for all file operation tools
+    monkeypatch.setattr(FileOperationTool, '_workspace_roots', [tmp_path])
     yield
     # Reset after test
-    monkeypatch.setattr(FileOperationTool, '_workspace_root', None)
+    monkeypatch.setattr(FileOperationTool, '_workspace_roots', None)
 
 
 class TestReadFileTool:
@@ -204,19 +204,21 @@ class TestReadFileToolLineRange:
 
 
 class TestReadFileToolSecurity:
-    """Tests for ReadFileTool path security."""
+    """Tests for ReadFileTool path security.
 
-    def test_read_file_blocks_path_traversal(self, tmp_path, monkeypatch):
-        """Test that ReadFileTool blocks path traversal."""
-        # Reset workspace to current directory (not tmp_path)
-        monkeypatch.setattr(FileOperationTool, '_workspace_root', Path.cwd())
+    Note: ReadFileTool no longer hard-blocks outside-workspace paths.
+    The ToolGatingService handles approval prompts before execution.
+    Tool-level tests verify basic path validation (non-existent files).
+    """
+
+    def test_read_file_nonexistent_returns_error(self, tmp_path, monkeypatch):
+        """Test that ReadFileTool returns error for non-existent file."""
+        monkeypatch.setattr(FileOperationTool, '_workspace_roots', [Path.cwd()])
 
         tool = ReadFileTool()
-        # Try to read outside workspace
-        result = tool.execute(file_path="../../../etc/passwd")
+        result = tool.execute(file_path="/nonexistent/path/file.txt")
 
         assert result.status == ToolStatus.ERROR
-        assert "SECURITY" in result.error or "outside" in result.error.lower()
 
 
 class TestWriteFileTool:
@@ -260,20 +262,22 @@ class TestWriteFileTool:
 
 
 class TestWriteFileToolSecurity:
-    """Tests for WriteFileTool path security."""
+    """Tests for WriteFileTool path security.
 
-    def test_write_file_blocks_path_traversal(self, tmp_path, monkeypatch):
-        """Test that WriteFileTool blocks path traversal."""
-        monkeypatch.setattr(FileOperationTool, '_workspace_root', Path.cwd())
+    Note: WriteFileTool no longer hard-blocks outside-workspace paths.
+    The ToolGatingService handles approval prompts before execution.
+    Tool-level tests verify basic validation (non-existent dirs, etc.).
+    """
+
+    def test_write_file_nonexistent_parent_creates(self, tmp_path):
+        """Test that WriteFileTool creates parent directories."""
+        target = tmp_path / "deep" / "nested" / "file.txt"
 
         tool = WriteFileTool()
-        result = tool.execute(
-            file_path="../../../tmp/evil.txt",
-            content="malicious"
-        )
+        result = tool.execute(file_path=str(target), content="hello")
 
-        assert result.status == ToolStatus.ERROR
-        assert "SECURITY" in result.error or "outside" in result.error.lower()
+        assert result.status == ToolStatus.SUCCESS
+        assert target.read_text() == "hello"
 
 
 class TestEditFileTool:
@@ -324,21 +328,24 @@ class TestEditFileTool:
 
 
 class TestEditFileToolSecurity:
-    """Tests for EditFileTool path security."""
+    """Tests for EditFileTool path security.
 
-    def test_edit_file_blocks_path_traversal(self, tmp_path, monkeypatch):
-        """Test that EditFileTool blocks path traversal."""
-        monkeypatch.setattr(FileOperationTool, '_workspace_root', Path.cwd())
+    Note: EditFileTool no longer hard-blocks outside-workspace paths.
+    The ToolGatingService handles approval prompts before execution.
+    """
+
+    def test_edit_file_nonexistent_returns_error(self, tmp_path, monkeypatch):
+        """Test that EditFileTool returns error for non-existent file."""
+        monkeypatch.setattr(FileOperationTool, '_workspace_roots', [Path.cwd()])
 
         tool = EditFileTool()
         result = tool.execute(
-            file_path="../../../etc/passwd",
+            file_path="/nonexistent/file.py",
             old_text="root",
-            new_text="hacked"
+            new_text="changed"
         )
 
         assert result.status == ToolStatus.ERROR
-        assert "SECURITY" in result.error or "outside" in result.error.lower()
 
 
 class TestAppendToFileTool:

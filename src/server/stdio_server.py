@@ -285,6 +285,8 @@ class StdioProtocol(UIProtocol):
         "approve_knowledge": "_handle_approve_knowledge",
         "export_knowledge": "_handle_export_knowledge",
         "import_knowledge": "_handle_import_knowledge",
+        # Workspace
+        "workspace_folders_changed": "_handle_workspace_folders_changed",
         # Subagent management
         "list_subagents": "_handle_list_subagents",
         "save_subagent": "_handle_save_subagent",
@@ -655,6 +657,18 @@ class StdioProtocol(UIProtocol):
             component_stack=data.get("component_stack", ""),
             session_id=data.get("session_id", ""),
         )
+
+    # -----------------------------------------------------------------
+    # Workspace handler
+    # -----------------------------------------------------------------
+
+    async def _handle_workspace_folders_changed(self, data: dict) -> None:
+        """Handle workspace folder add/remove from VS Code."""
+        folders: list[str] = data.get("folders", [])
+        if not folders:
+            return
+        if self._agent:
+            self._agent.update_workspace_roots(folders)
 
     # -----------------------------------------------------------------
     # Chat message handler
@@ -2609,6 +2623,7 @@ async def run_stdio_server(
     permission_mode: str = "auto",
     api_key: str | None = None,
     data_port: int = 0,
+    workspace_folders: list[str] | None = None,
 ) -> None:
     """Run the agent over stdio+TCP."""
     from src.core.agent import CodingAgent
@@ -2633,6 +2648,11 @@ async def run_stdio_server(
     )
     # Apply trace capture setting from config (default: off)
     agent._trace.set_enabled(load_trace_enabled(config_path))
+
+    # Set multi-root workspace folders if provided
+    if workspace_folders:
+        agent.update_workspace_roots(workspace_folders)
+
     session_id = agent.session_id
     message_store = agent.message_store
 

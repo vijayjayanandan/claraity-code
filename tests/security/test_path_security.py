@@ -15,9 +15,9 @@ from src.tools.search_tools import validate_path_security
 @pytest.fixture(autouse=True)
 def set_workspace(tmp_path, monkeypatch):
     """Set workspace root to a controlled temp directory."""
-    monkeypatch.setattr(FileOperationTool, '_workspace_root', tmp_path)
+    monkeypatch.setattr(FileOperationTool, '_workspace_roots', [tmp_path])
     yield
-    monkeypatch.setattr(FileOperationTool, '_workspace_root', None)
+    monkeypatch.setattr(FileOperationTool, '_workspace_roots', None)
 
 
 class TestValidatePathSecurity:
@@ -52,13 +52,17 @@ class TestValidatePathSecurity:
 class TestGrepToolPathSecurity:
     """S10: GrepTool must use validate_path_security."""
 
-    def test_grep_blocks_traversal(self, tmp_path):
-        """GrepTool rejects paths outside workspace via validate_path_security."""
+    def test_grep_nonexistent_outside_path_returns_error(self, tmp_path):
+        """GrepTool returns error for non-existent outside path.
+
+        Note: GrepTool no longer hard-blocks outside-workspace paths.
+        The ToolGatingService handles approval prompts before execution.
+        """
         from src.tools.search_tools import GrepTool
         tool = GrepTool()
-        result = tool.execute(pattern="test", file_path="../../../etc")
+        result = tool.execute(pattern="test", file_path="/nonexistent/path")
         assert result.status == ToolStatus.ERROR
-        assert "security" in result.error.lower() or "outside" in result.error.lower()
+        assert "not found" in result.error.lower()
 
     def test_grep_allows_workspace_path(self, tmp_path, monkeypatch):
         """GrepTool allows paths within workspace."""

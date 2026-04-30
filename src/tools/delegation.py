@@ -244,12 +244,18 @@ Use this tool proactively when appropriate!"""
         # Determine if trace is enabled on the parent
         trace_enabled = self._trace and self._trace.enabled
 
+        # Pass workspace roots to subagent so it can access all workspace folders.
+        workspace_roots = [
+            str(r) for r in getattr(main_agent, "_workspace_roots", [Path(working_directory)])
+        ]
+
         subprocess_input = SubprocessInput(
             config=asdict(config),
             llm_config=llm_config_dict,
             api_key=api_key,
             task_description=task.strip(),
             working_directory=working_directory,
+            workspace_roots=workspace_roots,
             max_iterations=effective_max_iterations,
             max_wall_time=None,
             transcript_path=transcript_path,

@@ -610,10 +610,10 @@ class SubAgent:
         # Layer 1: Universal base prompt + Layer 2: Role-specific prompt
         system_message = SUBAGENT_BASE_PROMPT + "\n\n" + self.config.system_prompt
 
-        # Defensive check: warn if tool_executor has no workspace_root
-        if self._tool_executor and getattr(self._tool_executor, "_workspace_root", None) is None:
+        # Defensive check: warn if tool_executor has no workspace_roots
+        if self._tool_executor and getattr(self._tool_executor, "_workspace_roots", None) is None:
             logger.warning(
-                f"SubAgent [{self.config.name}]: tool_executor._workspace_root is None - "
+                f"SubAgent [{self.config.name}]: tool_executor._workspace_roots is None - "
                 f"file operations may use incorrect paths"
             )
 

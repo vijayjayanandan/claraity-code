@@ -139,14 +139,14 @@ class TestFileToolIntegration:
             WriteFileTool,
         )
 
-        FileOperationTool._workspace_root = workspace
+        FileOperationTool._workspace_roots = [workspace]
         self.workspace = workspace
         self.read_tool = ReadFileTool()
         self.write_tool = WriteFileTool()
         self.edit_tool = EditFileTool()
         self.append_tool = AppendToFileTool()
         yield
-        FileOperationTool._workspace_root = None
+        FileOperationTool._workspace_roots = None
 
     def _create_file(self, name: str, content: str = "hello") -> Path:
         p = self.workspace / name
@@ -389,7 +389,7 @@ class TestListDirectoryIntegration:
     def test_list_directory_excludes_blocked(self, workspace):
         from src.tools.file_operations import FileOperationTool, ListDirectoryTool
 
-        FileOperationTool._workspace_root = workspace
+        FileOperationTool._workspace_roots = [workspace]
 
         (workspace / "app.py").write_text("code")
         (workspace / "secret.env").write_text("key")
@@ -401,7 +401,7 @@ class TestListDirectoryIntegration:
         assert "secret.env" not in result.output
         assert "app.py" in result.output
 
-        FileOperationTool._workspace_root = None
+        FileOperationTool._workspace_roots = None
 
 
 # ---------- Knowledge Tool Integration ----------

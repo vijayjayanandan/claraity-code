@@ -219,7 +219,9 @@ export type ClientMessage =
     | { type: 'get_tool_list' }
     // Turn deletion (context cleanup)
     | { type: 'delete_turn'; anchor_uuid: string }
-    | { type: 'restore_turn'; anchor_uuid: string };
+    | { type: 'restore_turn'; anchor_uuid: string }
+    // Workspace
+    | { type: 'workspace_folders_changed'; folders: string[] };
 
 // ============================================================================
 // Extension <-> WebView postMessage types

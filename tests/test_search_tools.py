@@ -585,34 +585,36 @@ class TestIntegration:
 class TestSecurityFixes:
     """Test security fixes for path traversal, ReDoS, and error handling."""
 
-    def test_grep_blocks_path_traversal(self):
-        """Test that GrepTool blocks path traversal attacks."""
+    def test_grep_outside_workspace_returns_not_found(self):
+        """Test that GrepTool returns error for non-existent outside path.
+
+        Note: Search tools no longer hard-block outside-workspace paths.
+        The ToolGatingService handles approval prompts before execution.
+        """
         grep_tool = GrepTool()
 
-        # Try to access file outside workspace
         result = grep_tool.execute(
             pattern="password",
-            file_path="../../../etc/passwd",
+            file_path="/nonexistent/path/file",
             output_mode="files_with_matches"
         )
 
         assert result.status == ToolStatus.ERROR
-        assert "[SECURITY]" in result.error
-        assert "Path traversal blocked" in result.error
 
-    def test_glob_blocks_path_traversal(self):
-        """Test that GlobTool blocks path traversal attacks."""
+    def test_glob_outside_workspace_returns_not_found(self):
+        """Test that GlobTool returns error for non-existent outside path.
+
+        Note: Search tools no longer hard-block outside-workspace paths.
+        The ToolGatingService handles approval prompts before execution.
+        """
         glob_tool = GlobTool()
 
-        # Try to access directory outside workspace
         result = glob_tool.execute(
             pattern="**/*.py",
-            file_path="../../../etc"
+            file_path="/nonexistent/path"
         )
 
         assert result.status == ToolStatus.ERROR
-        assert "[SECURITY]" in result.error
-        assert "Path traversal blocked" in result.error
 
     def test_grep_blocks_redos_nested_quantifiers(self):
         """Test that GrepTool blocks ReDoS attacks with nested quantifiers."""

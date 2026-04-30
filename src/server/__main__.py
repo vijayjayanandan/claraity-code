@@ -42,6 +42,11 @@ def main():
         help="TCP port for data channel (used with --stdio to bypass pipe issues on Windows)",
     )
     parser.add_argument(
+        "--workspace-folders",
+        default=None,
+        help="Comma-separated list of additional workspace folder paths",
+    )
+    parser.add_argument(
         "--subagent",
         action="store_true",
         help="Run as subagent subprocess (reads task JSON from stdin, emits events on stdout)",
@@ -58,6 +63,14 @@ def main():
         return
 
     working_directory = args.workdir or os.getcwd()
+
+    # Build workspace folders list: primary working directory + any additional folders
+    workspace_folders: list[str] = [working_directory]
+    if args.workspace_folders:
+        for folder in args.workspace_folders.split(","):
+            folder = folder.strip()
+            if folder and folder != working_directory:
+                workspace_folders.append(folder)
 
     # Resolve config path: explicit flag > project config > system config
     from src.llm.config_loader import SYSTEM_CONFIG_PATH
@@ -81,6 +94,7 @@ def main():
                     config_path=config_path,
                     permission_mode="auto",
                     data_port=args.data_port,
+                    workspace_folders=workspace_folders if len(workspace_folders) > 1 else None,
                 )
             )
         except KeyboardInterrupt:

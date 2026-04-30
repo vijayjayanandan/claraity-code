@@ -389,3 +389,136 @@ class TestFormatGateResponse:
         formatted = gating.format_gate_response(response)
         parsed = json.loads(formatted)
         assert parsed["error_code"] == "TEST"
+
+
+# ---------------------------------------------------------------------------
+# Test: check_outside_workspace
+# ---------------------------------------------------------------------------
+
+class TestCheckOutsideWorkspace:
+    """Outside-workspace paths require approval for all file tools."""
+
+    @pytest.fixture
+    def gating_with_roots(self, plan_mode_state, permission_manager, error_tracker, mcp_manager, tmp_path):
+        """Gating service with workspace roots set."""
+        primary = tmp_path / "projectA"
+        primary.mkdir()
+        from pathlib import Path
+        return ToolGatingService(
+            plan_mode_state=plan_mode_state,
+            permission_manager=permission_manager,
+            error_tracker=error_tracker,
+            mcp_manager=mcp_manager,
+            workspace_roots=[primary],
+        )
+
+    def test_read_inside_workspace_allowed(self, gating_with_roots, tmp_path):
+        """read_file inside workspace returns None (no gate)."""
+        target = tmp_path / "projectA" / "file.py"
+        result = gating_with_roots.check_outside_workspace(
+            "read_file", {"file_path": str(target)}
+        )
+        assert result is None
+
+    def test_read_outside_workspace_needs_approval(self, gating_with_roots, tmp_path):
+        """read_file outside workspace triggers NEEDS_APPROVAL."""
+        outside = tmp_path / "secrets" / "key.pem"
+        result = gating_with_roots.check_outside_workspace(
+            "read_file", {"file_path": str(outside)}
+        )
+        assert result is not None
+        assert result.action == GateAction.NEEDS_APPROVAL
+        assert result.safety_reason is not None
+        assert "outside workspace" in result.safety_reason
+
+    def test_write_outside_workspace_needs_approval(self, gating_with_roots, tmp_path):
+        """write_file outside workspace triggers NEEDS_APPROVAL."""
+        outside = tmp_path / "other" / "file.txt"
+        result = gating_with_roots.check_outside_workspace(
+            "write_file", {"file_path": str(outside)}
+        )
+        assert result is not None
+        assert result.action == GateAction.NEEDS_APPROVAL
+        assert result.safety_reason is not None
+
+    def test_edit_outside_workspace_needs_approval(self, gating_with_roots, tmp_path):
+        """edit_file outside workspace triggers NEEDS_APPROVAL."""
+        outside = tmp_path / "other" / "config.py"
+        result = gating_with_roots.check_outside_workspace(
+            "edit_file", {"file_path": str(outside)}
+        )
+        assert result is not None
+        assert result.action == GateAction.NEEDS_APPROVAL
+
+    def test_grep_outside_workspace_needs_approval(self, gating_with_roots, tmp_path):
+        """grep outside workspace triggers NEEDS_APPROVAL."""
+        outside = tmp_path / "other_project"
+        result = gating_with_roots.check_outside_workspace(
+            "grep", {"file_path": str(outside)}
+        )
+        assert result is not None
+        assert result.action == GateAction.NEEDS_APPROVAL
+
+    def test_list_directory_outside_workspace_needs_approval(self, gating_with_roots, tmp_path):
+        """list_directory outside workspace triggers NEEDS_APPROVAL."""
+        outside = tmp_path / "other"
+        result = gating_with_roots.check_outside_workspace(
+            "list_directory", {"directory_path": str(outside)}
+        )
+        assert result is not None
+        assert result.action == GateAction.NEEDS_APPROVAL
+
+    def test_non_file_tool_ignored(self, gating_with_roots):
+        """Tools not in _TOOLS_WITH_PATH are not checked."""
+        result = gating_with_roots.check_outside_workspace(
+            "run_command", {"command": "ls /etc"}
+        )
+        assert result is None
+
+    def test_no_workspace_roots_skips_check(self, gating):
+        """When workspace_roots is None, check is skipped."""
+        result = gating.check_outside_workspace(
+            "read_file", {"file_path": "/some/path"}
+        )
+        assert result is None
+
+    def test_no_file_path_arg_skips_check(self, gating_with_roots):
+        """When tool has no file_path arg, check is skipped."""
+        result = gating_with_roots.check_outside_workspace(
+            "read_file", {}
+        )
+        assert result is None
+
+    def test_evaluate_integrates_outside_workspace(self, gating_with_roots, tmp_path):
+        """evaluate() returns NEEDS_APPROVAL for outside-workspace reads
+        even when read category is auto-approved."""
+        # read is auto-approved by default
+        assert gating_with_roots.is_category_auto_approved("read_file")
+
+        outside = tmp_path / "secrets" / "data.txt"
+        result = gating_with_roots.evaluate(
+            "read_file", {"file_path": str(outside)}
+        )
+        assert result.action == GateAction.NEEDS_APPROVAL
+        assert result.safety_reason is not None
+
+    def test_multi_root_allows_secondary(self, plan_mode_state, permission_manager, error_tracker, mcp_manager, tmp_path):
+        """Path in secondary workspace root passes the check."""
+        primary = tmp_path / "projectA"
+        secondary = tmp_path / "shared-lib"
+        primary.mkdir()
+        secondary.mkdir()
+        from pathlib import Path
+
+        gating = ToolGatingService(
+            plan_mode_state=plan_mode_state,
+            permission_manager=permission_manager,
+            error_tracker=error_tracker,
+            mcp_manager=mcp_manager,
+            workspace_roots=[primary, secondary],
+        )
+        target = secondary / "utils.py"
+        result = gating.check_outside_workspace(
+            "read_file", {"file_path": str(target)}
+        )
+        assert result is None  # Inside secondary root, no gate

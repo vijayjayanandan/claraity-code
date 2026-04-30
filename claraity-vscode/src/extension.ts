@@ -284,6 +284,9 @@ export function activate(context: vscode.ExtensionContext) {
 
     // --- STDIO MODE ---
     const workDir = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    const additionalFolders = (vscode.workspace.workspaceFolders ?? [])
+        .slice(1)
+        .map((f) => f.uri.fsPath);
     if (!workDir) {
         vscode.window.showWarningMessage(
             'ClarAIty: No workspace folder open. Cannot start in stdio mode.',
@@ -294,7 +297,7 @@ export function activate(context: vscode.ExtensionContext) {
         statusBar.text = '$(loading~spin) ClarAIty (checking...)';
         statusBar.tooltip = 'ClarAIty - Detecting environment...';
 
-        resolveLaunchConfig(pythonPath, workDir, devMode, context.extensionPath)
+        resolveLaunchConfig(pythonPath, workDir, devMode, context.extensionPath, additionalFolders)
             .then(async (launchConfig) => {
                 if (!launchConfig) {
                     statusBar.text = '$(error) ClarAIty (server missing)';
@@ -348,6 +351,20 @@ export function activate(context: vscode.ExtensionContext) {
                 statusBar.tooltip = `ClarAIty - ${msg}`;
             });
     }
+
+    // Notify the agent when workspace folders change (add/remove folders)
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeWorkspaceFolders(() => {
+            const folders = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
+            if (connection && folders.length > 0) {
+                connection.send({
+                    type: 'workspace_folders_changed',
+                    folders,
+                });
+                log.appendLine(`[ClarAIty] Workspace folders updated: ${folders.length} folder(s)`);
+            }
+        }),
+    );
 
     // Register cleanup
     context.subscriptions.push({

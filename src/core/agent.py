@@ -424,10 +424,13 @@ class CodingAgent(AgentInterface):
         self._mcp_settings = None  # Loaded lazily by connect_mcp_from_settings()
         self._tools_cache = None  # Invalidated when tools are registered/unregistered
 
-        # Set workspace root on file operation tools so path validation works
+        # Set workspace roots on file operation tools so path validation works.
+        # _workspace_roots is a list: first entry is primary, rest are additional
+        # folders the user added to their VS Code workspace.
         from src.tools.file_operations import FileOperationTool
 
-        FileOperationTool._workspace_root = self.working_directory
+        self._workspace_roots: list[Path] = [self.working_directory]
+        FileOperationTool._workspace_roots = self._workspace_roots
 
         # Initialize tool parser
         self.tool_parser = ToolCallParser()
@@ -442,6 +445,7 @@ class CodingAgent(AgentInterface):
             project_root=Path(self.working_directory),
         )
         self.context_builder.set_trace(self._trace)
+        self.context_builder.set_workspace_roots(self._workspace_roots)
 
         # Initialize file reference parser
         self.file_reference_parser = FileReferenceParser(
@@ -465,6 +469,7 @@ class CodingAgent(AgentInterface):
             permission_manager=self.permission_manager,
             error_tracker=self._error_tracker,
             mcp_manager=self._mcp_manager,
+            workspace_roots=self._workspace_roots,
         )
 
         # Special tool handlers (clarify, plan approval)
@@ -946,6 +951,27 @@ class CodingAgent(AgentInterface):
     def _invalidate_tools_cache(self):
         """Clear cached tool definitions (call after registering/unregistering tools)."""
         self._tools_cache = None
+
+    def update_workspace_roots(self, folders: list[str]) -> None:
+        """Update workspace roots when VS Code workspace folders change.
+
+        Args:
+            folders: List of absolute folder paths.  The first entry is the
+                     primary workspace root (where .claraity/ lives).
+        """
+        from src.tools.file_operations import FileOperationTool
+
+        if not folders:
+            return
+        self._workspace_roots = [Path(f) for f in folders]
+        FileOperationTool._workspace_roots = self._workspace_roots
+        self.context_builder.set_workspace_roots(self._workspace_roots)
+        self._gating._workspace_roots = self._workspace_roots
+        logger.info(
+            "workspace_roots_updated",
+            primary=str(self._workspace_roots[0]),
+            count=len(self._workspace_roots),
+        )
 
     async def enable_mcp_integration(self, name, mcp_registry, client, secret_store=None):
         """Enable a named MCP integration by connecting and discovering tools.

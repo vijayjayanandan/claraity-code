@@ -107,18 +107,28 @@ class ToolGatingService:
         {"read", "edit", "execute", "browser", "knowledge_update", "subagent"}
     )
 
+    # Tools that access file paths and should prompt (not hard-block)
+    # when targeting paths outside all workspace roots.
+    # safety_reason is set so auto-approve cannot bypass the prompt.
+    _TOOLS_WITH_PATH = frozenset({
+        "read_file", "list_directory", "grep", "glob",
+        "write_file", "edit_file", "append_to_file",
+    })
+
     def __init__(
         self,
         plan_mode_state: "PlanModeState",
         permission_manager: Optional["PermissionManager"],
         error_tracker: "ErrorRecoveryTracker",
         mcp_manager: "McpConnectionManager",
+        workspace_roots: list | None = None,
     ):
         self._plan_mode_state = plan_mode_state
         self._permission_manager = permission_manager
         self._error_tracker = error_tracker
         self._mcp_manager = mcp_manager
         self._auto_approve_categories: set = {"read"}  # read is safe by default
+        self._workspace_roots = workspace_roots
 
     # ------------------------------------------------------------------
     # Category auto-approve
@@ -274,6 +284,53 @@ class ToolGatingService:
 
         return None
 
+    def check_outside_workspace(
+        self, tool_name: str, tool_args: dict[str, Any]
+    ) -> GateResult | None:
+        """Require approval for tools accessing paths outside workspace.
+
+        This is a safety floor: even if the tool's category is auto-approved,
+        accessing files outside all workspace roots requires explicit approval.
+        This prevents prompt injection from silently exfiltrating sensitive
+        files or writing to unexpected locations.
+
+        The safety_reason flag ensures "allow all" (auto-approve bypass) is
+        NOT offered — each outside-workspace access needs individual approval.
+        """
+        if tool_name not in self._TOOLS_WITH_PATH:
+            return None
+        if not self._workspace_roots:
+            return None
+
+        file_path = tool_args.get("file_path") or tool_args.get("directory_path")
+        if not file_path:
+            return None
+
+        from pathlib import Path
+
+        try:
+            resolved = Path(file_path).resolve()
+        except (OSError, ValueError):
+            return None
+
+        # Check if path is inside any workspace root
+        for root in self._workspace_roots:
+            try:
+                resolved.relative_to(root.resolve())
+                return None  # Inside this root — no extra approval needed
+            except ValueError:
+                continue
+
+        # Path is outside all workspace roots — require approval
+        verb = "writing to" if tool_name in ("write_file", "edit_file", "append_to_file") else "accessing"
+        return GateResult(
+            action=GateAction.NEEDS_APPROVAL,
+            safety_reason=(
+                f"File is outside workspace: {file_path}\n"
+                f"Approve to allow {verb} this file, or deny to block."
+            ),
+        )
+
     def needs_approval(self, tool_name: str, tool_args: dict[str, Any] | None = None) -> bool:
         """Determine if a tool call requires user approval.
 
@@ -326,10 +383,10 @@ class ToolGatingService:
     def evaluate(self, tool_name: str, tool_args: dict[str, Any]) -> GateResult:
         """Run all gating checks in priority order.
 
-        Order: repeat -> plan mode -> command safety -> approval -> allow.
+        Order: repeat -> plan mode -> command safety -> outside-workspace -> approval -> allow.
 
-        The command safety gate (check 4) is a safety floor that fires even
-        when auto-approve is enabled for the "execute" category.
+        Safety floors (command safety, outside-workspace) fire even when
+        auto-approve is enabled for the tool's category.
 
         Returns a GateResult indicating what the caller should do.
         """
@@ -348,7 +405,12 @@ class ToolGatingService:
         if result:
             return result
 
-        # 4. Category-based approval check
+        # 4. Outside-workspace read gate (safety floor - cannot be bypassed by auto-approve)
+        result = self.check_outside_workspace(tool_name, tool_args)
+        if result:
+            return result
+
+        # 5. Category-based approval check
         if self.needs_approval(tool_name, tool_args):
             return GateResult(action=GateAction.NEEDS_APPROVAL)
 
