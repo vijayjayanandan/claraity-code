@@ -5,6 +5,7 @@
  * Manages stdio connection and WebView lifecycle.
  */
 
+import * as os from 'os';
 import * as vscode from 'vscode';
 import { ClarAItySidebarProvider } from './sidebar-provider';
 import { resolveLaunchConfig } from './python-env';
@@ -283,74 +284,72 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(statusBar);
 
     // --- STDIO MODE ---
-    const workDir = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    const additionalFolders = (vscode.workspace.workspaceFolders ?? [])
-        .slice(1)
-        .map((f) => f.uri.fsPath);
-    if (!workDir) {
-        vscode.window.showWarningMessage(
-            'ClarAIty: No workspace folder open. Cannot start in stdio mode.',
-        );
-        statusBar.text = '$(sparkle) ClarAIty (offline)';
-        statusBar.tooltip = 'ClarAIty - No workspace folder';
+    const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
+    const workDir = workspaceFolders[0]?.uri.fsPath ?? os.homedir();
+    const additionalFolders = workspaceFolders.slice(1).map((f) => f.uri.fsPath);
+
+    if (workspaceFolders.length === 0) {
+        log.appendLine(`[ClarAIty] No workspace folder open. Using home directory fallback: ${workDir}`);
+        statusBar.text = '$(loading~spin) ClarAIty (home workspace)';
+        statusBar.tooltip = `ClarAIty - No folder open, using home directory: ${workDir}`;
     } else {
         statusBar.text = '$(loading~spin) ClarAIty (checking...)';
         statusBar.tooltip = 'ClarAIty - Detecting environment...';
-
-        resolveLaunchConfig(pythonPath, workDir, devMode, context.extensionPath, additionalFolders)
-            .then(async (launchConfig) => {
-                if (!launchConfig) {
-                    statusBar.text = '$(error) ClarAIty (server missing)';
-                    statusBar.tooltip = 'ClarAIty - Server binary not found. Reinstall the extension.';
-                    return;
-                }
-
-                log.appendLine('[ClarAIty] Starting in stdio mode...');
-                statusBar.text = '$(loading~spin) ClarAIty (starting...)';
-                statusBar.tooltip = `ClarAIty - Starting (stdio, ${launchConfig.mode} mode)...`;
-
-                // Create stdio connection with the resolved launch config
-                const stdioConn = new StdioConnection(
-                    {
-                        mode: launchConfig.mode,
-                        command: launchConfig.command,
-                        args: launchConfig.args,
-                        cwd: launchConfig.cwd,
-                    },
-                    log,
-                    context.extensionPath,
-                );
-
-                // Inject API key from VS Code SecretStorage
-                const apiKey = await context.secrets.get('claraity.apiKey');
-                if (apiKey) {
-                    stdioConn.setApiKey(apiKey);
-                    log.appendLine('[ClarAIty] API key loaded from SecretStorage');
-                }
-
-                // Inject Tavily key from VS Code SecretStorage
-                const tavilyKey = await context.secrets.get('claraity.tavilyKey');
-                if (tavilyKey) {
-                    stdioConn.setTavilyKey(tavilyKey);
-                    log.appendLine('[ClarAIty] Tavily key loaded from SecretStorage');
-                }
-
-                connection = stdioConn;
-
-                // Wire events (message handler, status bar, sidebar)
-                wireConnection(stdioConn, statusBar);
-                sidebarProvider.setConnection(stdioConn);
-
-                context.subscriptions.push(stdioConn);
-                stdioConn.connect();
-            })
-            .catch((err) => {
-                const msg = err instanceof Error ? err.message : String(err);
-                log.appendLine('[ERROR] Stdio launch failed: ' + msg);
-                statusBar.text = '$(error) ClarAIty (error)';
-                statusBar.tooltip = `ClarAIty - ${msg}`;
-            });
     }
+
+    resolveLaunchConfig(pythonPath, workDir, devMode, context.extensionPath, additionalFolders)
+        .then(async (launchConfig) => {
+            if (!launchConfig) {
+                statusBar.text = '$(error) ClarAIty (server missing)';
+                statusBar.tooltip = 'ClarAIty - Server binary not found. Reinstall the extension.';
+                return;
+            }
+
+            log.appendLine('[ClarAIty] Starting in stdio mode...');
+            statusBar.text = '$(loading~spin) ClarAIty (starting...)';
+            statusBar.tooltip = `ClarAIty - Starting (stdio, ${launchConfig.mode} mode)...`;
+
+            // Create stdio connection with the resolved launch config
+            const stdioConn = new StdioConnection(
+                {
+                    mode: launchConfig.mode,
+                    command: launchConfig.command,
+                    args: launchConfig.args,
+                    cwd: launchConfig.cwd,
+                },
+                log,
+                context.extensionPath,
+            );
+
+            // Inject API key from VS Code SecretStorage
+            const apiKey = await context.secrets.get('claraity.apiKey');
+            if (apiKey) {
+                stdioConn.setApiKey(apiKey);
+                log.appendLine('[ClarAIty] API key loaded from SecretStorage');
+            }
+
+            // Inject Tavily key from VS Code SecretStorage
+            const tavilyKey = await context.secrets.get('claraity.tavilyKey');
+            if (tavilyKey) {
+                stdioConn.setTavilyKey(tavilyKey);
+                log.appendLine('[ClarAIty] Tavily key loaded from SecretStorage');
+            }
+
+            connection = stdioConn;
+
+            // Wire events (message handler, status bar, sidebar)
+            wireConnection(stdioConn, statusBar);
+            sidebarProvider.setConnection(stdioConn);
+
+            context.subscriptions.push(stdioConn);
+            stdioConn.connect();
+        })
+        .catch((err) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            log.appendLine('[ERROR] Stdio launch failed: ' + msg);
+            statusBar.text = '$(error) ClarAIty (error)';
+            statusBar.tooltip = `ClarAIty - ${msg}`;
+        });
 
     // Notify the agent when workspace folders change (add/remove folders)
     context.subscriptions.push(

@@ -431,55 +431,86 @@ button, .toolbar-icon, .session-card, .mention-item, .tool-badge {
 /* ── Compaction Summary Card ── */
 
 .compaction-summary-card {
-  border: 1px solid color-mix(in srgb, var(--app-accent) 40%, var(--app-border));
-  border-left: 3px solid var(--app-accent);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  margin: var(--space-md) 0;
-  box-shadow: var(--shadow-sm);
+  border: none;
+  background: transparent;
+  margin: 24px 0;
   font-size: var(--font-size-sm);
 }
 
+/* summary row: line — pill — line */
 .compaction-summary-card > summary {
-  padding: var(--space-sm) 10px;
-  background: color-mix(in srgb, var(--app-accent) 10%, var(--app-tool-bg));
-  cursor: pointer;
-  user-select: none;
-  color: var(--app-fg);
-  font-weight: 500;
   display: flex;
   align-items: center;
-  gap: var(--space-xs);
+  gap: 10px;
   list-style: none;
+  cursor: pointer;
+  user-select: none;
+  padding: 0;
+  background: transparent;
 }
 
-.compaction-summary-card > summary::-webkit-details-marker {
-  display: none;
-}
+.compaction-summary-card > summary::-webkit-details-marker { display: none; }
+.compaction-summary-card > summary::marker { content: ""; }
 
-.compaction-summary-card > summary::marker {
+/* the lines */
+.compaction-summary-card > summary::before,
+.compaction-summary-card > summary::after {
   content: "";
+  flex: 1;
+  height: 1px;
+  background: color-mix(in srgb, #b8913a 45%, var(--app-border));
 }
 
-.compaction-summary-card > summary::before {
-  content: "\25B6";
-  font-size: 0.65em;
+/* pill */
+.compaction-summary-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 11px 3px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, #b8913a 55%, var(--app-border));
+  background: color-mix(in srgb, #b8913a 10%, var(--app-bg));
+  color: #c9a44e;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+
+.compaction-summary-card > summary:hover .compaction-summary-pill {
+  background: color-mix(in srgb, #b8913a 18%, var(--app-bg));
+  color: #dbb96a;
+}
+
+.compaction-summary-pill .codicon {
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.compaction-summary-chevron {
+  font-size: 8px;
+  opacity: 0.6;
+  display: inline-block;
   transition: transform 0.15s ease;
-  flex-shrink: 0;
+  margin-left: 1px;
 }
 
-.compaction-summary-card[open] > summary::before {
+.compaction-summary-card[open] .compaction-summary-chevron {
   transform: rotate(90deg);
 }
 
+/* expanded content */
 .compaction-summary-content {
-  max-height: 300px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  max-height: 280px;
   overflow-y: auto;
-  padding: var(--space-sm) 10px;
   white-space: pre-wrap;
   font-size: var(--font-size-sm);
   color: var(--app-fg-muted);
-  border-top: 1px solid var(--app-border);
+  background: var(--app-tool-bg);
+  border: 1px solid var(--app-border);
+  border-radius: var(--radius-md);
 }
 
 /* ── Tool Card ── */

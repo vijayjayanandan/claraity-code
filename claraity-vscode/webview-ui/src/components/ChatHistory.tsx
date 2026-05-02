@@ -333,8 +333,11 @@ export function ChatHistory({
             return (
               <details key={entry.id} className="compaction-summary-card">
                 <summary>
-                  <i className="codicon codicon-history" aria-hidden="true" />
-                  Conversation compacted
+                  <span className="compaction-summary-pill">
+                    <i className="codicon codicon-history" aria-hidden="true" />
+                    Conversation compacted
+                    <span className="compaction-summary-chevron">&#9658;</span>
+                  </span>
                 </summary>
                 <div className="compaction-summary-content">
                   {entry.content.replace(/^\[Conversation summary[^\]]*\]\n\n/, "")}

@@ -210,6 +210,7 @@ const vscode = {
         getConfiguration: vi.fn(() => createConfig()),
         workspaceFolders: [{ uri: Uri.file('/test/workspace'), name: 'test', index: 0 }],
         onDidChangeConfiguration: vi.fn(() => new Disposable(() => {})),
+        onDidChangeWorkspaceFolders: vi.fn(() => new Disposable(() => {})),
         registerTextDocumentContentProvider: vi.fn(() => new Disposable(() => {})),
         findFiles: vi.fn().mockResolvedValue([]),
         fs: workspaceFs,

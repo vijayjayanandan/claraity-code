@@ -10,6 +10,7 @@
  * Total: 40+ tests covering all code paths in the stdio-only extension.ts
  */
 
+import * as os from 'os';
 import * as vscode from 'vscode';
 import { activate, deactivate } from '../extension';
 
@@ -538,11 +539,11 @@ describe('extension.ts', () => {
             activate(ctx);
 
             expect(resolveLaunchConfig).toHaveBeenCalledWith(
-                'python',   // default pythonPath
-                9120,       // port (for compatibility)
-                '/test/workspace',
-                'auto',     // default devMode
-                true,       // default autoInstallAgent
+                'python',          // default pythonPath
+                '/test/workspace', // workspace folder
+                'never',           // default devMode
+                '/mock/extension', // extensionPath
+                [],                // additionalFolders
             );
         });
 
@@ -572,6 +573,7 @@ describe('extension.ts', () => {
 
             expect(StdioConnection).toHaveBeenCalledWith(
                 {
+                    mode: 'dev',
                     command: 'python',
                     args: ['-m', 'src.server'],
                     cwd: '/test/workspace',
@@ -730,8 +732,8 @@ describe('extension.ts', () => {
 
             const statusBar = (vscode.window.createStatusBarItem as vi.Mock)
                 .mock.results[0].value;
-            expect(statusBar.text).toBe('$(error) ClarAIty (not installed)');
-            expect(statusBar.tooltip).toBe('ClarAIty - Agent not found');
+            expect(statusBar.text).toBe('$(error) ClarAIty (server missing)');
+            expect(statusBar.tooltip).toBe('ClarAIty - Server binary not found. Reinstall the extension.');
         });
 
         test('does not create StdioConnection when resolveLaunchConfig returns null', async () => {
@@ -798,41 +800,44 @@ describe('extension.ts', () => {
     // ──────────────────────────────────────────────────────────────────────
 
     describe('activate() - no workspace folder', () => {
-        test('shows warning message when no workspace folder', () => {
+        test('uses home directory fallback when no workspace folder', () => {
             setWorkspaceFolders(undefined);
             const ctx = createMockContext();
             activate(ctx);
 
-            expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
-                'ClarAIty: No workspace folder open. Cannot start in stdio mode.',
+            expect(resolveLaunchConfig).toHaveBeenCalledWith(
+                'python',
+                os.homedir(),
+                'never',
+                '/mock/extension',
+                [],
             );
         });
 
-        test('sets status bar to offline when no workspace folder', () => {
+        test('sets status bar to home workspace when no workspace folder', () => {
             setWorkspaceFolders(undefined);
             const ctx = createMockContext();
             activate(ctx);
 
             const statusBar = (vscode.window.createStatusBarItem as vi.Mock)
                 .mock.results[0].value;
-            expect(statusBar.text).toBe('$(sparkle) ClarAIty (offline)');
-            expect(statusBar.tooltip).toBe('ClarAIty - No workspace folder');
+            expect(statusBar.text).toBe('$(loading~spin) ClarAIty (home workspace)');
+            expect(statusBar.tooltip).toBe(`ClarAIty - No folder open, using home directory: ${os.homedir()}`);
         });
 
-        test('does not call resolveLaunchConfig when no workspace', () => {
+        test('creates StdioConnection when no workspace', async () => {
             setWorkspaceFolders(undefined);
+            (resolveLaunchConfig as vi.Mock).mockResolvedValue({
+                mode: 'bundled',
+                command: '/mock/bin/claraity-server',
+                args: ['--workdir', os.homedir()],
+                cwd: os.homedir(),
+            });
             const ctx = createMockContext();
             activate(ctx);
+            await flushPromises();
 
-            expect(resolveLaunchConfig).not.toHaveBeenCalled();
-        });
-
-        test('does not create StdioConnection when no workspace', () => {
-            setWorkspaceFolders(undefined);
-            const ctx = createMockContext();
-            activate(ctx);
-
-            expect(StdioConnection).not.toHaveBeenCalled();
+            expect(StdioConnection).toHaveBeenCalled();
         });
 
         test('handles empty workspace folders array', () => {
@@ -840,9 +845,12 @@ describe('extension.ts', () => {
             const ctx = createMockContext();
             activate(ctx);
 
-            // workspaceFolders[0] is undefined, so no workDir
-            expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
-                'ClarAIty: No workspace folder open. Cannot start in stdio mode.',
+            expect(resolveLaunchConfig).toHaveBeenCalledWith(
+                'python',
+                os.homedir(),
+                'never',
+                '/mock/extension',
+                [],
             );
         });
     });
