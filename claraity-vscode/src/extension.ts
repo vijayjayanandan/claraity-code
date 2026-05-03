@@ -248,6 +248,9 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('claraity.showSubagents', () => {
             sidebarProvider.showSubagents();
         }),
+        vscode.commands.registerCommand('claraity.searchChat', () => {
+            sidebarProvider.toggleSearch();
+        }),
         vscode.commands.registerCommand('claraity.acceptChange', (callId: string) => {
             connection?.send({
                 type: 'approval_result',

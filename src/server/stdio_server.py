@@ -679,14 +679,47 @@ class StdioProtocol(UIProtocol):
         images = data.get("images", [])
         active_skill = data.get("active_skill") or None  # single skill ID or None
         skill_arguments = data.get("skill_arguments", "")
+
+        # Parse slash-command: /skill-name args
+        # Only if no skill was explicitly set via the picker
+        if not active_skill and content.strip().startswith("/"):
+            parsed = self._parse_slash_command(content.strip())
+            if parsed:
+                active_skill, skill_arguments, content = parsed
+
         if len(content) > _MAX_CHAT_MESSAGE_LEN:
             await self._send_error(
                 "message_too_large", "Message too large. Maximum 100,000 characters."
             )
             return
-        if content.strip() or images:
+        if content.strip() or images or active_skill:
             logger.info("chat_message_received", active_skill=active_skill or "(none)")
             await self._chat_queue.put({"content": content, "images": images, "active_skill": active_skill, "skill_arguments": skill_arguments})
+
+    def _parse_slash_command(self, content: str) -> "tuple[str, str, str] | None":
+        """Parse /skill-name args from user input.
+
+        Returns (skill_id, skill_arguments, remaining_content) if a valid
+        skill is found, or None if the slash prefix doesn't match a skill.
+        """
+        from src.skills.skill_loader import SkillLoader
+
+        # Extract the command name: first word after /
+        parts = content.split(None, 1)  # ["/name", "rest..."] or ["/name"]
+        command = parts[0][1:]  # strip leading /
+        rest = parts[1] if len(parts) > 1 else ""
+
+        if not command:
+            return None
+
+        working_dir = Path(self._working_directory) if self._working_directory else Path.cwd()
+        loader = SkillLoader(working_directory=working_dir)
+        skill = loader.get_skill(command)
+        if skill is None:
+            return None
+
+        logger.info("slash_command_parsed", skill_id=command, args=rest[:80] if rest else "(none)")
+        return command, rest, ""
 
     # -----------------------------------------------------------------
     # Config handlers

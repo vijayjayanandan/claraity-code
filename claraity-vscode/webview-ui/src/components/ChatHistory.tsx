@@ -9,7 +9,7 @@
  *
  * Auto-scrolls to bottom unless the user has scrolled up.
  */
-import { useRef, useEffect, useCallback, useMemo, useState, memo } from "react";
+import { useRef, useEffect, useCallback, useMemo, useState, createRef } from "react";
 import type {
   TimelineEntry,
   ThinkingBlock as ThinkingBlockType,
@@ -30,6 +30,21 @@ import { PlanWidget } from "./PlanWidget";
 import { UndoBar } from "./UndoBar";
 import { TurnStats } from "./TurnStats";
 import { WelcomeScreen } from "./WelcomeScreen";
+import { ChatSearchBar } from "./ChatSearchBar";
+import { stripProjectContext } from "../utils/text";
+
+/**
+ * Wrap query matches in already-rendered HTML with <mark> tags.
+ * Operates only on text nodes (not inside HTML tag attributes).
+ * Case-insensitive.
+ */
+function highlightSearchInHtml(html: string, query: string): string {
+  if (!query.trim()) return html;
+  // Use a regex that skips HTML tags, replacing only text node content
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`(?![^<]*>)(${escaped})`, "gi");
+  return html.replace(re, '<mark class="search-highlight">$1</mark>');
+}
 
 interface ChatHistoryProps {
   timeline: TimelineEntry[];
@@ -65,6 +80,10 @@ interface ChatHistoryProps {
   connected?: boolean;
   modelName?: string;
   workingDirectory?: string;
+  searchOpen?: boolean;
+  searchQuery?: string;
+  onSearchQuery?: (q: string) => void;
+  onSearchClose?: () => void;
 }
 
 export function ChatHistory({
@@ -86,6 +105,10 @@ export function ChatHistory({
   connected,
   modelName,
   workingDirectory,
+  searchOpen = false,
+  searchQuery = "",
+  onSearchQuery,
+  onSearchClose,
 }: ChatHistoryProps) {
   const { postMessage, toolCards, toolOrder, toolCardOwners, subagents, promotedApprovals, onDismissApproval } = useChatContext();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -140,6 +163,57 @@ export function ChatHistory({
     }
   }, []);
 
+  // ── Search ──
+  const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
+
+  // Compute which timeline entries match the search query
+  const matchingEntryIds = useMemo<string[]>(() => {
+    if (!searchOpen || !searchQuery.trim()) return [];
+    const q = searchQuery.toLowerCase();
+    const ids: string[] = [];
+    for (const entry of timeline) {
+      if (entry.type === "user_message") {
+        const text = stripProjectContext(entry.content).toLowerCase();
+        if (text.includes(q)) ids.push(entry.id);
+      } else if (entry.type === "assistant_text") {
+        if (entry.content.toLowerCase().includes(q)) ids.push(entry.id);
+      }
+    }
+    return ids;
+  }, [timeline, searchQuery, searchOpen]);
+
+  const matchCount = matchingEntryIds.length;
+
+  // Clamp currentMatchIndex when matchCount changes
+  useEffect(() => {
+    setCurrentMatchIndex(0);
+  }, [searchQuery, searchOpen]);
+
+  // Refs for scrolling to matched entries
+  const matchRefsMap = useMemo<Record<string, React.RefObject<HTMLDivElement>>>(() => {
+    const map: Record<string, React.RefObject<HTMLDivElement>> = {};
+    for (const id of matchingEntryIds) {
+      map[id] = createRef<HTMLDivElement>();
+    }
+    return map;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matchingEntryIds.join(",")]);
+
+  // Scroll to current match
+  useEffect(() => {
+    if (matchingEntryIds.length === 0) return;
+    const id = matchingEntryIds[currentMatchIndex];
+    matchRefsMap[id]?.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [currentMatchIndex, matchingEntryIds, matchRefsMap]);
+
+  const handleSearchNavigate = useCallback((dir: "prev" | "next") => {
+    setCurrentMatchIndex((prev) => {
+      if (matchCount === 0) return 0;
+      if (dir === "next") return (prev + 1) % matchCount;
+      return (prev - 1 + matchCount) % matchCount;
+    });
+  }, [matchCount]);
+
   // Pre-compute set of tool callIds for O(1) subagent dedup lookups
   const toolCallIds = useMemo(() => {
     const ids = new Set<string>();
@@ -169,25 +243,54 @@ export function ChatHistory({
   // Welcome screen when empty
   if (timeline.length === 0 && !isStreaming && onSendPrompt) {
     return (
-      <div className="chat-history" ref={containerRef} onScroll={handleScroll}>
-        <WelcomeScreen
-          onSendPrompt={onSendPrompt}
-          connected={connected}
-          modelName={modelName}
-          workingDirectory={workingDirectory}
-        />
-      </div>
+      <>
+        {searchOpen && (
+          <ChatSearchBar
+            query={searchQuery}
+            matchCount={0}
+            currentMatch={0}
+            onQueryChange={onSearchQuery ?? (() => {})}
+            onNavigate={handleSearchNavigate}
+            onClose={onSearchClose ?? (() => {})}
+          />
+        )}
+        <div className="chat-history" ref={containerRef} onScroll={handleScroll}>
+          <WelcomeScreen
+            onSendPrompt={onSendPrompt}
+            connected={connected}
+            modelName={modelName}
+            workingDirectory={workingDirectory}
+          />
+        </div>
+      </>
     );
   }
 
   return (
+    <>
+      {searchOpen && (
+        <ChatSearchBar
+          query={searchQuery}
+          matchCount={matchCount}
+          currentMatch={currentMatchIndex}
+          onQueryChange={onSearchQuery ?? (() => {})}
+          onNavigate={handleSearchNavigate}
+          onClose={onSearchClose ?? (() => {})}
+        />
+      )}
     <div className="chat-history" ref={containerRef} onScroll={handleScroll}>
       {/* Timeline — ordered sequence of all UI elements */}
       {timeline.map((entry) => {
         switch (entry.type) {
-          case "user_message":
+          case "user_message": {
+            const isMatch = matchingEntryIds.includes(entry.id);
+            const isCurrentMatch = isMatch && matchingEntryIds[currentMatchIndex] === entry.id;
             return (
-              <div key={entry.id} className="user-message-wrapper">
+              <div
+                key={entry.id}
+                className={`user-message-wrapper${isCurrentMatch ? " search-current-match" : ""}`}
+                ref={isMatch ? matchRefsMap[entry.id] : undefined}
+              >
                 <MessageBubble
                   message={{
                     id: entry.id,
@@ -197,6 +300,7 @@ export function ChatHistory({
                   }}
                   attachments={entry.attachments}
                   images={entry.images}
+                  searchQuery={searchOpen ? searchQuery : ""}
                 />
                 {entry.uuid && !isStreaming && (
                   <div className="user-message-actions">
@@ -212,16 +316,24 @@ export function ChatHistory({
                 )}
               </div>
             );
+          }
 
-          case "assistant_text":
+          case "assistant_text": {
+            const isMatch = matchingEntryIds.includes(entry.id);
+            const isCurrentMatch = isMatch && matchingEntryIds[currentMatchIndex] === entry.id;
+            const content = searchOpen && searchQuery.trim()
+              ? highlightSearchInHtml(renderMarkdown(entry.content), searchQuery)
+              : renderMarkdown(entry.content);
             return (
-              <div key={entry.id} className="message-wrapper">
+              <div
+                key={entry.id}
+                className={`message-wrapper${isCurrentMatch ? " search-current-match" : ""}`}
+                ref={isMatch ? matchRefsMap[entry.id] : undefined}
+              >
                 <div className="message assistant">
                   <div
                     className="content"
-                    dangerouslySetInnerHTML={{
-                      __html: renderMarkdown(entry.content),
-                    }}
+                    dangerouslySetInnerHTML={{ __html: content }}
                   />
                 </div>
                 <div className="message-actions">
@@ -239,6 +351,7 @@ export function ChatHistory({
                 </div>
               </div>
             );
+          }
 
           case "tool": {
             const tc = toolCards[entry.callId];
@@ -450,5 +563,6 @@ export function ChatHistory({
         </button>
       )}
     </div>
+    </>
   );
 }

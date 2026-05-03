@@ -21,6 +21,7 @@ interface MessageBubbleProps {
   message: ChatMessage;
   attachments?: FileAttachment[];
   images?: ImageAttachment[];
+  searchQuery?: string;
 }
 
 /**
@@ -60,7 +61,7 @@ const ImageChip = memo(function ImageChip({
   );
 });
 
-export const MessageBubble = memo(function MessageBubble({ message, attachments, images }: MessageBubbleProps) {
+export const MessageBubble = memo(function MessageBubble({ message, attachments, images, searchQuery }: MessageBubbleProps) {
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [previewFileContent, setPreviewFileContent] = useState<{ name: string; content: string } | null>(null);
   const { postMessage } = useChatContext();
@@ -69,8 +70,12 @@ export const MessageBubble = memo(function MessageBubble({ message, attachments,
     const displayContent = message.role === "user"
       ? stripProjectContext(message.content)
       : message.content;
-    return renderMarkdown(displayContent);
-  }, [message.content, message.role]);
+    const rendered = renderMarkdown(displayContent);
+    if (!searchQuery?.trim()) return rendered;
+    const escaped = searchQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`(?![^<]*>)(${escaped})`, "gi");
+    return rendered.replace(re, '<mark class="search-highlight">$1</mark>');
+  }, [message.content, message.role, searchQuery]);
 
   // Dismiss overlays on Escape key
   const dismissOverlays = useCallback(() => {

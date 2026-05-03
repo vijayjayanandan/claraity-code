@@ -122,6 +122,11 @@
       {
         "command": "claraity.setApiKey",
         "title": "ClarAIty: Set API Key"
+      },
+      {
+        "command": "claraity.searchChat",
+        "title": "ClarAIty: Search Chat",
+        "icon": "$(search)"
       }
     ],
     "submenus": [
@@ -132,6 +137,11 @@
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "claraity.searchChat",
+          "when": "view == claraity.chatView",
+          "group": "navigation@0"
+        },
         {
           "command": "claraity.newChat",
           "when": "view == claraity.chatView",
