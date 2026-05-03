@@ -98,13 +98,17 @@ export type Action =
   | { type: "LIMITS_SAVED"; success: boolean; message: string; limits?: LimitsData }
   // Skills
   | { type: "SKILLS_LOADED"; skills: SkillInfo[] }
-  | { type: "TOGGLE_SKILL"; skillId: string }
-  | { type: "CLEAR_ACTIVE_SKILLS" }
+  | { type: "SELECT_SKILL"; skillId: string }
+  | { type: "CLEAR_SKILL" }
   // Prompt Enrichment
   | { type: "SET_ENRICHMENT_ENABLED"; enabled: boolean }
   | { type: "SET_ENRICHMENT_LOADING"; loading: boolean }
   | { type: "ENRICHMENT_DELTA"; delta: string }
   | { type: "ENRICHMENT_COMPLETE"; original: string; enriched: string }
   | { type: "CLEAR_ENRICHED_PREVIEW" }
+  // Chat search
+  | { type: "TOGGLE_SEARCH" }
+  | { type: "SET_SEARCH_QUERY"; query: string }
+  | { type: "CLOSE_SEARCH" }
   // Error
   | { type: "ERROR"; errorType: string; message: string };

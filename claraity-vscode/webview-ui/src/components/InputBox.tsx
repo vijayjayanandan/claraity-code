@@ -31,8 +31,8 @@ interface InputBoxProps {
   onDraftChange: (draft: string) => void;
   // Skills
   skillsList: SkillInfo[];
-  activeSkills: string[];
-  onToggleSkill: (skillId: string) => void;
+  activeSkill: string | null;
+  onSelectSkill: (skillId: string) => void;
   onRequestSkills: () => void;
   onCreateSkill: () => void;
 }
@@ -76,8 +76,8 @@ export function InputBox({
   draft,
   onDraftChange,
   skillsList,
-  activeSkills,
-  onToggleSkill,
+  activeSkill,
+  onSelectSkill,
   onRequestSkills,
   onCreateSkill,
 }: InputBoxProps) {
@@ -419,19 +419,19 @@ export function InputBox({
         ))}
       </div>
 
-      {/* Active skill badges */}
-      {activeSkills.length > 0 && (
-        <div className="skill-badge-bar">
-          {activeSkills.map((id) => {
-            const skill = skillsList.find((s) => s.id === id);
-            return skill ? (
-              <span key={id} className="skill-badge" title={skill.description}>
-                <i className="codicon codicon-lightbulb" />
-                {skill.name}
-                <span className="skill-badge-remove" onClick={() => onToggleSkill(id)}>x</span>
-              </span>
-            ) : null;
-          })}
+      {/* Active skill badge */}
+      {activeSkill && (() => {
+        const skill = skillsList.find((s) => s.id === activeSkill);
+        return skill ? (
+          <div className="skill-badge-bar">
+            <span className="skill-badge" title={skill.description}>
+              <i className="codicon codicon-lightbulb" />
+              {skill.name}
+              <span className="skill-badge-remove" onClick={() => onSelectSkill(activeSkill)}>x</span>
+            </span>
+          </div>
+        ) : null;
+      })()
         </div>
       )}
 
@@ -546,8 +546,8 @@ export function InputBox({
         </button>
         <div className="skill-wrapper">
           <button
-            className={`input-icon-btn${activeSkills.length > 0 ? " skills-active" : ""}`}
-            title={`Skills${activeSkills.length > 0 ? ` (${activeSkills.length}/2)` : ""}`}
+            className={`input-icon-btn${activeSkill ? " skills-active" : ""}`}
+            title={activeSkill ? `Skill active: ${skillsList.find(s => s.id === activeSkill)?.name || activeSkill}` : "Skills"}
             onClick={() => setShowSkillPicker((v) => !v)}
             disabled={isStreaming}
           >
@@ -556,8 +556,8 @@ export function InputBox({
           {showSkillPicker && (
             <SkillPicker
               skills={skillsList}
-              activeSkills={activeSkills}
-              onToggle={onToggleSkill}
+              activeSkill={activeSkill}
+              onSelect={onSelectSkill}
               onRequestRefresh={onRequestSkills}
               onCreateSkill={() => { setShowSkillPicker(false); onCreateSkill(); }}
               onClose={() => setShowSkillPicker(false)}

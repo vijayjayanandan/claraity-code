@@ -319,7 +319,7 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
     private async handleWebviewMessage(msg: WebViewMessage): Promise<void> {
         switch (msg.type) {
             case 'chatMessage':
-                this.sendChatWithAttachments(msg.content, msg.attachments, msg.images, msg.systemContext, msg.activeSkills);
+                this.sendChatWithAttachments(msg.content, msg.attachments, msg.images, msg.systemContext, msg.activeSkill);
                 break;
 
             case 'searchFiles':
@@ -1089,7 +1089,7 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
         attachments?: FileAttachment[],
         images?: ImageAttachment[],
         systemContext?: string,
-        activeSkills?: string[],
+        activeSkill?: string,
     ): Promise<void> {
         // Prepend system context (hidden from UI, visible to agent)
         let finalContent = content;
@@ -1145,7 +1145,7 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
             type: 'chat_message',
             content: finalContent,
             ...(imagePayload ? { images: imagePayload } : {}),
-            ...(activeSkills && activeSkills.length > 0 ? { active_skills: activeSkills } : {}),
+            ...(activeSkill ? { active_skill: activeSkill } : {}),
         } as ClientMessage);
     }
 
@@ -1175,6 +1175,9 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
         this.postToWebview({ type: 'showSubagents' });
     }
 
+    toggleSearch(): void {
+        this.postToWebview({ type: 'toggleSearch' });
+    }
 
     postToWebview(message: ExtensionMessage): void {
         this.view?.webview.postMessage(message);

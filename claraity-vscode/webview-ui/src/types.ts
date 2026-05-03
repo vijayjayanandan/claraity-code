@@ -59,7 +59,8 @@ export type ExtensionMessage =
   | { type: "enrichmentError"; message: string }
   | { type: "traceData"; steps: TraceStepData[] }
   | { type: "traceEnabled"; enabled: boolean }
-  | { type: "toolList"; tools: { name: string; description: string; parameters: Record<string, unknown> }[] };
+  | { type: "toolList"; tools: { name: string; description: string; parameters: Record<string, unknown> }[] }
+  | { type: "toggleSearch" };
 
 /** A single trace event from the agent pipeline .trace.jsonl file. */
 export interface TraceStepData {
@@ -86,7 +87,7 @@ export interface TraceStepData {
 import type { FileAttachment, ImageAttachment, LimitsData } from "../../shared/protocol";
 
 export type WebViewMessage =
-  | { type: "chatMessage"; content: string; attachments?: FileAttachment[]; images?: ImageAttachment[]; systemContext?: string; activeSkills?: string[] }
+  | { type: "chatMessage"; content: string; attachments?: FileAttachment[]; images?: ImageAttachment[]; systemContext?: string; activeSkill?: string }
   | { type: "searchFiles"; query: string }
   | { type: "approvalResult"; callId: string; approved: boolean; autoApproveFuture?: boolean; feedback?: string }
   | { type: "interrupt" }

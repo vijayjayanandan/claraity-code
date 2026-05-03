@@ -1,14 +1,14 @@
 /**
  * Skill picker popover — shows available skills grouped by category
- * with checkboxes for selection (max 2 active).
+ * with single-select (click to select, click again to deselect).
  */
 import { useState, useRef, useEffect, useCallback } from "react";
 import type { SkillInfo } from "../types";
 
 interface SkillPickerProps {
   skills: SkillInfo[];
-  activeSkills: string[];
-  onToggle: (skillId: string) => void;
+  activeSkill: string | null;
+  onSelect: (skillId: string) => void;
   onRequestRefresh: () => void;
   onCreateSkill: () => void;
   onClose: () => void;
@@ -16,8 +16,8 @@ interface SkillPickerProps {
 
 export function SkillPicker({
   skills,
-  activeSkills,
-  onToggle,
+  activeSkill,
+  onSelect,
   onRequestRefresh,
   onCreateSkill,
   onClose,
@@ -69,13 +69,12 @@ export function SkillPicker({
   }
   const categories = Object.keys(grouped).sort();
 
-  const atLimit = activeSkills.length >= 2;
-
-  const handleToggle = useCallback(
+  const handleSelect = useCallback(
     (skillId: string) => {
-      onToggle(skillId);
+      onSelect(skillId);
+      onClose();
     },
-    [onToggle],
+    [onSelect, onClose],
   );
 
   return (
@@ -104,20 +103,18 @@ export function SkillPicker({
           <div key={cat}>
             {categories.length > 1 && <div className="skill-category-header">{cat}</div>}
             {grouped[cat].map((skill) => {
-              const isActive = activeSkills.includes(skill.id);
-              const isDisabled = !isActive && atLimit;
+              const isActive = activeSkill === skill.id;
               return (
                 <div
                   key={skill.id}
-                  className={`skill-item${isActive ? " active" : ""}${isDisabled ? " disabled" : ""}`}
-                  onClick={() => !isDisabled && handleToggle(skill.id)}
-                  title={isDisabled ? "Max 2 skills at once" : skill.description}
+                  className={`skill-item${isActive ? " active" : ""}`}
+                  onClick={() => handleSelect(skill.id)}
+                  title={skill.description}
                 >
                   <input
-                    type="checkbox"
-                    className="skill-checkbox"
+                    type="radio"
+                    className="skill-radio"
                     checked={isActive}
-                    disabled={isDisabled}
                     onChange={() => {}}
                     tabIndex={-1}
                   />

@@ -36,7 +36,7 @@ export interface ChatMessagePayload {
     content: string;
     attachments?: FileAttachment[];
     images?: ImageAttachment[];
-    active_skills?: string[];
+    active_skill?: string;
 }
 
 export interface ApprovalResultPayload {
@@ -248,10 +248,11 @@ export type ExtensionMessage =
     | { type: 'enrichmentError'; message: string }
     | { type: 'traceData'; steps: Array<{ id: number; from: string; to: string; label: string; type: string; data: string; durationMs: number; timestamp?: number; sections?: Record<string, string>; thinking?: string }> }
     | { type: 'traceEnabled'; enabled: boolean }
-    | { type: 'toolList'; tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }> };
+    | { type: 'toolList'; tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }> }
+    | { type: 'toggleSearch' };
 
 export type WebViewMessage =
-    | { type: 'chatMessage'; content: string; attachments?: FileAttachment[]; images?: ImageAttachment[]; systemContext?: string; activeSkills?: string[] }
+    | { type: 'chatMessage'; content: string; attachments?: FileAttachment[]; images?: ImageAttachment[]; systemContext?: string; activeSkill?: string }
     | { type: 'searchFiles'; query: string }
     | { type: 'approvalResult'; callId: string; approved: boolean; autoApproveFuture?: boolean; feedback?: string }
     | { type: 'interrupt' }

@@ -131,6 +131,10 @@ export function App() {
         dispatch({ type: "ERROR", errorType: "enrichment_error", message: msg.message ?? "Prompt enrichment failed." });
         break;
 
+      case "toggleSearch":
+        dispatch({ type: "TOGGLE_SEARCH" });
+        break;
+
       case "traceData":
         dispatch({ type: "TRACE_LOADED", steps: msg.steps });
         break;
@@ -189,7 +193,7 @@ export function App() {
       content,
       attachments: resolvedAttachments.length > 0 ? resolvedAttachments : undefined,
       images: resolvedImages.length > 0 ? resolvedImages : undefined,
-      activeSkills: state.activeSkills.length > 0 ? state.activeSkills : undefined,
+      activeSkill: state.activeSkill || undefined,
     });
     dispatch({ type: "CLEAR_INPUT" });
   };
@@ -198,18 +202,23 @@ export function App() {
     postMessage({ type: "interrupt" });
   };
 
-  // Escape key stops the stream (same as clicking the stop button).
+  // Escape key: stops the stream (priority) or closes search bar.
   // Uses capture phase so the webview catches it before VS Code can intercept it at the iframe level.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && state.isStreaming) {
-        e.preventDefault();
-        postMessage({ type: "interrupt" });
+      if (e.key === "Escape") {
+        if (state.isStreaming) {
+          e.preventDefault();
+          postMessage({ type: "interrupt" });
+        } else if (state.searchOpen) {
+          e.preventDefault();
+          dispatch({ type: "CLOSE_SEARCH" });
+        }
       }
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [state.isStreaming, postMessage]);
+  }, [state.isStreaming, state.searchOpen, postMessage]);
 
   // Memoized context value for ChatHistory's child components
   const chatContextValue = useMemo<ChatContextValue>(() => ({
@@ -398,6 +407,10 @@ export function App() {
           connected={state.connected}
           modelName={state.modelName}
           workingDirectory={state.workingDirectory}
+          searchOpen={state.searchOpen}
+          searchQuery={state.searchQuery}
+          onSearchQuery={(q) => dispatch({ type: "SET_SEARCH_QUERY", query: q })}
+          onSearchClose={() => dispatch({ type: "CLOSE_SEARCH" })}
         />
       </ChatContext.Provider>
 
@@ -464,8 +477,8 @@ export function App() {
         draft={state.chatDraft}
         onDraftChange={(draft) => dispatch({ type: "SET_CHAT_DRAFT", draft })}
         skillsList={state.skillsList}
-        activeSkills={state.activeSkills}
-        onToggleSkill={(skillId) => dispatch({ type: "TOGGLE_SKILL", skillId })}
+        activeSkill={state.activeSkill}
+        onSelectSkill={(skillId) => dispatch({ type: "SELECT_SKILL", skillId })}
         onRequestSkills={() => postMessage({ type: "getSkills" })}
         onCreateSkill={() => {
           handleSendMessage("I want to create a new skill. Help me define it.");

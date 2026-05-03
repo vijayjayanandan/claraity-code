@@ -2248,6 +2248,8 @@ class StdioProtocol(UIProtocol):
                             "description": s.description,
                             "category": s.category,
                             "tags": s.tags,
+                            **({"arguments": s.arguments} if s.arguments else {}),
+                            **({"argumentHint": s.argument_hint} if s.argument_hint else {}),
                         }
                         for s in skills
                     ],

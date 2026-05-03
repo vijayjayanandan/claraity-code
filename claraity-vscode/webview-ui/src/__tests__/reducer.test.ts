@@ -1495,28 +1495,27 @@ describe("Skills", () => {
     expect(s.skillsList[0].id).toBe("tdd");
   });
 
-  test("TOGGLE_SKILL adds skill to activeSkills", () => {
-    const s = reduce({ type: "TOGGLE_SKILL", skillId: "tdd" });
-    expect(s.activeSkills).toEqual(["tdd"]);
+  test("SELECT_SKILL sets activeSkill", () => {
+    const s = reduce({ type: "SELECT_SKILL", skillId: "tdd" });
+    expect(s.activeSkill).toBe("tdd");
   });
 
-  test("TOGGLE_SKILL removes already-active skill", () => {
-    let s: AppState = { ...initialState, activeSkills: ["tdd", "review"] };
-    s = reduce({ type: "TOGGLE_SKILL", skillId: "tdd" }, s);
-    expect(s.activeSkills).toEqual(["review"]);
+  test("SELECT_SKILL toggles off when same skill selected", () => {
+    let s: AppState = { ...initialState, activeSkill: "tdd" };
+    s = reduce({ type: "SELECT_SKILL", skillId: "tdd" }, s);
+    expect(s.activeSkill).toBeNull();
   });
 
-  test("TOGGLE_SKILL enforces max 2 limit", () => {
-    let s: AppState = { ...initialState, activeSkills: ["tdd", "review"] };
-    s = reduce({ type: "TOGGLE_SKILL", skillId: "new-skill" }, s);
-    // Should not add a third — state unchanged
-    expect(s.activeSkills).toEqual(["tdd", "review"]);
+  test("SELECT_SKILL replaces previous skill", () => {
+    let s: AppState = { ...initialState, activeSkill: "tdd" };
+    s = reduce({ type: "SELECT_SKILL", skillId: "review" }, s);
+    expect(s.activeSkill).toBe("review");
   });
 
-  test("CLEAR_ACTIVE_SKILLS resets to empty", () => {
-    let s: AppState = { ...initialState, activeSkills: ["tdd", "review"] };
-    s = reduce({ type: "CLEAR_ACTIVE_SKILLS" }, s);
-    expect(s.activeSkills).toEqual([]);
+  test("CLEAR_SKILL resets to null", () => {
+    let s: AppState = { ...initialState, activeSkill: "tdd" };
+    s = reduce({ type: "CLEAR_SKILL" }, s);
+    expect(s.activeSkill).toBeNull();
   });
 
   test("skills_list server message dispatches SKILLS_LOADED", () => {

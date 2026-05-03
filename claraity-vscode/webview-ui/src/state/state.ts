@@ -192,7 +192,7 @@ export interface AppState {
 
   // Skills
   skillsList: SkillInfo[];
-  activeSkills: string[];
+  activeSkill: string | null;
 
   // Trace
   traceSteps: import('../types').TraceStepData[] | null;
@@ -213,6 +213,10 @@ export interface AppState {
   enrichmentLoading: boolean;
   enrichedPromptPreview: string | null;
   enrichedPromptOriginal: string | null;
+
+  // Chat search
+  searchOpen: boolean;
+  searchQuery: string;
 
 }
 
@@ -294,7 +298,7 @@ export const initialState: AppState = {
   beadsData: null,
   architectureData: null,
   skillsList: [],
-  activeSkills: [],
+  activeSkill: null,
   traceSteps: null,
   traceEnabled: false,
   toolList: null,
@@ -313,5 +317,8 @@ export const initialState: AppState = {
   enrichmentLoading: false,
   enrichedPromptPreview: null,
   enrichedPromptOriginal: null,
+
+  searchOpen: false,
+  searchQuery: "",
 
 };

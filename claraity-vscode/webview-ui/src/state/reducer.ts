@@ -897,19 +897,13 @@ export function appReducer(state: AppState, action: Action): AppState {
     // ── Skills ──
     case "SKILLS_LOADED":
       return { ...state, skillsList: action.skills };
-    case "TOGGLE_SKILL": {
+    case "SELECT_SKILL": {
       const id = action.skillId;
-      const isActive = state.activeSkills.includes(id);
-      if (isActive) {
-        return { ...state, activeSkills: state.activeSkills.filter(s => s !== id) };
-      }
-      if (state.activeSkills.length >= 2) {
-        return state; // Max 2 active skills
-      }
-      return { ...state, activeSkills: [...state.activeSkills, id] };
+      // Toggle: clicking the active skill deselects it
+      return { ...state, activeSkill: state.activeSkill === id ? null : id };
     }
-    case "CLEAR_ACTIVE_SKILLS":
-      return { ...state, activeSkills: [] };
+    case "CLEAR_SKILL":
+      return { ...state, activeSkill: null };
 
     // ── Limits ──
     case "LIMITS_LOADED":
@@ -930,6 +924,16 @@ export function appReducer(state: AppState, action: Action): AppState {
       return { ...state, enrichedPromptPreview: action.enriched, enrichedPromptOriginal: action.original, enrichmentLoading: false };
     case "CLEAR_ENRICHED_PREVIEW":
       return { ...state, enrichedPromptPreview: null, enrichedPromptOriginal: null, enrichmentLoading: false };
+
+    // ── Chat search ──
+    case "TOGGLE_SEARCH":
+      return { ...state, searchOpen: !state.searchOpen, searchQuery: state.searchOpen ? "" : state.searchQuery };
+
+    case "SET_SEARCH_QUERY":
+      return { ...state, searchQuery: action.query };
+
+    case "CLOSE_SEARCH":
+      return { ...state, searchOpen: false, searchQuery: "" };
 
     // ── Error ──
     case "ERROR": {

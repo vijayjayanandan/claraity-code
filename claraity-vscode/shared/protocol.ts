@@ -256,6 +256,8 @@ export interface SkillInfo {
   description: string;
   category: string;
   tags: string[];
+  arguments?: string[];
+  argumentHint?: string;
 }
 
 // ============================================================================
