@@ -89,6 +89,16 @@ export function activate(context: vscode.ExtensionContext) {
         conn: StdioConnection,
         statusBar: vscode.StatusBarItem,
     ): void {
+        // Cache file-editing tool info by call_id so we can act on success
+        // (success notifications may not carry tool_name/arguments).
+        const fileToolCache = new Map<string, { toolName: string; filePath: string }>();
+
+        // Reusable highlight decoration for edited lines (subtle yellow, fades after 3s)
+        const editHighlight = vscode.window.createTextEditorDecorationType({
+            backgroundColor: 'rgba(255, 200, 0, 0.15)',
+            isWholeLine: true,
+        });
+
         // Track agent-modified files, pending changes, terminal commands, and undo checkpoints
         conn.onMessage((msg: ServerMessage) => {
             // Begin undo checkpoint on each agent turn
@@ -100,28 +110,52 @@ export function activate(context: vscode.ExtensionContext) {
             if (msg.type === 'store' && msg.event === 'tool_state_updated') {
                 const { call_id, tool_name, status, arguments: args } = msg.data;
 
-                // File decorations and CodeLens
-                if (tool_name === 'write_file' || tool_name === 'edit_file') {
-                    if (status === 'awaiting_approval' && args) {
+                // File tool cache + decorations + CodeLens
+                // Pending is the only notification guaranteed to carry tool_name + arguments.
+                // Later statuses (running, success) may lack them, so we use the cache.
+                if (tool_name === 'write_file' || tool_name === 'edit_file' || tool_name === 'append_to_file') {
+                    if (status === 'pending' && args) {
+                        const filePath = (args.file_path || args.path) as string | undefined;
+                        if (filePath) {
+                            fileToolCache.set(call_id, { toolName: tool_name, filePath });
+                        }
+                    } else if (status === 'awaiting_approval' && args) {
                         const filePath = (args.file_path || args.path) as string | undefined;
                         if (filePath) {
                             codeLens.addPendingChange(call_id, tool_name, filePath, args as Record<string, any>);
-                            // Snapshot BEFORE any modification
                             undoManager.snapshotFile(filePath);
                         }
-                    } else if (status === 'running' && args) {
-                        // Auto-approve path — snapshot on running if not already done
-                        const filePath = (args.file_path || args.path) as string | undefined;
-                        if (filePath) {
-                            undoManager.snapshotFile(filePath);
-                        }
-                    } else if (status === 'success' && args) {
-                        const filePath = (args.file_path || args.path) as string | undefined;
-                        if (filePath) {
-                            fileDecorations.markModified(filePath);
-                        }
+                    }
+                }
+
+                // Cache-based handlers (running/success/error don't carry tool_name)
+                const cached = fileToolCache.get(call_id);
+                if (cached) {
+                    if (status === 'running') {
+                        undoManager.snapshotFile(cached.filePath);
+                    } else if (status === 'success') {
+                        fileToolCache.delete(call_id);
+                        fileDecorations.markModified(cached.filePath);
                         codeLens.removePendingChange(call_id);
+
+                        const uri = vscode.Uri.file(cached.filePath);
+                        const editLine = msg.data.edit_line;
+                        const editLineCount = msg.data.edit_line_count;
+
+                        const openPromise = vscode.window.showTextDocument(uri, { preview: false, preserveFocus: true });
+                        if (openPromise) {
+                            openPromise.then(editor => {
+                                if (!editor || !editLine || editLine <= 0) return;
+                                const startLine = editLine - 1; // VS Code is 0-based
+                                const endLine = startLine + (editLineCount || 1);
+                                const range = new vscode.Range(startLine, 0, endLine - 1, 0);
+                                editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
+                                editor.setDecorations(editHighlight, [range]);
+                                setTimeout(() => editor.setDecorations(editHighlight, []), 3000);
+                            });
+                        }
                     } else if (status === 'rejected' || status === 'error' || status === 'cancelled') {
+                        fileToolCache.delete(call_id);
                         codeLens.removePendingChange(call_id);
                     }
                 }
@@ -161,6 +195,7 @@ export function activate(context: vscode.ExtensionContext) {
                 codeLens.clear();
                 shownCommands.clear();
                 undoManager.clear();
+                fileToolCache.clear();
             }
         });
 

@@ -303,6 +303,7 @@ class ContextBuilder:
 
             skill_loader = SkillLoader(working_directory=self.project_root)
             skills_injected = 0
+            logger.info(f"skills_injection_start: {active_skill_ids}", requested=active_skill_ids)
             for skill_id in active_skill_ids[:2]:  # Max 2 active skills
                 skill = skill_loader.get_skill(skill_id)
                 if skill and skill.body.strip():
@@ -314,6 +315,9 @@ class ContextBuilder:
                         + "\n</active-skill>"
                     )
                     skills_injected += 1
+                    logger.info(f"skill_injected: {skill_id} ({skill.name})", skill_id=skill_id, skill_name=skill.name)
+                else:
+                    logger.warning(f"skill_not_found_or_empty: {skill_id}", skill_id=skill_id)
             if _emit_sources and skills_injected:
                 self._trace.on_context_source(
                     "Active Skills",

@@ -998,32 +998,56 @@ describe('extension.ts', () => {
         test('handles tool_state_updated for edit_file success', async () => {
             await activateWithConnection();
 
+            // First send pending to populate the file tool cache
             connectionCallbacks['message']({
                 type: 'store',
                 event: 'tool_state_updated',
                 data: {
                     call_id: 'call-2',
                     tool_name: 'edit_file',
-                    status: 'success',
+                    status: 'pending',
                     arguments: { file_path: '/test/edited.ts' },
+                },
+            });
+
+            // Then send success (uses cached tool info)
+            connectionCallbacks['message']({
+                type: 'store',
+                event: 'tool_state_updated',
+                data: {
+                    call_id: 'call-2',
+                    status: 'success',
+                    edit_line: 10,
+                    edit_line_count: 3,
                 },
             });
 
             expect(mockFileDecorationInstance.markModified).toHaveBeenCalledWith('/test/edited.ts');
             expect(mockCodeLensInstance.removePendingChange).toHaveBeenCalledWith('call-2');
+            expect(vscode.window.showTextDocument).toHaveBeenCalled();
         });
 
         test('handles tool_state_updated for rejected status', async () => {
             await activateWithConnection();
 
+            // Pending populates the cache
             connectionCallbacks['message']({
                 type: 'store',
                 event: 'tool_state_updated',
                 data: {
                     call_id: 'call-3',
                     tool_name: 'write_file',
-                    status: 'rejected',
+                    status: 'pending',
                     arguments: { file_path: '/test/file.ts' },
+                },
+            });
+
+            connectionCallbacks['message']({
+                type: 'store',
+                event: 'tool_state_updated',
+                data: {
+                    call_id: 'call-3',
+                    status: 'rejected',
                 },
             });
 
@@ -1043,14 +1067,25 @@ describe('extension.ts', () => {
         test('handles tool_state_updated for running status (auto-approve snapshot)', async () => {
             await activateWithConnection();
 
+            // Pending populates the cache
             connectionCallbacks['message']({
                 type: 'store',
                 event: 'tool_state_updated',
                 data: {
                     call_id: 'call-4',
                     tool_name: 'write_file',
-                    status: 'running',
+                    status: 'pending',
                     arguments: { file_path: '/test/auto-file.ts' },
+                },
+            });
+
+            // Running uses cache for snapshot
+            connectionCallbacks['message']({
+                type: 'store',
+                event: 'tool_state_updated',
+                data: {
+                    call_id: 'call-4',
+                    status: 'running',
                 },
             });
 

@@ -771,6 +771,11 @@ class CodingAgent(AgentInterface):
         self._error_budget_resume_count = 0
         self._successful_tools_since_resume = 0
 
+        # 5. Reload cached sources (may have been edited during previous session)
+        self.context_builder.reload_cached_sources()
+        self.memory.reload_persistent_memory()
+        self.memory.reload_file_memories()
+
         logger.info(f"Session reset to {new_session_id}")
 
     def is_in_plan_mode(self) -> bool:
@@ -2722,11 +2727,12 @@ class CodingAgent(AgentInterface):
                     inject_reminders,
                 )
 
+                _skills_dir = self.working_directory / ".claraity" / "skills"
                 _reminder_state = build_reminder_state(
                     iteration=iteration,
                     tools_used=_reminder_tools_used,
                     last_task_tool_iteration=_reminder_last_task_tool_iter,
-                    skills_exist=bool(active_skills),
+                    skills_exist=_skills_dir.is_dir() and any(_skills_dir.glob("*.md")),
                     working_directory=str(self.working_directory),
                 )
                 inject_reminders(current_context, _reminder_state, REMINDERS)
@@ -3251,8 +3257,15 @@ class CodingAgent(AgentInterface):
             content_for_store = output if isinstance(output, list) else str(output)
 
             if self.memory.message_store:
+                # Forward edit location metadata for VS Code file reveal
+                edit_meta = {}
+                if hasattr(result, "metadata") and result.metadata:
+                    for key in ("edit_line", "edit_line_count"):
+                        if key in result.metadata:
+                            edit_meta[key] = result.metadata[key]
                 self.memory.message_store.update_tool_state(
-                    call_id, CoreToolStatus.SUCCESS, result=output, duration_ms=duration_ms
+                    call_id, CoreToolStatus.SUCCESS, result=output, duration_ms=duration_ms,
+                    extra_metadata=edit_meta or None,
                 )
             self.memory.add_tool_result(
                 tool_call_id=call_id,

@@ -201,7 +201,12 @@ const vscode = {
         registerWebviewViewProvider: vi.fn(() => new Disposable(() => {})),
         registerFileDecorationProvider: vi.fn(() => new Disposable(() => {})),
         activeTextEditor: undefined,
-        showTextDocument: vi.fn().mockResolvedValue(undefined),
+        showTextDocument: vi.fn().mockResolvedValue({
+            revealRange: vi.fn(),
+            setDecorations: vi.fn(),
+            document: { getText: vi.fn(() => ''), positionAt: vi.fn(() => ({ line: 0, character: 0 })), lineCount: 1 },
+        }),
+        createTextEditorDecorationType: vi.fn(() => ({ dispose: vi.fn() })),
         terminals: [],
     },
 

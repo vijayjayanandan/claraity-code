@@ -42,6 +42,10 @@ export interface ToolStateData {
   };
   /** Prompt tokens from the subagent's most recent LLM call. */
   context_tokens?: number;
+  /** 1-based line number where the edit starts (set on success for file-editing tools). */
+  edit_line?: number;
+  /** Number of lines in the replacement text. */
+  edit_line_count?: number;
 }
 
 export interface MessageData {

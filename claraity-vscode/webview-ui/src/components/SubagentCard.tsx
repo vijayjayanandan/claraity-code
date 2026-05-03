@@ -60,7 +60,7 @@ export function SubagentCard({ info, toolCards: toolCardsList, postMessage }: Su
   const statusText = info.active
     ? (currentToolName
         ? `${currentToolName}${currentToolArg ? ` \u2014 ${currentToolArg}` : ""}`
-        : "Starting\u2026")
+        : info.toolCount > 0 ? "Thinking\u2026" : "Starting\u2026")
     : "Completed";
 
   // Format token count as compact string (e.g. 1234 -> "1.2k", 52100 -> "52k")

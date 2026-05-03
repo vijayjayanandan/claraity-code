@@ -217,6 +217,10 @@ def serialize_store_notification(notification: StoreNotification) -> dict | None
             data["message"] = metadata["message"]
         if "context_tokens" in metadata:
             data["context_tokens"] = metadata["context_tokens"]
+        if "edit_line" in metadata:
+            data["edit_line"] = metadata["edit_line"]
+        if "edit_line_count" in metadata:
+            data["edit_line_count"] = metadata["edit_line_count"]
 
         return {
             "type": "store",

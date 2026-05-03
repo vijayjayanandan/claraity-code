@@ -684,6 +684,7 @@ class StdioProtocol(UIProtocol):
             )
             return
         if content.strip() or images:
+            logger.info(f"chat_message_received: active_skills={active_skills}", active_skills=active_skills, skill_count=len(active_skills))
             await self._chat_queue.put({"content": content, "images": images, "active_skills": active_skills})
 
     # -----------------------------------------------------------------

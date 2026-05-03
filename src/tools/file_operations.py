@@ -585,11 +585,18 @@ class WriteFileTool(FileOperationTool):
             with open(path, "w", encoding="utf-8") as f:
                 f.write(content)
 
+            total_lines = content.count("\n") + 1
+
             return ToolResult(
                 tool_name=self.name,
                 status=ToolStatus.SUCCESS,
                 output=f"Successfully wrote {len(content)} characters to {file_path}",
-                metadata={"file_path": str(path), "size": len(content)},
+                metadata={
+                    "file_path": str(path),
+                    "size": len(content),
+                    "edit_line": 1,
+                    "edit_line_count": total_lines,
+                },
             )
 
         except Exception as e:
@@ -760,6 +767,11 @@ class EditFileTool(FileOperationTool):
                     ),
                 )
 
+            # Compute edit location (1-based line number) before replacement
+            edit_idx = content.index(old_text)
+            edit_line = content[:edit_idx].count("\n") + 1
+            edit_line_count = new_text.count("\n") + 1
+
             # Replace (single or all)
             if replace_all:
                 new_content = content.replace(old_text, new_text)
@@ -777,6 +789,8 @@ class EditFileTool(FileOperationTool):
                 metadata={
                     "file_path": str(path),
                     "replacements": occurrence_count if replace_all else 1,
+                    "edit_line": edit_line,
+                    "edit_line_count": edit_line_count,
                 },
             )
 
@@ -837,6 +851,12 @@ class AppendToFileTool(FileOperationTool):
             with open(path, encoding="utf-8") as f:
                 total_lines = sum(1 for _ in f)
 
+            appended_line_count = content.count("\n") + 1
+            # Account for injected newline when file didn't end with one
+            if needs_newline:
+                appended_line_count += 1
+            edit_line = total_lines - appended_line_count + 1
+
             return ToolResult(
                 tool_name=self.name,
                 status=ToolStatus.SUCCESS,
@@ -846,6 +866,8 @@ class AppendToFileTool(FileOperationTool):
                     "appended_size": len(content),
                     "total_size": total_size,
                     "total_lines": total_lines,
+                    "edit_line": edit_line,
+                    "edit_line_count": appended_line_count,
                 },
             )
 

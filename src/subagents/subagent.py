@@ -1120,11 +1120,18 @@ class SubAgent:
                                 "tool_call_id": tool_call_id,
                             }
                         )
+                        # Forward edit location metadata for VS Code file reveal
+                        edit_meta = {}
+                        if hasattr(result, "metadata") and result.metadata:
+                            for key in ("edit_line", "edit_line_count"):
+                                if key in result.metadata:
+                                    edit_meta[key] = result.metadata[key]
                         self._message_store.update_tool_state(
                             tool_call_id=tool_call_id,
                             status=ToolStatus.SUCCESS,
                             result=output,
                             tool_name=tool_name,
+                            extra_metadata=edit_meta or None,
                         )
                     else:
                         error_content = f"Error: {result.error}"
