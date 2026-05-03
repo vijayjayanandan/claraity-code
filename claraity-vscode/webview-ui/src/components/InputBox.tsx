@@ -420,18 +420,13 @@ export function InputBox({
       </div>
 
       {/* Active skill badge */}
-      {activeSkill && (() => {
-        const skill = skillsList.find((s) => s.id === activeSkill);
-        return skill ? (
-          <div className="skill-badge-bar">
-            <span className="skill-badge" title={skill.description}>
-              <i className="codicon codicon-lightbulb" />
-              {skill.name}
-              <span className="skill-badge-remove" onClick={() => onSelectSkill(activeSkill)}>x</span>
-            </span>
-          </div>
-        ) : null;
-      })()
+      {activeSkill && skillsList.find((s) => s.id === activeSkill) && (
+        <div className="skill-badge-bar">
+          <span className="skill-badge" title={skillsList.find((s) => s.id === activeSkill)!.description}>
+            <i className="codicon codicon-lightbulb" />
+            {skillsList.find((s) => s.id === activeSkill)!.name}
+            <span className="skill-badge-remove" onClick={() => onSelectSkill(activeSkill)}>x</span>
+          </span>
         </div>
       )}
 
