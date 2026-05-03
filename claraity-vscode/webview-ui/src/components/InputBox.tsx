@@ -88,6 +88,9 @@ export function InputBox({
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [showSkillPicker, setShowSkillPicker] = useState(false);
+  const [showSlashMenu, setShowSlashMenu] = useState(false);
+  const [slashFilter, setSlashFilter] = useState("");
+  const [slashIndex, setSlashIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const attachMenuRef = useRef<HTMLDivElement>(null);
 
@@ -127,6 +130,18 @@ export function InputBox({
         setMentionIndex(0);
       } else {
         setShowMentions(false);
+      }
+
+      // Detect /slash-command at start of input
+      const slashMatch = value.match(/^\/(\S*)$/);
+      if (slashMatch) {
+        setSlashFilter(slashMatch[1].toLowerCase());
+        setShowSlashMenu(true);
+        setSlashIndex(0);
+        // Fetch skills if not loaded
+        if (skillsList.length === 0) onRequestSkills();
+      } else {
+        setShowSlashMenu(false);
       }
     },
     [onSearchFiles],
@@ -217,9 +232,52 @@ export function InputBox({
     textareaRef.current?.focus();
   }, [onClearEnrichment]);
 
+  // Filtered skills for slash menu
+  const slashSkills = showSlashMenu
+    ? skillsList.filter(
+        (s) =>
+          !slashFilter ||
+          s.id.includes(slashFilter) ||
+          s.name.toLowerCase().includes(slashFilter),
+      )
+    : [];
+
+  // Insert slash-command into text
+  const insertSlashCommand = useCallback(
+    (skill: SkillInfo) => {
+      setText("/" + skill.id + " ");
+      setShowSlashMenu(false);
+      textareaRef.current?.focus();
+    },
+    [],
+  );
+
   // Keyboard shortcuts
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      // Slash-command menu navigation
+      if (showSlashMenu && slashSkills.length > 0) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setSlashIndex((i) => Math.min(i + 1, slashSkills.length - 1));
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setSlashIndex((i) => Math.max(i - 1, 0));
+          return;
+        }
+        if (e.key === "Enter" || e.key === "Tab") {
+          e.preventDefault();
+          insertSlashCommand(slashSkills[slashIndex]);
+          return;
+        }
+        if (e.key === "Escape") {
+          setShowSlashMenu(false);
+          return;
+        }
+      }
+
       if (showMentions && mentionResults.length > 0) {
         if (e.key === "ArrowDown") {
           e.preventDefault();
@@ -415,6 +473,26 @@ export function InputBox({
           >
             <span className="mention-name">{file.name}</span>
             <span className="mention-path">{file.relativePath}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Slash-command dropdown */}
+      <div
+        className={`mention-dropdown ${showSlashMenu && slashSkills.length > 0 ? "visible" : ""}`}
+        role="listbox"
+        aria-label="Skill commands"
+      >
+        {slashSkills.map((skill, i) => (
+          <div
+            key={skill.id}
+            className={`mention-item ${i === slashIndex ? "selected" : ""}`}
+            onClick={() => insertSlashCommand(skill)}
+            role="option"
+            aria-selected={i === slashIndex}
+          >
+            <span className="mention-name">/{skill.id}</span>
+            <span className="mention-path">{skill.description}</span>
           </div>
         ))}
       </div>

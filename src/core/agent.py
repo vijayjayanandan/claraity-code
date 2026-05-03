@@ -1653,6 +1653,9 @@ class CodingAgent(AgentInterface):
                         f"</skill>\n\n"
                     )
                     user_input = _skill_header + user_input
+                    # Pre-approve tools listed in skill's allowed-tools frontmatter
+                    if _skill.allowed_tools:
+                        self._gating.set_skill_allowed_tools(_skill.allowed_tools)
                     logger.info(
                         "skill_injected_into_message",
                         skill_id=_skill.id,
@@ -2798,6 +2801,9 @@ class CodingAgent(AgentInterface):
                     store.close()
         except Exception as e:
             logger.debug("bead_touch_error", error=str(e))
+
+        # Clear skill-based tool pre-approval
+        self._gating.clear_skill_allowed_tools()
 
         # Yield StreamEnd to signal completion
         yield StreamEnd()

@@ -129,6 +129,21 @@ class ToolGatingService:
         self._mcp_manager = mcp_manager
         self._auto_approve_categories: set = {"read"}  # read is safe by default
         self._workspace_roots = workspace_roots
+        self._skill_allowed_tools: set[str] = set()  # tools pre-approved by active skill
+
+    # ------------------------------------------------------------------
+    # Skill-based tool pre-approval
+    # ------------------------------------------------------------------
+
+    def set_skill_allowed_tools(self, tools: list[str]) -> None:
+        """Set tools pre-approved by the active skill. Cleared per-message."""
+        self._skill_allowed_tools = set(tools)
+        if tools:
+            logger.info("skill_tools_pre_approved", tools=tools)
+
+    def clear_skill_allowed_tools(self) -> None:
+        """Clear skill-based tool pre-approval."""
+        self._skill_allowed_tools.clear()
 
     # ------------------------------------------------------------------
     # Category auto-approve
@@ -365,6 +380,10 @@ class ToolGatingService:
         # MCP tools: delegate to policy gate
         if self._mcp_manager.is_mcp_tool(tool_name):
             return self._mcp_manager.requires_approval(tool_name)
+
+        # Skill-based pre-approval: if the active skill allows this tool, skip approval
+        if tool_name in self._skill_allowed_tools:
+            return False
 
         # NORMAL mode: check category auto-approve
         # A tool needs approval if it has a category and that category is not auto-approved,

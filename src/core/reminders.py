@@ -159,12 +159,27 @@ def _trigger_available_skills(state: ReminderState) -> bool:
 
 
 def _content_available_skills(state: ReminderState) -> str:
+    # List skill names so the LLM can suggest relevant ones.
+    # Skills with disable-model-invocation are excluded from the list.
+    skill_names: list[str] = []
+    try:
+        from pathlib import Path
+
+        from src.skills.skill_loader import SkillLoader
+
+        loader = SkillLoader(working_directory=Path(state.working_directory))
+        for skill in loader.load_all():
+            if not skill.disable_model_invocation:
+                skill_names.append(f"/{skill.id} - {skill.name}")
+    except Exception:
+        pass
+
+    skills_list = "\n".join(skill_names) if skill_names else "(use lightbulb icon to browse)"
     return (
-        "Skills are available in this project (.claraity/skills/). "
-        "When the user's task matches a skill, you may suggest they activate it from "
-        "the lightbulb icon in the input toolbar. "
-        "Do NOT activate skills yourself - the user selects them from the VS Code picker. "
-        "Active skills will be injected into your context when selected."
+        "Skills are available in this project. "
+        "The user can activate a skill by typing /skill-name or via the lightbulb icon. "
+        "When the user's task matches a skill, suggest they use it.\n\n"
+        f"Available skills:\n{skills_list}"
     )
 
 
