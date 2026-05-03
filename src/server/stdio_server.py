@@ -677,15 +677,16 @@ class StdioProtocol(UIProtocol):
     async def _handle_chat_message(self, data: dict) -> None:
         content = data.get("content", "")
         images = data.get("images", [])
-        active_skills = data.get("active_skills", [])
+        active_skill = data.get("active_skill") or None  # single skill ID or None
+        skill_arguments = data.get("skill_arguments", "")
         if len(content) > _MAX_CHAT_MESSAGE_LEN:
             await self._send_error(
                 "message_too_large", "Message too large. Maximum 100,000 characters."
             )
             return
         if content.strip() or images:
-            logger.info(f"chat_message_received: active_skills={active_skills}", active_skills=active_skills, skill_count=len(active_skills))
-            await self._chat_queue.put({"content": content, "images": images, "active_skills": active_skills})
+            logger.info("chat_message_received", active_skill=active_skill or "(none)")
+            await self._chat_queue.put({"content": content, "images": images, "active_skill": active_skill, "skill_arguments": skill_arguments})
 
     # -----------------------------------------------------------------
     # Config handlers
@@ -2290,7 +2291,7 @@ class StdioProtocol(UIProtocol):
             )
             return
 
-        # Slugify name for filename
+        # Slugify name for directory and filename
         slug = _re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
         if not slug:
             await self._send_json(
@@ -2305,8 +2306,8 @@ class StdioProtocol(UIProtocol):
 
         try:
             working_dir = Path(self._working_directory) if self._working_directory else Path.cwd()
-            skills_dir = working_dir / ".claraity" / "skills"
-            skills_dir.mkdir(parents=True, exist_ok=True)
+            skill_dir = working_dir / ".claraity" / "skills" / slug
+            skill_dir.mkdir(parents=True, exist_ok=True)
 
             # Build frontmatter
             fm: dict[str, Any] = {"name": name, "description": description}
@@ -2318,7 +2319,7 @@ class StdioProtocol(UIProtocol):
             fm_yaml = _yaml.dump(fm, default_flow_style=False, allow_unicode=True).strip()
             content = f"---\n{fm_yaml}\n---\n\n{body}\n"
 
-            target = skills_dir / f"{slug}.md"
+            target = skill_dir / f"skill-{slug}.md"
             target.write_text(content, encoding="utf-8")
 
             await self._send_json(
@@ -2326,7 +2327,7 @@ class StdioProtocol(UIProtocol):
                     "type": "skill_saved",
                     "success": True,
                     "name": name,
-                    "message": f"Skill '{name}' saved as {slug}.md",
+                    "message": f"Skill '{name}' saved as {slug}/skill-{slug}.md",
                 }
             )
         except Exception as e:
@@ -2575,7 +2576,7 @@ class StdioProtocol(UIProtocol):
     # Streaming
     # -----------------------------------------------------------------
 
-    async def _stream_and_send(self, agent, chat_content: str, attachments=None, active_skills=None) -> int:
+    async def _stream_and_send(self, agent, chat_content: str, attachments=None, active_skill=None, skill_arguments="") -> int:
         """Stream agent response and send each event to the client.
 
         Checks for TCP disconnect to avoid burning tokens when the client
@@ -2583,7 +2584,8 @@ class StdioProtocol(UIProtocol):
         """
         count = 0
         async for event in agent.stream_response(
-            user_input=chat_content, ui=self, attachments=attachments, active_skills=active_skills
+            user_input=chat_content, ui=self, attachments=attachments,
+            active_skill=active_skill, skill_arguments=skill_arguments,
         ):
             if self._closed:
                 logger.warning("stdio_tcp_disconnected_during_stream")
@@ -2849,12 +2851,13 @@ async def run_stdio_server(
                 # Reset protocol state for new turn
                 protocol.reset()
 
-                # Extract content, images, and active skills
+                # Extract content, images, and active skill
                 chat_content = (
                     chat_msg.get("content", "") if isinstance(chat_msg, dict) else str(chat_msg)
                 )
                 raw_images = chat_msg.get("images", []) if isinstance(chat_msg, dict) else []
-                active_skills = chat_msg.get("active_skills", []) if isinstance(chat_msg, dict) else []
+                active_skill = chat_msg.get("active_skill") if isinstance(chat_msg, dict) else None
+                skill_arguments = chat_msg.get("skill_arguments", "") if isinstance(chat_msg, dict) else ""
 
                 # Build attachments
                 attachments = None
@@ -2907,7 +2910,7 @@ async def run_stdio_server(
                 logger.debug("stdio_stream_start")
 
                 streaming_task = asyncio.create_task(
-                    protocol._stream_and_send(agent, chat_content, attachments, active_skills=active_skills or None)
+                    protocol._stream_and_send(agent, chat_content, attachments, active_skill=active_skill, skill_arguments=skill_arguments)
                 )
                 protocol.set_streaming_task(streaming_task)
                 try:

@@ -1546,7 +1546,8 @@ class CodingAgent(AgentInterface):
         user_input: str,
         ui: "UIProtocol",
         attachments: "list | None" = None,
-        active_skills: "list[str] | None" = None,
+        active_skill: "str | None" = None,
+        skill_arguments: "str" = "",
     ) -> "AsyncIterator[UIEvent]":
         """
         Stream response to UI as typed UIEvent objects.
@@ -1558,6 +1559,8 @@ class CodingAgent(AgentInterface):
             user_input: User message
             ui: UIProtocol for bidirectional communication (approvals, interrupts)
             attachments: Optional list of Attachment objects (images, text files)
+            active_skill: Optional skill ID to activate for this message
+            skill_arguments: Raw arguments string for skill substitution
 
         Yields:
             UIEvent instances (StreamStart, TextDelta, ToolCallStart, etc.)
@@ -1629,6 +1632,36 @@ class CodingAgent(AgentInterface):
             # Trace: request received (before save — request arrives, then is persisted)
             self._trace.on_request(user_input)
 
+            # Inject active skill into user message (not system prompt)
+            # Skill content is prepended to the user message so the agent
+            # sees it as tied to this specific conversation turn.
+            if active_skill:
+                from src.skills.skill_loader import SkillLoader, substitute_arguments
+
+                _skill_loader = SkillLoader(working_directory=self.working_directory)
+                _skill = _skill_loader.get_skill(active_skill)
+                if _skill and _skill.body.strip():
+                    _skill_body = _skill.body.strip()
+                    if skill_arguments or _skill.arguments:
+                        _skill_body = substitute_arguments(
+                            _skill_body, skill_arguments, _skill.arguments
+                        )
+                    _skill_header = (
+                        f'<skill name="{_skill.name}" id="{_skill.id}">\n'
+                        f"Base directory for this skill: {_skill.skill_dir}\n\n"
+                        f"{_skill_body}\n"
+                        f"</skill>\n\n"
+                    )
+                    user_input = _skill_header + user_input
+                    logger.info(
+                        "skill_injected_into_message",
+                        skill_id=_skill.id,
+                        skill_name=_skill.name,
+                        args=skill_arguments or "(none)",
+                    )
+                else:
+                    logger.warning("skill_not_found_or_empty", skill_id=active_skill)
+
             # Add user message to memory with attachments
             # MemoryManager will build multimodal content and store it in MessageStore
             self.memory.add_user_message(user_input, attachments=attachments)
@@ -1678,7 +1711,6 @@ class CodingAgent(AgentInterface):
                 plan_mode_state=self.plan_mode_state,
 
                 iteration=0,
-                active_skill_ids=active_skills,
             )
             logger.debug(
                 "stream_response_phase",
@@ -1977,7 +2009,6 @@ class CodingAgent(AgentInterface):
                                         plan_mode_state=self.plan_mode_state,
                         
                                         iteration=iteration,
-                                        active_skill_ids=active_skills,
                                     )
                             except Exception as compact_err:
                                 logger.error(f"[COMPACTION] Failed: {compact_err}", exc_info=True)
@@ -2732,7 +2763,7 @@ class CodingAgent(AgentInterface):
                     iteration=iteration,
                     tools_used=_reminder_tools_used,
                     last_task_tool_iteration=_reminder_last_task_tool_iter,
-                    skills_exist=_skills_dir.is_dir() and any(_skills_dir.glob("*.md")),
+                    skills_exist=_skills_dir.is_dir() and any(p.is_dir() for p in _skills_dir.iterdir()),
                     working_directory=str(self.working_directory),
                 )
                 inject_reminders(current_context, _reminder_state, REMINDERS)

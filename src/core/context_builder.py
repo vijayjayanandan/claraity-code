@@ -214,7 +214,6 @@ class ContextBuilder:
         plan_mode_state: Any | None = None,
         log_report: bool = True,
         iteration: int = 0,
-        active_skill_ids: list[str] | None = None,
     ) -> list[dict[str, str]]:
         """
         Build complete context for LLM.
@@ -296,35 +295,6 @@ class ContextBuilder:
                 bool(project_instructions),
                 iteration,
             )
-
-        # Inject active skills (user-selected procedural instructions)
-        if active_skill_ids:
-            from src.skills.skill_loader import SkillLoader
-
-            skill_loader = SkillLoader(working_directory=self.project_root)
-            skills_injected = 0
-            logger.info(f"skills_injection_start: {active_skill_ids}", requested=active_skill_ids)
-            for skill_id in active_skill_ids[:2]:  # Max 2 active skills
-                skill = skill_loader.get_skill(skill_id)
-                if skill and skill.body.strip():
-                    system_prompt = (
-                        system_prompt
-                        + "\n\n"
-                        + f'<active-skill name="{skill.name}">\n'
-                        + skill.body.strip()
-                        + "\n</active-skill>"
-                    )
-                    skills_injected += 1
-                    logger.info(f"skill_injected: {skill_id} ({skill.name})", skill_id=skill_id, skill_name=skill.name)
-                else:
-                    logger.warning(f"skill_not_found_or_empty: {skill_id}", skill_id=skill_id)
-            if _emit_sources and skills_injected:
-                self._trace.on_context_source(
-                    "Active Skills",
-                    f"{skills_injected} skill(s) injected",
-                    True,
-                    iteration,
-                )
 
         # Inject architecture brief from knowledge DB (cached at startup)
         knowledge_brief = self._cached_knowledge_brief or ""
