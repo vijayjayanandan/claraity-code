@@ -196,6 +196,7 @@ export function App() {
       activeSkill: state.activeSkill || undefined,
     });
     dispatch({ type: "CLEAR_INPUT" });
+    dispatch({ type: "CLEAR_SKILL" });
   };
 
   const handleInterrupt = () => {
