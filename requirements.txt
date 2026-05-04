@@ -1,7 +1,7 @@
 # Core Dependencies - Tested & Working Versions
 # transformers>=4.40.0  # REMOVED: Using LLM APIs instead of local models
 # sentence-transformers>=2.7.0  # REMOVED: Using Alibaba embeddings API (Option B architecture)
-chromadb>=0.4.24  # Keep for local vector DB (fast queries)
+chromadb>=1.5.8  # Keep for local vector DB (fast queries)
 tiktoken>=0.7.0
 
 # AST Parsing - Specific versions required for compatibility
