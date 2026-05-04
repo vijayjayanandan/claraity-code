@@ -16,6 +16,7 @@ export const TOOL_ICONS: Record<string, string> = {
   plan: "P",
   delegate_task: "T",
   delegate_to_subagent: "SA",
+  skill_preprocess: "!",
 };
 
 /**

@@ -40,6 +40,7 @@ required; all other fields are optional.
 from __future__ import annotations
 
 import re
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -66,10 +67,9 @@ class SkillInfo:
     # Extended frontmatter fields
     arguments: list[str] = field(default_factory=list)
     argument_hint: str = ""
-    # Reserved for future use — parsed from frontmatter but not yet enforced.
-    # disable_model_invocation: prevents auto-invocation by the LLM (Phase 3).
-    # allowed_tools: restricts tool access during skill execution (Phase 3).
     disable_model_invocation: bool = False
+    # allowed_tools: informational list of tools relevant to this skill.
+    # Does NOT bypass tool approval — normal auto-approve settings still apply.
     allowed_tools: list[str] = field(default_factory=list)
     # Directory containing the skill (for resolving scripts/, references/, etc.)
     skill_dir: Path = field(default_factory=lambda: Path())
@@ -134,6 +134,145 @@ def substitute_arguments(body: str, args_string: str, argument_names: list[str])
     result = _re.sub(r"\$(\d+)", _replace_positional, result)
 
     return result
+
+
+_SHELL_COMMAND_TIMEOUT = 30  # seconds per command
+_MAX_COMMAND_OUTPUT = 10_000  # 10KB per command output
+
+
+def extract_shell_commands(body: str) -> list[str]:
+    """Extract all shell commands from the skill body without executing them.
+
+    Returns a list of command strings found in !`command` and ```! blocks.
+    Used to show the user what will be executed before approval.
+    """
+    if "!`" not in body and "```!" not in body:
+        return []
+
+    commands: list[str] = []
+
+    # Fenced blocks
+    for match in re.finditer(r"```!\s*\n(.*?)\n\s*```", body, re.DOTALL):
+        for line in match.group(1).strip().splitlines():
+            line = line.strip()
+            if line:
+                commands.append(line)
+
+    # Inline
+    for match in re.finditer(r"!`([^`]+)`", body):
+        cmd = match.group(1).strip()
+        if cmd:
+            commands.append(cmd)
+
+    return commands
+
+
+async def preprocess_shell_commands(body: str, cwd: Path) -> str:
+    """Execute !`command` and ```! blocks in the skill body.
+
+    Inline commands: !`git status --short`
+    Fenced blocks: ```!\\n cmd1\\n cmd2\\n ```
+
+    Each command is run via asyncio.create_subprocess_shell, so:
+    - The event loop stays responsive (no UI freeze)
+    - User can interrupt (process is killed on cancellation)
+
+    The command placeholder is replaced with both the command and its
+    output, so the LLM knows what was run.
+
+    Args:
+        body: Skill body with !`command` placeholders.
+        cwd: Working directory for command execution.
+
+    Returns:
+        Body with all commands replaced by their output.
+    """
+    import asyncio
+
+    # Fast path: skip regex if no command patterns present
+    if "!`" not in body and "```!" not in body:
+        return body
+
+    # Collect all command blocks with their positions for replacement
+    replacements: list[tuple[int, int, str]] = []
+
+    # Pass 1: Fenced blocks
+    for match in re.finditer(r"```!\s*\n(.*?)\n\s*```", body, re.DOTALL):
+        commands = match.group(1).strip()
+        if commands:
+            output = await _run_commands_async(commands, cwd)
+            replacements.append((match.start(), match.end(), output))
+
+    # Pass 2: Inline (only matches outside already-replaced fenced blocks)
+    for match in re.finditer(r"!`([^`]+)`", body):
+        # Skip if this match falls inside a fenced block replacement
+        if any(start <= match.start() < end for start, end, _ in replacements):
+            continue
+        command = match.group(1).strip()
+        if command:
+            output = await _run_commands_async(command, cwd)
+            replacements.append((match.start(), match.end(), output))
+
+    # Apply replacements in reverse order to preserve positions
+    for start, end, output in sorted(replacements, key=lambda r: r[0], reverse=True):
+        body = body[:start] + output + body[end:]
+
+    return body
+
+
+async def _run_commands_async(commands: str, cwd: Path) -> str:
+    """Run one or more shell commands asynchronously and return formatted output.
+
+    Uses asyncio.create_subprocess_shell so the event loop stays responsive
+    and processes can be killed on interrupt (CancelledError).
+    """
+    import asyncio
+
+    lines = [line.strip() for line in commands.splitlines() if line.strip()]
+    parts: list[str] = []
+
+    for cmd in lines:
+        proc = None
+        try:
+            proc = await asyncio.create_subprocess_shell(
+                cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                stdin=subprocess.DEVNULL,
+                cwd=str(cwd),
+            )
+            try:
+                stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                    proc.communicate(), timeout=_SHELL_COMMAND_TIMEOUT
+                )
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+                parts.append(f"Command: `{cmd}`\nOutput:\n[Error: command timed out after {_SHELL_COMMAND_TIMEOUT}s]")
+                logger.warning("skill_preprocess_timeout", command=cmd[:80])
+                continue
+
+            output = (stdout_bytes or b"").decode("utf-8", errors="replace").strip()
+            if len(output) > _MAX_COMMAND_OUTPUT:
+                output = output[:_MAX_COMMAND_OUTPUT] + f"\n[... truncated at {_MAX_COMMAND_OUTPUT // 1000}KB]"
+            stderr = (stderr_bytes or b"").decode("utf-8", errors="replace").strip()
+            if stderr:
+                label = "[Warnings]" if proc.returncode == 0 else "[Errors]"
+                stderr_capped = stderr[:_MAX_COMMAND_OUTPUT] if len(stderr) > _MAX_COMMAND_OUTPUT else stderr
+                output = f"{output}\n{label}\n{stderr_capped}" if output else f"{label}\n{stderr_capped}"
+            parts.append(f"Command: `{cmd}`\nOutput:\n{output}")
+            logger.info("skill_preprocess_command", command=cmd[:80], exit_code=proc.returncode)
+        except asyncio.CancelledError:
+            # User interrupted — kill the process and re-raise
+            if proc and proc.returncode is None:
+                proc.kill()
+                await proc.wait()
+            raise
+        except Exception as e:
+            parts.append(f"Command: `{cmd}`\nOutput:\n[Error: {e}]")
+            logger.warning("skill_preprocess_error", command=cmd[:80], error=str(e))
+
+    return "\n\n".join(parts)
 
 
 def _split_args(args_string: str) -> list[str]:

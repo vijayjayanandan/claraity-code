@@ -119,13 +119,18 @@ export const ToolCard = memo(function ToolCard({ data, postMessage }: ToolCardPr
         <span className={`tool-badge ${displayStatus}`}>{displayStatus}</span>
       </div>
 
+      {/* Args summary — shown prominently when present (e.g. skill_preprocess command list) */}
+      {data.args_summary && (
+        <pre className="tool-summary" style={{ whiteSpace: "pre-wrap", margin: "4px 0" }}>{data.args_summary}</pre>
+      )}
+
       {/* Summary — shown prominently when present */}
-      {hasSummary && (
+      {!data.args_summary && hasSummary && (
         <div className="tool-summary">{summary}</div>
       )}
 
       {/* Primary arg (file path, command, etc.) — only if no summary */}
-      {!hasSummary && primaryArg && (
+      {!data.args_summary && !hasSummary && primaryArg && (
         <div className="tool-args" title={primaryArg}>
           {primaryArg}
         </div>

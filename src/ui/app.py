@@ -3302,8 +3302,22 @@ class CodingAgentApp(App):
                 self._clarify_widget.remove()
                 self._clarify_widget = None
 
-        # Card may not exist yet (race condition) - that's OK, card creation queries store
+        # Skill preprocessing approval: create a promoted card (like subagent approvals)
+        # since skill_preprocess is not an LLM tool call and has no existing card.
         if tool_call_id not in self._tool_cards:
+            metadata = notification.metadata or {}
+            if (
+                metadata.get("tool_name") == "skill_preprocess"
+                and tool_state.status == CoreToolStatus.AWAITING_APPROVAL
+            ):
+                args = metadata.get("arguments", {})
+                self.call_later(
+                    self._promote_approval,
+                    tool_call_id,
+                    "skill_preprocess",
+                    args,
+                    "Skill",
+                )
             return
 
         card = self._tool_cards[tool_call_id]

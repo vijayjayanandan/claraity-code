@@ -1632,16 +1632,98 @@ class CodingAgent(AgentInterface):
             # Trace: request received (before save — request arrives, then is persisted)
             self._trace.on_request(user_input)
 
+            # StreamStart early when a skill is active — disables input during
+            # preprocessing approval and command execution.
+            if active_skill:
+                yield StreamStart()
+
             # Inject active skill into user message (not system prompt)
             # Skill content is prepended to the user message so the agent
             # sees it as tied to this specific conversation turn.
             if active_skill:
-                from src.skills.skill_loader import SkillLoader, substitute_arguments
+                from src.skills.skill_loader import (
+                    SkillLoader,
+                    extract_shell_commands,
+                    preprocess_shell_commands,
+                    substitute_arguments,
+                )
 
                 _skill_loader = SkillLoader(working_directory=self.working_directory)
                 _skill = _skill_loader.get_skill(active_skill)
                 if _skill and _skill.body.strip():
                     _skill_body = _skill.body.strip()
+                    # Step 1: Shell preprocessing BEFORE argument substitution.
+                    # This order is intentional: $ARGUMENTS are user-supplied and
+                    # must not flow into shell commands (prevents injection).
+                    # Requires user approval if commands are present.
+                    _commands = extract_shell_commands(_skill_body)
+                    if _commands:
+                        import uuid as _uuid
+
+                        _preprocess_call_id = f"skill-preprocess-{_uuid.uuid4().hex[:8]}"
+                        _commands_summary = "\n".join(f"  {i+1}. {c}" for i, c in enumerate(_commands))
+                        # Show approval card via store notification
+                        if self.memory.message_store:
+                            self.memory.message_store.update_tool_state(
+                                _preprocess_call_id,
+                                CoreToolStatus.AWAITING_APPROVAL,
+                                tool_name="skill_preprocess",
+                                extra_metadata=build_tool_metadata(
+                                    tool_name="skill_preprocess",
+                                    tool_args={"commands": _commands, "skill": _skill.name},
+                                    args_summary=f"Skill '{_skill.name}' wants to run {len(_commands)} command(s):\n{_commands_summary}",
+                                    requires_approval=True,
+                                ),
+                            )
+                        _preprocess_approved = True
+                        try:
+                            _approval = await ui.wait_for_approval(
+                                _preprocess_call_id, "skill_preprocess"
+                            )
+                            _preprocess_approved = _approval.approved
+                        except asyncio.CancelledError:
+                            _preprocess_approved = False
+
+                        if _preprocess_approved:
+                            if self.memory.message_store:
+                                self.memory.message_store.update_tool_state(
+                                    _preprocess_call_id, CoreToolStatus.RUNNING,
+                                    tool_name="skill_preprocess",
+                                )
+                            try:
+                                _skill_body = await preprocess_shell_commands(
+                                    _skill_body, self.working_directory
+                                )
+                                if self.memory.message_store:
+                                    self.memory.message_store.update_tool_state(
+                                        _preprocess_call_id, CoreToolStatus.SUCCESS,
+                                        tool_name="skill_preprocess",
+                                    )
+                                logger.info("skill_preprocess_approved", skill_id=_skill.id, commands=len(_commands))
+                            except (asyncio.CancelledError, KeyboardInterrupt):
+                                if self.memory.message_store:
+                                    self.memory.message_store.update_tool_state(
+                                        _preprocess_call_id, CoreToolStatus.CANCELLED,
+                                        tool_name="skill_preprocess",
+                                    )
+                                logger.info("skill_preprocess_cancelled", skill_id=_skill.id)
+                                raise
+                            except Exception as _preprocess_err:
+                                if self.memory.message_store:
+                                    self.memory.message_store.update_tool_state(
+                                        _preprocess_call_id, CoreToolStatus.ERROR,
+                                        tool_name="skill_preprocess",
+                                        error=str(_preprocess_err),
+                                    )
+                                logger.warning("skill_preprocess_error", skill_id=_skill.id, error=str(_preprocess_err))
+                        else:
+                            if self.memory.message_store:
+                                self.memory.message_store.update_tool_state(
+                                    _preprocess_call_id, CoreToolStatus.REJECTED,
+                                    tool_name="skill_preprocess",
+                                )
+                            logger.info("skill_preprocess_denied", skill_id=_skill.id)
+                    # Step 2: Argument substitution — $ARGUMENTS, $0, $varname
                     if skill_arguments or _skill.arguments:
                         _skill_body = substitute_arguments(
                             _skill_body, skill_arguments, _skill.arguments
@@ -1688,7 +1770,9 @@ class CodingAgent(AgentInterface):
             # StreamStart AFTER FileReadEvents so TUI can flush buffered
             # file-read notes (which need UserMessage widget to be mounted).
             # Sequence: add_user_message → FileReadEvent(s) → StreamStart → LLM call
-            yield StreamStart()
+            # Skip if already yielded for skill preprocessing above.
+            if not active_skill:
+                yield StreamStart()
 
             _t0 = time.monotonic()
             logger.debug("stream_response_phase", phase="start", input_len=len(user_input))

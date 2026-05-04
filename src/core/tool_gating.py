@@ -132,17 +132,23 @@ class ToolGatingService:
         self._skill_allowed_tools: set[str] = set()  # tools pre-approved by active skill
 
     # ------------------------------------------------------------------
-    # Skill-based tool pre-approval
+    # Skill allowed-tools (informational, does NOT bypass approval)
     # ------------------------------------------------------------------
 
     def set_skill_allowed_tools(self, tools: list[str]) -> None:
-        """Set tools pre-approved by the active skill. Cleared per-message."""
+        """Set tools listed in the active skill's allowed-tools frontmatter.
+
+        This is informational only — it does NOT bypass the normal approval
+        gate. Tools still require approval based on the user's auto-approve
+        settings. The allowed-tools list tells the LLM which tools are
+        relevant for this skill.
+        """
         self._skill_allowed_tools = set(tools)
         if tools:
-            logger.info("skill_tools_pre_approved", tools=tools)
+            logger.info("skill_allowed_tools_set", tools=tools)
 
     def clear_skill_allowed_tools(self) -> None:
-        """Clear skill-based tool pre-approval."""
+        """Clear skill allowed-tools list."""
         self._skill_allowed_tools.clear()
 
     # ------------------------------------------------------------------
@@ -380,10 +386,6 @@ class ToolGatingService:
         # MCP tools: delegate to policy gate
         if self._mcp_manager.is_mcp_tool(tool_name):
             return self._mcp_manager.requires_approval(tool_name)
-
-        # Skill-based pre-approval: if the active skill allows this tool, skip approval
-        if tool_name in self._skill_allowed_tools:
-            return False
 
         # NORMAL mode: check category auto-approve
         # A tool needs approval if it has a category and that category is not auto-approved,

@@ -9,6 +9,8 @@ from src.skills.skill_loader import (
     SkillLoader,
     _parse_frontmatter,
     _split_args,
+    extract_shell_commands,
+    preprocess_shell_commands,
     substitute_arguments,
 )
 
@@ -355,3 +357,111 @@ class TestSkillLoader:
         assert skill.skill_dir == skill_dir
         # Subdirectories don't affect skill loading
         assert "Read agents/grader.md" in skill.body
+
+
+# ---------------------------------------------------------------------------
+# Shell preprocessing
+# ---------------------------------------------------------------------------
+
+
+class TestPreprocessShellCommands:
+    @pytest.mark.asyncio
+    async def test_inline_command(self, tmp_path: Path):
+        body = "Before\n!`echo hello`\nAfter"
+        result = await preprocess_shell_commands(body, tmp_path)
+        assert "Command: `echo hello`" in result
+        assert "Output:" in result
+        assert "hello" in result
+        assert "Before" in result
+        assert "After" in result
+
+    @pytest.mark.asyncio
+    async def test_no_commands_unchanged(self, tmp_path: Path):
+        body = "No commands here. Just text."
+        result = await preprocess_shell_commands(body, tmp_path)
+        assert result == body
+
+    @pytest.mark.asyncio
+    async def test_multiple_inline_commands(self, tmp_path: Path):
+        body = "A: !`echo one`\nB: !`echo two`"
+        result = await preprocess_shell_commands(body, tmp_path)
+        assert "one" in result
+        assert "two" in result
+
+    @pytest.mark.asyncio
+    async def test_fenced_block(self, tmp_path: Path):
+        body = "Before\n```!\necho hello\necho world\n```\nAfter"
+        result = await preprocess_shell_commands(body, tmp_path)
+        assert "Command: `echo hello`" in result
+        assert "Command: `echo world`" in result
+        assert "hello" in result
+        assert "world" in result
+
+    @pytest.mark.asyncio
+    async def test_failed_command_shows_error(self, tmp_path: Path):
+        # A command that fails (nonexistent command)
+        body = "!`this_command_does_not_exist_xyz 2>&1`"
+        result = await preprocess_shell_commands(body, tmp_path)
+        assert "Command:" in result
+        assert "Output:" in result
+
+    @pytest.mark.asyncio
+    async def test_preserves_command_text(self, tmp_path: Path):
+        body = "Status:\n!`echo OK`"
+        result = await preprocess_shell_commands(body, tmp_path)
+        assert "Command: `echo OK`" in result
+        assert "OK" in result
+
+    @pytest.mark.asyncio
+    async def test_empty_command_unchanged(self, tmp_path: Path):
+        body = "!``"
+        result = await preprocess_shell_commands(body, tmp_path)
+        assert result == body
+
+    @pytest.mark.asyncio
+    async def test_cwd_respected(self, tmp_path: Path):
+        # Create a file in tmp_path to verify cwd
+        (tmp_path / "test-marker.txt").write_text("marker", encoding="utf-8")
+        body = "!`ls test-marker.txt 2>/dev/null || dir /b test-marker.txt 2>nul`"
+        result = await preprocess_shell_commands(body, tmp_path)
+        assert "test-marker.txt" in result
+
+
+# ---------------------------------------------------------------------------
+# Extract shell commands (for approval display)
+# ---------------------------------------------------------------------------
+
+
+class TestExtractShellCommands:
+    def test_no_commands(self):
+        assert extract_shell_commands("No commands here") == []
+
+    def test_inline_single(self):
+        cmds = extract_shell_commands("Before\n!`echo hello`\nAfter")
+        assert cmds == ["echo hello"]
+
+    def test_inline_multiple(self):
+        cmds = extract_shell_commands("!`echo one` and !`echo two`")
+        assert cmds == ["echo one", "echo two"]
+
+    def test_fenced_block(self):
+        body = "```!\necho hello\necho world\n```"
+        cmds = extract_shell_commands(body)
+        assert cmds == ["echo hello", "echo world"]
+
+    def test_mixed_fenced_and_inline(self):
+        body = "```!\ngit status\n```\n\nAlso: !`git log -1`"
+        cmds = extract_shell_commands(body)
+        assert cmds == ["git status", "git log -1"]
+
+    def test_empty_command_skipped(self):
+        assert extract_shell_commands("!``") == []
+
+    def test_fast_path_no_markers(self):
+        body = "Plain text with `backticks` but no commands"
+        assert extract_shell_commands(body) == []
+
+    def test_fenced_with_empty_lines(self):
+        body = "```!\n\necho hello\n\n```"
+        cmds = extract_shell_commands(body)
+        assert cmds == ["echo hello"]

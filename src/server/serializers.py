@@ -211,6 +211,8 @@ def serialize_store_notification(notification: StoreNotification) -> dict | None
             data["tool_name"] = metadata["tool_name"]
         if "arguments" in metadata:
             data["arguments"] = metadata["arguments"]
+        if "args_summary" in metadata:
+            data["args_summary"] = metadata["args_summary"]
         if "requires_approval" in metadata:
             data["requires_approval"] = metadata["requires_approval"]
         if "message" in metadata:
