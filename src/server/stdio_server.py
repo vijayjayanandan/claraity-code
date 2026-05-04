@@ -2952,8 +2952,10 @@ async def run_stdio_server(
                     event_count = await streaming_task
                 except asyncio.CancelledError:
                     logger.info("stdio_stream_cancelled")
-                    # Send stream_end so the extension resets its UI state
-                    await protocol.send_event(StreamEnd())
+                    # Send stream_end so the extension resets its UI state.
+                    # interrupted=True tells the webview to mark stale tool cards
+                    # as 'cancelled' rather than 'error'.
+                    await protocol.send_event(StreamEnd(interrupted=True))
                 except Exception as e:
                     logger.error("stdio_stream_error", error=str(e))
                     await protocol._send_error("api_error", "An internal error occurred.")

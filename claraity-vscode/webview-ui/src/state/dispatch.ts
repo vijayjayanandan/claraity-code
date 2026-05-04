@@ -19,7 +19,7 @@ export function dispatchServerMessage(
       break;
 
     case "stream_end":
-      dispatch({ type: "STREAM_END", tokens: msg.total_tokens, durationMs: msg.duration_ms });
+      dispatch({ type: "STREAM_END", tokens: msg.total_tokens, durationMs: msg.duration_ms, interrupted: msg.interrupted });
       break;
 
     case "text_delta":

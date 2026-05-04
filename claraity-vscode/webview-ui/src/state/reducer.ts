@@ -199,7 +199,8 @@ export function appReducer(state: AppState, action: Action): AppState {
 
       // Finalize any tool cards still stuck in "running" or "pending" status.
       // If the stream ended and they're still running, they'll never complete —
-      // mark them as "error" so StreamingStatus doesn't show stale tool names.
+      // mark them as "cancelled" (user interrupted) or "error" (unexpected stop).
+      const staleStatus = action.interrupted ? "cancelled" : "error";
       let toolCards = flushed.toolCards;
       const staleStatuses = new Set(["running", "pending"]);
       const hasStale = Object.values(toolCards).some(c => staleStatuses.has(c.status));
@@ -207,7 +208,7 @@ export function appReducer(state: AppState, action: Action): AppState {
         toolCards = { ...toolCards };
         for (const [id, card] of Object.entries(toolCards)) {
           if (staleStatuses.has(card.status)) {
-            toolCards[id] = { ...card, status: "error" as ToolStateData["status"] };
+            toolCards[id] = { ...card, status: staleStatus as ToolStateData["status"] };
           }
         }
       }

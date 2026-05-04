@@ -322,7 +322,7 @@ export type ServerMessage =
   | { type: "store"; event: "turn_restored"; data: TurnRestoredData }
   // Streaming
   | { type: "stream_start" }
-  | { type: "stream_end"; tool_calls?: number; elapsed_s?: number; iterations?: number; total_tokens?: number; duration_ms?: number }
+  | { type: "stream_end"; tool_calls?: number; elapsed_s?: number; iterations?: number; total_tokens?: number; duration_ms?: number; interrupted?: boolean }
   | { type: "text_delta"; content: string }
   | { type: "code_block_start"; language?: string }
   | { type: "code_block_delta"; content: string }

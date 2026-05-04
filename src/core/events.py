@@ -50,13 +50,16 @@ class StreamStart:
 
 @dataclass(frozen=True)
 class StreamEnd:
-    """Stream complete (normal termination).
+    """Stream complete (normal termination or user interrupt).
 
     UI should finalize the current message and re-focus input.
+    interrupted=True means the user pressed Stop -- stale tool cards should be
+    marked 'cancelled' rather than 'error'.
     """
 
     total_tokens: int | None = None
     duration_ms: int | None = None
+    interrupted: bool = False
 
 
 # =============================================================================

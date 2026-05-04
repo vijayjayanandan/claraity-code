@@ -13,7 +13,7 @@ export type Action =
   | { type: "SET_SESSION_INFO"; sessionId: string; model: string; permissionMode: string; workingDirectory?: string; autoApprove?: Record<string, boolean>; limits?: LimitsData }
   // Streaming
   | { type: "STREAM_START" }
-  | { type: "STREAM_END"; tokens?: number; durationMs?: number }
+  | { type: "STREAM_END"; tokens?: number; durationMs?: number; interrupted?: boolean }
   | { type: "TEXT_DELTA"; content: string }
   // Code blocks
   | { type: "CODE_BLOCK_START"; language?: string }

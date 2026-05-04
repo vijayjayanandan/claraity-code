@@ -1345,7 +1345,7 @@ class CodingAgent(AgentInterface):
             if self.memory.message_store:
                 self.memory.message_store.update_tool_state(
                     tc_id,
-                    CoreToolStatus.ERROR,  # Mark as error since it was interrupted
+                    CoreToolStatus.CANCELLED,  # Interrupted by user -- show as cancelled not error
                 )
 
         # CRITICAL: Rebuild context with tool_results in correct positions
@@ -3308,9 +3308,13 @@ class CodingAgent(AgentInterface):
 
         # --- Exception path ---
         if exc is not None:
+            _exc_is_cancel = isinstance(exc, asyncio.CancelledError)
             if self.memory.message_store:
                 self.memory.message_store.update_tool_state(
-                    call_id, CoreToolStatus.ERROR, error=str(exc), duration_ms=duration_ms
+                    call_id,
+                    CoreToolStatus.CANCELLED if _exc_is_cancel else CoreToolStatus.ERROR,
+                    error=str(exc),
+                    duration_ms=duration_ms,
                 )
             error_type = self._classify_tool_error(str(exc))
             error_context = self._error_tracker.record_failure(
@@ -3422,10 +3426,12 @@ class CodingAgent(AgentInterface):
             return outcome
 
         # --- Error path ---
+        # If the tool was cancelled by user interrupt, show CANCELLED not ERROR
+        _was_interrupted = result.metadata.get("interrupted", False)
         if self.memory.message_store:
             self.memory.message_store.update_tool_state(
                 call_id,
-                CoreToolStatus.ERROR,
+                CoreToolStatus.CANCELLED if _was_interrupted else CoreToolStatus.ERROR,
                 result=result.output,
                 error=result.error,
                 duration_ms=duration_ms,
