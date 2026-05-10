@@ -125,7 +125,7 @@ class TestSkillLoader:
             "---\nname: My Skill\ndescription: Does things\ncategory: dev\ntags: [a, b]\n---\n\nInstructions here.\n",
         )
 
-        loader = SkillLoader(working_directory=tmp_path)
+        loader = SkillLoader(working_directory=tmp_path, builtins_dir=tmp_path / "_no_builtins")
         skills = loader.load_all()
 
         assert len(skills) == 1
@@ -143,11 +143,11 @@ class TestSkillLoader:
         skills_dir = tmp_path / ".claraity" / "skills"
         skills_dir.mkdir(parents=True)
 
-        loader = SkillLoader(working_directory=tmp_path)
+        loader = SkillLoader(working_directory=tmp_path, builtins_dir=tmp_path / "_no_builtins")
         assert loader.load_all() == []
 
     def test_no_skills_directory(self, tmp_path: Path):
-        loader = SkillLoader(working_directory=tmp_path)
+        loader = SkillLoader(working_directory=tmp_path, builtins_dir=tmp_path / "_no_builtins")
         assert loader.load_all() == []
 
     def test_missing_skill_file_skipped(self, tmp_path: Path):
@@ -155,7 +155,7 @@ class TestSkillLoader:
         # Create directory without the expected skill-<name>.md
         (skills_dir / "bad-skill").mkdir(parents=True)
 
-        loader = SkillLoader(working_directory=tmp_path)
+        loader = SkillLoader(working_directory=tmp_path, builtins_dir=tmp_path / "_no_builtins")
         assert loader.load_all() == []
 
     def test_malformed_frontmatter_skipped(self, tmp_path: Path):
@@ -167,7 +167,7 @@ class TestSkillLoader:
         )
         _create_skill_dir(skills_dir, "bad", "No frontmatter here")
 
-        loader = SkillLoader(working_directory=tmp_path)
+        loader = SkillLoader(working_directory=tmp_path, builtins_dir=tmp_path / "_no_builtins")
         skills = loader.load_all()
         assert len(skills) == 1
         assert skills[0].id == "good"
@@ -180,7 +180,7 @@ class TestSkillLoader:
             "---\ndescription: Has description but no name\n---\n\nBody\n",
         )
 
-        loader = SkillLoader(working_directory=tmp_path)
+        loader = SkillLoader(working_directory=tmp_path, builtins_dir=tmp_path / "_no_builtins")
         assert loader.load_all() == []
 
     def test_missing_description_skipped(self, tmp_path: Path):
@@ -191,7 +191,7 @@ class TestSkillLoader:
             "---\nname: Has name but no description\n---\n\nBody\n",
         )
 
-        loader = SkillLoader(working_directory=tmp_path)
+        loader = SkillLoader(working_directory=tmp_path, builtins_dir=tmp_path / "_no_builtins")
         assert loader.load_all() == []
 
     def test_id_from_directory_name(self, tmp_path: Path):
@@ -202,7 +202,7 @@ class TestSkillLoader:
             "---\nname: Test-Driven Bug Fix\ndescription: TDD bugfix\n---\n\nBody\n",
         )
 
-        loader = SkillLoader(working_directory=tmp_path)
+        loader = SkillLoader(working_directory=tmp_path, builtins_dir=tmp_path / "_no_builtins")
         skills = loader.load_all()
         assert skills[0].id == "test-driven-bugfix"
 
@@ -214,7 +214,7 @@ class TestSkillLoader:
             "---\nname: Review\ndescription: Code review\n---\n\nReview steps.\n",
         )
 
-        loader = SkillLoader(working_directory=tmp_path)
+        loader = SkillLoader(working_directory=tmp_path, builtins_dir=tmp_path / "_no_builtins")
         skill = loader.get_skill("review")
         assert skill is not None
         assert skill.name == "Review"
@@ -223,14 +223,14 @@ class TestSkillLoader:
         skills_dir = tmp_path / ".claraity" / "skills"
         skills_dir.mkdir(parents=True)
 
-        loader = SkillLoader(working_directory=tmp_path)
+        loader = SkillLoader(working_directory=tmp_path, builtins_dir=tmp_path / "_no_builtins")
         assert loader.get_skill("nonexistent") is None
 
     def test_get_skill_path_traversal_blocked(self, tmp_path: Path):
         skills_dir = tmp_path / ".claraity" / "skills"
         skills_dir.mkdir(parents=True)
 
-        loader = SkillLoader(working_directory=tmp_path)
+        loader = SkillLoader(working_directory=tmp_path, builtins_dir=tmp_path / "_no_builtins")
         assert loader.get_skill("../../etc/passwd") is None
         assert loader.get_skill("../../../secrets") is None
 
@@ -242,7 +242,7 @@ class TestSkillLoader:
             "---\nname: Simple\ndescription: No category\n---\n\nBody\n",
         )
 
-        loader = SkillLoader(working_directory=tmp_path)
+        loader = SkillLoader(working_directory=tmp_path, builtins_dir=tmp_path / "_no_builtins")
         assert loader.load_all()[0].category == "general"
 
     def test_tags_as_csv_string(self, tmp_path: Path):
@@ -253,7 +253,7 @@ class TestSkillLoader:
             "---\nname: CSV Tags\ndescription: Tags as string\ntags: bug, fix, test\n---\n\nBody\n",
         )
 
-        loader = SkillLoader(working_directory=tmp_path)
+        loader = SkillLoader(working_directory=tmp_path, builtins_dir=tmp_path / "_no_builtins")
         skill = loader.load_all()[0]
         assert skill.tags == ["bug", "fix", "test"]
 
@@ -275,7 +275,7 @@ class TestSkillLoader:
             "---\nname: M Skill\ndescription: Desc\ncategory: alpha\n---\n\nBody\n",
         )
 
-        loader = SkillLoader(working_directory=tmp_path)
+        loader = SkillLoader(working_directory=tmp_path, builtins_dir=tmp_path / "_no_builtins")
         skills = loader.load_all()
         names = [s.name for s in skills]
         assert names == ["M Skill", "Z Skill", "A Skill"]
@@ -289,7 +289,7 @@ class TestSkillLoader:
                 f"---\nname: Skill {i}\ndescription: Desc {i}\n---\n\nBody {i}\n",
             )
 
-        loader = SkillLoader(working_directory=tmp_path)
+        loader = SkillLoader(working_directory=tmp_path, builtins_dir=tmp_path / "_no_builtins")
         assert len(loader.load_all()) == 5
 
     def test_extended_frontmatter(self, tmp_path: Path):
@@ -310,7 +310,7 @@ class TestSkillLoader:
             ),
         )
 
-        loader = SkillLoader(working_directory=tmp_path)
+        loader = SkillLoader(working_directory=tmp_path, builtins_dir=tmp_path / "_no_builtins")
         skill = loader.load_all()[0]
         assert skill.arguments == ["scope", "issue"]
         assert skill.argument_hint == "[scope] [issue-number]"
@@ -333,7 +333,7 @@ class TestSkillLoader:
             "---\nname: New\ndescription: New format\n---\n\nBody\n",
         )
 
-        loader = SkillLoader(working_directory=tmp_path)
+        loader = SkillLoader(working_directory=tmp_path, builtins_dir=tmp_path / "_no_builtins")
         skills = loader.load_all()
         assert len(skills) == 1
         assert skills[0].id == "new-style"
@@ -351,12 +351,131 @@ class TestSkillLoader:
         (skill_dir / "agents").mkdir()
         (skill_dir / "agents" / "grader.md").write_text("# Grade stuff", encoding="utf-8")
 
-        loader = SkillLoader(working_directory=tmp_path)
+        loader = SkillLoader(working_directory=tmp_path, builtins_dir=tmp_path / "_no_builtins")
         skill = loader.get_skill("complex-skill")
         assert skill is not None
         assert skill.skill_dir == skill_dir
         # Subdirectories don't affect skill loading
         assert "Read agents/grader.md" in skill.body
+
+
+# ---------------------------------------------------------------------------
+# Dual-directory loading (built-in + project skills)
+# ---------------------------------------------------------------------------
+
+
+class TestDualDirectoryLoading:
+    """Tests for built-in skills loading and project override semantics."""
+
+    def test_builtin_loads_when_no_project_skills(self, tmp_path: Path):
+        """Built-in skills load when project has no skills directory."""
+        builtins_dir = tmp_path / "builtins"
+        _create_skill_dir(
+            builtins_dir,
+            "my-builtin",
+            "---\nname: Built-in Skill\ndescription: Ships with agent\n---\n\nBuilt-in body.\n",
+        )
+
+        loader = SkillLoader(working_directory=tmp_path, builtins_dir=builtins_dir)
+        skills = loader.load_all()
+
+        assert len(skills) == 1
+        assert skills[0].id == "my-builtin"
+        assert skills[0].name == "Built-in Skill"
+
+    def test_project_skill_overrides_builtin_by_name(self, tmp_path: Path):
+        """Project skill with same directory name replaces built-in."""
+        builtins_dir = tmp_path / "builtins"
+        _create_skill_dir(
+            builtins_dir,
+            "shared-name",
+            "---\nname: Built-in Version\ndescription: Original\n---\n\nBuilt-in.\n",
+        )
+
+        project_dir = tmp_path / ".claraity" / "skills"
+        _create_skill_dir(
+            project_dir,
+            "shared-name",
+            "---\nname: Project Version\ndescription: Override\n---\n\nProject.\n",
+        )
+
+        loader = SkillLoader(working_directory=tmp_path, builtins_dir=builtins_dir)
+        skills = loader.load_all()
+
+        assert len(skills) == 1
+        assert skills[0].name == "Project Version"
+        assert skills[0].description == "Override"
+
+    def test_load_all_merges_both_sources(self, tmp_path: Path):
+        """load_all returns skills from both directories without duplicates."""
+        builtins_dir = tmp_path / "builtins"
+        _create_skill_dir(
+            builtins_dir,
+            "builtin-only",
+            "---\nname: Builtin Only\ndescription: Only in builtins\n---\n\nBody.\n",
+        )
+
+        project_dir = tmp_path / ".claraity" / "skills"
+        _create_skill_dir(
+            project_dir,
+            "project-only",
+            "---\nname: Project Only\ndescription: Only in project\n---\n\nBody.\n",
+        )
+
+        loader = SkillLoader(working_directory=tmp_path, builtins_dir=builtins_dir)
+        skills = loader.load_all()
+
+        assert len(skills) == 2
+        ids = {s.id for s in skills}
+        assert ids == {"builtin-only", "project-only"}
+
+    def test_get_skill_returns_project_when_both_exist(self, tmp_path: Path):
+        """get_skill prefers project version over built-in."""
+        builtins_dir = tmp_path / "builtins"
+        _create_skill_dir(
+            builtins_dir,
+            "dual",
+            "---\nname: Builtin Dual\ndescription: Built-in version\n---\n\nBuiltin body.\n",
+        )
+
+        project_dir = tmp_path / ".claraity" / "skills"
+        _create_skill_dir(
+            project_dir,
+            "dual",
+            "---\nname: Project Dual\ndescription: Project version\n---\n\nProject body.\n",
+        )
+
+        loader = SkillLoader(working_directory=tmp_path, builtins_dir=builtins_dir)
+        skill = loader.get_skill("dual")
+
+        assert skill is not None
+        assert skill.name == "Project Dual"
+        assert "Project body." in skill.body
+
+    def test_get_skill_falls_back_to_builtin(self, tmp_path: Path):
+        """get_skill returns built-in when not in project skills."""
+        builtins_dir = tmp_path / "builtins"
+        _create_skill_dir(
+            builtins_dir,
+            "only-builtin",
+            "---\nname: Only Builtin\ndescription: Fallback\n---\n\nFallback body.\n",
+        )
+
+        # No project skills directory at all
+        loader = SkillLoader(working_directory=tmp_path, builtins_dir=builtins_dir)
+        skill = loader.get_skill("only-builtin")
+
+        assert skill is not None
+        assert skill.name == "Only Builtin"
+        assert "Fallback body." in skill.body
+
+    def test_get_skill_nonexistent_in_both(self, tmp_path: Path):
+        """get_skill returns None when skill not in either directory."""
+        builtins_dir = tmp_path / "builtins"
+        builtins_dir.mkdir()
+
+        loader = SkillLoader(working_directory=tmp_path, builtins_dir=builtins_dir)
+        assert loader.get_skill("nonexistent") is None
 
 
 # ---------------------------------------------------------------------------

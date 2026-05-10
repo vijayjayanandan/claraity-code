@@ -1,4 +1,11 @@
-"""Skill loader — reads directory-based skills from .claraity/skills/.
+"""Skill loader — reads directory-based skills from two sources.
+
+Skills are loaded from:
+1. **Built-in skills** — ``src/skills/builtins/`` (ship with the agent binary)
+2. **Project skills** — ``.claraity/skills/`` (project-specific)
+
+Project skills override built-in skills with the same directory name,
+so projects can customize or replace any built-in skill.
 
 Each skill is a directory containing a main file named skill-<name>.md
 with YAML frontmatter, plus optional bundled resources (scripts/, references/,
@@ -6,7 +13,7 @@ agents/, assets/).
 
 Directory layout::
 
-    .claraity/skills/
+    .claraity/skills/        (or src/skills/builtins/)
     +-- test-driven-bugfix/
     |   +-- skill-test-driven-bugfix.md   # main skill file (required)
     |   +-- scripts/                      # optional helper scripts
@@ -304,35 +311,90 @@ def _split_args(args_string: str) -> list[str]:
 
 
 class SkillLoader:
-    """Loads skill definitions from ``.claraity/skills/<name>/skill-<name>.md``."""
+    """Loads skill definitions from built-in and project skill directories.
 
-    def __init__(self, working_directory: Path | None = None) -> None:
+    Built-in skills ship with the agent (``src/skills/builtins/``).
+    Project skills live in ``.claraity/skills/``.
+    Project skills override built-ins with the same directory name.
+    """
+
+    # Built-in skills directory (sibling to this module)
+    _BUILTINS_DIR = Path(__file__).parent / "builtins"
+
+    def __init__(
+        self,
+        working_directory: Path | None = None,
+        builtins_dir: Path | None = None,
+    ) -> None:
         root = working_directory or Path.cwd()
         self.skills_dir = root / ".claraity" / "skills"
+        # Allow overriding builtins_dir for testing (pass a nonexistent
+        # path to disable built-in skills in tests).
+        self.builtins_dir = builtins_dir if builtins_dir is not None else self._BUILTINS_DIR
 
     def load_all(self) -> list[SkillInfo]:
-        """Return all valid skills sorted by (category, name)."""
-        if not self.skills_dir.is_dir():
-            return []
+        """Return all valid skills sorted by (category, name).
 
+        Scans built-in skills first, then project skills.  Project skills
+        override built-ins with the same directory name.
+        """
+        skills_by_id: dict[str, SkillInfo] = {}
+
+        # Built-ins first (can be overridden)
+        for skill in self._scan_dir(self.builtins_dir):
+            skills_by_id[skill.id] = skill
+
+        # Project skills override built-ins
+        for skill in self._scan_dir(self.skills_dir):
+            skills_by_id[skill.id] = skill
+
+        result = list(skills_by_id.values())
+        result.sort(key=lambda s: (s.category, s.name))
+        return result
+
+    def get_skill(self, skill_id: str) -> SkillInfo | None:
+        """Load a single skill by ID (directory name).
+
+        Checks project skills first, then falls back to built-ins.
+        """
+        # Try project skills first (they take priority)
+        skill = self._get_from_dir(skill_id, self.skills_dir)
+        if skill is not None:
+            return skill
+
+        # Fall back to built-ins
+        return self._get_from_dir(skill_id, self.builtins_dir)
+
+    def _scan_dir(self, base_dir: Path) -> list[SkillInfo]:
+        """Scan a directory for valid skills."""
+        if not base_dir.is_dir():
+            return []
+        resolved_base = base_dir.resolve()
         skills: list[SkillInfo] = []
-        for skill_dir in sorted(self.skills_dir.iterdir()):
+        for skill_dir in sorted(base_dir.iterdir()):
             if not skill_dir.is_dir():
+                continue
+            # Symlink guard: ensure resolved path stays within base_dir
+            try:
+                skill_dir.resolve().relative_to(resolved_base)
+            except ValueError:
+                logger.warning("skill_scan_symlink_blocked", path=str(skill_dir))
                 continue
             try:
                 skill = self._load_skill_dir(skill_dir)
                 skills.append(skill)
             except Exception:
                 logger.warning("skill_load_skipped", path=str(skill_dir))
-        skills.sort(key=lambda s: (s.category, s.name))
         return skills
 
-    def get_skill(self, skill_id: str) -> SkillInfo | None:
-        """Load a single skill by ID (directory name)."""
-        skill_dir = self.skills_dir / skill_id
+    def _get_from_dir(self, skill_id: str, base_dir: Path) -> SkillInfo | None:
+        """Load a single skill from a specific directory."""
+        if not base_dir.is_dir():
+            return None
+        skill_dir = base_dir / skill_id
         # Path traversal guard
         try:
-            skill_dir.resolve().relative_to(self.skills_dir.resolve())
+            skill_dir.resolve().relative_to(base_dir.resolve())
         except ValueError:
             logger.warning("skill_path_traversal_blocked", skill_id=skill_id)
             return None

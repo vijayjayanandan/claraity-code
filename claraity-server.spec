@@ -27,7 +27,10 @@ a = Analysis(
     ["src/server/__main__.py"],
     pathex=["."],
     binaries=[],
-    datas=[],
+    datas=[
+        # Built-in skills (ship with the binary)
+        ("src/skills/builtins", "src/skills/builtins"),
+    ],
     hiddenimports=[
         # Core agent
         "src.core.agent",

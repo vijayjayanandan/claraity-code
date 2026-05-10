@@ -482,7 +482,19 @@ export function App() {
         onSelectSkill={(skillId) => dispatch({ type: "SELECT_SKILL", skillId })}
         onRequestSkills={() => postMessage({ type: "getSkills" })}
         onCreateSkill={() => {
-          handleSendMessage("I want to create a new skill. Help me define it.");
+          // Invoke the built-in skill-creator skill directly.
+          // We can't use dispatch(SELECT_SKILL) + handleSendMessage because
+          // React state updates are async — activeSkill wouldn't be set yet.
+          // Instead, send the message with activeSkill baked in.
+          const content = "I want to create a new skill. Help me define it.";
+          dispatch({ type: "ADD_USER_MESSAGE", content });
+          postMessage({
+            type: "chatMessage",
+            content,
+            activeSkill: "skill-creator",
+          });
+          dispatch({ type: "CLEAR_INPUT" });
+          dispatch({ type: "CLEAR_SKILL" });
         }}
       />
 
