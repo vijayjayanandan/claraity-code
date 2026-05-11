@@ -21,6 +21,7 @@ Usage:
 import json
 from dataclasses import dataclass
 from enum import Enum, auto
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
 from src.observability import get_logger
@@ -129,6 +130,7 @@ class ToolGatingService:
         self._mcp_manager = mcp_manager
         self._auto_approve_categories: set = {"read"}  # read is safe by default
         self._workspace_roots = workspace_roots
+        self._allowed_outside_paths: list[Path] = []
         self._skill_allowed_tools: set[str] = set()  # tools pre-approved by active skill
 
     # ------------------------------------------------------------------
@@ -150,6 +152,19 @@ class ToolGatingService:
     def clear_skill_allowed_tools(self) -> None:
         """Clear skill allowed-tools list."""
         self._skill_allowed_tools.clear()
+
+    # ------------------------------------------------------------------
+    # Allowed outside paths (narrow carve-out for agent-managed dirs)
+    # ------------------------------------------------------------------
+
+    def set_allowed_outside_paths(self, paths: list[Path]) -> None:
+        """Set paths outside workspace that skip the safety-floor approval.
+
+        These paths bypass the safety_reason flag in check_outside_workspace(),
+        so the normal category-based auto-approve logic applies instead.
+        Used for agent-managed directories like ~/.claraity/memory/.
+        """
+        self._allowed_outside_paths = [p.resolve() for p in paths]
 
     # ------------------------------------------------------------------
     # Category auto-approve
@@ -327,8 +342,6 @@ class ToolGatingService:
         if not file_path:
             return None
 
-        from pathlib import Path
-
         try:
             resolved = Path(file_path).resolve()
         except (OSError, ValueError):
@@ -339,6 +352,14 @@ class ToolGatingService:
             try:
                 resolved.relative_to(root.resolve())
                 return None  # Inside this root — no extra approval needed
+            except ValueError:
+                continue
+
+        # Check if path is inside any allowed outside path (e.g. ~/.claraity/memory/)
+        for allowed in self._allowed_outside_paths:
+            try:
+                resolved.relative_to(allowed)
+                return None  # Inside allowed path — normal approval rules apply
             except ValueError:
                 continue
 

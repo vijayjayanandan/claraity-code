@@ -320,21 +320,7 @@ class ContextBuilder:
             elapsed_ms=round((time.monotonic() - _t0) * 1000),
         )
 
-        # Emit memory files source (loaded once at startup, cached in MemoryManager)
-        if _emit_sources:
-            mem_files = (
-                self.memory.file_memory_content
-                if hasattr(self.memory, "file_memory_content")
-                else ""
-            )
-            self._trace.on_context_source(
-                "Memory Files",
-                mem_files if mem_files else "(no memory files loaded)",
-                bool(mem_files),
-                iteration,
-            )
-
-        # Emit persistent memory source (agent-managed, cross-session)
+        # Emit project memory source (agent-managed, cross-session)
         if _emit_sources:
             persistent_mem = (
                 self.memory.persistent_memory_content
@@ -342,23 +328,72 @@ class ContextBuilder:
                 else ""
             )
             self._trace.on_context_source(
-                "Persistent Memory",
-                persistent_mem if persistent_mem else "(no persistent memories)",
+                "Project Memory",
+                persistent_mem if persistent_mem else "(no project memories)",
                 bool(persistent_mem),
+                iteration,
+            )
+
+        # Emit user memory source (agent-managed, cross-project)
+        if _emit_sources:
+            user_persistent_mem = getattr(
+                self.memory, "user_persistent_memory_content", ""
+            )
+            self._trace.on_context_source(
+                "User Memory",
+                user_persistent_mem if user_persistent_mem else "(no user memories)",
+                bool(user_persistent_mem),
                 iteration,
             )
 
         # Inject persistent memory management instructions + actual memory content
         if hasattr(self.memory, "persistent_memory_dir"):
-            memory_dir = str(self.memory.persistent_memory_dir)
-            system_prompt = system_prompt + "\n\n" + get_persistent_memory_injection(memory_dir)
-            # Inject actual MEMORY.md content into the system prompt so the
+            project_memory_dir = str(self.memory.persistent_memory_dir)
+
+            # Determine user-level memory dir; dedupe if same as project dir
+            user_memory_dir_val = None
+            if hasattr(self.memory, "user_memory_dir"):
+                _umd = str(self.memory.user_memory_dir)
+                if Path(_umd).resolve() != Path(project_memory_dir).resolve():
+                    user_memory_dir_val = _umd
+
+            system_prompt = system_prompt + "\n\n" + get_persistent_memory_injection(
+                project_memory_dir=project_memory_dir,
+                user_memory_dir=user_memory_dir_val,
+            )
+
+            # Inject actual memory content into the system prompt so the
             # agent sees its memories without needing a tool call.
-            # (get_context_for_llm injects it as a system message, but
-            # build_context filters out system messages from memory context.)
-            persistent_mem = getattr(self.memory, "persistent_memory_content", "")
-            if persistent_mem:
-                system_prompt = system_prompt + "\n\n## Your Current Memories\n\n" + persistent_mem
+            project_mem = getattr(self.memory, "persistent_memory_content", "")
+            user_mem_index = getattr(self.memory, "user_persistent_memory_content", "")
+
+            # For user memories, prefer full file contents over just the index.
+            # This saves the agent a read_file call per memory and ensures
+            # feedback/preferences are always visible. Falls back to index
+            # if full content exceeds the token budget.
+            user_mem_full = getattr(self.memory, "user_memory_full_content", "")
+            _USER_MEMORY_TOKEN_BUDGET = 2000
+            if user_mem_full and self.optimizer.count_tokens(user_mem_full) <= _USER_MEMORY_TOKEN_BUDGET:
+                user_mem_display = user_mem_full
+            else:
+                user_mem_display = user_mem_index
+
+            if project_mem or user_mem_display:
+                mem_section = "\n\n## Your Current Memories\n\n"
+                if user_mem_display and user_memory_dir_val:
+                    mem_section += (
+                        f"### User Memory ({user_memory_dir_val})\n\n"
+                        f"{user_mem_display}\n\n"
+                    )
+                if project_mem:
+                    mem_section += (
+                        f"### Project Memory ({project_memory_dir})\n\n"
+                        f"{project_mem}\n\n"
+                    )
+                elif user_mem_display and not user_memory_dir_val:
+                    # Overlapping dirs: already shown as project memories
+                    mem_section += f"{user_mem_display}\n\n"
+                system_prompt = system_prompt + mem_section
 
         # Inject workspace folders context (multi-root workspace)
         if self._workspace_roots and len(self._workspace_roots) > 1:

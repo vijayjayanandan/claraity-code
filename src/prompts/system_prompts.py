@@ -198,7 +198,10 @@ Don't retry the identical action blindly, but don't abandon a viable approach af
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-def get_persistent_memory_injection(memory_dir: str) -> str:
+def get_persistent_memory_injection(
+    project_memory_dir: str,
+    user_memory_dir: str | None = None,
+) -> str:
     """
     Generate persistent memory management instructions for the agent.
 
@@ -207,15 +210,59 @@ def get_persistent_memory_injection(memory_dir: str) -> str:
     memory files.
 
     Args:
-        memory_dir: Absolute path to the .claraity/memory/ directory
+        project_memory_dir: Absolute path to the project .claraity/memory/ directory
+        user_memory_dir: Absolute path to ~/.claraity/memory/ (None if same as project)
 
     Returns:
         Memory management instruction block
     """
-    return f"""# Persistent Memory
+    has_user_dir = user_memory_dir is not None
 
-You have a persistent, file-based memory system at `{memory_dir}`.
-This directory already exists. Use your file tools (write_file, edit_file, read_file) to manage it.
+    if has_user_dir:
+        location_block = f"""You have a persistent, file-based memory system with two locations:
+- **Project memories** (`project`, `reference` types): `{project_memory_dir}`
+- **User memories** (`user`, `feedback` types): `{user_memory_dir}`
+Both directories already exist. Use your file tools (write_file, edit_file, read_file) to manage them."""
+    else:
+        location_block = f"""You have a persistent, file-based memory system at `{project_memory_dir}`.
+This directory already exists. Use your file tools (write_file, edit_file, read_file) to manage it."""
+
+    if has_user_dir:
+        save_block = f"""## How to Save (two steps)
+
+Choose the correct directory based on memory type:
+
+| Type | Directory | Why |
+|------|-----------|-----|
+| **user** | `{user_memory_dir}` | Follows the user across projects |
+| **feedback** | `{user_memory_dir}` | Follows the user across projects |
+| **project** | `{project_memory_dir}` | Specific to this codebase |
+| **reference** | `{project_memory_dir}` | Specific to this codebase |
+
+1. Write the memory file: `write_file` to `<directory>/<name>.md`
+2. Update the index: `edit_file` to add a line to `<directory>/MEMORY.md`"""
+    else:
+        save_block = f"""## How to Save (two steps)
+
+1. Write the memory file: `write_file` to `{project_memory_dir}/<name>.md`
+2. Update the index: `edit_file` to add a line to `{project_memory_dir}/MEMORY.md`"""
+
+    if has_user_dir:
+        duplicate_block = f"""## Duplicate Prevention
+
+Before writing a new memory, check the correct MEMORY.md for an existing entry on the same topic.
+- For `user`/`feedback` types, check `{user_memory_dir}/MEMORY.md`
+- For `project`/`reference` types, check `{project_memory_dir}/MEMORY.md`
+Update the existing file rather than creating a duplicate."""
+    else:
+        duplicate_block = """## Duplicate Prevention
+
+Before writing a new memory, check MEMORY.md for an existing entry on the same topic.
+Update the existing file rather than creating a duplicate."""
+
+    return f"""# Memory
+
+{location_block}
 
 ## Purpose
 Build up cross-session knowledge so future conversations have context about:
@@ -316,15 +363,9 @@ Keep the index concise -- it is loaded into your context every session.
 - Actionable work items (use beads)
 - Current task progress or session state (ephemeral)
 
-## Duplicate Prevention
+{duplicate_block}
 
-Before writing a new memory, check MEMORY.md for an existing entry on the same topic.
-Update the existing file rather than creating a duplicate.
-
-## How to Save (two steps)
-
-1. Write the memory file: `write_file` to `{memory_dir}/<name>.md`
-2. Update the index: `edit_file` to add a line to `{memory_dir}/MEMORY.md`
+{save_block}
 
 ## When to Recall
 
@@ -332,8 +373,10 @@ Update the existing file rather than creating a duplicate.
 - When the user explicitly asks you to check, recall, or remember something (you MUST access memory)
 - If the user says to ignore memory, proceed as if MEMORY.md were empty
 
-MEMORY.md is already in your context. To read a specific memory, use `read_file`
-on the individual file. Only read files when their index entry seems relevant.
+User memory files are fully loaded in your context when they fit the token budget.
+You do NOT need to `read_file` individual user memories -- they are already visible.
+For project memories, only the MEMORY.md index is in context. Use `read_file` to
+read individual project memory files when their index entry seems relevant.
 
 ## Staleness
 

@@ -184,7 +184,7 @@ class TestPersistentMemoryContext:
         )
 
         system_prompt = context[0]["content"]
-        assert "Persistent Memory" in system_prompt
+        assert "# Memory" in system_prompt
         assert "write_file" in system_prompt
         assert "MEMORY.md" in system_prompt
 

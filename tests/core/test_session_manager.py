@@ -130,7 +130,6 @@ class TestSessionManager:
                 "task_id": "task-123",
                 "description": "Test task"
             },
-            "file_memories": "# Project Memory\nUse 2-space indent",
             "model_name": "test-model",
             "message_count": 2,
             "duration_minutes": 15.0,
@@ -193,7 +192,6 @@ class TestSessionManager:
         assert (session_dir / "metadata.json").exists()
         assert (session_dir / "working_memory.json").exists()
         assert (session_dir / "task_context.json").exists()
-        assert (session_dir / "file_memories.txt").exists()
 
     def test_save_session_with_tags(self, manager, sample_state):
         """Test saving session with tags."""
@@ -261,7 +259,6 @@ class TestSessionManager:
         assert "metadata" in loaded_state
         assert "working_memory" in loaded_state
         assert "task_context" in loaded_state
-        assert "file_memories" in loaded_state
 
     def test_load_session_short_id(self, manager, sample_state):
         """Test loading session with short ID (8 chars)."""
@@ -296,9 +293,6 @@ class TestSessionManager:
 
         # Check task context
         assert loaded_state["task_context"] == sample_state["task_context"]
-
-        # Check file memories
-        assert loaded_state["file_memories"] == sample_state["file_memories"]
 
     # ==================== List Sessions Tests ====================
 

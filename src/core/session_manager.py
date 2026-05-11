@@ -194,10 +194,6 @@ class SessionManager:
             with open(session_dir / "task_context.json", "w") as f:
                 json.dump(state["task_context"], f, indent=2)
 
-        if "file_memories" in state:
-            with open(session_dir / "file_memories.txt", "w") as f:
-                f.write(state["file_memories"])
-
         # Update manifest
         self._add_to_manifest(metadata)
 
@@ -246,11 +242,6 @@ class SessionManager:
         if task_context_path.exists():
             with open(task_context_path) as f:
                 state["task_context"] = json.load(f)
-
-        file_memories_path = session_dir / "file_memories.txt"
-        if file_memories_path.exists():
-            with open(file_memories_path) as f:
-                state["file_memories"] = f.read()
 
         logger.info(f"Loaded session: {metadata.short_id} ({metadata.name})")
         return state

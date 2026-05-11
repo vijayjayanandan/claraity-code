@@ -59,9 +59,6 @@ class TestMemoryManagerSessions:
         )
         memory_manager.set_task_context(task)
 
-        # Add file memory
-        memory_manager.file_memory_content = "# Project Memory\nUse 2-space indentation"
-
         return memory_manager
 
     # ==================== Save Session Tests ====================
@@ -93,7 +90,6 @@ class TestMemoryManagerSessions:
         assert (session_dir / "metadata.json").exists()
         assert (session_dir / "working_memory.json").exists()
         assert (session_dir / "task_context.json").exists()
-        assert (session_dir / "file_memories.txt").exists()
 
     def test_save_session_with_tags(self, populated_manager):
         """Test saving session with tags."""
@@ -161,7 +157,6 @@ class TestMemoryManagerSessions:
         # Verify data restored
         assert len(new_manager.working_memory.messages) == 4
         assert new_manager.working_memory.task_context is not None
-        assert new_manager.file_memory_content == "# Project Memory\nUse 2-space indentation"
 
     def test_load_session_by_name_short(self, populated_manager):
         """Test loading session by name (short ID no longer applies to new format)."""
@@ -267,9 +262,6 @@ class TestMemoryManagerSessions:
         )
         new_manager.load_session(session_id)
 
-        # Verify file memories
-        assert new_manager.file_memory_content == "# Project Memory\nUse 2-space indentation"
-
     def test_round_trip_preserves_all_data(self, populated_manager):
         """Test that save/load round-trip preserves all data."""
         # Save
@@ -298,9 +290,6 @@ class TestMemoryManagerSessions:
             new_manager.working_memory.task_context.task_id
             == populated_manager.working_memory.task_context.task_id
         )
-
-        # File memories
-        assert new_manager.file_memory_content == populated_manager.file_memory_content
 
     # ==================== Multiple Sessions Tests ====================
 

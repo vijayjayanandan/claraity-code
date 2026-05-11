@@ -65,14 +65,6 @@ class TestE2ESessionPersistence:
         )
         memory_manager.set_task_context(task)
 
-        # Add file memory
-        memory_manager.file_memory_content = (
-            "# Project Memory\n"
-            "- Use 2-space indentation\n"
-            "- Follow PEP 8 style guide\n"
-            "- Add docstrings to all functions\n"
-        )
-
         # Save session
         session_id = memory_manager.save_session(
             session_name="jwt-auth-feature",
@@ -102,10 +94,6 @@ class TestE2ESessionPersistence:
         assert "JWT" in restored_task.key_concepts
         assert "auth.py" in restored_task.related_files
         assert "Must use bcrypt" in restored_task.constraints[0]
-
-        # 4. File memories
-        assert "Project Memory" in new_manager.file_memory_content
-        assert "2-space indentation" in new_manager.file_memory_content
 
     def test_multiple_session_isolation(self, memory_manager):
         """Test that multiple sessions don't interfere with each other."""
@@ -433,38 +421,6 @@ class TestSessionPersistenceIntegration:
             persist_directory=str(temp_dir),
             load_file_memories=False,
         )
-
-    def test_session_with_file_memory_integration(self, memory_manager):
-        """Test session persistence with file-based memories."""
-        # Set file memory content
-        memory_manager.file_memory_content = (
-            "# Enterprise Memory\n"
-            "- Security policy: All passwords must be hashed\n"
-            "# User Memory\n"
-            "- Preferred language: Python\n"
-            "# Project Memory\n"
-            "- Use async/await for I/O operations\n"
-        )
-
-        memory_manager.add_user_message("Implement user login")
-        memory_manager.add_assistant_message("I'll implement secure login")
-
-        session_id = memory_manager.save_session(
-            session_name="login-with-memory",
-            task_description="Login implementation with memory",
-        )
-
-        # Load
-        new_manager = MemoryManager(
-            persist_directory=str(memory_manager.persist_directory),
-            load_file_memories=False,
-        )
-        new_manager.load_session(session_id)
-
-        # Verify file memories restored
-        assert "Enterprise Memory" in new_manager.file_memory_content
-        assert "passwords must be hashed" in new_manager.file_memory_content
-        assert "async/await" in new_manager.file_memory_content
 
     def test_context_building_after_load(self, memory_manager):
         """Test that context can be built correctly after loading."""

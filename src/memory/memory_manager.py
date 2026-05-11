@@ -12,7 +12,6 @@ logger = get_logger("memory")
 from src.core.render_meta import RenderMetaRegistry
 from src.session.models.message import Message as SessionMessage
 
-from .file_loader import MemoryFileLoader
 from .models import (
     CodeContext,
     MemoryType,
@@ -53,8 +52,8 @@ class MemoryManager:
             episodic_memory_tokens: Ignored (kept for backward compat)
             system_prompt_tokens: Tokens reserved for system prompt
             persist_directory: Directory for persistence
-            load_file_memories: Whether to load hierarchical file memories on init
-            starting_directory: Starting directory for file memory search (default: cwd)
+            load_file_memories: Ignored (kept for backward compat)
+            starting_directory: Starting directory for project root (default: cwd)
         """
         self.total_context_tokens = total_context_tokens
         self.system_prompt_tokens = system_prompt_tokens
@@ -62,12 +61,10 @@ class MemoryManager:
         # Initialize memory layers
         self.working_memory = WorkingMemory(max_tokens=working_memory_tokens)
 
-        # Initialize file-based memory loader
-        self.file_loader = MemoryFileLoader()
-        self.file_memory_content = ""
-
         # Persistent memory (agent-managed, cross-session)
         self.persistent_memory_content = ""
+        self.user_persistent_memory_content = ""
+        self.user_memory_full_content = ""  # All user memory files combined
         self._persistent_memory_dir: Path | None = None
 
         # Knowledge base cache
@@ -77,12 +74,10 @@ class MemoryManager:
             Path(starting_directory).resolve() if starting_directory else Path.cwd()
         )
 
-        # Load file memories if requested
-        if load_file_memories:
-            self.load_file_memories(starting_directory)
-
         # Load persistent memory (always attempt)
         self.load_persistent_memory()
+        self.load_user_persistent_memory()
+        self.load_user_memory_files()
 
         # Session metadata
         self.session_id = str(uuid.uuid4())
@@ -653,7 +648,7 @@ class MemoryManager:
         self,
         system_prompt: str,
         include_episodic: bool = True,  # Kept for backward compat (ignored)
-        include_file_memories: bool = True,
+        include_file_memories: bool = True,  # Kept for backward compat (ignored)
         max_context_messages: int | None = None,
     ) -> list[dict[str, str]]:
         """
@@ -668,7 +663,7 @@ class MemoryManager:
         Args:
             system_prompt: System prompt to include
             include_episodic: Ignored (kept for backward compat)
-            include_file_memories: Whether to include file-based memories (default: True)
+            include_file_memories: Ignored (kept for backward compat)
             max_context_messages: Optional limit on conversation messages
 
         Returns:
@@ -679,16 +674,7 @@ class MemoryManager:
         # 1. System prompt
         context.append({"role": "system", "content": system_prompt})
 
-        # 2. File-based memories (project, user, enterprise)
-        if include_file_memories and self.file_memory_content:
-            context.append(
-                {
-                    "role": "system",
-                    "content": f"Project and user memory context:\n{self.file_memory_content}",
-                }
-            )
-
-        # 2a. Persistent memory is injected by ContextBuilder into the system
+        # 2. Persistent memory is injected by ContextBuilder into the system
         # prompt (not as a separate system message) so it survives the system
         # message filtering in build_context().
 
@@ -781,7 +767,6 @@ class MemoryManager:
                 if self.working_memory.task_context
                 else None
             ),
-            "file_memories": self.file_memory_content,
             "persistent_memory": self.persistent_memory_content,
             "model_name": "unknown",  # Will be overridden if Agent provides it
             "message_count": len(self.working_memory.messages),
@@ -848,10 +833,6 @@ class MemoryManager:
         if "working_memory" in state:
             self.working_memory.from_dict(state["working_memory"])
 
-        # Restore file memories
-        if "file_memories" in state:
-            self.file_memory_content = state["file_memories"]
-
         # Restore persistent memory (reload from disk — it may have changed
         # since the session was saved, which is the whole point)
         self.load_persistent_memory()
@@ -906,102 +887,8 @@ class MemoryManager:
         if self._message_store:
             self._message_store.clear_tool_state()
 
-    def load_file_memories(self, starting_dir: Path | None = None) -> str:
-        """
-        Load hierarchical file memories from .claraity/memory.md files.
-
-        Loads from:
-        1. Enterprise: /etc/claraity/memory.md (Linux/Mac)
-        2. User: ~/.claraity/memory.md
-        3. Project: .claraity/memory.md (traverses upward from starting_dir)
-
-        Args:
-            starting_dir: Directory to start search (default: cwd)
-
-        Returns:
-            Combined memory content from all hierarchy levels
-
-        Example:
-            >>> manager.load_file_memories()
-            >>> # Loads enterprise, user, and project memories
-        """
-        self.file_memory_content = self.file_loader.load_hierarchy(starting_dir)
-        return self.file_memory_content
-
-    def reload_file_memories(self, starting_dir: Path | None = None) -> str:
-        """
-        Reload file memories (useful after editing memory files).
-
-        Args:
-            starting_dir: Directory to start search (default: cwd)
-
-        Returns:
-            Updated memory content
-        """
-        # Create fresh loader to reset loaded_files tracking
-        self.file_loader = MemoryFileLoader()
-        return self.load_file_memories(starting_dir)
-
-    def quick_add_memory(self, text: str, location: str = "project") -> Path:
-        """
-        Quick add memory to file (# syntax from user input).
-
-        Args:
-            text: Memory text to add
-            location: 'project' or 'user'
-
-        Returns:
-            Path to file that was updated
-
-        Example:
-            >>> manager.quick_add_memory("Always use 2-space indent", "project")
-            PosixPath('/path/to/project/.claraity/memory.md')
-
-            >>> # Reload to see the change
-            >>> manager.reload_file_memories()
-        """
-        path = self.file_loader.quick_add(text, location)
-        # Auto-reload to include the new memory
-        self.reload_file_memories()
-        return path
-
-    def init_project_memory(self, path: Path | None = None) -> Path:
-        """
-        Initialize a new project memory file with template.
-
-        Args:
-            path: Path to create file (default: ./.claraity/memory.md)
-
-        Returns:
-            Path to created file
-
-        Raises:
-            FileExistsError: If file already exists
-
-        Example:
-            >>> manager.init_project_memory()
-            PosixPath('/path/to/project/.claraity/memory.md')
-
-            >>> # Reload to include the new template
-            >>> manager.reload_file_memories()
-        """
-        created_path = self.file_loader.init_project_memory(path)
-
-        # Auto-reload to include the new template
-        # If custom path provided, reload from its parent's parent directory
-        # (to find the .claraity directory)
-        if path:
-            # path is like: /some/dir/.claraity/memory.md
-            # We want to search from /some/dir
-            search_dir = created_path.parent.parent
-            self.reload_file_memories(starting_dir=search_dir)
-        else:
-            self.reload_file_memories()
-
-        return created_path
-
     # =========================================================================
-    # Persistent Memory (agent-managed, cross-session)
+    # Project Memory + User Memory (agent-managed, cross-session)
     # =========================================================================
 
     @property
@@ -1011,6 +898,11 @@ class MemoryManager:
             return self._persistent_memory_dir
         return self._project_root / ".claraity" / "memory"
 
+    @property
+    def user_memory_dir(self) -> Path:
+        """User-level memory directory (~/.claraity/memory/)."""
+        return Path.home() / ".claraity" / "memory"
+
     def load_persistent_memory(self) -> str:
         """
         Load the agent-managed persistent memory index (MEMORY.md).
@@ -1018,9 +910,9 @@ class MemoryManager:
         Reads .claraity/memory/MEMORY.md if it exists. Creates the directory
         and an empty MEMORY.md if they don't exist.
 
-        This is separate from file_memory_content (developer-authored project
-        instructions). Persistent memory is written by the agent across sessions
-        to remember user preferences, feedback, project context, and references.
+        Persistent memory is written by the agent across sessions to remember
+        project context and references. User-level memories (user, feedback)
+        are stored separately at ~/.claraity/memory/ via load_user_persistent_memory().
 
         Returns:
             Content of MEMORY.md, or empty string if none exists.
@@ -1064,8 +956,109 @@ class MemoryManager:
         self.persistent_memory_content = ""
         return ""
 
+    def load_user_persistent_memory(self) -> str:
+        """
+        Load the user-level persistent memory index (~/.claraity/memory/MEMORY.md).
+
+        Mirrors load_persistent_memory() but targets the user's home directory.
+        User-level memories (type: user, feedback) follow the user across projects.
+
+        Returns:
+            Content of user-level MEMORY.md, or empty string if none exists.
+        """
+        try:
+            memory_dir = self.user_memory_dir
+        except (RuntimeError, OSError) as e:
+            logger.warning("user_memory_dir_resolve_failed", error=str(e))
+            self.user_persistent_memory_content = ""
+            return ""
+
+        index_path = memory_dir / "MEMORY.md"
+
+        # Ensure directory exists
+        try:
+            memory_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.warning("user_memory_dir_create_failed", error=str(e))
+            self.user_persistent_memory_content = ""
+            return ""
+
+        # Create empty MEMORY.md if it doesn't exist
+        if not index_path.exists():
+            try:
+                index_path.write_text(
+                    "# User Memory\n",
+                    encoding="utf-8",
+                )
+                logger.info("user_memory_index_created", path=str(index_path))
+            except OSError as e:
+                logger.warning("user_memory_index_create_failed", error=str(e))
+
+        # Load the index
+        try:
+            if index_path.exists():
+                content = index_path.read_text(encoding="utf-8").strip()
+                self.user_persistent_memory_content = content
+                logger.info(
+                    "user_persistent_memory_loaded",
+                    path=str(index_path),
+                    length=len(content),
+                )
+                return content
+        except (OSError, UnicodeDecodeError) as e:
+            logger.warning("user_persistent_memory_load_failed", error=str(e))
+
+        self.user_persistent_memory_content = ""
+        return ""
+
+    def load_user_memory_files(self) -> str:
+        """Load all individual user memory files from ~/.claraity/memory/.
+
+        Reads every .md file (except MEMORY.md index) and combines them
+        into a single string. This allows the LLM to see full user memory
+        content without needing read_file tool calls.
+
+        Returns:
+            Combined content of all user memory files, or empty string.
+        """
+        try:
+            memory_dir = self.user_memory_dir
+        except (RuntimeError, OSError):
+            self.user_memory_full_content = ""
+            return ""
+
+        if not memory_dir.exists():
+            self.user_memory_full_content = ""
+            return ""
+
+        parts = []
+        try:
+            for md_file in sorted(memory_dir.glob("*.md")):
+                if md_file.name == "MEMORY.md":
+                    continue
+                try:
+                    content = md_file.read_text(encoding="utf-8").strip()
+                    if content:
+                        parts.append(f"## {md_file.name}\n\n{content}")
+                except (OSError, UnicodeDecodeError):
+                    continue
+        except OSError:
+            self.user_memory_full_content = ""
+            return ""
+
+        combined = "\n\n".join(parts)
+        self.user_memory_full_content = combined
+        logger.info(
+            "user_memory_files_loaded",
+            count=len(parts),
+            length=len(combined),
+        )
+        return combined
+
     def reload_persistent_memory(self) -> str:
         """Reload persistent memory (useful after agent writes new memories)."""
+        self.load_user_persistent_memory()
+        self.load_user_memory_files()
         return self.load_persistent_memory()
 
     @staticmethod

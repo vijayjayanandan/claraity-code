@@ -318,7 +318,7 @@ class CodingAgent(AgentInterface):
             working_directory: Working directory for file operations
             api_key: API key for OpenAI-compatible backends (optional)
             api_key_env: Environment variable name for API key (default: OPENAI_API_KEY)
-            load_file_memories: Whether to load file-based memories on init (default: True)
+            load_file_memories: Ignored (kept for backward compat)
             permission_mode: Permission mode (plan/normal/auto, default: normal)
             hook_manager: Optional hook manager for event hooks
         """
@@ -472,6 +472,10 @@ class CodingAgent(AgentInterface):
             workspace_roots=self._workspace_roots,
         )
 
+        # Allow agent to write to user-level memory dir without safety-floor approval
+        if hasattr(self.memory, "user_memory_dir"):
+            self._gating.set_allowed_outside_paths([self.memory.user_memory_dir])
+
         # Special tool handlers (clarify, plan approval)
         from src.core.special_tool_handlers import SpecialToolHandlers
 
@@ -550,7 +554,7 @@ class CodingAgent(AgentInterface):
             session_id: Session ID (auto-generated if omitted)
             message_store: MessageStore instance (auto-created if omitted)
             api_key: API key override (falls back to config.api_key)
-            load_file_memories: Whether to load file-based memories
+            load_file_memories: Ignored (kept for backward compat)
             hook_manager: Optional hook manager for event hooks
 
         Returns:
@@ -774,7 +778,6 @@ class CodingAgent(AgentInterface):
         # 5. Reload cached sources (may have been edited during previous session)
         self.context_builder.reload_cached_sources()
         self.memory.reload_persistent_memory()
-        self.memory.reload_file_memories()
 
         logger.info(f"Session reset to {new_session_id}")
 

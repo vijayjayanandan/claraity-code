@@ -512,9 +512,11 @@ class TestContextBuilderTraceWiring:
             {"role": "user", "content": "hello"},
             {"role": "assistant", "content": "hi there"},
         ]
-        mm.file_memory_content = "memory file content here"
         mm.persistent_memory_content = ""
+        mm.user_persistent_memory_content = ""
+        mm.user_memory_full_content = ""
         mm.persistent_memory_dir = "/tmp/test/.claraity/memory"
+        mm.user_memory_dir = "/tmp/home/.claraity/memory"
         return mm
 
     @pytest.fixture
@@ -550,7 +552,7 @@ class TestContextBuilderTraceWiring:
 
     def test_first_build_emits_context_sources(self, builder, mock_trace):
         """First build_context emits on_context_source for System Prompt,
-        CLARAITY.md, Knowledge DB, Memory Files, and Persistent Memory."""
+        CLARAITY.md, Knowledge DB, Project Memory, and User Memory."""
         builder.set_trace(mock_trace)
         builder.build_context(user_query="test", log_report=False)
 
@@ -559,8 +561,8 @@ class TestContextBuilderTraceWiring:
         assert "System Prompt" in source_names
         assert "CLARAITY.md" in source_names
         assert "Knowledge DB" in source_names
-        assert "Memory Files" in source_names
-        assert "Persistent Memory" in source_names
+        assert "Project Memory" in source_names
+        assert "User Memory" in source_names
         assert len(source_names) == 5
 
     def test_first_build_emits_store_fetch(self, builder, mock_trace):
@@ -642,34 +644,35 @@ class TestContextBuilderTraceWiring:
                 return
         pytest.fail("No on_context_source call for CLARAITY.md")
 
-    def test_memory_files_content_from_memory_manager(self, builder, mock_trace):
-        """Memory Files source content comes from memory.file_memory_content."""
+    def test_user_memory_source_emitted(self, builder, mock_trace, mock_memory):
+        """User Memory source is emitted with correct content."""
+        mock_memory.user_persistent_memory_content = "user prefs here"
         builder.set_trace(mock_trace)
         builder.build_context(user_query="test", log_report=False)
 
         for c in mock_trace.on_context_source.call_args_list:
-            if c[0][0] == "Memory Files":
+            if c[0][0] == "User Memory":
                 content = c[0][1]
                 found = c[0][2]
                 assert found is True
-                assert content == "memory file content here"
+                assert content == "user prefs here"
                 return
-        pytest.fail("No on_context_source call for Memory Files")
+        pytest.fail("No on_context_source call for User Memory")
 
-    def test_memory_files_empty_when_no_content(self, builder, mock_trace, mock_memory):
-        """When file_memory_content is empty, Memory Files reports not found."""
-        mock_memory.file_memory_content = ""
+    def test_user_memory_empty_when_no_content(self, builder, mock_trace, mock_memory):
+        """When user_persistent_memory_content is empty, reports not found."""
+        mock_memory.user_persistent_memory_content = ""
         builder.set_trace(mock_trace)
         builder.build_context(user_query="test", log_report=False)
 
         for c in mock_trace.on_context_source.call_args_list:
-            if c[0][0] == "Memory Files":
+            if c[0][0] == "User Memory":
                 content = c[0][1]
                 found = c[0][2]
                 assert found is False
-                assert content == "(no memory files loaded)"
+                assert content == "(no user memories)"
                 return
-        pytest.fail("No on_context_source call for Memory Files")
+        pytest.fail("No on_context_source call for User Memory")
 
     def test_store_fetch_role_breakdown(self, builder, mock_trace):
         """on_context_store_fetch receives correct role counts."""
