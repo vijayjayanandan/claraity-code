@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>From LLM Call to AI Agent — The ClarAIty Journey</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+    <!-- Thin progress bar at the very top -->
+    <div id="progress-bar"></div>
+
+    <!-- Chapter indicator -->
+    <div id="chapter-indicator"></div>
+
+    <!-- Main presentation container (sections injected by engine) -->
+    <div id="presentation"></div>
+
+    <!-- Speaker notes panel (toggle with N key) -->
+    <div id="notes-panel"></div>
+
+    <!-- Chapter navigation overlay (toggle with G key) -->
+    <div id="chapter-nav"></div>
+
+    <!-- Navigation hints -->
+    <div id="nav-hint">
+        <span>Scroll or Arrow Keys</span>
+        <span>N = Notes</span>
+        <span>G = Go to Chapter</span>
+        <span>F = Fullscreen</span>
+    </div>
+
+    <!-- Branding -->
+    <div id="branding">ClarAIty</div>
+
+    <!-- Content first, then engine -->
+    <script src="slides.js"></script>
+    <script src="engine.js"></script>
+
+</body>
+</html>
