@@ -959,6 +959,13 @@ class KnowledgeExportTool(Tool):
         except Exception as e:
             results.append(f"Beads export failed: {e}")
 
+        try:
+            from src.claraity.export_html import generate
+            out = generate()
+            results.append(f"HTML: {out}")
+        except Exception as e:
+            results.append(f"HTML export failed: {e}")
+
         return ToolResult(
             tool_name=self.name,
             status=ToolStatus.SUCCESS,
