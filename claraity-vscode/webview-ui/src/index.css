@@ -5655,6 +5655,19 @@ button, .toolbar-icon, .session-card, .mention-item, .tool-badge {
   outline: none;
 }
 
+.enrichment-prompt-textarea {
+  resize: none;
+  height: 72px;
+  max-height: 480px;
+  overflow-y: hidden;
+  line-height: 1.5;
+  transition: height 0.15s ease;
+}
+
+.enrichment-prompt-textarea.expanded {
+  overflow-y: auto;
+}
+
 .form-hint {
   display: block;
   font-size: var(--font-size-xs);

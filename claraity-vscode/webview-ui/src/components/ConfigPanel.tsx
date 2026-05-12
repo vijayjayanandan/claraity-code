@@ -133,6 +133,8 @@ export function ConfigPanel({
   const [enrichmentDefaultPrompt, setEnrichmentDefaultPrompt] = useState("");
   const [showEnrichment, setShowEnrichment] = useState(true);
   const [enrichmentDropdownOpen, setEnrichmentDropdownOpen] = useState(false);
+  const [enrichmentPromptFocused, setEnrichmentPromptFocused] = useState(false);
+  const enrichmentTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [fetchStatus, setFetchStatus] = useState("");
 
   // ── Save / notification state ────────────────────────────────────────────────
@@ -306,6 +308,20 @@ export function ConfigPanel({
       Object.fromEntries(configSubagentNames.map((n) => [n, model]))
     );
   }, [sameModel, model, configSubagentNames]);
+
+  // ── Enrichment textarea expand/collapse ──────────────────────────────────────
+  const autoResizeEnrichmentTextarea = useCallback(() => {
+    const el = enrichmentTextareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, []);
+
+  const collapseEnrichmentTextarea = useCallback(() => {
+    const el = enrichmentTextareaRef.current;
+    if (!el) return;
+    el.style.height = "";
+  }, []);
 
   // ── Enrichment model typeahead ───────────────────────────────────────────────
   const filteredEnrichmentModels = useMemo(() => {
@@ -726,27 +742,25 @@ export function ConfigPanel({
                     )}
                   </div>
                 </Field>
-                <Field label={
-                  <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    Enrichment Prompt
-                    {enrichmentSystemPrompt && (
-                      <button
-                        className="model-clear-btn"
-                        title="Reset to default"
-                        onClick={() => setEnrichmentSystemPrompt("")}
-                        tabIndex={-1}
-                      >
-                        Reset
-                      </button>
-                    )}
-                  </span>
-                }>
+                <Field label="Enrichment Prompt">
                   <textarea
-                    className="form-textarea"
-                    value={enrichmentSystemPrompt}
-                    rows={6}
-                    onChange={(e) => setEnrichmentSystemPrompt(e.target.value)}
-                    placeholder={enrichmentDefaultPrompt || "(use built-in default)"}
+                    ref={enrichmentTextareaRef}
+                    className={`form-textarea enrichment-prompt-textarea${enrichmentPromptFocused ? " expanded" : ""}`}
+                    value={enrichmentSystemPrompt || enrichmentDefaultPrompt}
+                    onChange={(e) => {
+                      setEnrichmentSystemPrompt(e.target.value);
+                      autoResizeEnrichmentTextarea();
+                    }}
+                    onInput={autoResizeEnrichmentTextarea}
+                    onFocus={() => {
+                      setEnrichmentPromptFocused(true);
+                      setTimeout(autoResizeEnrichmentTextarea, 0);
+                    }}
+                    onBlur={() => {
+                      setEnrichmentPromptFocused(false);
+                      collapseEnrichmentTextarea();
+                    }}
+                    placeholder="(use built-in default)"
                   />
                 </Field>
               </div>

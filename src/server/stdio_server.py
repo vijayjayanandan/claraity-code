@@ -2506,7 +2506,7 @@ class StdioProtocol(UIProtocol):
                 if lines:
                     history_text = "Recent conversation:\n" + "\n".join(lines) + "\n\n"
 
-            user_message = f'{history_text}User request: "{content}"'
+            user_message = f'{history_text}"{content}"'
 
             messages = [
                 {"role": "system", "content": system_prompt},
