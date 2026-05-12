@@ -1080,6 +1080,144 @@ class ClaraityStore:
             sys_col += 1
             updated += 1
 
+        # -- Component-level layout within each module ---------------------------
+        # Build component subgraph per module, run same SCC+Kahn, assign flow_rank/flow_col
+        components = {n["id"]: n for n in nodes if n["type"] == "component"}
+        mod_components: dict[str, list[str]] = defaultdict(list)
+        for e in edges:
+            if e["type"] == "contains" and e["from_id"] in modules and e["to_id"] in components:
+                mod_components[e["from_id"]].append(e["to_id"])
+
+        comp_updated = 0
+        for mod_id, comp_ids in mod_components.items():
+            if len(comp_ids) <= 1:
+                # Single component: trivial position
+                if comp_ids:
+                    node = components[comp_ids[0]]
+                    props = _parse_props(node.get("properties", "{}"))
+                    props["flow_rank"] = 0
+                    props["flow_col"] = 0
+                    with self._cursor() as cur:
+                        cur.execute("UPDATE nodes SET properties = ? WHERE id = ?", (json.dumps(props), comp_ids[0]))
+                    comp_updated += 1
+                continue
+
+            comp_set = set(comp_ids)
+
+            # Build intra-module directed graph
+            cgraph: dict[str, set[str]] = defaultdict(set)
+            creverse: dict[str, set[str]] = defaultdict(set)
+            for e in edges:
+                if e["type"] in ("contains", "constrains"):
+                    continue
+                if e["from_id"] in comp_set and e["to_id"] in comp_set and e["from_id"] != e["to_id"]:
+                    cgraph[e["from_id"]].add(e["to_id"])
+                    creverse[e["to_id"]].add(e["from_id"])
+
+            # Tarjan's SCC
+            c_index_counter = [0]
+            c_stack: list[str] = []
+            c_lowlink: dict[str, int] = {}
+            c_index: dict[str, int] = {}
+            c_on_stack: set[str] = set()
+            c_sccs: list[list[str]] = []
+
+            def c_strongconnect(v: str):
+                c_index[v] = c_index_counter[0]
+                c_lowlink[v] = c_index_counter[0]
+                c_index_counter[0] += 1
+                c_stack.append(v)
+                c_on_stack.add(v)
+                for w in cgraph.get(v, set()):
+                    if w not in c_index:
+                        c_strongconnect(w)
+                        c_lowlink[v] = min(c_lowlink[v], c_lowlink[w])
+                    elif w in c_on_stack:
+                        c_lowlink[v] = min(c_lowlink[v], c_index[w])
+                if c_lowlink[v] == c_index[v]:
+                    scc = []
+                    while True:
+                        w = c_stack.pop()
+                        c_on_stack.discard(w)
+                        scc.append(w)
+                        if w == v:
+                            break
+                    c_sccs.append(scc)
+
+            for v in comp_ids:
+                if v not in c_index:
+                    c_strongconnect(v)
+
+            comp_to_scc: dict[str, int] = {}
+            for i, scc in enumerate(c_sccs):
+                for c in scc:
+                    comp_to_scc[c] = i
+
+            # SCC DAG + Kahn's topological sort
+            cscc_graph: dict[int, set[int]] = defaultdict(set)
+            cscc_in_degree: dict[int, int] = {i: 0 for i in range(len(c_sccs))}
+            for from_c, to_cs in cgraph.items():
+                fs = comp_to_scc.get(from_c)
+                for to_c in to_cs:
+                    ts = comp_to_scc.get(to_c)
+                    if fs is not None and ts is not None and fs != ts and ts not in cscc_graph[fs]:
+                        cscc_graph[fs].add(ts)
+                        cscc_in_degree[ts] += 1
+
+            cqueue = deque([i for i in range(len(c_sccs)) if cscc_in_degree[i] == 0])
+            cscc_rank: dict[int, int] = {}
+            while cqueue:
+                idx = cqueue.popleft()
+                if idx not in cscc_rank:
+                    cscc_rank[idx] = 0
+                for dep in cscc_graph.get(idx, set()):
+                    cscc_rank[dep] = max(cscc_rank.get(dep, 0), cscc_rank[idx] + 1)
+                    cscc_in_degree[dep] -= 1
+                    if cscc_in_degree[dep] == 0:
+                        cqueue.append(dep)
+            for i in range(len(c_sccs)):
+                if i not in cscc_rank:
+                    cscc_rank[i] = 0
+
+            # Assign flow_rank to components; isolated (no intra-module edges) go to bottom
+            cmax_rank = max(cscc_rank.values()) if cscc_rank else 0
+            comp_rank: dict[str, int] = {}
+            for comp_id in comp_ids:
+                has_edge = comp_id in cgraph or comp_id in creverse
+                if has_edge and comp_id in comp_to_scc:
+                    comp_rank[comp_id] = cscc_rank[comp_to_scc[comp_id]]
+                else:
+                    comp_rank[comp_id] = cmax_rank + 1
+
+            # Within each rank sort by edge count descending
+            cranks: dict[int, list[str]] = defaultdict(list)
+            for comp_id, rank in comp_rank.items():
+                cranks[rank].append(comp_id)
+            comp_edge_count: dict[str, int] = defaultdict(int)
+            for fc, tcs in cgraph.items():
+                comp_edge_count[fc] += len(tcs)
+            for tc, fcs in creverse.items():
+                comp_edge_count[tc] += len(fcs)
+            for rank in cranks:
+                cranks[rank].sort(key=lambda c: -comp_edge_count.get(c, 0))
+
+            comp_col: dict[str, int] = {}
+            for _rank, clist in cranks.items():
+                for i, comp_id in enumerate(clist):
+                    comp_col[comp_id] = i
+
+            # Persist flow_rank/flow_col on each component
+            for comp_id in comp_ids:
+                node = components[comp_id]
+                props = _parse_props(node.get("properties", "{}"))
+                props["flow_rank"] = comp_rank.get(comp_id, 0)
+                props["flow_col"] = comp_col.get(comp_id, 0)
+                with self._cursor() as cur:
+                    cur.execute("UPDATE nodes SET properties = ? WHERE id = ?", (json.dumps(props), comp_id))
+                comp_updated += 1
+
+        updated += comp_updated
+
         return {
             "modules_updated": updated,
             "ranks": {r: mods for r, mods in sorted(ranks.items())},

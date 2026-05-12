@@ -237,17 +237,24 @@ function calculateLayout(
     const props = mod.properties || {};
 
     if (expanded && components.length > 0) {
-      // Change #5: Single column layout for narrow sidebar
-      const cols = 1;
-      const rows = Math.ceil(components.length / cols);
-      const w = cols * (COMP_W + COMP_PAD) + MOD_PAD * 2 - COMP_PAD;
-      const h = rows * (COMP_H + COMP_PAD) + MOD_PAD_TOP + MOD_PAD - COMP_PAD;
-      const childLayouts: ChildLayout[] = components.map((c, i) => ({
-        id: c.id as string, node: c,
-        relX: MOD_PAD + (i % cols) * (COMP_W + COMP_PAD),
-        relY: MOD_PAD_TOP + Math.floor(i / cols) * (COMP_H + COMP_PAD),
-        x: 0, y: 0, w: COMP_W, h: COMP_H,
-      }));
+      // Layout components by flow_rank/flow_col (set by auto_layout).
+      // Fall back to insertion-order single column if properties missing.
+      const childLayouts: ChildLayout[] = components.map((c, i) => {
+        const cprops = (c.properties || {}) as Record<string, unknown>;
+        const cRank = (cprops.flow_rank as number) ?? i;
+        const cCol  = (cprops.flow_col  as number) ?? 0;
+        return {
+          id: c.id as string, node: c,
+          relX: MOD_PAD + cCol  * (COMP_W + COMP_PAD),
+          relY: MOD_PAD_TOP + cRank * (COMP_H + COMP_PAD),
+          x: 0, y: 0, w: COMP_W, h: COMP_H,
+        };
+      });
+      // Derive module box size from actual component extents
+      const maxRelX = Math.max(...childLayouts.map((cl) => cl.relX + cl.w));
+      const maxRelY = Math.max(...childLayouts.map((cl) => cl.relY + cl.h));
+      const w = maxRelX + MOD_PAD;
+      const h = maxRelY + MOD_PAD;
       moduleLayouts.push({
         id: mod.id, node: mod as unknown as Record<string, unknown>, label, expanded: true,
         w, h, children: childLayouts, color: (moduleColorCache[mod.id] ??= moduleColor(mod.id)),
