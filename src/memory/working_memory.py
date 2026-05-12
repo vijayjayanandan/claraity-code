@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
 
-import tiktoken
+from src.tokenizer import get_encoding
 
 from .models import CodeContext, Message, MessageRole, TaskContext
 
@@ -43,7 +43,7 @@ class WorkingMemory:
             transcript_logger: Optional transcript logger for compaction events
         """
         self.max_tokens = max_tokens
-        self.encoding = tiktoken.get_encoding(encoding_name)
+        self.encoding = get_encoding(encoding_name)
         self.transcript_logger = transcript_logger
 
         # Current context

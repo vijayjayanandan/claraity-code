@@ -23,7 +23,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-import tiktoken
+from src.tokenizer import get_encoding
 
 from src.observability import get_logger
 
@@ -92,7 +92,7 @@ class PrioritizedSummarizer:
                        Signature: (prompt: str) -> str
         """
         self.token_budget = token_budget
-        self.encoding = tiktoken.get_encoding(encoding_name)
+        self.encoding = get_encoding(encoding_name)
         self.llm_caller = llm_caller
 
     def count_tokens(self, text: str) -> int:

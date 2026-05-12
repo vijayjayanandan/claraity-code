@@ -3,7 +3,7 @@
 import re
 from typing import Any, Optional
 
-import tiktoken
+from src.tokenizer import get_encoding
 
 
 class PromptOptimizer:
@@ -19,7 +19,7 @@ class PromptOptimizer:
         Args:
             encoding_name: Tokenizer encoding name
         """
-        self.encoding = tiktoken.get_encoding(encoding_name)
+        self.encoding = get_encoding(encoding_name)
 
     def count_tokens(self, text: str) -> int:
         """Count tokens in text."""
