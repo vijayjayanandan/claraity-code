@@ -6,6 +6,7 @@ messages, assistant messages (with segment-based rendering), tool results,
 and system messages (clarify requests, plan approvals, compaction boundaries).
 """
 
+import re
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -117,6 +118,14 @@ class StoreRenderer:
                 )
             if content.strip().startswith("<task-notification>"):
                 return pre_mounted_user_widget
+
+            # Collapse skill injection blocks into a compact label for display.
+            # The full content is preserved in JSONL for LLM context replay.
+            content = re.sub(
+                r'<skill\s+name="([^"]*)"[^>]*>[\s\S]*?</skill>\s*',
+                r"**Skill: \1**\n\n",
+                content,
+            )
 
             # Adopt pre-mounted widget (mounted immediately on submit)
             if not bulk_load and pre_mounted_user_widget is not None:

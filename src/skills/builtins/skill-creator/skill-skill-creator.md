@@ -138,15 +138,12 @@ determines whether the agent invokes a skill. It appears in the
 Skills can run shell commands during preprocessing to gather dynamic
 context before the LLM sees the skill body.
 
-**Inline syntax:** `!`git status --short``
+**Inline syntax:** An exclamation mark directly followed by a backtick-wrapped
+command (no space between the exclamation mark and the opening backtick).
 
-**Fenced block syntax:**
-````
-```!
-git log --oneline -5
-npm run build
-```
-````
+**Fenced block syntax:** A fenced code block whose opening fence is three
+backticks followed immediately by an exclamation mark. Each line inside
+the block becomes a separate command.
 
 **Key rules:**
 - Shell preprocessing runs BEFORE argument substitution. This means

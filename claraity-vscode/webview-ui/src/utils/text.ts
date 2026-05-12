@@ -34,5 +34,9 @@ export function stripProjectContext(text: string): string {
   return text
     .replace(/<project_context>[\s\S]*?<\/project_context>\s*/g, "")
     .replace(/<attached_files>[\s\S]*?<\/attached_files>\s*/g, "")
+    .replace(
+      /<skill\s+name="([^"]*)"[^>]*>[\s\S]*?<\/skill>\s*/g,
+      "**Skill: $1**\n\n",
+    )
     .trim();
 }
