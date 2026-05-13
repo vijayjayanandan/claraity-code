@@ -3,8 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ClarAIty -- AI Coding Agent for VS Code</title>
-  <meta name="description" content="AI coding agent that brings visual clarity to your codebase and every AI interaction. Built for VS Code.">
+  <title>ClarAIty -- The AI Coding Agent You Can Actually Trust</title>
+  <meta name="description" content="AI coding agent that shows every tool call, every decision, in real time. 8-layer safety system. Works with any LLM. Free and open source VS Code extension.">
+  <meta name="keywords" content="AI coding agent, VS Code extension, code assistant, transparent AI, LLM coding, Copilot alternative, AI code review, codebase intelligence">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -365,6 +366,180 @@
     footer a:hover { color: var(--fg); }
     .footer-links { display: flex; gap: 1.5rem; }
 
+    /* ── Comparison table ── */
+    .comparison {
+      width: 100%;
+      max-width: 800px;
+      margin: 3rem auto 0;
+      border-collapse: collapse;
+      font-size: 0.875rem;
+    }
+    .comparison th {
+      text-align: left;
+      padding: 0.75rem 1rem;
+      font-weight: 700;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--fg-muted);
+      border-bottom: 2px solid var(--border);
+    }
+    .comparison th:last-child { color: #a78bfa; }
+    .comparison td {
+      padding: 0.6rem 1rem;
+      border-bottom: 1px solid var(--border);
+      color: var(--fg-muted);
+    }
+    .comparison td:last-child { color: var(--fg); font-weight: 600; }
+    .comparison tr:hover td { background: rgba(124,58,237,0.05); }
+
+    /* ── Feature showcase (large alternating sections) ── */
+    .showcase { padding: 4rem 2rem; max-width: 1100px; margin: 0 auto; }
+    .showcase-item {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 3rem;
+      align-items: center;
+      margin-bottom: 5rem;
+    }
+    .showcase-item.reverse { direction: rtl; }
+    .showcase-item.reverse > * { direction: ltr; }
+    .showcase-text .section-label { margin-bottom: 0.5rem; }
+    .showcase-text h3 {
+      font-size: 1.5rem;
+      font-weight: 800;
+      margin-bottom: 0.75rem;
+      letter-spacing: -0.01em;
+    }
+    .showcase-text p {
+      color: var(--fg-muted);
+      font-size: 0.95rem;
+      line-height: 1.7;
+      margin-bottom: 1rem;
+    }
+    .showcase-text ul {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+    .showcase-text li {
+      font-size: 0.875rem;
+      color: var(--fg-muted);
+      padding-left: 1.25rem;
+      position: relative;
+    }
+    .showcase-text li::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0.55em;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+    }
+    .showcase-visual {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      min-height: 260px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .showcase-visual img, .showcase-visual video {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+    .gif-placeholder {
+      padding: 2rem;
+      text-align: center;
+      color: var(--fg-muted);
+      font-size: 0.85rem;
+    }
+    .gif-placeholder .placeholder-label {
+      display: inline-block;
+      background: rgba(124,58,237,0.15);
+      border: 1px dashed rgba(124,58,237,0.3);
+      color: #a78bfa;
+      padding: 0.4rem 1rem;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      margin-bottom: 0.75rem;
+    }
+
+    /* ── Safety layers ── */
+    .safety-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 1rem;
+      margin-top: 1.5rem;
+    }
+    .safety-layer {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+    }
+    .safety-layer h4 {
+      font-size: 0.85rem;
+      font-weight: 700;
+      margin-bottom: 0.3rem;
+    }
+    .safety-layer p {
+      font-size: 0.8rem;
+      color: var(--fg-muted);
+      line-height: 1.5;
+    }
+    .safety-layer.critical { border-left: 3px solid #ef4444; }
+    .safety-layer.approval { border-left: 3px solid #f59e0b; }
+    .safety-layer.policy { border-left: 3px solid #a78bfa; }
+    .safety-layer.review { border-left: 3px solid #34d399; }
+
+    /* ── Code block in page ── */
+    .inline-code {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 0.8rem;
+      color: #8b949e;
+      line-height: 1.7;
+      overflow-x: auto;
+      margin-top: 1rem;
+    }
+    .inline-code .comment { color: #6e7681; }
+    .inline-code .file { color: #a78bfa; }
+    .inline-code .tracked { color: #34d399; }
+
+    /* ── GitHub star CTA ── */
+    .star-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--fg);
+      padding: 0.5rem 1.25rem;
+      border-radius: var(--radius);
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.9rem;
+      transition: border-color 0.2s, transform 0.1s;
+    }
+    .star-cta:hover { border-color: #f59e0b; transform: translateY(-1px); }
+    .star-cta svg { fill: #f59e0b; }
+
+    @media (max-width: 768px) {
+      .showcase-item, .showcase-item.reverse { grid-template-columns: 1fr; }
+      .comparison { font-size: 0.8rem; }
+      .comparison th, .comparison td { padding: 0.5rem 0.6rem; }
+    }
     @media (max-width: 640px) {
       .mock-body { grid-template-columns: 1fr; }
       .mock-sidebar { display: none; }
@@ -379,6 +554,7 @@
   <a class="nav-logo" href="#">ClarAIty</a>
   <div class="nav-links">
     <a href="#features">Features</a>
+    <a href="#safety">Safety</a>
     <a href="#how-it-works">How it works</a>
     <a href="https://github.com/vijayjayanandan/claraity-code">GitHub</a>
     <a class="btn-install" href="https://marketplace.visualstudio.com/items?itemName=claraity.claraity-code">Install Free</a>
@@ -387,17 +563,64 @@
 
 <!-- Hero -->
 <div class="hero">
-  <div class="badge">&#10024; Now available on VS Code Marketplace</div>
-  <h1>AI coding agent with<br><span>visual clarity</span></h1>
-  <p>ClarAIty brings a fully transparent AI coding agent directly into VS Code. Watch every tool call, trace every decision, and stay in control at every step.</p>
+  <div class="badge">Free &amp; Open Source &middot; MIT License &middot; Works with any LLM</div>
+  <h1>AI coding agents are black boxes.<br><span>This one isn't.</span></h1>
+  <p>ClarAIty traces every tool call, every file read, every decision &mdash; in real time. Review diffs before they apply. Undo any turn. Use any LLM. Your code, your rules.</p>
   <div class="hero-cta">
     <a class="btn-primary" href="https://marketplace.visualstudio.com/items?itemName=claraity.claraity-code">
-      &#8595; Install for VS Code
+      &#8595; Install for VS Code &mdash; Free
     </a>
     <a class="btn-secondary" href="https://github.com/vijayjayanandan/claraity-code">
       View on GitHub
     </a>
+    <a class="star-cta" href="https://github.com/vijayjayanandan/claraity-code">
+      <svg width="16" height="16" viewBox="0 0 16 16"><path d="M8 .25a.75.75 0 01.673.418l1.882 3.815 4.21.612a.75.75 0 01.416 1.279l-3.046 2.97.719 4.192a.75.75 0 01-1.088.791L8 12.347l-3.766 1.98a.75.75 0 01-1.088-.79l.72-4.194L.818 6.374a.75.75 0 01.416-1.28l4.21-.611L7.327.668A.75.75 0 018 .25z"/></svg>
+      Star on GitHub
+    </a>
   </div>
+
+  <!-- Why ClarAIty comparison -->
+  <table class="comparison">
+    <thead>
+      <tr>
+        <th></th>
+        <th>Other AI Agents</th>
+        <th>ClarAIty</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Visibility</td>
+        <td>See the final result</td>
+        <td>See every step &mdash; reads, searches, edits, commands</td>
+      </tr>
+      <tr>
+        <td>Safety</td>
+        <td>Basic approve/deny</td>
+        <td>8-layer safety pipeline with hard-blocked commands</td>
+      </tr>
+      <tr>
+        <td>Model lock-in</td>
+        <td>One or two providers</td>
+        <td>Any OpenAI-compatible endpoint &mdash; per-subagent model selection</td>
+      </tr>
+      <tr>
+        <td>Codebase understanding</td>
+        <td>File-level context</td>
+        <td>Knowledge graph &mdash; modules, components, dependencies</td>
+      </tr>
+      <tr>
+        <td>Customization</td>
+        <td>Configuration files</td>
+        <td>Custom subagents + skills + MCP &mdash; all git-tracked</td>
+      </tr>
+      <tr>
+        <td>Prompt quality</td>
+        <td>You write the prompt</td>
+        <td>Prompt enrichment &mdash; rewrites vague prompts into precise instructions</td>
+      </tr>
+    </tbody>
+  </table>
 
   <!-- Mock UI -->
   <div class="hero-visual">
@@ -444,57 +667,216 @@
 
 <hr class="divider">
 
-<!-- Features -->
-<section id="features">
-  <div class="section-label">Features</div>
-  <div class="section-title">Everything you need, nothing hidden</div>
-  <p class="section-sub">ClarAIty is built on the principle that you should always know exactly what your AI agent is doing and why.</p>
+<!-- Feature Showcase: Deep Dives -->
+<div class="showcase" id="features">
+
+  <!-- 1. Trace Viewer -->
+  <div class="showcase-item">
+    <div class="showcase-text">
+      <div class="section-label">Real-Time Tracing</div>
+      <h3>See everything the agent does</h3>
+      <p>Every file read, every grep, every command &mdash; displayed as a live trace with animated execution flow. No hidden operations. No surprises.</p>
+      <ul>
+        <li>7-node animated pipeline: User, Agent, LLM, Tools, Gating, Store, Context</li>
+        <li>Click any step to inspect full content and parameters</li>
+        <li>Context assembly breakdown &mdash; see exactly what's sent to the LLM</li>
+        <li>Subagent delegation traced seamlessly</li>
+      </ul>
+    </div>
+    <div class="showcase-visual">
+      <!-- Replace with GIF 1 when recorded: <img src="images/trace-demo.gif" alt="Trace viewer demo"> -->
+      <div class="gif-placeholder">
+        <div class="placeholder-label">Demo GIF coming soon</div>
+        <p>Animated trace viewer showing the agent's pipeline in real time</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. Safety -->
+  <div class="showcase-item reverse" id="safety">
+    <div class="showcase-text">
+      <div class="section-label">Multi-Layer Safety</div>
+      <h3>The agent asks before it acts</h3>
+      <p>An 8-layer safety system protects your code by default. Hard-blocked commands can never execute. Everything else requires your approval.</p>
+      <div class="safety-grid">
+        <div class="safety-layer critical">
+          <h4>Command Hard-Block</h4>
+          <p>Disk destruction, reverse shells, data exfiltration &mdash; permanently blocked</p>
+        </div>
+        <div class="safety-layer approval">
+          <h4>Approval Workflow</h4>
+          <p>Edits, deletes, credential access &mdash; pause for confirmation</p>
+        </div>
+        <div class="safety-layer policy">
+          <h4>.claraityignore</h4>
+          <p>Gitignore-style policy &mdash; blocked files can't be read, searched, or referenced</p>
+        </div>
+        <div class="safety-layer review">
+          <h4>Diff Review + Undo</h4>
+          <p>VS Code diff editor for every change &mdash; accept, reject, or undo any turn</p>
+        </div>
+      </div>
+    </div>
+    <div class="showcase-visual">
+      <!-- Replace with GIF 2 when recorded: <img src="images/safety-demo.gif" alt="Approval flow demo"> -->
+      <div class="gif-placeholder">
+        <div class="placeholder-label">Demo GIF coming soon</div>
+        <p>Approval workflow: agent pauses, user reviews diff, accepts or rejects</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. Codebase Intelligence -->
+  <div class="showcase-item">
+    <div class="showcase-text">
+      <div class="section-label">Codebase Intelligence</div>
+      <h3>It understands your entire codebase</h3>
+      <p>ClarAIty scans your project and builds a knowledge graph &mdash; modules, components, dependencies, architectural decisions. Query it. Visualize it. Track it in git.</p>
+      <ul>
+        <li>Interactive D3.js architecture graph inside VS Code</li>
+        <li>Impact analysis: "what breaks if I change this?"</li>
+        <li>Full-text search across all codebase entities</li>
+        <li>Drift detection &mdash; scopes incremental updates when files change</li>
+        <li>Git-trackable JSONL exports &mdash; architecture docs evolve with your code</li>
+      </ul>
+    </div>
+    <div class="showcase-visual">
+      <!-- Replace with GIF 3 when recorded: <img src="images/knowledge-demo.gif" alt="Knowledge graph demo"> -->
+      <div class="gif-placeholder">
+        <div class="placeholder-label">Demo GIF coming soon</div>
+        <p>Interactive architecture graph with expand, hover, and "Discuss with AI"</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. BYO Model -->
+  <div class="showcase-item reverse">
+    <div class="showcase-text">
+      <div class="section-label">Any LLM, Your Choice</div>
+      <h3>No vendor lock-in</h3>
+      <p>Connect to OpenAI, Anthropic, Ollama (local), DeepSeek, Kimi, Azure, Groq, Together.ai, OpenRouter, or any OpenAI-compatible endpoint. If your provider serves multiple models, assign different ones to different subagents.</p>
+      <ul>
+        <li>Per-subagent model overrides &mdash; powerful model for code review, fast model for exploration</li>
+        <li>Auto-fetched model lists from your provider</li>
+        <li>Switch models mid-session without restarting</li>
+        <li>Your API key, your data &mdash; nothing routes through our servers</li>
+      </ul>
+    </div>
+    <div class="showcase-visual">
+      <div class="gif-placeholder">
+        <div class="placeholder-label">Demo GIF coming soon</div>
+        <p>Settings panel showing multiple LLM providers and model selection</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5. Prompt Enrichment -->
+  <div class="showcase-item">
+    <div class="showcase-text">
+      <div class="section-label">Prompt Enrichment</div>
+      <h3>Vague prompts in, precise instructions out</h3>
+      <p>ClarAIty can rewrite your prompts before they reach the agent. Ambiguous references get resolved, missing context gets filled in, and you review the enriched version before sending.</p>
+      <ul>
+        <li>Side-by-side preview &mdash; see original and enriched prompt, edit before sending</li>
+        <li>Context-aware &mdash; uses recent conversation history to resolve "this", "that", "continue"</li>
+        <li>Configurable model &mdash; use a fast/cheap model for enrichment, powerful model for the agent</li>
+        <li>Custom enrichment prompt &mdash; change how rewriting works via Settings</li>
+        <li>One-click toggle &mdash; sparkle icon to enable/disable per message</li>
+      </ul>
+    </div>
+    <div class="showcase-visual">
+      <div class="gif-placeholder">
+        <div class="placeholder-label">Demo GIF coming soon</div>
+        <p>Vague prompt enriched into precise instructions with side-by-side preview</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 6. Skills & Subagents -->
+  <div class="showcase-item reverse">
+    <div class="showcase-text">
+      <div class="section-label">Extend It Your Way</div>
+      <h3>Custom subagents and skills</h3>
+      <p>8 built-in specialist agents. 7 built-in skills as slash commands. Create your own with a markdown file &mdash; no code changes required.</p>
+      <ul>
+        <li>Code reviewer, test writer, doc writer, planner, knowledge builder, and more</li>
+        <li>Slash commands: /code-review, /safe-refactor, /test-driven-bugfix</li>
+        <li>Mix-and-match models &mdash; main agent on Claude Sonnet, reviewer on GPT-4o, explorer on Qwen (same endpoint)</li>
+        <li>Per-subagent tool restrictions and model overrides</li>
+        <li>MCP integration &mdash; connect databases, APIs, and external tools</li>
+        <li>Run up to 4 subagents in parallel</li>
+      </ul>
+    </div>
+    <div class="showcase-visual">
+      <div class="gif-placeholder">
+        <div class="placeholder-label">Demo GIF coming soon</div>
+        <p>Slash command activating a skill, subagent launching in sidebar</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 7. Git-Trackable Everything -->
+  <div class="showcase-item">
+    <div class="showcase-text">
+      <div class="section-label">Git-Trackable Config</div>
+      <h3>Clone the repo, get the context</h3>
+      <p>Memories, skills, subagents, knowledge, and tasks &mdash; all stored in <code>.claraity/</code> and version-controlled with your code. A new developer's agent already knows the codebase.</p>
+      <div class="inline-code">
+        <span class="file">.claraity/</span><br>
+        &nbsp;&nbsp;<span class="file">memory/</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="tracked"># project memories</span><br>
+        &nbsp;&nbsp;<span class="file">skills/</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="tracked"># custom skills</span><br>
+        &nbsp;&nbsp;<span class="file">agents/</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="tracked"># custom subagents</span><br>
+        &nbsp;&nbsp;<span class="file">plans/</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="tracked"># implementation plans</span><br>
+        &nbsp;&nbsp;<span class="file">claraity_knowledge.jsonl</span> <span class="tracked"># codebase knowledge</span><br>
+        &nbsp;&nbsp;<span class="file">claraity_beads.jsonl</span> &nbsp;&nbsp;&nbsp;<span class="tracked"># task records</span>
+      </div>
+    </div>
+    <div class="showcase-visual">
+      <div class="gif-placeholder">
+        <div class="placeholder-label">All git-tracked</div>
+        <p>Architecture decisions, team workflows, and task backlogs travel with your repository</p>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Quick feature grid (secondary features) -->
+<section>
+  <div class="section-label">And More</div>
+  <div class="section-title">30+ built-in tools, deep VS Code integration</div>
+  <p class="section-sub">Parallel tool execution, intelligent error recovery, session persistence, and tight editor integration.</p>
 
   <div class="features-grid">
     <div class="feature-card">
-      <div class="feature-icon" style="background:rgba(124,58,237,0.15);">&#128269;</div>
-      <h3>Full Tool Transparency</h3>
-      <p>Every file read, every grep, every command -- displayed in real time as a live trace. No black box decisions.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon" style="background:rgba(59,130,246,0.15);">&#129302;</div>
-      <h3>Subagent Delegation</h3>
-      <p>Delegate focused tasks to specialized subagents -- code reviewer, test writer, doc writer -- each with their own isolated context.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon" style="background:rgba(52,211,153,0.15);">&#9889;</div>
-      <h3>Approval Workflow</h3>
-      <p>Destructive or sensitive operations pause for your approval. Auto-approve categories you trust, review the rest.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon" style="background:rgba(251,191,36,0.15);">&#128196;</div>
+      <div class="feature-icon" style="background:rgba(124,58,237,0.15);">&#128196;</div>
       <h3>Session History</h3>
-      <p>Every conversation is persisted. Resume any past session, replay tool traces, and pick up exactly where you left off.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon" style="background:rgba(239,68,68,0.15);">&#8617;</div>
-      <h3>Undo Any Turn</h3>
-      <p>Made a mistake? Undo the last agent turn -- file changes are snapshotted before every edit, so recovery is instant.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon" style="background:rgba(124,58,237,0.15);">&#128279;</div>
-      <h3>MCP Integration</h3>
-      <p>Connect any Model Context Protocol server to extend the agent with custom tools, APIs, and data sources.</p>
+      <p>Every conversation persisted to JSONL. Browse and resume any past session. Pick up exactly where you left off.</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon" style="background:rgba(59,130,246,0.15);">&#128218;</div>
-      <h3>Knowledge Base</h3>
-      <p>Build a persistent knowledge graph of your codebase. Architecture, decisions, and invariants survive across sessions.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon" style="background:rgba(52,211,153,0.15);">&#127775;</div>
       <h3>Task Tracker</h3>
-      <p>Built-in beads task system. Create, prioritize, and track work items without leaving the agent chat.</p>
+      <p>Built-in Beads task system. Hierarchical tasks, dependency graph, priority levels, and git-trackable exports.</p>
     </div>
     <div class="feature-card">
-      <div class="feature-icon" style="background:rgba(251,191,36,0.15);">&#128736;</div>
-      <h3>Bring Your Own Model</h3>
-      <p>Works with OpenAI, Anthropic, and any OpenAI-compatible endpoint. Configure model per session or per subagent.</p>
+      <div class="feature-icon" style="background:rgba(52,211,153,0.15);">&#128279;</div>
+      <h3>MCP Marketplace</h3>
+      <p>Browse and install MCP servers. Per-tool toggles, project or global scope, auto-reconnect on startup.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon" style="background:rgba(251,191,36,0.15);">&#128187;</div>
+      <h3>Deep VS Code Integration</h3>
+      <p>CodeLens buttons, file decorations, diff editor, context menu, @file mentions, image paste, cost tracking.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon" style="background:rgba(239,68,68,0.15);">&#128202;</div>
+      <h3>Intelligent Compaction</h3>
+      <p>When approaching context limits, the agent summarizes with priorities: user messages, code, errors, then decisions.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon" style="background:rgba(124,58,237,0.15);">&#128203;</div>
+      <h3>Persistent Memory</h3>
+      <p>Markdown memory files with YAML frontmatter. Project-level and user-level. Loaded every session, git-tracked.</p>
     </div>
   </div>
 </section>
@@ -511,7 +893,7 @@
     <div class="step">
       <div class="step-num">1</div>
       <h3>Install the extension</h3>
-      <p>One click from the VS Code Marketplace. The agent backend installs automatically via pip.</p>
+      <p>One click from the VS Code Marketplace. The agent binary is bundled &mdash; no Python installation required.</p>
     </div>
     <div class="step">
       <div class="step-num">2</div>
@@ -533,14 +915,18 @@
 
 <!-- CTA Band -->
 <div class="cta-band">
-  <h2>Ready to code with clarity?</h2>
-  <p>Free to install. Works with your existing API keys.</p>
+  <h2>Start building with clarity</h2>
+  <p>Free and open source. Install in 30 seconds. Works with any LLM.</p>
   <div style="display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;">
     <a class="btn-primary" href="https://marketplace.visualstudio.com/items?itemName=claraity.claraity-code">
-      Install for VS Code -- Free
+      Install for VS Code &mdash; Free
     </a>
     <a class="btn-secondary" href="https://github.com/vijayjayanandan/claraity-code">
       View source on GitHub
+    </a>
+    <a class="star-cta" href="https://github.com/vijayjayanandan/claraity-code">
+      <svg width="16" height="16" viewBox="0 0 16 16"><path d="M8 .25a.75.75 0 01.673.418l1.882 3.815 4.21.612a.75.75 0 01.416 1.279l-3.046 2.97.719 4.192a.75.75 0 01-1.088.791L8 12.347l-3.766 1.98a.75.75 0 01-1.088-.79l.72-4.194L.818 6.374a.75.75 0 01.416-1.28l4.21-.611L7.327.668A.75.75 0 018 .25z"/></svg>
+      Star on GitHub
     </a>
   </div>
 </div>
@@ -553,7 +939,7 @@
     <a href="https://github.com/vijayjayanandan/claraity-code">GitHub</a>
     <a href="https://github.com/vijayjayanandan/claraity-code/issues">Support</a>
   </div>
-  <div>MIT License &nbsp;&middot;&nbsp; &copy; 2025 ClarAIty</div>
+  <div>MIT License &nbsp;&middot;&nbsp; &copy; 2025&ndash;2026 ClarAIty</div>
 </footer>
 
 </body>

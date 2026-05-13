@@ -8,3 +8,4 @@
 - [Director mode session 2026-04-26](director-mode-session-2026-04-26.md) -- full feature built; 2 bugs still pending (CSS missing, /director routing); parallel session clobbering lesson; director deadlock bug documented
 - [No session redaction](no-session-redaction.md) -- secret redaction removed from writer.py; file permissions are the security boundary; do not re-add
 - [Multi-root workspace](multi-root-workspace.md) -- multi-folder workspace + outside-workspace approval gate; `_workspace_roots: list[Path]`; gating handles security upstream
+- [Skill system](skill-system.md) -- full skill architecture: directory-based, dual-directory SkillLoader, built-in skill-creator toolkit, preprocessing, slash commands, VS Code integration
