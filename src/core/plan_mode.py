@@ -64,16 +64,10 @@ READ_ONLY_TOOLS = frozenset(
         "web_fetch",
         "web_search",
         # Task/todo tools (read-only queries)
-        "get_todos",
-        "get_next_task",
-        # Architecture query tools (read-only)
-        "query_component",
-        "query_dependencies",
-        "query_decisions",
-        "query_flows",
-        "query_architecture_summary",
-        "search_components",
-        "get_implementation_spec",
+        "task_list",
+        "task_show",
+        # Knowledge DB (read-only query)
+        "knowledge_query",
         # Git read-only
         "git_status",
         "git_diff",
