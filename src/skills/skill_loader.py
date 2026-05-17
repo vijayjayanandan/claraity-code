@@ -134,7 +134,7 @@ def substitute_arguments(body: str, args_string: str, argument_names: list[str])
     # Positional: $0, $1, $2, etc. — replace via regex to avoid $1 colliding with $10
     import re as _re
 
-    def _replace_positional(match: "_re.Match[str]") -> str:
+    def _replace_positional(match: _re.Match[str]) -> str:
         idx = int(match.group(1))
         return parts[idx] if idx < len(parts) else match.group(0)
 

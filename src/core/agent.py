@@ -2097,7 +2097,7 @@ class CodingAgent(AgentInterface):
                                         if _todo_state.get("todos")
                                         else None,
                                         plan_mode_state=self.plan_mode_state,
-                        
+
                                         iteration=iteration,
                                     )
                             except Exception as compact_err:

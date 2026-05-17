@@ -56,6 +56,7 @@ class TestSerializeEvent:
             "type": "stream_end",
             "total_tokens": 100,
             "duration_ms": 500,
+            "interrupted": False,
         }
 
     def test_stream_end_none_fields(self):

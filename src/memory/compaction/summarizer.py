@@ -23,9 +23,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from src.tokenizer import get_encoding
-
 from src.observability import get_logger
+from src.tokenizer import get_encoding
 
 logger = get_logger(__name__)
 

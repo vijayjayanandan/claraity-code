@@ -1089,7 +1089,7 @@ class ClaraityStore:
                 mod_components[e["from_id"]].append(e["to_id"])
 
         comp_updated = 0
-        for mod_id, comp_ids in mod_components.items():
+        for _mod_id, comp_ids in mod_components.items():
             if len(comp_ids) <= 1:
                 # Single component: trivial position
                 if comp_ids:
@@ -1122,27 +1122,31 @@ class ClaraityStore:
             c_on_stack: set[str] = set()
             c_sccs: list[list[str]] = []
 
-            def c_strongconnect(v: str):
-                c_index[v] = c_index_counter[0]
-                c_lowlink[v] = c_index_counter[0]
-                c_index_counter[0] += 1
-                c_stack.append(v)
-                c_on_stack.add(v)
-                for w in cgraph.get(v, set()):
-                    if w not in c_index:
+            def c_strongconnect(  # noqa: B023 — Tarjan's SCC uses shared closure state
+                v: str,
+                _idx=c_index_counter, _stk=c_stack, _low=c_lowlink,
+                _ix=c_index, _on=c_on_stack, _gr=cgraph, _sccs=c_sccs,
+            ):
+                _ix[v] = _idx[0]
+                _low[v] = _idx[0]
+                _idx[0] += 1
+                _stk.append(v)
+                _on.add(v)
+                for w in _gr.get(v, set()):
+                    if w not in _ix:
                         c_strongconnect(w)
-                        c_lowlink[v] = min(c_lowlink[v], c_lowlink[w])
-                    elif w in c_on_stack:
-                        c_lowlink[v] = min(c_lowlink[v], c_index[w])
-                if c_lowlink[v] == c_index[v]:
+                        _low[v] = min(_low[v], _low[w])
+                    elif w in _on:
+                        _low[v] = min(_low[v], _ix[w])
+                if _low[v] == _ix[v]:
                     scc = []
                     while True:
-                        w = c_stack.pop()
-                        c_on_stack.discard(w)
+                        w = _stk.pop()
+                        _on.discard(w)
                         scc.append(w)
                         if w == v:
                             break
-                    c_sccs.append(scc)
+                    _sccs.append(scc)
 
             for v in comp_ids:
                 if v not in c_index:

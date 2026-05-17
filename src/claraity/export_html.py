@@ -10,12 +10,11 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import html as html_lib
 import json
 import math
-import html as html_lib
 from collections import defaultdict
 from pathlib import Path
-
 
 # ---------------------------------------------------------------------------
 # JSONL loader
