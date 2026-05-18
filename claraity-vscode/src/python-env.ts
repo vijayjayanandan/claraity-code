@@ -24,7 +24,7 @@ export interface LaunchConfig {
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
-export const MIN_AGENT_VERSION = '1.1.1';
+export const MIN_AGENT_VERSION = '1.1.2';
 export const PYPI_PACKAGE = 'claraity-code';
 
 // ── Main Orchestrator ──────────────────────────────────────────────────────
