@@ -99,8 +99,9 @@ def get_config_response(config_path: str, working_directory: str = "") -> dict:
 
     config_dict["subagent_models"] = subagent_models
 
-    # Web search provider
+    # Web search
     config_dict["web_search_provider"] = cfg.web_search_provider
+    config_dict["web_search_budget"] = cfg.web_search_budget
 
     # Prompt enrichment config
     from src.prompts.enrichment import ENRICHMENT_SYSTEM_PROMPT
@@ -148,10 +149,13 @@ def save_config_from_request(data: dict, config_path: str) -> dict:
                 if model_str and str(model_str).strip():
                     cfg.subagents[str(name)] = SubAgentLLMOverride(model=str(model_str).strip())
 
-        # Web search provider
+        # Web search provider and budget
         ws_provider = str(raw.get("web_search_provider", "tavily")).strip()
         if ws_provider in ("tavily", "brave"):
             cfg.web_search_provider = ws_provider
+        ws_budget = raw.get("web_search_budget")
+        if ws_budget is not None:
+            cfg.web_search_budget = max(1, _int_or(ws_budget, cfg.web_search_budget))
 
         # Prompt enrichment overrides
         from src.llm.config_loader import PromptEnrichmentConfig

@@ -38,6 +38,7 @@ interface ConfigSnapshot {
   contextWindow: number;
   thinkingBudget: string;
   searchProvider: string;
+  webSearchBudget: string;
   hasSearchKey: boolean;
   subagentModels: Record<string, string>;
   enrichmentModel: string;
@@ -55,6 +56,7 @@ function snapshotEqual(a: ConfigSnapshot, b: ConfigSnapshot): boolean {
     a.contextWindow !== b.contextWindow ||
     a.thinkingBudget !== b.thinkingBudget ||
     a.searchProvider !== b.searchProvider ||
+    a.webSearchBudget !== b.webSearchBudget ||
     a.enrichmentModel !== b.enrichmentModel ||
     a.enrichmentSystemPrompt !== b.enrichmentSystemPrompt
   ) return false;
@@ -82,6 +84,7 @@ function parseSnapshot(cfg: Record<string, unknown>): ConfigSnapshot {
     contextWindow: cfg.context_window != null ? Number(cfg.context_window) : 131072,
     thinkingBudget: cfg.thinking_budget != null ? String(cfg.thinking_budget) : "",
     searchProvider: typeof cfg.web_search_provider === "string" ? cfg.web_search_provider : "tavily",
+    webSearchBudget: cfg.web_search_budget != null ? String(cfg.web_search_budget) : "3",
     hasSearchKey: !!cfg.has_search_key,
     subagentModels: (cfg.subagent_models != null && typeof cfg.subagent_models === "object")
       ? { ...(cfg.subagent_models as Record<string, string>) }
@@ -123,6 +126,7 @@ export function ConfigPanel({
   const [contextWindow, setContextWindow] = useState(131072);
   const [thinkingBudget, setThinkingBudget] = useState("");
   const [searchProvider, setSearchProvider] = useState("tavily");
+  const [webSearchBudget, setWebSearchBudget] = useState("3");
   const [searchKey, setSearchKey] = useState("");
   const [hasSearchKey, setHasSearchKey] = useState(false);
   const [subagentModels, setSubagentModels] = useState<Record<string, string>>({});
@@ -189,6 +193,7 @@ export function ConfigPanel({
     setContextWindow(snap.contextWindow);
     setThinkingBudget(snap.thinkingBudget);
     setSearchProvider(snap.searchProvider);
+    setWebSearchBudget(snap.webSearchBudget);
     setHasSearchKey(snap.hasSearchKey);
     setSearchKey(snap.hasSearchKey ? KEY_STORED_SENTINEL : "");
     setSubagentModels({ ...snap.subagentModels });
@@ -230,12 +235,13 @@ export function ConfigPanel({
     contextWindow,
     thinkingBudget,
     searchProvider,
+    webSearchBudget,
     hasSearchKey,
     subagentModels,
     enrichmentModel,
     enrichmentSystemPrompt,
     enrichmentDefaultPrompt,
-  }), [backend, baseUrl, hasApiKey, model, temperature, maxTokens, contextWindow, thinkingBudget, searchProvider, hasSearchKey, subagentModels, enrichmentModel, enrichmentSystemPrompt, enrichmentDefaultPrompt]);
+  }), [backend, baseUrl, hasApiKey, model, temperature, maxTokens, contextWindow, thinkingBudget, searchProvider, webSearchBudget, hasSearchKey, subagentModels, enrichmentModel, enrichmentSystemPrompt, enrichmentDefaultPrompt]);
 
   const isDirty = useMemo(() => {
     if (!savedSnapshot.current) return false;
@@ -367,6 +373,7 @@ export function ConfigPanel({
       context_window: snap.contextWindow || null,
       thinking_budget: snap.thinkingBudget || null,
       web_search_provider: snap.searchProvider,
+      web_search_budget: snap.webSearchBudget ? parseInt(snap.webSearchBudget, 10) || 3 : 3,
       subagent_models: snap.subagentModels,
     };
     if (apiKey && apiKey !== KEY_STORED_SENTINEL) { payload.api_key = apiKey; }
@@ -575,6 +582,18 @@ export function ConfigPanel({
                   <select className="form-input" value={searchProvider} onChange={(e) => setSearchProvider(e.target.value)}>
                     <option value="tavily">Tavily</option>
                   </select>
+                </Field>
+              </div>
+              <div style={{ flex: "0 0 80px" }}>
+                <Field label="Budget / turn">
+                  <input
+                    className="form-input"
+                    type="number"
+                    min={1}
+                    value={webSearchBudget}
+                    onChange={(e) => setWebSearchBudget(e.target.value)}
+                    placeholder="3"
+                  />
                 </Field>
               </div>
               <div style={{ flex: 1 }}>

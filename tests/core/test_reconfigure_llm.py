@@ -56,6 +56,11 @@ def mock_agent():
     # Mock subagent manager
     agent.subagent_manager = MagicMock()
 
+    # Mock web tools and budget
+    agent._web_search_budget = 3
+    agent._web_search_tool = MagicMock()
+    agent._web_fetch_tool = MagicMock()
+
     return agent
 
 
@@ -193,7 +198,7 @@ class TestReconfigureLlm:
         mock_agent.reconfigure_llm(config)
 
         mock_agent.subagent_manager.config_loader.apply_llm_overrides.assert_called_once_with(
-            config
+            config, force=True
         )
 
     @patch("src.core.agent.OpenAIBackend")

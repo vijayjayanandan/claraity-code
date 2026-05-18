@@ -560,21 +560,22 @@ class SubAgentConfigLoader:
         self.loaded_configs.clear()
         return self.discover_all()
 
-    def apply_llm_overrides(self, llm_config: "LLMConfigData") -> None:
+    def apply_llm_overrides(self, llm_config: "LLMConfigData", force: bool = False) -> None:
         """Apply config.yaml subagent LLM overrides to loaded SubAgentConfigs.
 
         Only applies if the SubAgentConfig doesn't already have llm set
-        (i.e., .md file overrides beat config.yaml).
+        (i.e., .md file overrides beat config.yaml), unless force=True.
 
         Priority: .md file ``llm:`` > config.yaml ``subagents:`` > inherit from main agent
 
         Args:
             llm_config: Resolved LLM configuration (with subagents dict)
+            force: If True, overwrite existing overrides (used for live config refresh)
         """
         import os as _os
 
         for name, override in llm_config.subagents.items():
-            if name in self.loaded_configs and self.loaded_configs[name].llm is None:
+            if name in self.loaded_configs and (force or self.loaded_configs[name].llm is None):
                 # Build SubAgentLLMConfig from the config.yaml override
                 self.loaded_configs[name].llm = SubAgentLLMConfig(
                     backend_type=override.backend_type,

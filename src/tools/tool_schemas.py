@@ -613,12 +613,7 @@ CLARIFY_TOOL = ToolDefinition(
 
 CHECK_BACKGROUND_TASK_TOOL = ToolDefinition(
     name="check_background_task",
-    description=(
-        "Check status or get full output of a background task. "
-        "Returns status, exit code, stdout, and stderr. "
-        "You will be automatically notified when background tasks complete, "
-        "then use this tool to retrieve the full output."
-    ),
+    description="Get status and output of a background task. Only call when the user explicitly asks.",
     parameters={
         "type": "object",
         "properties": {

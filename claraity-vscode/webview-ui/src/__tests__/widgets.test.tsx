@@ -179,14 +179,14 @@ describe("ToolCard", () => {
     expect(container.querySelector(".tool-duration")).not.toBeInTheDocument();
   });
 
-  test("does not render arguments for delegate_to_subagent", () => {
+  test("renders task summary for delegate_to_subagent", () => {
     renderToolCard({
       tool_name: "delegate_to_subagent",
       arguments: { task: "research something" },
     });
 
-    // delegate_to_subagent explicitly skips primaryArg
-    expect(screen.queryByText("research something")).not.toBeInTheDocument();
+    // delegate_to_subagent shows the task in a tool-summary for user review
+    expect(screen.getByText("research something")).toBeInTheDocument();
   });
 
   test("Reject with empty feedback sends undefined feedback", async () => {

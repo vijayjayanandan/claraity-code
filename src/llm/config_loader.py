@@ -125,6 +125,7 @@ class LLMConfigData:
     auto_approve: AutoApproveConfig = field(default_factory=AutoApproveConfig)
     prompt_enrichment: PromptEnrichmentConfig = field(default_factory=PromptEnrichmentConfig)
     web_search_provider: str = "tavily"
+    web_search_budget: int = 3
 
 
 # =============================================================================
@@ -297,12 +298,19 @@ def load_llm_config(config_path: str = DEFAULT_CONFIG_PATH) -> LLMConfigData:
         if "system_prompt" in pe_data and pe_data["system_prompt"]:
             pe.system_prompt = str(pe_data["system_prompt"])
 
-    # -- Web search provider (top-level `web_search:` section) --
+    # -- Web search provider and budget (top-level `web_search:` section) --
     ws_data = data.get("web_search")
     if isinstance(ws_data, dict):
         provider = ws_data.get("provider", "")
         if provider in ("tavily", "brave"):
             config.web_search_provider = str(provider)
+        if "budget" in ws_data:
+            try:
+                val = int(ws_data["budget"])
+                if val >= 1:
+                    config.web_search_budget = val
+            except (TypeError, ValueError):
+                _safe_stderr("Invalid value for web_search.budget, ignoring")
 
     # Populate api_key from credential store (runtime only, never saved to YAML)
     try:
@@ -431,6 +439,7 @@ def save_llm_config(
     # Build web_search section (top-level)
     existing_data["web_search"] = {
         "provider": config.web_search_provider,
+        "budget": config.web_search_budget,
     }
 
     # Write back

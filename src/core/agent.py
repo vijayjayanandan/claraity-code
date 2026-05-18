@@ -301,6 +301,7 @@ class CodingAgent(AgentInterface):
         permission_mode: str = "normal",
         hook_manager: Optional["HookManager"] = None,
         limits: "LimitsConfig | None" = None,
+        web_search_budget: int = 3,
     ):
         """
         Initialize coding agent.
@@ -332,6 +333,7 @@ class CodingAgent(AgentInterface):
         from src.llm.config_loader import LimitsConfig
 
         self._limits = limits if limits is not None else LimitsConfig()
+        self._web_search_budget = web_search_budget
 
         # Initialize LLM backend
         # Read from .env if not provided
@@ -585,6 +587,7 @@ class CodingAgent(AgentInterface):
             permission_mode=permission_mode,
             hook_manager=hook_manager,
             limits=config.limits,
+            web_search_budget=config.web_search_budget,
         )
 
         # 3. Generate session ID if not provided
@@ -686,9 +689,17 @@ class CodingAgent(AgentInterface):
             self.memory.working_memory.max_tokens = int(config.context_window * 0.4)
             self.context_builder.max_context_tokens = config.context_window
 
-        # Apply subagent overrides
-        if config.subagents and hasattr(self, "subagent_manager"):
-            self.subagent_manager.config_loader.apply_llm_overrides(config)
+        # Apply subagent overrides (force=True so existing overrides are replaced)
+        if hasattr(self, "subagent_manager"):
+            self.subagent_manager.config_loader.apply_llm_overrides(config, force=True)
+            self.subagent_manager.subagent_instances.clear()
+
+        # Refresh web search budget
+        from src.tools.web_tools import RunBudget
+        self._web_search_budget = config.web_search_budget
+        self._web_run_budget = RunBudget(max_searches=self._web_search_budget, max_fetches=5)
+        self._web_search_tool.set_run_budget(self._web_run_budget)
+        self._web_fetch_tool.set_run_budget(self._web_run_budget)
 
         # Build change summary
         changes = []
@@ -873,7 +884,7 @@ class CodingAgent(AgentInterface):
         # Web tools (search and fetch)
         from src.tools.web_tools import RunBudget, WebFetchTool, WebSearchTool
 
-        self._web_run_budget = RunBudget(max_searches=3, max_fetches=5)
+        self._web_run_budget = RunBudget(max_searches=self._web_search_budget, max_fetches=5)
         self._web_search_tool = WebSearchTool()
         self._web_fetch_tool = WebFetchTool()
         self._web_search_tool.set_run_budget(self._web_run_budget)
@@ -3418,11 +3429,14 @@ class CodingAgent(AgentInterface):
                     include_in_llm_context=False,
                 )
 
+            framed_content = _frame_tool_result(content_for_store, tc.function.name)
+            if tc.function.name == "check_background_task":
+                framed_content += "\n\n[STOP] Do not call check_background_task again. Wait for the user to ask."
             outcome["tool_msg"] = {
                 "role": "tool",
                 "tool_call_id": call_id,
                 "name": tc.function.name,
-                "content": _frame_tool_result(content_for_store, tc.function.name),
+                "content": framed_content,
             }
             # Flags for deferred side effects
             outcome["_tool_name"] = tc.function.name
