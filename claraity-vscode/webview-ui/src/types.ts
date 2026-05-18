@@ -149,7 +149,7 @@ export type WebViewMessage =
   | { type: "getSkills" }
   | { type: "createSkill"; name: string; description: string; category: string; tags: string[]; body: string }
   // Prompt Enrichment
-  | { type: "enrichPrompt"; content: string; history?: Array<{ role: string; content: string }> }
+  | { type: "enrichPrompt"; content: string }
   // Background tasks
   | { type: "cancelBackgroundTask"; taskId: string }
   // Turn deletion (context cleanup)

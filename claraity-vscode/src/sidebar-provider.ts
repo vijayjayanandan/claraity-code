@@ -456,7 +456,7 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                 break;
 
             case 'enrichPrompt':
-                this.connection?.send({ type: 'enrich_prompt', content: msg.content, history: msg.history } as ClientMessage);
+                this.connection?.send({ type: 'enrich_prompt', content: msg.content } as ClientMessage);
                 break;
 
             case 'cancelBackgroundTask':

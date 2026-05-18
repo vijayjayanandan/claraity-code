@@ -2460,7 +2460,7 @@ class StdioProtocol(UIProtocol):
             model_name=pe.model,
             base_url=cfg.base_url,
             temperature=0.2,
-            max_tokens=200,
+            max_tokens=cfg.max_tokens,
             top_p=0.95,
             context_window=8192,
         )
@@ -2489,32 +2489,13 @@ class StdioProtocol(UIProtocol):
 
             system_prompt = pe.system_prompt or ENRICHMENT_SYSTEM_PROMPT
 
-            # Build conversation history context from the last few chat turns.
-            # Each entry is {"role": "user"|"assistant", "content": str}.
-            raw_history = data.get("history") or []
-            history_text = ""
-            if raw_history and isinstance(raw_history, list):
-                lines = []
-                for entry in raw_history:
-                    if not isinstance(entry, dict):
-                        continue
-                    role = str(entry.get("role", "")).strip()
-                    text = str(entry.get("content", "")).strip()
-                    if role in ("user", "assistant") and text:
-                        label = "User" if role == "user" else "Assistant"
-                        lines.append(f"{label}: {text}")
-                if lines:
-                    history_text = "Recent conversation:\n" + "\n".join(lines) + "\n\n"
-
-            user_message = f'{history_text}"{content}"'
-
             messages = [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
+                {"role": "user", "content": content},
             ]
 
             accumulated = []
-            async for delta in backend.generate_provider_deltas_async(messages, max_tokens=200):
+            async for delta in backend.generate_provider_deltas_async(messages):
                 if delta.text_delta:
                     accumulated.append(delta.text_delta)
                     await self._send_json({"type": "enrichment_delta", "delta": delta.text_delta})

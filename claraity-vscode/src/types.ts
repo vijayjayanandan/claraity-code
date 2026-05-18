@@ -212,7 +212,7 @@ export type ClientMessage =
     | { type: 'get_limits' }
     | { type: 'save_limits'; limits: import('../shared/protocol').LimitsData }
     // Prompt Enrichment
-    | { type: 'enrich_prompt'; content: string; history?: Array<{ role: string; content: string }> }
+    | { type: 'enrich_prompt'; content: string }
     // Trace
     | { type: 'get_trace_enabled' }
     | { type: 'set_trace_enabled'; enabled: boolean }

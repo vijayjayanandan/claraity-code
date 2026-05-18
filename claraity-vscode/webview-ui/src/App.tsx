@@ -466,13 +466,7 @@ export function App() {
         onToggleEnrichment={(enabled) => dispatch({ type: "SET_ENRICHMENT_ENABLED", enabled })}
         onRequestEnrichment={(content) => {
           dispatch({ type: "SET_ENRICHMENT_LOADING", loading: true });
-          // Send the last 6 finalized user/assistant messages as context so the
-          // enrichment LLM understands what the conversation is already about.
-          const history = state.messages
-            .filter((m) => m.finalized && (m.role === "user" || m.role === "assistant"))
-            .slice(-6)
-            .map((m) => ({ role: m.role, content: m.content }));
-          postMessage({ type: "enrichPrompt", content, history: history.length > 0 ? history : undefined });
+          postMessage({ type: "enrichPrompt", content });
         }}
         onClearEnrichment={() => dispatch({ type: "CLEAR_ENRICHED_PREVIEW" })}
         draft={state.chatDraft}

@@ -860,8 +860,8 @@ class TestHandleEnrichPrompt:
             "Blocking generate() was called — should use streaming instead"
         )
 
-    def test_user_message_contains_request_in_quotes(self):
-        """User message must wrap the request in quotes for clear delineation."""
+    def test_user_message_contains_request_directly(self):
+        """User message passes content directly without wrapping."""
         protocol = _make_protocol_for_enrich()
 
         with patch("src.llm.config_loader.load_llm_config") as mock_cfg:
@@ -873,7 +873,7 @@ class TestHandleEnrichPrompt:
         messages = call_args[0][0]
         assert messages[0]["role"] == "system"
         assert messages[1]["role"] == "user"
-        assert '"add tests"' in messages[1]["content"]
+        assert messages[1]["content"] == "add tests"
 
     def test_custom_system_prompt_from_config_is_used(self):
         """If prompt_enrichment.system_prompt is set in config, it replaces the built-in default."""
@@ -937,55 +937,8 @@ class TestHandleEnrichPrompt:
         assert msg["type"] == "enrichment_error"
         assert "LLM unavailable" in msg["message"]
 
-    def test_history_included_in_user_message(self):
-        """Chat history entries are prepended to the user message sent to the LLM."""
-        protocol = _make_protocol_for_enrich()
-        history = [
-            {"role": "user", "content": "I'm working on the auth module"},
-            {"role": "assistant", "content": "I can help with that."},
-        ]
-
-        with patch("src.llm.config_loader.load_llm_config") as mock_cfg:
-            from src.llm.config_loader import LLMConfigData
-            mock_cfg.return_value = LLMConfigData()
-            _run(protocol._handle_enrich_prompt({
-                "type": "enrich_prompt",
-                "content": "fix the login bug",
-                "history": history,
-            }))
-
-        call_args = protocol._agent.llm.generate_provider_deltas_async.call_args
-        user_content = call_args[0][0][1]["content"]
-        assert "I'm working on the auth module" in user_content
-        assert "I can help with that." in user_content
-        assert '"fix the login bug"' in user_content
-        # History must appear before the request
-        assert user_content.index("auth module") < user_content.index("fix the login bug")
-
-    def test_history_labels_roles_correctly(self):
-        """User turns are labelled 'User:' and assistant turns 'Assistant:'."""
-        protocol = _make_protocol_for_enrich()
-        history = [
-            {"role": "user", "content": "hello"},
-            {"role": "assistant", "content": "hi there"},
-        ]
-
-        with patch("src.llm.config_loader.load_llm_config") as mock_cfg:
-            from src.llm.config_loader import LLMConfigData
-            mock_cfg.return_value = LLMConfigData()
-            _run(protocol._handle_enrich_prompt({
-                "type": "enrich_prompt",
-                "content": "do something",
-                "history": history,
-            }))
-
-        call_args = protocol._agent.llm.generate_provider_deltas_async.call_args
-        user_content = call_args[0][0][1]["content"]
-        assert "User: hello" in user_content
-        assert "Assistant: hi there" in user_content
-
-    def test_no_history_sends_request_only(self):
-        """When history is absent the user message contains only the request."""
+    def test_user_content_passed_directly(self):
+        """User content is passed directly to the LLM without history or wrapping."""
         protocol = _make_protocol_for_enrich()
 
         with patch("src.llm.config_loader.load_llm_config") as mock_cfg:
@@ -998,11 +951,10 @@ class TestHandleEnrichPrompt:
 
         call_args = protocol._agent.llm.generate_provider_deltas_async.call_args
         user_content = call_args[0][0][1]["content"]
-        assert "Recent conversation" not in user_content
-        assert '"add tests"' in user_content
+        assert user_content == "add tests"
 
-    def test_empty_history_list_ignored(self):
-        """An empty history list produces the same output as no history."""
+    def test_history_field_ignored(self):
+        """History field in request is ignored -- only content is sent to LLM."""
         protocol = _make_protocol_for_enrich()
 
         with patch("src.llm.config_loader.load_llm_config") as mock_cfg:
@@ -1010,37 +962,17 @@ class TestHandleEnrichPrompt:
             mock_cfg.return_value = LLMConfigData()
             _run(protocol._handle_enrich_prompt({
                 "type": "enrich_prompt",
-                "content": "do it",
-                "history": [],
+                "content": "fix the bug",
+                "history": [
+                    {"role": "user", "content": "I'm working on auth"},
+                    {"role": "assistant", "content": "I can help"},
+                ],
             }))
 
         call_args = protocol._agent.llm.generate_provider_deltas_async.call_args
         user_content = call_args[0][0][1]["content"]
-        assert "Recent conversation" not in user_content
-
-    def test_invalid_history_entries_skipped(self):
-        """Non-dict entries and unknown roles in history are silently ignored."""
-        protocol = _make_protocol_for_enrich()
-        history = [
-            "not a dict",
-            {"role": "system", "content": "should be ignored"},
-            {"role": "user", "content": "valid entry"},
-            {"role": "assistant"},  # missing content
-        ]
-
-        with patch("src.llm.config_loader.load_llm_config") as mock_cfg:
-            from src.llm.config_loader import LLMConfigData
-            mock_cfg.return_value = LLMConfigData()
-            _run(protocol._handle_enrich_prompt({
-                "type": "enrich_prompt",
-                "content": "go",
-                "history": history,
-            }))
-
-        call_args = protocol._agent.llm.generate_provider_deltas_async.call_args
-        user_content = call_args[0][0][1]["content"]
-        assert "should be ignored" not in user_content
-        assert "User: valid entry" in user_content
+        assert user_content == "fix the bug"
+        assert "auth" not in user_content
 
     def test_enrich_prompt_registered_in_handlers(self):
         """enrich_prompt must be in the _HANDLERS dispatch table."""
