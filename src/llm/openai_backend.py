@@ -12,6 +12,7 @@ Works with any OpenAI-compatible API including:
 import json
 import logging
 import os
+import re
 import time
 import traceback
 from collections.abc import AsyncIterator, Iterator
@@ -60,6 +61,14 @@ from .base import (
 )
 from .cache_tracker import CacheTracker
 from .failure_handler import LLMFailureHandler
+
+# LiteLLM placeholder regex for empty content sanitization.
+# LiteLLM injects "[System: Empty message content sanitised to satisfy protocol]"
+# when proxying empty assistant content to Anthropic's API.
+# See: https://github.com/BerriAI/litellm/issues/19061
+_LITELLM_PLACEHOLDER_RE = re.compile(
+    r"\[System: Empty message content sanitised to satisfy \w+\]"
+)
 
 
 class ThinkTagParser:
@@ -333,6 +342,56 @@ class OpenAIBackend(LLMBackend):
 
         return result
 
+    @staticmethod
+    def _strip_litellm_placeholder(content: str | None) -> str | None:
+        """Strip LiteLLM's empty-content placeholder strings from text.
+
+        Returns None if content is empty after stripping.
+        Only modifies content when a placeholder is actually matched,
+        preserving whitespace-only chunks (important for streaming deltas).
+        """
+        if not content:
+            return content
+        cleaned = _LITELLM_PLACEHOLDER_RE.sub("", content)
+        if cleaned == content:
+            return content  # No placeholder found, pass through unchanged
+        cleaned = cleaned.strip()
+        return cleaned or None
+
+    @staticmethod
+    def _sanitize_outbound_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Clean empty/placeholder content from message history before sending.
+
+        Prevents LiteLLM from injecting sanitization placeholders by ensuring
+        assistant messages with no real text content have content=None.
+        """
+        result = []
+        for msg in messages:
+            if msg.get("role") == "assistant":
+                content = msg.get("content")
+                if isinstance(content, str):
+                    cleaned = _LITELLM_PLACEHOLDER_RE.sub("", content).strip()
+                    if not cleaned:
+                        msg = {**msg, "content": None}
+                elif isinstance(content, list):
+                    cleaned_blocks = []
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            text = block.get("text", "")
+                            text = _LITELLM_PLACEHOLDER_RE.sub("", text).strip()
+                            if text:
+                                cleaned_blocks.append({**block, "text": text})
+                        else:
+                            cleaned_blocks.append(block)
+                    msg = {**msg, "content": cleaned_blocks if cleaned_blocks else None}
+            result.append(msg)
+        return result
+
+    def _prepare_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Sanitize outbound messages and apply cache control breakpoints."""
+        sanitized = self._sanitize_outbound_messages(messages)
+        return self._apply_cache_control(sanitized)
+
     def generate(self, messages: list[dict[str, str]], **kwargs: Any) -> LLMResponse:
         """
         Generate completion from messages.
@@ -349,7 +408,7 @@ class OpenAIBackend(LLMBackend):
         # Merge config parameters with kwargs
         params = {
             "model": self.config.model_name,
-            "messages": self._apply_cache_control(messages),
+            "messages": self._prepare_messages(messages),
             "temperature": self._sanitize_temperature(
                 kwargs.get("temperature", self.config.temperature)
             ),
@@ -368,7 +427,7 @@ class OpenAIBackend(LLMBackend):
             )
 
             # Extract content and metadata
-            content = response.choices[0].message.content
+            content = self._strip_litellm_placeholder(response.choices[0].message.content)
             finish_reason = response.choices[0].finish_reason
 
             # Validate response
@@ -418,7 +477,7 @@ class OpenAIBackend(LLMBackend):
         # Merge config parameters with kwargs
         params = {
             "model": self.config.model_name,
-            "messages": self._apply_cache_control(messages),
+            "messages": self._prepare_messages(messages),
             "temperature": self._sanitize_temperature(
                 kwargs.get("temperature", self.config.temperature)
             ),
@@ -445,7 +504,7 @@ class OpenAIBackend(LLMBackend):
 
                 if chunk.choices and len(chunk.choices) > 0:
                     delta = chunk.choices[0].delta
-                    content = delta.content if delta.content else ""
+                    content = (self._strip_litellm_placeholder(delta.content) or "") if delta.content else ""
                     finish_reason = chunk.choices[0].finish_reason
 
                     yield StreamChunk(
@@ -567,7 +626,7 @@ class OpenAIBackend(LLMBackend):
         # Build parameters for API call
         params = {
             "model": self.config.model_name,
-            "messages": self._apply_cache_control(messages),
+            "messages": self._prepare_messages(messages),
             "temperature": self._sanitize_temperature(
                 kwargs.get("temperature", self.config.temperature)
             ),
@@ -589,7 +648,7 @@ class OpenAIBackend(LLMBackend):
 
             # Extract content and tool calls
             message = response.choices[0].message
-            content = message.content  # May be None if tool-only response
+            content = self._strip_litellm_placeholder(message.content)
             finish_reason = response.choices[0].finish_reason
 
             # Validate response if content is present
@@ -718,7 +777,7 @@ class OpenAIBackend(LLMBackend):
         # Build parameters for API call
         params = {
             "model": self.config.model_name,
-            "messages": self._apply_cache_control(messages),
+            "messages": self._prepare_messages(messages),
             "temperature": self._sanitize_temperature(
                 kwargs.get("temperature", self.config.temperature)
             ),
@@ -772,8 +831,9 @@ class OpenAIBackend(LLMBackend):
 
                     # Yield text content chunks - strip <think> tags
                     # (thinking suppressed in v1; StreamChunk has no thinking field)
-                    if delta.content:
-                        for kind, text in think_parser.feed(delta.content):
+                    _content = self._strip_litellm_placeholder(delta.content) if delta.content else None
+                    if _content:
+                        for kind, text in think_parser.feed(_content):
                             if kind == "text":
                                 yield (
                                     StreamChunk(
@@ -957,7 +1017,7 @@ class OpenAIBackend(LLMBackend):
         # Build parameters for API call
         params = {
             "model": self.config.model_name,
-            "messages": self._apply_cache_control(messages),
+            "messages": self._prepare_messages(messages),
             "temperature": self._sanitize_temperature(
                 kwargs.get("temperature", self.config.temperature)
             ),
@@ -1012,8 +1072,9 @@ class OpenAIBackend(LLMBackend):
 
                     # Yield text content chunks - strip <think> tags
                     # (thinking suppressed in v1; StreamChunk has no thinking field)
-                    if delta.content:
-                        for kind, text in think_parser.feed(delta.content):
+                    _content = self._strip_litellm_placeholder(delta.content) if delta.content else None
+                    if _content:
+                        for kind, text in think_parser.feed(_content):
                             if kind == "text":
                                 yield (
                                     StreamChunk(
@@ -1178,7 +1239,7 @@ class OpenAIBackend(LLMBackend):
         # Build parameters
         params = {
             "model": self.config.model_name,
-            "messages": self._apply_cache_control(messages),
+            "messages": self._prepare_messages(messages),
             "temperature": self._sanitize_temperature(
                 kwargs.get("temperature", self.config.temperature)
             ),
@@ -1290,8 +1351,9 @@ class OpenAIBackend(LLMBackend):
                     finish_reason = chunk.choices[0].finish_reason
 
                     # Emit text delta - parse <think> tags to separate reasoning
-                    if delta.content:
-                        for kind, text in think_parser.feed(delta.content):
+                    _content = self._strip_litellm_placeholder(delta.content) if delta.content else None
+                    if _content:
+                        for kind, text in think_parser.feed(_content):
                             if kind == "thinking":
                                 yield ProviderDelta(
                                     stream_id=sid,
@@ -1422,7 +1484,7 @@ class OpenAIBackend(LLMBackend):
         # Build parameters
         params = {
             "model": self.config.model_name,
-            "messages": self._apply_cache_control(messages),
+            "messages": self._prepare_messages(messages),
             "temperature": self._sanitize_temperature(
                 kwargs.get("temperature", self.config.temperature)
             ),
@@ -1534,8 +1596,9 @@ class OpenAIBackend(LLMBackend):
                     finish_reason = chunk.choices[0].finish_reason
 
                     # Emit text delta - parse <think> tags to separate reasoning
-                    if delta.content:
-                        for kind, text in think_parser.feed(delta.content):
+                    _content = self._strip_litellm_placeholder(delta.content) if delta.content else None
+                    if _content:
+                        for kind, text in think_parser.feed(_content):
                             if kind == "thinking":
                                 yield ProviderDelta(
                                     stream_id=sid,
