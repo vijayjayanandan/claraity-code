@@ -873,7 +873,7 @@ With this, the agent runs **indefinitely**. The desk clears itself.
       title: 'The Configuration',
       caption: 'A JSON file defines your MCP servers. **Local** servers have a command. **Remote** servers have a URL.',
       diagram: 'mcp-config-example',
-      notes: `Walk through the two examples: "The Puppeteer server is local — the command tells the agent to run 'npx' which launches a Node.js program. It could just as easily be 'python -m my_server' or a compiled binary. The Jira server is remote — instead of a command, it has a URL. The auth_secret_key tells the agent which credential to look up from the secure store at connect time. Both are in one config file. The agent reads it at startup and connects to all enabled servers."`
+      notes: `Walk through the two examples: "The Puppeteer server is local — the command tells the agent to run 'npx' which launches a Node.js program. It could just as easily be 'python -m my_server' or a compiled binary. The Atlassian Rovo server is remote — instead of a command, it has a URL pointing to Atlassian's hosted MCP endpoint. Both are in one config file. The agent reads it at startup and connects to all enabled servers."`
     },
 
     {
@@ -887,12 +887,31 @@ With this, the agent runs **indefinitely**. The desk clears itself.
     },
 
     {
-      id: 'ch4-mcp-remote-bridge',
-      layout: 'diagram-only',
-      title: 'The Remote Bridge: mcp-remote',
-      caption: 'A community npm package that bridges **stdio to HTTP+SSE** — used by Claude Desktop, ClarAIty, Cursor, and others.',
-      diagram: 'mcp-remote-bridge',
-      notes: `mcp-remote is not specific to ClarAIty — it's a community-maintained package used by any MCP client that speaks stdio. It solves the transport mismatch: agent speaks stdio, remote server speaks HTTP + SSE. The OAuth flow follows the MCP specification: (1) mcp-remote connects to the remote server, (2) server responds 401 with a WWW-Authenticate header pointing to its authorization server, (3) mcp-remote opens your browser for login (OAuth 2.1 + PKCE), (4) after you authenticate, tokens are stored locally on your machine and auto-refreshed. The agent and the LLM never see these tokens — they stay inside the mcp-remote process. ClarAIty also has its own SecretStorage for API keys (VS Code's OS keychain) — that's a separate mechanism for servers that use simple API key auth rather than OAuth.`
+      id: 'ch10-mcp-oauth-flow',
+      layout: 'center-text',
+      title: 'Remote Authentication: Login Once, Connect Forever',
+      body: `Remote MCP servers like Atlassian Rovo require proof of identity. The agent handles this automatically using **OAuth 2.1 + PKCE** — the same standard your browser uses for "Sign in with Google."
+
+**First connect:** The agent opens your browser. You log in to Atlassian. Done. Tokens are saved securely to your OS keyring.
+
+**Every connect after:** Silent. No browser. The agent reads the saved token and connects in the background.
+
+**The agent and the LLM never see your credentials** — they live in the OS keyring, never in config files or logs.`,
+      notes: `OAuth 2.1 + PKCE is the current security standard for delegated authorization — it's what banks, Google, and Microsoft use. PKCE (Proof Key for Code Exchange) prevents token interception attacks even over plain HTTP. The flow: (1) Agent generates a random code challenge, (2) opens browser to the authorization server with that challenge, (3) user logs in and approves, (4) server returns an authorization code, (5) agent exchanges the code + verifier for tokens. ClarAIty implements this entirely in Python using the official MCP SDK's OAuthClientProvider — no external npm packages or proxy processes required.`
+    },
+
+    {
+      id: 'ch10-mcp-token-storage',
+      layout: 'center-text',
+      title: 'Where Do Your Credentials Live?',
+      body: `Tokens are stored in your **OS keyring** — the same secure vault your system uses for Wi-Fi passwords and browser credentials.
+
+- **Windows:** Windows Credential Manager
+- **macOS:** Keychain
+- **Fallback:** Encrypted file at \`~/.claraity/mcp_auth/<server-name>/\`
+
+When you **uninstall** an MCP server, its tokens are cleared automatically. No credentials left behind.`,
+      notes: `This is the question every enterprise audience asks first: "Where do my credentials go?" The OS keyring is the right answer — it's hardware-backed on modern machines, access-controlled by the OS, and never written to disk in plaintext. The file fallback exists for environments where keyring access is restricted (e.g. some CI systems). The fallback files are stored under ~/.claraity/mcp_auth/ with restricted permissions. ClarAIty's KeyringTokenStorage handles both paths transparently — the rest of the agent code never knows which backend was used. On uninstall, mcp_marketplace_uninstall() calls KeyringTokenStorage.clear() before removing the server from settings, so no stale credentials remain even if you reinstall with a different configuration.`
     },
 
     {
@@ -904,7 +923,7 @@ With this, the agent runs **indefinitely**. The desk clears itself.
 **Remote (HTTP)** — a server on the network. The agent sends HTTP requests with authentication. Ideal for Jira, Confluence, cloud APIs.
 
 The LLM doesn't know or care which mode a tool uses — both look the same.`,
-      notes: `Stdio = standard input/output. Every program has these two channels — one for receiving data (stdin), one for sending data back (stdout). The agent writes a request to stdin, reads the response from stdout. It's the simplest possible communication — no ports, no sockets, no network stack. Remote = standard HTTP POST, same as any web API call. Auth tokens are resolved from a secure store at connect time and injected into each request header — never persisted to disk.`
+      notes: `Stdio = standard input/output. Every program has these two channels — one for receiving data (stdin), one for sending data back (stdout). The agent writes a request to stdin, reads the response from stdout. It's the simplest possible communication — no ports, no sockets, no network stack. Remote = the agent speaks directly to the MCP server over HTTP using the official MCP Python SDK. For servers that require login (like Atlassian Rovo), OAuth 2.1 handles authentication automatically — the agent opens your browser once, you log in, and tokens are saved securely to the OS keyring. Every subsequent connect is silent.`
     },
 
     {
@@ -930,13 +949,11 @@ From the agent's perspective, a tool is a tool — whether it reads a local file
       id: 'ch4-mcp-key-insight',
       layout: 'center-text',
       title: 'The Key Insight',
-      body: `**Recipe: MCP Adoption Checklist** — (1) Implement the JSON-RPC 2.0 client. (2) Support stdio transport (covers 90% of servers). (3) On connect, discover tools and adapt schemas to your LLM's format. (4) Wrap each MCP tool as a native tool (Bridge pattern). (5) Classify read/write from server annotations, default to write. (6) Route by server reference, not name lookup.
+      body: `**Recipe: MCP Adoption Checklist** — (1) Use the official MCP Python SDK. (2) Support stdio transport (covers 90% of servers). (3) On connect, discover tools and adapt schemas to your LLM's format. (4) Wrap each MCP tool as a native tool (Bridge pattern). (5) Classify read/write from server annotations, default to write. (6) Route by server reference, not name lookup.
 
 For any agent you build: adopt MCP early. The ecosystem already has hundreds of servers. Your agent gets them all for the cost of implementing the protocol.
 
-*(Note: In our live demo, we are skipping the MCP build step to focus on core agent architecture, but the integration pattern remains the same.)*
-
-**Next up:** With built-in tools AND external MCP tools, the agent has a lot of power. The next chapter is about the safety layer that checks every tool call — whether native or MCP — before it executes.`,
+**Next up:** With built-in tools AND external MCP tools connected, the next chapter explores how the agent maps and navigates your entire codebase — the Knowledge Graph.`,
       notes: `Configuration is a JSON file (.claraity/mcp_settings.json) with server name, command/URL, and per-tool visibility toggles. Two scopes: project-level (team-shared) and global (personal). The official MCP registry at registry.modelcontextprotocol.io has hundreds of servers. ClarAIty includes a built-in marketplace for discovery and one-click install.`
     },
 
