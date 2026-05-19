@@ -49,7 +49,8 @@
       "Bash(grep -rIl -i 'claraity' . --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=__pycache__ --exclude-dir=htmlcov --exclude-dir=.claraity --exclude-dir=.claraity)",
       "Bash(grep -rIl -i 'claraity' . --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=__pycache__ --exclude-dir=htmlcov --exclude-dir=.claraity --exclude-dir=.claraity --exclude-dir=.venv-build --exclude-dir=.venv --exclude-dir=build --exclude-dir=dist --exclude-dir=.pytest_cache --exclude-dir=.checkpoints --exclude-dir=out --exclude-dir=proxy_captures --exclude-dir=validation-results --exclude='*.pyc' --exclude='*.map')",
       "Bash(xargs sed:*)",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "WebFetch(domain:www.telus.com)"
     ],
     "deny": []
   }

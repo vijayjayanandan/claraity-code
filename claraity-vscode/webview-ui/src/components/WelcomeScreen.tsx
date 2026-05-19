@@ -154,14 +154,6 @@ const TOOL_GROUPS: ToolGroup[] = [
     ],
   },
   {
-    category: "Code Intelligence",
-    icon: "codicon-symbol-class",
-    tools: [
-      { name: "get_file_outline", description: "Extract symbols, classes, and functions from a file" },
-      { name: "get_symbol_context", description: "Find references, definitions, and type info via LSP" },
-    ],
-  },
-  {
     category: "Execution",
     icon: "codicon-terminal",
     tools: [
@@ -176,9 +168,14 @@ const TOOL_GROUPS: ToolGroup[] = [
       { name: "knowledge_scan_files", description: "Scan files into the knowledge database" },
       { name: "knowledge_query", description: "Query architecture, components, and decisions" },
       { name: "knowledge_update", description: "Update knowledge entries with new information" },
+      { name: "knowledge_set_metadata", description: "Store key-value pairs in knowledge metadata" },
+      { name: "knowledge_auto_layout", description: "Compute visual layout for architecture graph" },
+      { name: "knowledge_export", description: "Export knowledge DB to git-tracked JSONL" },
       { name: "task_create", description: "Create a new task in the Beads system" },
       { name: "task_update", description: "Update task status, priority, or notes" },
       { name: "task_list", description: "List tasks by status, priority, or tag" },
+      { name: "task_show", description: "View full details and history for a specific task" },
+      { name: "task_link", description: "Add dependency links between tasks" },
     ],
   },
   {
@@ -241,9 +238,6 @@ export function WelcomeScreen({
     <div className="welcome-screen-v2">
       {/* ── Hero ── */}
       <div className="welcome-hero">
-        <div className="welcome-logo">
-          <i className="codicon codicon-sparkle welcome-logo-icon" />
-        </div>
         <h1 className="welcome-heading">ClarAIty</h1>
         <p className="welcome-subtitle">Bringing clarity to AI coding.</p>
 

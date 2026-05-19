@@ -32,6 +32,7 @@
         setupNavigation();
         setupProgressBar();
         buildChapterNav(SLIDES);
+        setupGlossaryPopups();
     }
 
     // ==========================================================
@@ -351,15 +352,16 @@
 
     function renderLayerStack() {
         var layers = [
-            { label: 'Subagents',          desc: 'Ch 12 — Delegation',        color: '#6366F1' },
-            { label: 'Error Recovery',      desc: 'Ch 11 — Handling failures', color: '#8B5CF6' },
-            { label: 'Streaming UX',        desc: 'Ch 10 — Real-time output',  color: '#7C3AED' },
-            { label: 'Agent Loop',          desc: 'Ch 9 — Orchestration',      color: '#A855F7' },
-            { label: 'Task Tracking',       desc: 'Ch 8 — Planning work',      color: '#EC4899' },
-            { label: 'Knowledge Graph',     desc: 'Ch 7 — Codebase map',       color: '#F43F5E' },
-            { label: 'Context Compaction',  desc: 'Ch 6 — Managing limits',    color: '#F59E0B' },
-            { label: 'Session Persistence', desc: 'Ch 5 — Saving history',     color: '#EAB308' },
-            { label: 'Tool Gating',         desc: 'Ch 4 — Safety checks',      color: '#22C55E' },
+            { label: 'Subagents',          desc: 'Ch 13 — Delegation',        color: '#6366F1' },
+            { label: 'Error Recovery',      desc: 'Ch 12 — Handling failures', color: '#8B5CF6' },
+            { label: 'Streaming UX',        desc: 'Ch 11 — Real-time output',  color: '#7C3AED' },
+            { label: 'Agent Loop',          desc: 'Ch 10 — Orchestration',     color: '#A855F7' },
+            { label: 'Task Tracking',       desc: 'Ch 9 — Planning work',      color: '#EC4899' },
+            { label: 'Knowledge Graph',     desc: 'Ch 8 — Codebase map',       color: '#F43F5E' },
+            { label: 'Context Compaction',  desc: 'Ch 7 — Managing limits',    color: '#F59E0B' },
+            { label: 'Session Persistence', desc: 'Ch 6 — Saving history',     color: '#EAB308' },
+            { label: 'Tool Gating',         desc: 'Ch 5 — Safety checks',      color: '#22C55E' },
+            { label: 'MCP',                 desc: 'Ch 4 — External tools',     color: '#10B981' },
             { label: 'Tool Calling',        desc: 'Ch 3 — Taking actions',     color: '#14B8A6' },
             { label: 'Context Builder',     desc: 'Ch 2 — Project knowledge',  color: '#06B6D4' },
             { label: 'Chat Completion',     desc: 'Ch 1 — The raw LLM call',   color: '#58A6FF' }
@@ -3270,10 +3272,29 @@
         return escAndFormat(text);
     }
 
-    /** Escape HTML then apply **bold** markers */
+    /** Escape HTML then apply **bold** markers and [[glossary]] tooltips */
     function escAndFormat(text) {
-        var safe = esc(text);
-        return safe.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        // Extract glossary terms BEFORE escaping
+        var glossaryTerms = [];
+        var textWithPlaceholders = text.replace(/\[\[(.+?)\]\]/g, function (_, term) {
+            var idx = glossaryTerms.length;
+            glossaryTerms.push(term);
+            return '%%GLOSSARY_' + idx + '%%';
+        });
+
+        var safe = esc(textWithPlaceholders);
+        safe = safe.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+        // Re-insert glossary terms as clickable spans (only if term exists in GLOSSARY)
+        safe = safe.replace(/%%GLOSSARY_(\d+)%%/g, function (_, idx) {
+            var term = glossaryTerms[parseInt(idx, 10)];
+            if (typeof GLOSSARY !== 'undefined' && GLOSSARY[term]) {
+                return '<span class="glossary-term" data-glossary-key="' + esc(term) + '">' + esc(term) + '</span>';
+            }
+            return esc(term);
+        });
+
+        return safe;
     }
 
     /** Escape HTML special chars */
@@ -3543,6 +3564,97 @@
             var progress = scrollHeight > 0 ? (scrollTop / scrollHeight) * 100 : 0;
             progressBar.style.width = Math.min(progress, 100) + '%';
         }, { passive: true });
+    }
+
+    // ==========================================================
+    //  GLOSSARY POPUPS
+    // ==========================================================
+
+    function setupGlossaryPopups() {
+        // Create shared popup element
+        var popup = document.createElement('div');
+        popup.className = 'glossary-popup';
+        document.body.appendChild(popup);
+
+        function closePopup() {
+            popup.classList.remove('visible');
+        }
+
+        // Delegate clicks on glossary terms
+        document.addEventListener('click', function (e) {
+            var term = e.target.closest('.glossary-term');
+            if (term) {
+                e.stopPropagation();
+                var key = term.dataset.glossaryKey;
+                var entry = (typeof GLOSSARY !== 'undefined') ? GLOSSARY[key] : null;
+                if (!entry) return;
+
+                // Build popup content: title, description, code block, copy button
+                var html = '<span class="glossary-close">&times;</span>';
+                html += '<div class="glossary-title">' + esc(entry.title) + '</div>';
+                html += '<div class="glossary-desc">' + esc(entry.description) + '</div>';
+                html += '<div class="glossary-code-wrapper">';
+                html += '<button class="glossary-copy-btn" title="Copy to clipboard">Copy</button>';
+                html += '<pre class="glossary-code"><code>' + esc(entry.code) + '</code></pre>';
+                html += '</div>';
+                popup.innerHTML = html;
+
+                // Wire copy button
+                var copyBtn = popup.querySelector('.glossary-copy-btn');
+                if (copyBtn) {
+                    copyBtn.addEventListener('click', function (e) {
+                        e.stopPropagation();
+                        navigator.clipboard.writeText(entry.code).then(function () {
+                            copyBtn.textContent = 'Copied!';
+                            copyBtn.classList.add('glossary-copy-success');
+                            setTimeout(function () {
+                                copyBtn.textContent = 'Copy';
+                                copyBtn.classList.remove('glossary-copy-success');
+                            }, 2000);
+                        }).catch(function () {
+                            copyBtn.textContent = 'Failed';
+                            setTimeout(function () { copyBtn.textContent = 'Copy'; }, 2000);
+                        });
+                    });
+                }
+
+                popup.classList.add('visible');
+
+                // Position below the term, centered
+                var rect = term.getBoundingClientRect();
+                var popupWidth = Math.min(560, window.innerWidth - 32);
+                var left = rect.left + rect.width / 2 - popupWidth / 2;
+                if (left < 16) left = 16;
+                if (left + popupWidth > window.innerWidth - 16) left = window.innerWidth - popupWidth - 16;
+
+                // Show above if not enough room below
+                var top = rect.bottom + 8;
+                popup.style.maxWidth = popupWidth + 'px';
+                popup.style.left = left + 'px';
+                popup.style.top = top + 'px';
+
+                // Check if popup overflows viewport bottom, flip above if needed
+                requestAnimationFrame(function () {
+                    var popupRect = popup.getBoundingClientRect();
+                    if (popupRect.bottom > window.innerHeight - 16) {
+                        popup.style.top = (rect.top - popupRect.height - 8) + 'px';
+                    }
+                });
+                return;
+            }
+
+            // Close on click outside or on close button
+            if (e.target.closest('.glossary-close') || !e.target.closest('.glossary-popup')) {
+                closePopup();
+            }
+        });
+
+        // Close on Escape
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') {
+                closePopup();
+            }
+        });
     }
 
 })();

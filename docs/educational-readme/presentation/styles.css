@@ -753,6 +753,127 @@ strong {
     #nav-hint { display: none; }
 }
 
+/* ── Glossary Tooltips ─────────────────────────────────────── */
+
+.glossary-term {
+    color: var(--accent-blue);
+    cursor: pointer;
+    border-bottom: 1px dashed var(--accent-blue);
+    position: relative;
+    transition: color 0.2s;
+}
+
+.glossary-term:hover {
+    color: #93C5FD;
+}
+
+.glossary-popup {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    background: #1E293B;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 1.25rem 1.5rem;
+    max-width: 560px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    font-family: var(--font-sans);
+    font-size: 0.9rem;
+    line-height: 1.5;
+    color: #E2E8F0;
+    pointer-events: auto;
+}
+
+.glossary-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #93C5FD;
+    margin-bottom: 0.5rem;
+}
+
+.glossary-desc {
+    color: #94A3B8;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    margin-bottom: 0.75rem;
+}
+
+.glossary-code-wrapper {
+    position: relative;
+    margin-top: 0.5rem;
+}
+
+.glossary-copy-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 10;
+    background: #1E293B;
+    color: #94A3B8;
+    border: 1px solid #334155;
+    border-radius: 4px;
+    padding: 3px 10px;
+    font-size: 0.72rem;
+    font-family: var(--font-sans);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.glossary-copy-btn:hover {
+    background: #334155;
+    color: #E2E8F0;
+    border-color: #58A6FF;
+}
+
+.glossary-copy-btn.glossary-copy-success {
+    background: #14532D;
+    color: #4ADE80;
+    border-color: #16A34A;
+}
+
+.glossary-code {
+    background: #0F172A;
+    border: 1px solid #1E293B;
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    margin: 0;
+    overflow-x: auto;
+    max-height: 320px;
+    overflow-y: auto;
+}
+
+.glossary-code code {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    line-height: 1.6;
+    color: #E2E8F0;
+    white-space: pre;
+}
+
+.glossary-popup.visible {
+    display: block;
+    animation: glossaryFadeIn 0.2s ease-out;
+}
+
+@keyframes glossaryFadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.glossary-popup .glossary-close {
+    position: absolute;
+    top: 6px;
+    right: 10px;
+    color: #64748B;
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.glossary-popup .glossary-close:hover {
+    color: #E2E8F0;
+}
+
 @media (max-width: 480px) {
     .hero-title { font-size: 2.2rem; }
     .slide-title { font-size: 1.6rem; }
