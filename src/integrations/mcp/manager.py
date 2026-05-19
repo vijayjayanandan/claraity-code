@@ -17,8 +17,9 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Optional
 
-from .client import McpClient
+from .client import McpClient, SdkTransport, SseTransport, StdioTransport
 from .config import McpServerConfig
+from .policy import McpPolicyGate
 from .registry import McpToolRegistry
 
 if TYPE_CHECKING:
@@ -157,8 +158,6 @@ class McpConnectionManager:
         Returns:
             Dict mapping server name -> number of tools registered.
         """
-        from .client import McpClient, SseTransport, StdioTransport
-        from .policy import McpPolicyGate
         from .registry import McpToolRegistry
 
         results: dict[str, int] = {}
@@ -185,7 +184,11 @@ class McpConnectionManager:
                 runtime_config = server_settings.to_runtime_config()
 
                 # Create transport based on type
-                if server_settings.transport == "sse":
+                # use_sdk=True opts into the official MCP Python SDK transport.
+                # Default (False) preserves existing SseTransport / StdioTransport.
+                if server_settings.use_sdk:
+                    transport = SdkTransport()
+                elif server_settings.transport == "sse":
                     transport = SseTransport()
                 else:
                     transport = StdioTransport()

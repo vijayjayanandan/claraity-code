@@ -525,19 +525,19 @@ class McpMarketplace:
         }
 
         if entry.command:
-            # Stdio server (local subprocess)
+            # Local stdio server -- pass command and args directly to SDK stdio_client
             config["command"] = entry.command
             if entry.args:
                 config["args"] = list(entry.args)
             if entry.env_vars and env_values:
                 config["env"] = {k: env_values.get(k, "") for k in entry.env_vars}
         elif entry.remote_url:
-            # Remote server — use mcp-remote bridge to wrap as stdio
-            # mcp-remote handles SSE/HTTP connection and exposes it as stdio JSON-RPC
-            config["command"] = "npx"
-            config["args"] = ["-y", "mcp-remote@latest", entry.remote_url]
+            # Remote server -- connect directly via SDK (SSE or streamable HTTP)
+            # SdkTransport handles auth/OAuth; no mcp-remote bridge needed.
+            config["url"] = entry.remote_url
+            config["transport"] = entry.transport or "sse"
         else:
-            # No install info — can't auto-install
+            # No install info -- can't auto-install
             return None
 
         return config

@@ -111,6 +111,20 @@ a = Analysis(
         "bs4.element",
         "emoji",
         "pathspec",        # .claraityignore / .gitignore pattern matching
+        # MCP Python SDK -- all imports are lazy so PyInstaller misses them.
+        # Only client-side submodules we actually use (not mcp.server.*).
+        "mcp",
+        "mcp.types",
+        "mcp.client.session",
+        "mcp.client.auth",
+        "mcp.client.auth.oauth2",
+        "mcp.client.sse",
+        "mcp.client.stdio",
+        "mcp.client.streamable_http",
+        "mcp.shared.auth",
+        "mcp.shared.session",
+        "mcp.shared.exceptions",
+        "mcp.os.win32.utilities",   # Windows named-pipe stdio transport
         "keyring",         # Credential store
         "cryptography",    # Fernet encryption for secrets
         "aiohttp",

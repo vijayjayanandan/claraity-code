@@ -140,8 +140,10 @@ class McpToolRegistry:
                 )
                 continue
 
-            # Register tool in policy gate using MCP annotations
-            annotations = raw_tool.get("annotations", {})
+            # Register tool in policy gate using MCP annotations.
+            # SDK Tool.model_dump() can return {'annotations': None} (key present, value None).
+            # `raw_tool.get("annotations", {})` returns None in that case (not {}), so use `or {}`.
+            annotations = raw_tool.get("annotations") or {}
             policy = self._policy_gate.register_tool(tool_def.name, annotations)
 
             if not policy.allowed:

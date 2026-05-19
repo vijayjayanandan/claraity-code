@@ -384,7 +384,8 @@ class TestInstallConfig:
         assert config["enabled"] is True
         assert "url" not in config
 
-    def test_create_config_remote_uses_mcp_remote(self):
+    def test_create_config_remote_uses_sdk_direct(self):
+        """Remote servers must install with url/transport, not mcp-remote."""
         marketplace = McpMarketplace()
         entry = McpMarketplaceEntry(
             id="atlassian",
@@ -392,13 +393,15 @@ class TestInstallConfig:
             author="atlassian",
             description="Atlassian Rovo",
             remote_url="https://mcp.atlassian.com/v1/mcp",
+            transport="sse",
         )
         config = marketplace.create_install_config(entry)
 
         assert config is not None
-        assert config["command"] == "npx"
-        assert config["args"] == ["-y", "mcp-remote@latest", "https://mcp.atlassian.com/v1/mcp"]
-        assert "url" not in config
+        assert config["url"] == "https://mcp.atlassian.com/v1/mcp"
+        assert config["transport"] == "sse"
+        assert "command" not in config
+        assert "args" not in config
 
     def test_create_config_no_install_info(self):
         marketplace = McpMarketplace()

@@ -66,6 +66,10 @@ watchdog>=4.0.0
 # System Monitoring (optional)
 psutil>=5.9.8
 
+# MCP (Model Context Protocol)
+mcp>=1.23.0  # Official MCP Python SDK -- streamablehttp_client, sse_client, OAuth 2.1
+keyring>=23.0.0  # OS keyring for OAuth token storage (Windows Credential Manager / macOS Keychain)
+
 # LLM Backends (install as needed)
 # ollama  # Use official Ollama installation instead
 # requests>=2.31.0  # For Ollama API calls (typically already installed)

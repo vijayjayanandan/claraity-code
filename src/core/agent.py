@@ -1203,14 +1203,22 @@ class CodingAgent(AgentInterface):
             # Auto-connect if no missing env vars
             if not missing_env and server_settings.enabled:
                 try:
-                    from src.integrations.mcp.client import McpClient, SseTransport, StdioTransport
+                    from src.integrations.mcp.client import (
+                        McpClient,
+                        SdkTransport,
+                        SseTransport,
+                        StdioTransport,
+                    )
                     from src.integrations.mcp.policy import McpPolicyGate
                     from src.integrations.mcp.registry import McpToolRegistry
 
                     runtime_config = server_settings.to_runtime_config()
-                    transport = (
-                        SseTransport() if server_settings.transport == "sse" else StdioTransport()
-                    )
+                    if server_settings.use_sdk:
+                        transport = SdkTransport()
+                    elif server_settings.transport == "sse":
+                        transport = SseTransport()
+                    else:
+                        transport = StdioTransport()
                     client = McpClient(runtime_config, transport)
                     registry = McpToolRegistry(runtime_config, McpPolicyGate())
 
@@ -1245,6 +1253,7 @@ class CodingAgent(AgentInterface):
             Dict with status.
         """
         from src.integrations.mcp.settings import McpSettingsManager
+        from src.integrations.mcp.token_storage import KeyringTokenStorage
 
         settings = getattr(self, "_mcp_settings", None)
         if settings is None:
@@ -1252,10 +1261,17 @@ class CodingAgent(AgentInterface):
             settings.load()
             self._mcp_settings = settings
 
-        # Disconnect if connected
+        # Disconnect if connected. Use try/finally so credential cleanup always
+        # runs even if the server process is already dead and disconnect raises.
         if self._mcp_manager.get_connection(server_name):
-            await self._mcp_manager.disconnect(server_name, self.tool_executor)
-            self._invalidate_tools_cache()
+            try:
+                await self._mcp_manager.disconnect(server_name, self.tool_executor)
+                self._invalidate_tools_cache()
+            except Exception:
+                logger.warning("mcp_disconnect_on_uninstall_failed", server=server_name)
+
+        # Clear stored OAuth tokens and client_info so a reinstall starts fresh
+        KeyringTokenStorage(server_id=server_name).clear()
 
         # Remove from settings
         removed = settings.remove_server(server_name)

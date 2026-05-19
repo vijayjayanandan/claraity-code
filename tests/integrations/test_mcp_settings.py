@@ -129,8 +129,8 @@ class TestServerSettings:
 
         assert isinstance(config, McpServerConfig)
         assert config.name == "github"
-        assert "npx" in config.command
-        assert "@modelcontextprotocol/server-github" in config.command
+        assert config.command == "npx"
+        assert config.args == ["-y", "@modelcontextprotocol/server-github"]
         assert config.extra_env == {"TOKEN": "xxx"}
         assert config.tool_prefix == "gh"
         assert config.invoke_timeout == 120.0
@@ -210,7 +210,8 @@ class TestToolVisibility:
 
 class TestSettingsManager:
     def test_load_missing_file(self, tmp_path):
-        mgr = McpSettingsManager(tmp_path / "nonexistent.json")
+        # Use an isolated global_path so the real ~/.claraity/mcp_settings.json is not merged in.
+        mgr = McpSettingsManager(tmp_path / "nonexistent.json", global_path=tmp_path / "no_global.json")
         mgr.load()  # Should not raise
         assert mgr.servers == {}
 
@@ -237,7 +238,7 @@ class TestSettingsManager:
             }
         }), encoding="utf-8")
 
-        mgr = McpSettingsManager(settings_file)
+        mgr = McpSettingsManager(settings_file, global_path=tmp_path / "no_global.json")
         mgr.load()
 
         assert len(mgr.servers) == 2
@@ -249,7 +250,7 @@ class TestSettingsManager:
         settings_file = tmp_path / "bad.json"
         settings_file.write_text("not json", encoding="utf-8")
 
-        mgr = McpSettingsManager(settings_file)
+        mgr = McpSettingsManager(settings_file, global_path=tmp_path / "no_global.json")
         mgr.load()  # Should not raise
         assert mgr.servers == {}
 
@@ -283,7 +284,7 @@ class TestSettingsManager:
         ))
         mgr.save()
 
-        mgr2 = McpSettingsManager(settings_file)
+        mgr2 = McpSettingsManager(settings_file, global_path=tmp_path / "no_global.json")
         mgr2.load()
 
         gh = mgr2.get_server("github")

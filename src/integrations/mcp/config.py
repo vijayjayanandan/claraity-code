@@ -41,3 +41,8 @@ class McpServerConfig:
 
     # Tool name prefix for namespacing (e.g. "jira" -> "jira_searchJiraIssuesUsingJql")
     tool_prefix: str = ""
+
+    # When True, use the official MCP Python SDK transport instead of our
+    # custom SseTransport / StdioTransport. Default True -- SDK is now the
+    # preferred transport for both remote and local servers.
+    use_sdk: bool = True

@@ -1509,8 +1509,9 @@ class StdioProtocol(UIProtocol):
             settings = getattr(self._agent, "_mcp_settings", None)
             if settings is None:
                 settings = McpSettingsManager()
-                settings.load()
-                self._agent._mcp_settings = settings
+            # Always reload from disk -- picks up any config edits (args, path, etc.)
+            settings.load()
+            self._agent._mcp_settings = settings
 
             settings.update_server_enabled(server_name, enabled)
             settings.save()
@@ -1529,6 +1530,7 @@ class StdioProtocol(UIProtocol):
                     if server_settings:
                         from src.integrations.mcp.client import (
                             McpClient,
+                            SdkTransport,
                             SseTransport,
                             StdioTransport,
                         )
@@ -1536,11 +1538,12 @@ class StdioProtocol(UIProtocol):
                         from src.integrations.mcp.registry import McpToolRegistry
 
                         runtime_config = server_settings.to_runtime_config()
-                        transport = (
-                            SseTransport()
-                            if server_settings.transport == "sse"
-                            else StdioTransport()
-                        )
+                        if server_settings.use_sdk:
+                            transport = SdkTransport()
+                        elif server_settings.transport == "sse":
+                            transport = SseTransport()
+                        else:
+                            transport = StdioTransport()
                         client = McpClient(runtime_config, transport)
                         registry = McpToolRegistry(runtime_config, McpPolicyGate())
 
@@ -1583,6 +1586,9 @@ class StdioProtocol(UIProtocol):
                 settings.update_tool_visibility(server_name, tool_name, enabled)
 
             settings.save()
+            # Reload from disk so in-memory state reflects what was just saved
+            settings.load()
+            self._agent._mcp_settings = settings
 
             # Reconnect to apply changes
             if self._agent._mcp_manager.get_connection(server_name):
@@ -1590,14 +1596,22 @@ class StdioProtocol(UIProtocol):
 
                 server_settings = settings.get_server(server_name)
                 if server_settings and server_settings.enabled:
-                    from src.integrations.mcp.client import McpClient, SseTransport, StdioTransport
+                    from src.integrations.mcp.client import (
+                        McpClient,
+                        SdkTransport,
+                        SseTransport,
+                        StdioTransport,
+                    )
                     from src.integrations.mcp.policy import McpPolicyGate
                     from src.integrations.mcp.registry import McpToolRegistry
 
                     runtime_config = server_settings.to_runtime_config()
-                    transport = (
-                        SseTransport() if server_settings.transport == "sse" else StdioTransport()
-                    )
+                    if server_settings.use_sdk:
+                        transport = SdkTransport()
+                    elif server_settings.transport == "sse":
+                        transport = SseTransport()
+                    else:
+                        transport = StdioTransport()
                     client = McpClient(runtime_config, transport)
                     registry = McpToolRegistry(runtime_config, McpPolicyGate())
 
@@ -1643,14 +1657,17 @@ class StdioProtocol(UIProtocol):
             # Reconnect
             server_settings = settings.get_server(server_name)
             if server_settings and server_settings.enabled:
-                from src.integrations.mcp.client import McpClient, SseTransport, StdioTransport
+                from src.integrations.mcp.client import McpClient, SdkTransport, SseTransport, StdioTransport
                 from src.integrations.mcp.policy import McpPolicyGate
                 from src.integrations.mcp.registry import McpToolRegistry
 
                 runtime_config = server_settings.to_runtime_config()
-                transport = (
-                    SseTransport() if server_settings.transport == "sse" else StdioTransport()
-                )
+                if server_settings.use_sdk:
+                    transport = SdkTransport()
+                elif server_settings.transport == "sse":
+                    transport = SseTransport()
+                else:
+                    transport = StdioTransport()
                 client = McpClient(runtime_config, transport)
                 registry = McpToolRegistry(runtime_config, McpPolicyGate())
 

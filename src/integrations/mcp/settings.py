@@ -81,6 +81,10 @@ class McpServerSettings:
     # For sensitive tokens, prefer referencing env vars by name
     # (e.g. set GITHUB_TOKEN in your shell, not in this file).
 
+    # When True, use the official MCP Python SDK transport.
+    # False (default) uses our existing SseTransport / StdioTransport.
+    use_sdk: bool = True
+
     # Timeouts
     connect_timeout: float = 30.0
     invoke_timeout: float = 60.0
@@ -117,6 +121,8 @@ class McpServerSettings:
         d["toolPrefix"] = self.tool_prefix
         if self.tools:
             d["tools"] = {name: override.to_dict() for name, override in self.tools.items()}
+        if not self.use_sdk:
+            d["useSdk"] = False  # only write when False -- True is the default, keeps files clean
         if self.connect_timeout != 30.0:
             d["connectTimeout"] = self.connect_timeout
         if self.invoke_timeout != 60.0:
@@ -165,6 +171,7 @@ class McpServerSettings:
             enabled=data.get("enabled", True),
             tool_prefix=data.get("toolPrefix", name),
             tools=tools,
+            use_sdk=data.get("useSdk", True),
             connect_timeout=data.get("connectTimeout", 30.0),
             invoke_timeout=data.get("invokeTimeout", 60.0),
             max_result_chars=data.get("maxResultChars", 8192),
@@ -173,34 +180,21 @@ class McpServerSettings:
     def to_runtime_config(self) -> McpServerConfig:
         """Convert to runtime McpServerConfig for the MCP client layer.
 
-        For stdio transport, combines command + args into a single command string.
+        command and args are passed separately -- SdkTransport uses them directly.
+        Legacy StdioTransport does its own shlex.split() internally.
         """
-        if self.transport == "stdio" and self.command:
-            # Build full command with args for the StdioTransport
-            import sys
-
-            parts = [self.command] + self.args
-            if sys.platform == "win32":
-                import subprocess
-
-                full_command = subprocess.list2cmdline(parts)
-            else:
-                import shlex
-
-                full_command = " ".join(shlex.quote(p) for p in parts)
-        else:
-            full_command = self.command
-
         return McpServerConfig(
             name=self.name,
             server_url=self.server_url,
-            command=full_command,
+            command=self.command,
+            args=list(self.args),
             connect_timeout=self.connect_timeout,
             invoke_timeout=self.invoke_timeout,
             max_result_chars=self.max_result_chars,
             extra_env=dict(self.env),
             extra_headers=dict(self.headers),
             tool_prefix=self.tool_prefix or self.name,
+            use_sdk=self.use_sdk,
         )
 
     def get_disabled_tools(self) -> set[str]:
