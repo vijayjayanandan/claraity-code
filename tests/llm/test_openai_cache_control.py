@@ -7,11 +7,12 @@ Covers:
 - _extract_cached_tokens: usage field extraction
 """
 
-import pytest
-from unittest.mock import patch, MagicMock
-from src.llm.openai_backend import OpenAIBackend
-from src.llm.base import LLMConfig, LLMBackendType
+from unittest.mock import MagicMock, patch
 
+import pytest
+
+from src.llm.base import LLMBackendType, LLMConfig
+from src.llm.openai_backend import OpenAIBackend
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -228,7 +229,7 @@ class TestApplyCacheControl:
             {"role": "assistant", "content": "Hello"},
         ]
         result = gpt_backend._apply_cache_control(messages)
-        for i, msg in enumerate(result):
+        for i, _msg in enumerate(result):
             assert result[i]["content"] == messages[i]["content"]
 
     def test_tool_loop_bp2_progression(self, claude_backend):

@@ -1,12 +1,13 @@
 """Tests for session manager."""
 
-import pytest
 import json
-import tempfile
 import shutil
-from pathlib import Path
-from datetime import datetime
 import sys
+import tempfile
+from datetime import datetime
+from pathlib import Path
+
+import pytest
 
 # Ensure src is in path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))

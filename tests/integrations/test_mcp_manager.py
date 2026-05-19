@@ -2,16 +2,16 @@
 
 import asyncio
 import json
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.integrations.mcp.client import McpClient, McpTransport
 from src.integrations.mcp.config import McpServerConfig
-from src.integrations.mcp.manager import McpConnectionManager, McpConnection
+from src.integrations.mcp.manager import McpConnection, McpConnectionManager
 from src.integrations.mcp.policy import McpPolicyGate
 from src.integrations.mcp.registry import McpToolRegistry
 from src.tools.base import ToolExecutor, ToolStatus
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -353,6 +353,7 @@ class TestGetToolsNoDuplicates:
     async def test_no_duplicate_tool_names_with_mcp(self):
         """_get_tools() returns unique tool names when MCP is connected."""
         import os
+
         from src.core.agent import CodingAgent
 
         agent = CodingAgent(

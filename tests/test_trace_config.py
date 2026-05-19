@@ -56,8 +56,9 @@ class TestSaveTraceEnabled:
 
     def test_save_creates_file(self, tmp_path):
         """Save to non-existent file creates it with trace_enabled key."""
-        from src.llm.config_loader import save_trace_enabled
         import yaml
+
+        from src.llm.config_loader import save_trace_enabled
 
         config_path = str(tmp_path / "new_config.yaml")
         result = save_trace_enabled(True, config_path)
@@ -68,8 +69,9 @@ class TestSaveTraceEnabled:
 
     def test_save_preserves_other_keys(self, tmp_path):
         """Save to existing config with llm section preserves that section."""
-        from src.llm.config_loader import save_trace_enabled
         import yaml
+
+        from src.llm.config_loader import save_trace_enabled
 
         config_file = tmp_path / "config.yaml"
         config_file.write_text(

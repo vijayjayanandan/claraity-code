@@ -1,18 +1,19 @@
 """Tests for JSONL session writer (Schema v2.1)."""
 
-import pytest
 import asyncio
 import json
 import tempfile
 from pathlib import Path
 
+import pytest
+
+from src.session.models import FileHistorySnapshot, Message
 from src.session.persistence.writer import (
     SessionWriter,
     WriteResult,
-    create_session_file,
     append_to_session,
+    create_session_file,
 )
-from src.session.models import Message, FileHistorySnapshot
 from src.session.store import MessageStore
 
 
@@ -21,13 +22,13 @@ class TestWriteResult:
 
     def test_write_result_success(self):
         result = WriteResult(success=True, bytes_written=100)
-        assert result.success == True
+        assert result.success
         assert result.bytes_written == 100
         assert result.error is None
 
     def test_write_result_failure(self):
         result = WriteResult(success=False, error="File not found")
-        assert result.success == False
+        assert not result.success
         assert result.error == "File not found"
         assert result.bytes_written == 0
 
@@ -64,7 +65,7 @@ class TestSessionWriterLifecycle:
             # Write a message - this should create parent directories
             msg = Message.create_user("Test", "sess-1", None, 1)
             await writer.write_message(msg)
-            
+
             # Now parent directory should exist
             assert file_path.parent.exists()
             assert file_path.exists()
@@ -101,13 +102,13 @@ class TestSessionWriterWrite:
             msg = Message.create_user("Hello", "sess-1", None, 1)
             result = await writer.write_message(msg)
 
-            assert result.success == True
+            assert result.success
             assert result.bytes_written > 0
 
             await writer.close()
 
             # Verify file content
-            with open(file_path, 'r') as f:
+            with open(file_path) as f:
                 content = f.read()
             data = json.loads(content.strip())
             assert data["role"] == "user"
@@ -124,12 +125,12 @@ class TestSessionWriterWrite:
             snapshot = FileHistorySnapshot.create("sess-1")
             result = await writer.write_snapshot(snapshot)
 
-            assert result.success == True
+            assert result.success
 
             await writer.close()
 
             # Verify file content
-            with open(file_path, 'r') as f:
+            with open(file_path) as f:
                 content = f.read()
             data = json.loads(content.strip())
             assert data["type"] == "file_snapshot"
@@ -144,12 +145,12 @@ class TestSessionWriterWrite:
 
             result = await writer.write_raw({"custom": "data", "key": 123})
 
-            assert result.success == True
+            assert result.success
 
             await writer.close()
 
             # Verify file content
-            with open(file_path, 'r') as f:
+            with open(file_path) as f:
                 content = f.read()
             data = json.loads(content.strip())
             assert data["custom"] == "data"
@@ -165,7 +166,7 @@ class TestSessionWriterWrite:
             msg = Message.create_user("Hello", "sess-1", None, 1)
             result = await writer.write_message(msg)
 
-            assert result.success == False
+            assert not result.success
             assert "not open" in result.error.lower()
 
     @pytest.mark.asyncio
@@ -183,7 +184,7 @@ class TestSessionWriterWrite:
             await writer.close()
 
             # Verify file content
-            with open(file_path, 'r') as f:
+            with open(file_path) as f:
                 lines = f.readlines()
             assert len(lines) == 5
 
@@ -241,7 +242,7 @@ class TestSessionWriterFlush:
             await writer.flush()
 
             # Read the file before close
-            with open(file_path, 'r') as f:
+            with open(file_path) as f:
                 content = f.read()
             assert "Hello" in content
 
@@ -270,7 +271,7 @@ class TestSessionWriterStoreBinding:
             await writer.close()
 
             # Verify file content
-            with open(file_path, 'r') as f:
+            with open(file_path) as f:
                 content = f.read()
             assert "Store message" in content
 
@@ -312,7 +313,7 @@ class TestSessionWriterStoreBinding:
             await writer.close()
 
             # Only first message should be in file
-            with open(file_path, 'r') as f:
+            with open(file_path) as f:
                 content = f.read()
             assert "First" in content
             assert "Second" not in content
@@ -351,7 +352,7 @@ class TestSessionWriterDrain:
             await writer.close()
 
             # All messages should be written
-            with open(file_path, 'r') as f:
+            with open(file_path) as f:
                 lines = f.readlines()
 
             assert len(lines) == 10
@@ -386,9 +387,9 @@ class TestConvenienceFunctions:
             msg = Message.create_user("Appended", "sess-1", None, 1)
             result = await append_to_session(file_path, msg)
 
-            assert result.success == True
+            assert result.success
 
-            with open(file_path, 'r') as f:
+            with open(file_path) as f:
                 data = json.loads(f.read().strip())
             assert data["content"] == "Appended"
 
@@ -399,9 +400,9 @@ class TestConvenienceFunctions:
 
             result = await append_to_session(file_path, {"raw": "dict", "value": 42})
 
-            assert result.success == True
+            assert result.success
 
-            with open(file_path, 'r') as f:
+            with open(file_path) as f:
                 data = json.loads(f.read().strip())
             assert data["raw"] == "dict"
             assert data["value"] == 42
@@ -414,7 +415,7 @@ class TestConvenienceFunctions:
             msg = Message.create_user("Test", "sess-1", None, 1)
             result = await append_to_session(file_path, msg)
 
-            assert result.success == True
+            assert result.success
             assert file_path.exists()
 
     @pytest.mark.asyncio
@@ -426,7 +427,7 @@ class TestConvenienceFunctions:
                 msg = Message.create_user(f"Msg {i}", "sess-1", None, i+1)
                 await append_to_session(file_path, msg)
 
-            with open(file_path, 'r') as f:
+            with open(file_path) as f:
                 lines = f.readlines()
             assert len(lines) == 5
 
@@ -447,7 +448,7 @@ class TestErrorHandling:
 
             # Write without calling open() should fail (writer not initialized)
             result = await writer.write_raw({"test": "data"})
-            assert result.success == False
+            assert not result.success
             assert "not open" in result.error.lower()
 
     @pytest.mark.asyncio
@@ -461,12 +462,12 @@ class TestErrorHandling:
             msg = Message.create_user("Hello 你好 مرحبا", "sess-1", None, 1)
             result = await writer.write_message(msg)
 
-            assert result.success == True
+            assert result.success
 
             await writer.close()
 
             # Verify content preserved
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, encoding='utf-8') as f:
                 content = f.read()
             assert "你好" in content
             assert "مرحبا" in content

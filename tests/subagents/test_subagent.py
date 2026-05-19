@@ -1,14 +1,15 @@
 """Comprehensive tests for SubAgent class."""
 
-import pytest
-from pathlib import Path
-from unittest.mock import Mock, MagicMock, patch, call
 from dataclasses import dataclass
+from pathlib import Path
+from unittest.mock import MagicMock, Mock, call, patch
 
-from src.subagents.subagent import SubAgent, SubAgentResult
-from src.subagents.config import SubAgentConfig, SubAgentLLMConfig
-from src.tools.base import ToolResult, ToolStatus
+import pytest
+
 from src.llm import LLMBackendType, LLMResponse
+from src.subagents.config import SubAgentConfig, SubAgentLLMConfig
+from src.subagents.subagent import SubAgent, SubAgentResult
+from src.tools.base import ToolResult, ToolStatus
 
 
 @pytest.fixture

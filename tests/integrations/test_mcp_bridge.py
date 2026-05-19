@@ -2,8 +2,9 @@
 
 import asyncio
 import json
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from src.integrations.mcp.adapter import McpToolAdapter
 from src.integrations.mcp.bridge import McpBridgeTool
@@ -13,7 +14,6 @@ from src.integrations.mcp.policy import McpPolicyGate
 from src.integrations.mcp.registry import McpToolRegistry
 from src.llm.base import ToolDefinition
 from src.tools.base import ToolExecutor, ToolStatus
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

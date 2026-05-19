@@ -1,14 +1,15 @@
 """Tests for file reference parser."""
 
-import pytest
-from pathlib import Path
-import tempfile
 import sys
+import tempfile
+from pathlib import Path
+
+import pytest
 
 # Ensure src is in path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.core.file_reference_parser import FileReferenceParser, FileReference
+from src.core.file_reference_parser import FileReference, FileReferenceParser
 
 
 class TestFileReferenceParser:

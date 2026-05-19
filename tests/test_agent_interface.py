@@ -9,14 +9,16 @@ Covers:
 - AgentToolProxy
 """
 
+from typing import Any
+
 import pytest
-from typing import List, Dict, Any
+
 from src.core import (
-    AgentInterface,
-    MockAgent,
     AgentContextProvider,
+    AgentInterface,
     AgentLLMProxy,
     AgentToolProxy,
+    MockAgent,
 )
 
 
@@ -366,8 +368,9 @@ class TestCriticalFixes:
 
     def test_call_llm_validates_empty_messages(self):
         """call_llm validates empty messages (Critical Fix #2)."""
-        from src.core import CodingAgent
         import os
+
+        from src.core import CodingAgent
 
         # Create real agent
         agent = CodingAgent(
@@ -385,8 +388,9 @@ class TestCriticalFixes:
 
     def test_call_llm_validates_missing_role(self):
         """call_llm validates missing role (Critical Fix #2)."""
-        from src.core import CodingAgent
         import os
+
+        from src.core import CodingAgent
 
         agent = CodingAgent(
             model_name=os.getenv("LLM_MODEL", "deepseek-coder"),
@@ -423,8 +427,9 @@ class TestCriticalFixes:
 
     def test_update_memory_preserves_structure(self):
         """update_memory preserves structured data (Critical Fix #4)."""
-        from src.core import CodingAgent
         import os
+
+        from src.core import CodingAgent
 
         agent = CodingAgent(
             model_name=os.getenv("LLM_MODEL", "deepseek-coder"),
@@ -447,8 +452,9 @@ class TestCriticalFixes:
 
     def test_get_memory_with_default(self):
         """get_memory returns default for missing key (Critical Fix #4)."""
-        from src.core import CodingAgent
         import os
+
+        from src.core import CodingAgent
 
         agent = CodingAgent(
             model_name=os.getenv("LLM_MODEL", "deepseek-coder"),

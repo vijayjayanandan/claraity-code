@@ -1,8 +1,9 @@
 """Tests for MCP marketplace - official registry search and install."""
 
 import json
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.integrations.mcp.marketplace import (
     McpMarketplace,
@@ -10,7 +11,6 @@ from src.integrations.mcp.marketplace import (
     McpMarketplaceSearchResult,
     _parse_official_entry,
 )
-
 
 # ---------------------------------------------------------------------------
 # Official registry response fixtures

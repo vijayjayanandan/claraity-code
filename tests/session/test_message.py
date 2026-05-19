@@ -1,26 +1,28 @@
 """Tests for unified Message class (Schema v2.1)."""
 
-import pytest
 import json
+
+import pytest
+
 from src.session.models import (
+    SCHEMA_VERSION,
+    FileBackup,
+    FileHistorySnapshot,
     Message,
     MessageMeta,
+    Segment,
+    Snapshot,
+    TextSegment,
+    ThinkingSegment,
+    TokenUsage,
     ToolCall,
     ToolCallFunction,
-    TokenUsage,
-    TextSegment,
     ToolCallSegment,
-    ThinkingSegment,
-    Segment,
-    parse_segment,
-    FileHistorySnapshot,
-    Snapshot,
-    FileBackup,
-    SCHEMA_VERSION,
-    generate_uuid,
-    now_iso,
     generate_stream_id,
     generate_tool_call_id,
+    generate_uuid,
+    now_iso,
+    parse_segment,
 )
 
 
@@ -289,7 +291,7 @@ class TestMessageMeta:
         meta = MessageMeta.from_dict(data)
         assert meta.uuid == "msg-123"
         assert meta.seq == 5
-        assert meta.is_sidechain == True
+        assert meta.is_sidechain
         assert meta.stream_id == "stream_001"
         assert meta.thinking == "Let me reason..."
 
@@ -323,7 +325,7 @@ class TestMessage:
         )
         assert msg.role == "user"
         assert msg.content == "Hello"
-        assert msg.is_user == True
+        assert msg.is_user
         assert msg.uuid != ""
         assert msg.seq == 1
 
@@ -335,7 +337,7 @@ class TestMessage:
             seq=2
         )
         assert msg.role == "assistant"
-        assert msg.is_assistant == True
+        assert msg.is_assistant
         assert msg.stream_id is not None
 
     def test_create_assistant_with_tool_calls(self):
@@ -352,7 +354,7 @@ class TestMessage:
         )
         assert len(msg.tool_calls) == 1
         assert msg.get_tool_call_ids() == ["call_123"]
-        assert msg.has_tool_calls() == True
+        assert msg.has_tool_calls()
 
     def test_create_tool_factory(self):
         msg = Message.create_tool(
@@ -365,7 +367,7 @@ class TestMessage:
             duration_ms=50
         )
         assert msg.role == "tool"
-        assert msg.is_tool == True
+        assert msg.is_tool
         assert msg.tool_call_id == "call_123"
         assert msg.meta.status == "success"
         assert msg.meta.duration_ms == 50
@@ -378,7 +380,7 @@ class TestMessage:
             event_type="compact_boundary"
         )
         assert msg.role == "system"
-        assert msg.is_system == True
+        assert msg.is_system
         assert msg.meta.event_type == "compact_boundary"
 
     def test_to_dict_serialization(self):
@@ -474,11 +476,11 @@ class TestMessage:
     def test_should_include_in_context(self):
         # Regular messages are included
         msg = Message.create_user("Hi", "sess", None, 1)
-        assert msg.should_include_in_context == True
+        assert msg.should_include_in_context
 
         # Compact boundary excluded
         boundary = Message.create_system("boundary", "sess", 2, event_type="compact_boundary")
-        assert boundary.should_include_in_context == False
+        assert not boundary.should_include_in_context
 
         # Explicit include_in_llm_context=False
         meta = MessageMeta(
@@ -487,7 +489,7 @@ class TestMessage:
             include_in_llm_context=False
         )
         excluded = Message(role="user", content="test", meta=meta)
-        assert excluded.should_include_in_context == False
+        assert not excluded.should_include_in_context
 
     def test_get_ordered_content_with_segments(self):
         segments = [
@@ -544,7 +546,7 @@ class TestFileHistorySnapshot:
 
     def test_file_backup_creation(self):
         backup = FileBackup(file_path="/test/file.py", existed=True, content="old content")
-        assert backup.existed == True
+        assert backup.existed
 
     def test_file_history_snapshot_create(self):
         fhs = FileHistorySnapshot.create(session_id="sess-1")

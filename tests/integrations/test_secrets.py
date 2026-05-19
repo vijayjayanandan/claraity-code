@@ -3,11 +3,11 @@
 import json
 import os
 import tempfile
-import pytest
 from pathlib import Path
 
-from src.integrations.secrets import EncryptedFileSecretStore, SecretStore
+import pytest
 
+from src.integrations.secrets import EncryptedFileSecretStore, SecretStore
 
 # ---------------------------------------------------------------------------
 # EncryptedFileSecretStore
@@ -173,6 +173,7 @@ class TestSecretLeakPrevention:
     def test_mcp_client_does_not_store_token_on_self(self):
         """McpClient must not have any attribute containing the secret."""
         from unittest.mock import AsyncMock
+
         from src.integrations.mcp.client import McpClient, McpTransport
         from src.integrations.mcp.config import McpServerConfig
 

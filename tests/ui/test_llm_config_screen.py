@@ -4,9 +4,11 @@ Uses Textual's pilot testing API for widget interaction tests.
 """
 
 import os
-import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
+import pytest
+
 
 @pytest.fixture(autouse=True)
 def mock_api_env():
@@ -18,7 +20,6 @@ def mock_api_env():
 
 from src.llm.config_loader import LLMConfigData, SubAgentLLMOverride, save_llm_config
 from src.ui.llm_config_screen import ConfigLLMScreen
-
 
 # ---------------------------------------------------------------------------
 # Unit tests (no Textual app needed)

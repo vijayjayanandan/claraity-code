@@ -6,13 +6,14 @@ Tests cover:
 - Glob: recursive patterns, brace expansion, file filtering
 """
 
-import pytest
-from pathlib import Path
-import tempfile
 import shutil
+import tempfile
+from pathlib import Path
 
-from src.tools.search_tools import GrepTool, GlobTool, OutputMode
+import pytest
+
 from src.tools.base import ToolStatus
+from src.tools.search_tools import GlobTool, GrepTool, OutputMode
 
 
 @pytest.fixture

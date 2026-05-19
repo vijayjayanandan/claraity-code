@@ -1,6 +1,7 @@
 """Tests for testing data models."""
 
 import pytest
+
 from src.testing.models import TestCase, TestStatus, TestSuiteResult
 
 

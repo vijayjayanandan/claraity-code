@@ -1,8 +1,10 @@
 """Integration tests for CodingAgent with SubAgent architecture."""
 
-import pytest
 from pathlib import Path
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
+
 from src.core.agent import CodingAgent
 from src.subagents import SubAgentManager, SubAgentResult
 

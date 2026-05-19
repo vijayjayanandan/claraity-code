@@ -1,12 +1,13 @@
 """Integration tests for CodingAgent with HookManager."""
 
 import os
-import pytest
 import tempfile
 from pathlib import Path
-from src.core.agent import CodingAgent
-from src.hooks import HookManager, HookDecision, HookResult
 
+import pytest
+
+from src.core.agent import CodingAgent
+from src.hooks import HookDecision, HookManager, HookResult
 
 # Common API configuration for all tests
 # API key is read from env var; tests that construct a real CodingAgent require it

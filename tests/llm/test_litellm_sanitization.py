@@ -6,10 +6,12 @@ Covers:
 - _prepare_messages: integration of sanitization + cache control
 """
 
-import pytest
 from unittest.mock import patch
+
+import pytest
+
+from src.llm.base import LLMBackendType, LLMConfig
 from src.llm.openai_backend import OpenAIBackend
-from src.llm.base import LLMConfig, LLMBackendType
 
 PLACEHOLDER_PROTOCOL = "[System: Empty message content sanitised to satisfy protocol]"
 PLACEHOLDER_PROTOTYPE = "[System: Empty message content sanitised to satisfy prototype]"

@@ -1,19 +1,20 @@
 """Tests for JSONL parser (Schema v2.1)."""
 
-import pytest
 import json
 import tempfile
 from pathlib import Path
 
+import pytest
+
+from src.session.models import FileHistorySnapshot, Message
 from src.session.persistence import (
     ParseError,
-    parse_line,
-    parse_file_iter,
-    load_session,
-    validate_session_file,
     get_session_info,
+    load_session,
+    parse_file_iter,
+    parse_line,
+    validate_session_file,
 )
-from src.session.models import Message, FileHistorySnapshot
 from src.session.store import MessageStore
 
 
@@ -333,7 +334,7 @@ class TestValidateSessionFile:
 
             is_valid, errors = validate_session_file(f.name)
 
-            assert is_valid == True
+            assert is_valid
             assert errors == []
 
         Path(f.name).unlink()
@@ -345,14 +346,14 @@ class TestValidateSessionFile:
 
             is_valid, errors = validate_session_file(f.name)
 
-            assert is_valid == False
+            assert not is_valid
             assert len(errors) > 0
 
         Path(f.name).unlink()
 
     def test_validate_nonexistent_file(self):
         is_valid, errors = validate_session_file("/nonexistent/path.jsonl")
-        assert is_valid == False
+        assert not is_valid
         assert "not found" in errors[0].lower()
 
 

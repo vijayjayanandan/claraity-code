@@ -8,8 +8,9 @@ agent.py) that would otherwise only surface when running the live agent.
 No API key needed -- uses a dummy config with a fake backend.
 """
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 
 class TestAgentSmoke:
@@ -41,8 +42,8 @@ class TestAgentSmoke:
 
     def test_all_tools_registered(self, tmp_path):
         """All expected tools should be registered in the executor."""
-        from src.llm.config_loader import LLMConfigData
         from src.core.agent import CodingAgent
+        from src.llm.config_loader import LLMConfigData
 
         config = LLMConfigData(
             model="test-model",
@@ -73,8 +74,8 @@ class TestAgentSmoke:
 
     def test_deleted_tools_not_registered(self, tmp_path):
         """Consolidated tools should NOT appear as separate registrations."""
-        from src.llm.config_loader import LLMConfigData
         from src.core.agent import CodingAgent
+        from src.llm.config_loader import LLMConfigData
 
         config = LLMConfigData(
             model="test-model",

@@ -1,8 +1,9 @@
 """Tests for ClarAIty Knowledge DB (claraity_db.py)."""
 
 import json
-import tempfile
 import shutil
+import sqlite3
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -10,10 +11,10 @@ import pytest
 from src.claraity.claraity_db import (
     ClaraityStore,
     render_compact_briefing,
-    render_module_detail,
     render_file_detail,
-    render_search,
     render_impact,
+    render_module_detail,
+    render_search,
     scan_files,
 )
 
@@ -142,7 +143,7 @@ class TestClaraityStore:
 
     def test_add_edge_foreign_key(self, temp_store):
         """Edge should fail if nodes don't exist."""
-        with pytest.raises(Exception):
+        with pytest.raises(sqlite3.IntegrityError):
             temp_store.add_edge("nonexistent-a", "nonexistent-b", "uses")
 
     def test_set_and_get_metadata(self, temp_store):

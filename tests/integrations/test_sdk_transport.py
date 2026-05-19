@@ -1,12 +1,12 @@
 """Tests for SdkTransport and KeyringTokenStorage."""
 
 import asyncio
+from unittest.mock import AsyncMock, MagicMock, call, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, call
 
 from src.integrations.mcp.client import SdkTransport
 from src.integrations.mcp.config import McpServerConfig
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -26,7 +26,7 @@ def _make_config(name="test-server", url=None, command=None):
 
 def _make_mock_session(tools=None):
     """Build a mock SDK ClientSession."""
-    from mcp.types import Tool, ListToolsResult, CallToolResult, TextContent
+    from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 
     session = AsyncMock()
     session.__aenter__ = AsyncMock(return_value=session)
@@ -484,9 +484,8 @@ class TestKeyringTokenStorage:
 # is in place. Once the fix lands the test goes green automatically.
 # ---------------------------------------------------------------------------
 
-import sys
 import stat
-
+import sys
 
 # ---------------------------------------------------------------------------
 # Critical 1: Reconnect lifecycle -- stale events after disconnect/reconnect

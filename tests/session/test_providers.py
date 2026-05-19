@@ -1,9 +1,10 @@
 """Tests for provider translators (OpenAI and Anthropic)."""
 
 import pytest
-from src.session.providers import from_openai, to_openai, from_anthropic, to_anthropic
-from src.session.providers.anthropic import get_system_prompt
+
 from src.session.models import Message
+from src.session.providers import from_anthropic, from_openai, to_anthropic, to_openai
+from src.session.providers.anthropic import get_system_prompt
 
 
 class TestOpenAIProvider:

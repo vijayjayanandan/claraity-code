@@ -9,27 +9,26 @@ Testing Strategy:
 """
 
 import time
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
 from src.tools.base import ToolStatus
 from src.tools.web_tools import (
-    TTLCache,
     RateLimiter,
+    RateLimitError,
     RunBudget,
-    UrlSafety,
-    UrlSafetyError,
-    is_content_type_allowed,
-    WebFetchTool,
-    WebSearchTool,
-    WebSearchProvider,
-    WebSearchResult,
     SearchResultItem,
     TavilyProvider,
-    RateLimitError,
+    TTLCache,
+    UrlSafety,
+    UrlSafetyError,
+    WebFetchTool,
+    WebSearchProvider,
+    WebSearchResult,
+    WebSearchTool,
+    is_content_type_allowed,
 )
-
 
 # =============================================================================
 # TTLCache Tests
@@ -694,7 +693,9 @@ class TestTavilyProvider:
 
 # Load .env for integration tests (API keys)
 from pathlib import Path
+
 from dotenv import load_dotenv
+
 _env_path = Path(__file__).parent.parent / ".env"
 if _env_path.exists():
     load_dotenv(_env_path)

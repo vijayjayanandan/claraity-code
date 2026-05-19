@@ -1,10 +1,11 @@
 """Tests for PowerShell command sanitization."""
 
 import platform
-import pytest
 from unittest.mock import patch
 
-from src.tools.powershell_sanitize import sanitize_for_powershell, _replace_outside_quotes
+import pytest
+
+from src.tools.powershell_sanitize import _replace_outside_quotes, sanitize_for_powershell
 
 
 class TestReplaceOutsideQuotes:

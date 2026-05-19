@@ -1,8 +1,10 @@
 """Unit tests for hook result classes."""
 
 import pytest
-from src.hooks.result import HookResult, UserPromptResult, NotificationResult
-from src.hooks.events import HookDecision, HookContinue, HookApproval
+from pydantic import ValidationError
+
+from src.hooks.events import HookApproval, HookContinue, HookDecision
+from src.hooks.result import HookResult, NotificationResult, UserPromptResult
 
 
 class TestHookResult:
@@ -180,7 +182,7 @@ class TestResultValidation:
         assert result.decision == HookDecision.PERMIT
 
         # Invalid decision type should raise error
-        with pytest.raises(Exception):  # Pydantic ValidationError
+        with pytest.raises(ValidationError):  # Pydantic ValidationError
             HookResult(decision="invalid")
 
     def test_user_prompt_result_validates_decision_type(self):
@@ -188,7 +190,7 @@ class TestResultValidation:
         result = UserPromptResult(decision=HookContinue.CONTINUE)
         assert result.decision == HookContinue.CONTINUE
 
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             UserPromptResult(decision="invalid")
 
     def test_notification_result_validates_decision_type(self):
@@ -196,5 +198,5 @@ class TestResultValidation:
         result = NotificationResult(decision=HookApproval.APPROVE)
         assert result.decision == HookApproval.APPROVE
 
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             NotificationResult(decision="invalid")

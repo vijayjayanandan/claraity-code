@@ -6,12 +6,12 @@ Verifies the load order introduced for configurable subagents:
   project .claraity/agents/ (highest -- can override built-ins)
 """
 
-import pytest
 from pathlib import Path
 from unittest.mock import patch
 
-from src.subagents.config import SubAgentConfig, SubAgentConfigLoader
+import pytest
 
+from src.subagents.config import SubAgentConfig, SubAgentConfigLoader
 
 # ---------------------------------------------------------------------------
 # Helpers

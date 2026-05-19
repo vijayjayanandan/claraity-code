@@ -1,7 +1,8 @@
 """Unit tests for hook events and decision types."""
 
 import pytest
-from src.hooks.events import HookEvent, HookDecision, HookContinue, HookApproval
+
+from src.hooks.events import HookApproval, HookContinue, HookDecision, HookEvent
 
 
 class TestHookEvent:

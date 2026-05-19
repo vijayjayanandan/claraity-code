@@ -1,17 +1,18 @@
 """End-to-End tests for session persistence through Agent."""
 
-import pytest
-import tempfile
 import shutil
-from pathlib import Path
 import sys
+import tempfile
+from pathlib import Path
+
+import pytest
 
 # Ensure src is in path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from src.core.session_manager import SessionManager
 from src.memory.memory_manager import MemoryManager
 from src.memory.models import TaskContext
-from src.core.session_manager import SessionManager
 
 
 class TestE2ESessionPersistence:

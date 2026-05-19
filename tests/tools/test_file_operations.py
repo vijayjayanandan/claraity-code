@@ -1,19 +1,21 @@
 """Tests for file operation tools."""
 
-import pytest
-import tempfile
 import os
+import tempfile
 from pathlib import Path
+
+import pytest
+
 from src.tools import (
-    ReadFileTool,
-    WriteFileTool,
+    AppendToFileTool,
     EditFileTool,
     ListDirectoryTool,
+    ReadFileTool,
     RunCommandTool,
-    AppendToFileTool,
+    WriteFileTool,
 )
-from src.tools.file_operations import FileOperationTool
 from src.tools.base import ToolStatus
+from src.tools.file_operations import FileOperationTool
 
 
 @pytest.fixture(autouse=True)
@@ -111,7 +113,7 @@ class TestReadFileToolLineRange:
 
         assert result.status == ToolStatus.SUCCESS
         assert result.metadata["lines_returned"] == 10
-        assert result.metadata["has_more"] == True
+        assert result.metadata["has_more"]
 
     def test_has_more_hint(self, tmp_path):
         """Test that hint is shown when more content exists."""
@@ -169,7 +171,7 @@ class TestReadFileToolLineRange:
         assert result.status == ToolStatus.SUCCESS
         assert result.metadata["lines_returned"] == 10
         # Key streaming benefit: has_more indicates more content exists
-        assert result.metadata["has_more"] == True
+        assert result.metadata["has_more"]
         # Total lines count is provided (may do second pass to count)
         assert result.metadata["total_lines"] >= 10  # At minimum, we know we read 10
 

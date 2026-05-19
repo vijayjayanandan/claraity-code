@@ -1,13 +1,13 @@
 """Tests for SubAgent config enforcement: tool filtering, LLM override, backend_type."""
 
-import pytest
 from pathlib import Path
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
 
-from src.subagents.subagent import SubAgent, SubAgentResult
-from src.subagents.config import SubAgentConfig, SubAgentLLMConfig
+import pytest
+
 from src.llm import LLMBackendType, LLMResponse
-
+from src.subagents.config import SubAgentConfig, SubAgentLLMConfig
+from src.subagents.subagent import SubAgent, SubAgentResult
 
 # =============================================================================
 # FIXTURES

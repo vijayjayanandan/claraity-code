@@ -5,39 +5,51 @@ deserializes correctly, and edge cases are handled gracefully.
 """
 
 import pytest
+
 from src.core.events import (
-    StreamStart, StreamEnd,
-    TextDelta,
-    CodeBlockStart, CodeBlockDelta, CodeBlockEnd,
-    ToolCallStart, ToolCallStatus, ToolCallResult,
-    ThinkingStart, ThinkingDelta, ThinkingEnd,
-    PausePromptStart, PausePromptEnd,
-    ContextUpdated, ContextCompacting, ContextCompacted,
-    FileReadEvent,
+    CodeBlockDelta,
+    CodeBlockEnd,
+    CodeBlockStart,
+    ContextCompacted,
+    ContextCompacting,
+    ContextUpdated,
     ErrorEvent,
+    FileReadEvent,
+    PausePromptEnd,
+    PausePromptStart,
+    StreamEnd,
+    StreamStart,
+    TextDelta,
+    ThinkingDelta,
+    ThinkingEnd,
+    ThinkingStart,
+    ToolCallResult,
+    ToolCallStart,
+    ToolCallStatus,
+)
+from src.core.events import (
     ToolStatus as EventToolStatus,
 )
 from src.core.protocol import (
     ApprovalResult,
-    InterruptSignal,
-    RetrySignal,
-    PauseResult,
     ClarifyResult,
+    InterruptSignal,
+    PauseResult,
     PlanApprovalResult,
+    RetrySignal,
 )
 from src.core.tool_status import ToolStatus
-from src.session.store.memory_store import (
-    StoreNotification,
-    StoreEvent,
-    ToolExecutionState,
-)
 from src.server.serializers import (
+    deserialize_action,
     serialize_event,
     serialize_store_notification,
     serialize_tool_status,
-    deserialize_action,
 )
-
+from src.session.store.memory_store import (
+    StoreEvent,
+    StoreNotification,
+    ToolExecutionState,
+)
 
 # ============================================================================
 # UIEvent Serialization

@@ -23,21 +23,20 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.server.stdio_server import (
-    StdioProtocol,
-    _build_replay_messages,
-    _error_response,
+    _CHAT_POLL_INTERVAL,
     _MAX_CHAT_MESSAGE_LEN,
     _MAX_CHAT_QUEUE,
     _MAX_LINE_BYTES,
     _MAX_STDIN_QUEUE,
     _SESSION_ID_RE,
-    _stdin_reader_thread,
     _TCP_CONNECT_TIMEOUT,
     _TCP_DRAIN_TIMEOUT,
-    _CHAT_POLL_INTERVAL,
     _VALID_MODES,
+    StdioProtocol,
+    _build_replay_messages,
+    _error_response,
+    _stdin_reader_thread,
 )
-
 
 # ============================================================================
 # _error_response

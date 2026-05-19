@@ -5,7 +5,8 @@ being written to JSONL session files.
 """
 
 import pytest
-from src.security import redact_secrets, redact_dict, REDACTED
+
+from src.security import REDACTED, redact_dict, redact_secrets
 
 
 class TestRedactSecrets:

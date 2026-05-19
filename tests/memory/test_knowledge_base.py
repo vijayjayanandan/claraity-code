@@ -1,11 +1,12 @@
 """Tests for knowledge DB brief injection into agent context."""
 
-import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
+import pytest
+
 from src.core.context_builder import ContextBuilder
 from src.memory.memory_manager import MemoryManager
-
 
 _MM_KWARGS = {"load_file_memories": False}
 

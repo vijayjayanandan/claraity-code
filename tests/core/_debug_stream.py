@@ -11,12 +11,13 @@ os.environ.update({
     'EMBEDDING_MODEL': 'm',
 })
 
-from src.core.agent import CodingAgent
-from tests.core.conftest import MockLLMBackend, MockUIProtocol
-from src.session.store.memory_store import MessageStore
-from src.memory import TaskContext
-from src.core.events import TextDelta
 import uuid
+
+from src.core.agent import CodingAgent
+from src.core.events import TextDelta
+from src.memory import TaskContext
+from src.session.store.memory_store import MessageStore
+from tests.core.conftest import MockLLMBackend, MockUIProtocol
 
 
 def main():

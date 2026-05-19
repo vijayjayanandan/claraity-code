@@ -1,8 +1,9 @@
 """Comprehensive tests for SubAgentConfig and SubAgentConfigLoader."""
 
-import pytest
 from pathlib import Path
 from unittest.mock import Mock, patch
+
+import pytest
 
 from src.subagents.config import SubAgentConfig, SubAgentConfigLoader, SubAgentLLMConfig
 

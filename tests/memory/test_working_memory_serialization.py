@@ -1,15 +1,16 @@
 """Tests for WorkingMemory serialization."""
 
-import pytest
-from datetime import datetime
 import sys
+from datetime import datetime
 from pathlib import Path
+
+import pytest
 
 # Ensure src is in path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from src.memory.models import CodeContext, Message, MessageRole, TaskContext
 from src.memory.working_memory import WorkingMemory
-from src.memory.models import Message, MessageRole, CodeContext, TaskContext
 
 
 class TestWorkingMemorySerialization:

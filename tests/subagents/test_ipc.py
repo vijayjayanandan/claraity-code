@@ -5,27 +5,28 @@ survive JSON roundtrips through the IPC serialization layer.
 """
 
 import json
+
 import pytest
 
 # Prime import chain (see conftest.py)
 import src.core  # noqa: F401
-
+from src.core.events import ToolStatus
+from src.session.models.message import Message
+from src.session.store.memory_store import (
+    StoreEvent,
+    StoreNotification,
+    ToolExecutionState,
+)
 from src.subagents.ipc import (
-    SubprocessInput,
     IPCEventType,
-    serialize_notification,
+    SubprocessInput,
     deserialize_notification,
-    serialize_result,
     deserialize_result,
     emit_event,
+    serialize_notification,
+    serialize_result,
 )
-from src.session.store.memory_store import (
-    StoreNotification, StoreEvent, ToolExecutionState,
-)
-from src.session.models.message import Message
-from src.core.events import ToolStatus
 from src.subagents.subagent import SubAgentResult
-
 
 # ============================================================================
 # SubprocessInput roundtrip

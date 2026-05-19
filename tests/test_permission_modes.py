@@ -8,11 +8,12 @@ Covers:
 - Integration with permission manager
 """
 
-import pytest
-import tempfile
 import shutil
-from pathlib import Path
+import tempfile
 from datetime import datetime
+from pathlib import Path
+
+import pytest
 
 from src.core.agent import CodingAgent
 from src.core.session_manager import SessionManager, SessionMetadata
@@ -21,7 +22,6 @@ pytest.importorskip("src.workflow", reason="src.workflow module not yet implemen
 from src.workflow.permission_manager import PermissionManager, PermissionMode
 
 from src.memory.memory_manager import MemoryManager
-
 
 # Test configuration for CodingAgent
 API_CONFIG = {

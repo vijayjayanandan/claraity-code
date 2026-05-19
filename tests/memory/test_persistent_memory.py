@@ -9,8 +9,10 @@ Tests verify:
 - Missing/empty directory handling
 """
 
-import pytest
 from pathlib import Path
+
+import pytest
+
 from src.memory.memory_manager import MemoryManager
 
 

@@ -7,34 +7,35 @@ Tests end-to-end workflows:
 - Store + Writer + Parser integration
 """
 
-import pytest
 import asyncio
 import json
 import tempfile
 from pathlib import Path
 
+import pytest
+
+from src.session.manager import SessionManager
 from src.session.models import (
+    FileHistorySnapshot,
     Message,
     MessageMeta,
     ToolCall,
     ToolCallFunction,
-    FileHistorySnapshot,
 )
-from src.session.store import MessageStore
 from src.session.persistence import (
-    parse_line,
-    load_session,
     SessionWriter,
-    create_session_file,
     append_to_session,
+    create_session_file,
+    load_session,
+    parse_line,
 )
 from src.session.providers import (
-    from_openai,
-    to_openai,
     from_anthropic,
+    from_openai,
     to_anthropic,
+    to_openai,
 )
-from src.session.manager import SessionManager
+from src.session.store import MessageStore
 
 
 class TestMessageLifecycle:
@@ -270,7 +271,7 @@ class TestStreamingCollapse:
             # Boundary-only persistence: only MESSAGE_ADDED is persisted
             # (MESSAGE_UPDATED events are skipped to reduce JSONL bloat)
             # File should have 1 entry (the initial add)
-            with open(file_path, 'r') as f:
+            with open(file_path) as f:
                 lines = f.readlines()
             assert len(lines) == 1
 
@@ -294,7 +295,7 @@ class TestSnapshotIntegration:
             store.add_message(msg)
 
             # Add snapshot
-            from src.session.models import Snapshot, FileBackup
+            from src.session.models import FileBackup, Snapshot
             snapshot = FileHistorySnapshot.create("sess-1")
             snapshot.snapshots.append(Snapshot(
                 file_path="/test.py",

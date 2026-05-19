@@ -6,6 +6,7 @@ session persistence continue to function correctly.
 """
 
 import pytest
+
 from src.memory.memory_manager import MemoryManager
 
 

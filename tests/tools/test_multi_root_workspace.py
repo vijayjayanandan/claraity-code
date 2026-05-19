@@ -7,14 +7,13 @@ Validates:
 - Workspace roots can be updated mid-session
 """
 
-import pytest
 from pathlib import Path
 
-from src.tools.search_tools import validate_path_security, _workspace_hint
-from src.tools.file_operations import FileOperationTool, ReadFileTool, WriteFileTool
-from src.tools.search_tools import GrepTool, GlobTool
-from src.tools.base import ToolStatus
+import pytest
 
+from src.tools.base import ToolStatus
+from src.tools.file_operations import FileOperationTool, ReadFileTool, WriteFileTool
+from src.tools.search_tools import GlobTool, GrepTool, _workspace_hint, validate_path_security
 
 # ── validate_path_security with multiple roots ───────────────────────────
 

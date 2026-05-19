@@ -23,7 +23,6 @@ import pytest
 from src.observability.log_store import LogStore
 from src.observability.sqlite_log_handler import SQLiteLogHandler
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

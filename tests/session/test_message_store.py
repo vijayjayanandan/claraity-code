@@ -1,14 +1,15 @@
 """Tests for MessageStore (Schema v2.1)."""
 
 import pytest
+
+from src.session.models import ToolCall, ToolCallFunction
 from src.session.store import (
+    Message,
     MessageStore,
+    SeqCollisionError,
     StoreEvent,
     StoreNotification,
-    SeqCollisionError,
-    Message,
 )
-from src.session.models import ToolCall, ToolCallFunction
 
 
 class TestMessageStoreBasics:
@@ -17,7 +18,7 @@ class TestMessageStoreBasics:
     def test_store_creation(self):
         store = MessageStore()
         assert store.message_count == 0
-        assert store.is_empty == True
+        assert store.is_empty
         assert store.max_seq == 0
 
     def test_add_message(self):
@@ -26,7 +27,7 @@ class TestMessageStoreBasics:
         store.add_message(msg)
 
         assert store.message_count == 1
-        assert store.is_empty == False
+        assert not store.is_empty
 
     def test_get_message_by_uuid(self):
         store = MessageStore()
@@ -339,7 +340,7 @@ class TestCompactionTracking:
         )
         store.add_message(boundary)
 
-        assert store.has_compaction() == True
+        assert store.has_compaction()
         assert store.get_compact_boundary() is not None
         assert store.get_compact_boundary().content == "Compaction boundary"
 
@@ -507,7 +508,7 @@ class TestClearAndReset:
         store.clear()
 
         assert store.message_count == 0
-        assert store.is_empty == True
+        assert store.is_empty
         assert store.max_seq == 0
         assert store.session_id is None
 

@@ -1,12 +1,13 @@
 """Comprehensive tests for SubAgentManager."""
 
-import pytest
-from pathlib import Path
-from unittest.mock import Mock, MagicMock, patch
 from concurrent.futures import Future
+from pathlib import Path
+from unittest.mock import MagicMock, Mock, patch
 
-from src.subagents.manager import SubAgentManager, DelegationResult
+import pytest
+
 from src.subagents.config import SubAgentConfig
+from src.subagents.manager import DelegationResult, SubAgentManager
 from src.subagents.subagent import SubAgent, SubAgentResult
 
 

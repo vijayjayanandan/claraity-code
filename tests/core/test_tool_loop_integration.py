@@ -12,20 +12,22 @@ Skip if no API: tests auto-skip when API config is missing.
 import asyncio
 import json
 import os
+
 import pytest
 
-from src.core.events import (
-    StreamStart, StreamEnd, TextDelta,
-    PausePromptStart, PausePromptEnd,
-)
 from src.core.agent import CodingAgent
-
+from src.core.events import (
+    PausePromptEnd,
+    PausePromptStart,
+    StreamEnd,
+    StreamStart,
+    TextDelta,
+)
 from tests.core.conftest import (
     MockUIProtocol,
     make_tool_call,
     requires_api,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -254,6 +256,7 @@ class TestToolLoopState:
     def test_elapsed_seconds(self):
         """elapsed_seconds returns monotonic time since start."""
         import time
+
         from src.core.tool_loop_state import ToolLoopState
 
         state = ToolLoopState(current_context=[])

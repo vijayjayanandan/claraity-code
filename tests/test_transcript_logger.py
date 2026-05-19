@@ -11,17 +11,18 @@ Tests cover:
 """
 
 import json
-import pytest
 import tempfile
-from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from src.observability.transcript_logger import (
-    TranscriptLogger,
-    TranscriptEvent,
     SECRET_PATTERNS,
-    SENSITIVE_KEYS
+    SENSITIVE_KEYS,
+    TranscriptEvent,
+    TranscriptLogger,
 )
 
 
@@ -60,7 +61,7 @@ class TestBasicLogging:
         logger.log("event1", {"data": "one"})
         logger.log("event2", {"data": "two"})
 
-        with open(logger.transcript_path, 'r') as f:
+        with open(logger.transcript_path) as f:
             lines = f.readlines()
 
         assert len(lines) == 2
@@ -270,7 +271,7 @@ class TestThreadSafety:
         assert len(seq_numbers) == len(set(seq_numbers))
 
         # All events should be in file
-        with open(logger.transcript_path, 'r') as f:
+        with open(logger.transcript_path) as f:
             lines = f.readlines()
         assert len(lines) == 100
 

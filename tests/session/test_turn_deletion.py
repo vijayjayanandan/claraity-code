@@ -24,7 +24,6 @@ from src.server.serializers import serialize_store_notification
 from src.session.models import Message, MessageMeta, ToolCall, ToolCallFunction
 from src.session.store import MessageStore, StoreEvent, StoreNotification
 
-
 # =============================================================================
 # Helpers
 # =============================================================================

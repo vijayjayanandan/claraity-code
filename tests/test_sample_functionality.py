@@ -1,5 +1,6 @@
 import unittest
 
+
 class TestSampleFunctionality(unittest.TestCase):
     def test_basic_operation(self):
         # Add basic test implementation

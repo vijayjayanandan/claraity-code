@@ -5,48 +5,49 @@ Tests platform detection, path normalization, encoding safety,
 subprocess wrapper, and virtual environment handling.
 """
 
-import sys
 import os
 import shutil
-import tempfile
 import subprocess
+import sys
+import tempfile
 from pathlib import Path
+
 import pytest
 
 from src.platform import (
-    # Platform detection
-    is_windows,
-    is_unix,
-    get_platform_name,
-    get_shell_type,
-    # Path normalization
-    normalize_path,
-    to_posix_path,
-    to_windows_path,
-    safe_path_join,
-    get_relative_path,
+    create_virtualenv_command,
+    get_activation_script,
     # Encoding safety
     get_console_encoding,
+    # Utilities
+    get_line_ending,
+    get_max_path_length,
+    get_pip_executable,
+    get_platform_name,
+    get_python_executable,
+    get_relative_path,
+    get_shell_type,
+    get_virtualenv_path,
+    # Virtual environment
+    is_in_virtualenv,
+    is_path_too_long,
+    is_unix,
     is_utf8_encoding,
-    safe_encode_output,
+    # Platform detection
+    is_windows,
+    normalize_line_endings,
+    # Path normalization
+    normalize_path,
     remove_emojis,
     # Subprocess wrapper
     run_command,
-    get_python_executable,
-    get_pip_executable,
-    # Virtual environment
-    is_in_virtualenv,
-    get_virtualenv_path,
-    get_activation_script,
-    create_virtualenv_command,
+    safe_encode_output,
+    safe_path_join,
     # File operations
     safe_read_file,
     safe_write_file,
-    # Utilities
-    get_line_ending,
-    normalize_line_endings,
-    get_max_path_length,
-    is_path_too_long,
+    to_posix_path,
+    to_windows_path,
 )
 
 
@@ -258,7 +259,7 @@ class TestFileOperations:
             safe_write_file(test_path, test_content, ensure_parent=True)
 
             assert os.path.exists(test_path)
-            with open(test_path, 'r', encoding='utf-8') as f:
+            with open(test_path, encoding='utf-8') as f:
                 assert f.read() == test_content
 
 
@@ -394,8 +395,9 @@ class TestDetectPreferredShell:
     @pytest.mark.skipif(not is_windows(), reason="Windows-only")
     def test_wsl_bash_rejected_by_find_git_bash(self):
         """WSL bash (System32\\bash.exe) should be rejected by _find_git_bash."""
-        from src.platform.windows import _find_git_bash
         from unittest.mock import patch
+
+        from src.platform.windows import _find_git_bash
 
         # Mock both shutil.which and os.path.isfile to fully isolate
         def mock_which(name):
@@ -411,8 +413,9 @@ class TestDetectPreferredShell:
     @pytest.mark.skipif(not is_windows(), reason="Windows-only")
     def test_syswow64_bash_rejected(self):
         """SysWOW64 bash should also be rejected."""
-        from src.platform.windows import _find_git_bash
         from unittest.mock import patch
+
+        from src.platform.windows import _find_git_bash
 
         def mock_which(name):
             if name == "bash":
@@ -427,8 +430,9 @@ class TestDetectPreferredShell:
     @pytest.mark.skipif(not is_windows(), reason="Windows-only")
     def test_git_bash_accepted_via_path(self):
         """Git Bash found on PATH should be accepted."""
-        from src.platform.windows import _find_git_bash
         from unittest.mock import patch
+
+        from src.platform.windows import _find_git_bash
 
         def mock_which(name):
             if name == "bash":
@@ -443,8 +447,9 @@ class TestDetectPreferredShell:
     @pytest.mark.skipif(not is_windows(), reason="Windows-only")
     def test_git_bash_derived_from_git_exe(self):
         """When bash isn't on PATH, derive from git.exe location."""
-        from src.platform.windows import _find_git_bash
         from unittest.mock import patch
+
+        from src.platform.windows import _find_git_bash
 
         def mock_which(name):
             if name == "bash":

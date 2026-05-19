@@ -1,7 +1,9 @@
 """Integration tests for testing layer with real test execution."""
 
-import pytest
 from pathlib import Path
+
+import pytest
+
 from src.testing import TestRunner, ValidationEngine
 from src.testing.models import TestStatus
 

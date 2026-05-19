@@ -1657,7 +1657,12 @@ class StdioProtocol(UIProtocol):
             # Reconnect
             server_settings = settings.get_server(server_name)
             if server_settings and server_settings.enabled:
-                from src.integrations.mcp.client import McpClient, SdkTransport, SseTransport, StdioTransport
+                from src.integrations.mcp.client import (
+                    McpClient,
+                    SdkTransport,
+                    SseTransport,
+                    StdioTransport,
+                )
                 from src.integrations.mcp.policy import McpPolicyGate
                 from src.integrations.mcp.registry import McpToolRegistry
 

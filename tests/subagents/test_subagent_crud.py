@@ -9,10 +9,10 @@ Covers:
 
 import asyncio
 import json
-import pytest
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
+import pytest
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -27,7 +27,7 @@ def _make_md(directory: Path, name: str, description: str = "Test agent", prompt
     return path
 
 
-def _make_handler(tmp_path: Path) -> "StdioProtocol":
+def _make_handler(tmp_path: Path):
     """Create a StdioProtocol instance with mocked internals for unit testing."""
     from src.server.stdio_server import StdioProtocol
 

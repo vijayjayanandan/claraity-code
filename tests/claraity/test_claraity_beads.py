@@ -1,18 +1,23 @@
 """Tests for ClarAIty Beads task tracker (claraity_beads.py)."""
 
 import json
+import shutil
 import sqlite3
 import tempfile
-import shutil
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
 from src.claraity.claraity_beads import (
-    BeadStore, render_tasks_md, render_bead_detail,
-    VALID_STATUSES, VALID_ISSUE_TYPES, VALID_DEP_TYPES,
-    BLOCKING_DEP_TYPES, ASSOCIATION_DEP_TYPES,
+    ASSOCIATION_DEP_TYPES,
+    BLOCKING_DEP_TYPES,
+    VALID_DEP_TYPES,
+    VALID_ISSUE_TYPES,
+    VALID_STATUSES,
+    BeadStore,
+    render_bead_detail,
+    render_tasks_md,
 )
 
 
@@ -894,7 +899,8 @@ class TestTouch:
     def test_touch_updates_last_activity(self, temp_beads):
         bid = temp_beads.add_bead(title="Touch me")
         bead_before = temp_beads.get_bead(bid)
-        import time; time.sleep(0.05)  # ensure timestamp differs
+        import time
+        time.sleep(0.05)  # ensure timestamp differs
         temp_beads.touch(bid)
         bead_after = temp_beads.get_bead(bid)
         assert bead_after["last_activity"] > bead_before["last_activity"]

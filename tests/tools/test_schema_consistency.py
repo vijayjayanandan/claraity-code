@@ -11,17 +11,22 @@ and what execute() actually receives.
 """
 
 import inspect
+
 import pytest
 
-from src.tools.tool_schemas import _SCHEMA_REGISTRY
 from src.tools.base import Tool
-from src.tools.search_tools import GrepTool, GlobTool
-from src.tools.file_operations import (
-    ReadFileTool, WriteFileTool, EditFileTool, AppendToFileTool, ListDirectoryTool,
-)
-from src.tools.clarify_tool import ClarifyTool
 from src.tools.checkpoint_tool import CreateCheckpointTool
+from src.tools.clarify_tool import ClarifyTool
+from src.tools.file_operations import (
+    AppendToFileTool,
+    EditFileTool,
+    ListDirectoryTool,
+    ReadFileTool,
+    WriteFileTool,
+)
 from src.tools.plan_mode_tools import EnterPlanModeTool, RequestPlanApprovalTool
+from src.tools.search_tools import GlobTool, GrepTool
+from src.tools.tool_schemas import _SCHEMA_REGISTRY
 
 # All Tool subclasses that delegate via _SCHEMA_NAME.
 # Add new tools here as they are migrated to the _SCHEMA_NAME pattern.
@@ -104,13 +109,13 @@ class TestNoInlineSchemasDiverge:
         parameters (delegated from _SCHEMA_REGISTRY). This is a documented exception,
         not a violation.
         """
-        import src.tools.search_tools
-        import src.tools.file_operations
-        import src.tools.clarify_tool
-        import src.tools.checkpoint_tool
-        import src.tools.plan_mode_tools
-        import src.tools.web_tools
         import src.tools.background_tools
+        import src.tools.checkpoint_tool
+        import src.tools.clarify_tool
+        import src.tools.file_operations
+        import src.tools.plan_mode_tools
+        import src.tools.search_tools
+        import src.tools.web_tools
         return [
             src.tools.search_tools,
             src.tools.file_operations,
@@ -211,6 +216,7 @@ class TestConstructorArgTools:
         """DelegateToSubagentTool keeps a _get_parameters() override that still delegates
         to the registry -- verify parameters match even though description is dynamic."""
         from unittest.mock import MagicMock
+
         from src.tools.delegation import DelegateToSubagentTool
         tool = DelegateToSubagentTool(subagent_manager=MagicMock())
         self._assert_schema_matches_registry(tool)

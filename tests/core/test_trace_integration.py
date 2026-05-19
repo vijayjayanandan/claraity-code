@@ -18,7 +18,6 @@ from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # TraceIntegration tests
 # ---------------------------------------------------------------------------

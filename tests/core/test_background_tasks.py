@@ -3,19 +3,19 @@
 import asyncio
 import platform
 import subprocess
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from src.core.background_tasks import (
-    BackgroundTaskRegistry,
-    BackgroundTaskInfo,
-    BackgroundTaskStatus,
-    MAX_CONCURRENT_TASKS,
     DEFAULT_BG_TIMEOUT,
     MAX_BG_TIMEOUT,
+    MAX_CONCURRENT_TASKS,
+    BackgroundTaskInfo,
+    BackgroundTaskRegistry,
+    BackgroundTaskStatus,
     _clamp_bg_timeout,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

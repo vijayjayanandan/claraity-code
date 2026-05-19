@@ -9,12 +9,12 @@ Coverage:
 Total: 10 tests across 3 test classes
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
 
-from src.core.events import ToolStatus
-from src.ui.widgets.subagent_card import HEADER_ICONS, _SubagentHeader, SubAgentCard
+import pytest
 
+from src.core.events import ToolStatus
+from src.ui.widgets.subagent_card import HEADER_ICONS, SubAgentCard, _SubagentHeader
 
 # ---------------------------------------------------------------------------
 # Helpers

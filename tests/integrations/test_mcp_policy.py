@@ -2,9 +2,8 @@
 
 import pytest
 
-from src.integrations.mcp.policy import McpPolicyGate, ToolPolicy
 from src.integrations.jira.tools import create_jira_policy_gate
-
+from src.integrations.mcp.policy import McpPolicyGate, ToolPolicy
 
 # ---------------------------------------------------------------------------
 # ToolPolicy.from_annotations

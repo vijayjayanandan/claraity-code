@@ -1,14 +1,15 @@
 """Tests for TestRunner."""
 
-import pytest
-from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
 import json
-import tempfile
 import os
+import tempfile
+from pathlib import Path
+from unittest.mock import MagicMock, Mock, patch
 
-from src.testing.test_runner import TestRunner
+import pytest
+
 from src.testing.models import TestStatus
+from src.testing.test_runner import TestRunner
 
 
 class TestFrameworkDetection:

@@ -1,12 +1,13 @@
 """Tests for search tools (GrepTool, GlobTool)."""
 
 import os
-import pytest
 from pathlib import Path
-from src.tools import GrepTool, GlobTool
+
+import pytest
+
+from src.tools import GlobTool, GrepTool
 from src.tools.base import ToolStatus
 from src.tools.search_tools import validate_path_security, validate_regex_safety
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

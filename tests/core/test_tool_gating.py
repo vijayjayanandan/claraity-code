@@ -6,11 +6,11 @@ No API calls needed - all dependencies are mocked.
 """
 
 import json
-import pytest
 from unittest.mock import MagicMock, patch
 
-from src.core.tool_gating import ToolGatingService, GateAction, GateResult
+import pytest
 
+from src.core.tool_gating import GateAction, GateResult, ToolGatingService
 
 # ---------------------------------------------------------------------------
 # Fixtures

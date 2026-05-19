@@ -1,18 +1,18 @@
 """Tests for src.server.config_handler pure functions."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from src.server.config_handler import (
-    get_config_response,
-    save_config_from_request,
-    list_models_from_request,
     SUBAGENT_NAMES,
-    _int_or,
     _float_or,
+    _int_or,
     _int_or_none,
+    get_config_response,
+    list_models_from_request,
+    save_config_from_request,
 )
-
 
 # ── Helpers ──
 

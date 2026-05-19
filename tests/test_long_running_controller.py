@@ -12,15 +12,16 @@ Coverage targets:
 - get_status: Status information
 """
 
-import pytest
 import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock
 
-from src.execution.controller import LongRunningController
+import pytest
+
 from src.execution.checkpoint import CheckpointManager, CheckpointMetadata
+from src.execution.controller import LongRunningController
 
 
 class TestLongRunningController:

@@ -3,13 +3,14 @@
 import asyncio
 import json
 import platform
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.core.background_tasks import BackgroundTaskRegistry
 from src.tools.background_tools import CheckBackgroundTaskTool
-from src.tools.file_operations import RunCommandTool
 from src.tools.base import ToolStatus
+from src.tools.file_operations import RunCommandTool
 
 
 @pytest.fixture

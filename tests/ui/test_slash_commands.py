@@ -1,7 +1,8 @@
 """Tests for src.ui.slash_commands - slash command dispatcher."""
 
-import pytest
 from unittest.mock import AsyncMock
+
+import pytest
 
 from src.ui.slash_commands import SlashCommandDispatcher
 

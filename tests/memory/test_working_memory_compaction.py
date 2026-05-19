@@ -10,12 +10,13 @@ Tests cover:
 - Budget threshold enforcement
 """
 
-import pytest
-from unittest.mock import MagicMock, patch
 from datetime import datetime
+from unittest.mock import MagicMock, patch
 
-from src.memory.working_memory import WorkingMemory
+import pytest
+
 from src.memory.models import Message, MessageRole
+from src.memory.working_memory import WorkingMemory
 
 
 @pytest.fixture

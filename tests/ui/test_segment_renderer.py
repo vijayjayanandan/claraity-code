@@ -1,11 +1,11 @@
 """Tests for src.ui.segment_renderer - segment rendering into widgets."""
 
-import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.ui.segment_renderer import SegmentRenderer
-
 
 # ---- Helpers ----
 
@@ -240,7 +240,7 @@ class TestRenderSegments:
 class TestRenderToolSegmentsOnly:
     @pytest.mark.asyncio
     async def test_renders_tool_ref_segment(self):
-        from src.session.models.message import ToolCallRefSegment, TextSegment
+        from src.session.models.message import TextSegment, ToolCallRefSegment
         tc = make_tool_call(tc_id="tc-1", name="read_file", arguments='{"path": "a.py"}')
         msg = make_message(tool_calls=[tc])
 

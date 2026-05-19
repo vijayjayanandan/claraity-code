@@ -4,15 +4,14 @@ All tests use mocked Anthropic SDK -- no real API calls.
 """
 
 import json
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
 
 # Prime import chain (see conftest.py)
 import src.core  # noqa: F401
-
-from src.llm.base import LLMConfig, LLMBackendType, ToolDefinition, ProviderDelta, ToolCallDelta
+from src.llm.base import LLMBackendType, LLMConfig, ProviderDelta, ToolCallDelta, ToolDefinition
 from src.session.models.message import ToolCall, ToolCallFunction
-
 
 # ============================================================================
 # Fixtures

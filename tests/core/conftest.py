@@ -11,26 +11,25 @@ import asyncio
 import json
 import os
 import uuid
-import yaml
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import pytest
+import yaml
 
 from src.session.models.message import ToolCall, ToolCallFunction
-
 
 # ---------------------------------------------------------------------------
 # API Configuration (same pattern as test_prompt_caching.py)
 # ---------------------------------------------------------------------------
 
-def _load_api_config() -> Dict[str, Any]:
+def _load_api_config() -> dict[str, Any]:
     """Load API config from .claraity/config.yaml + credential_store, like the real agent."""
     project_root = Path(__file__).resolve().parent.parent.parent
     config_path = project_root / ".claraity" / "config.yaml"
 
     if config_path.exists():
-        with open(config_path, "r") as f:
+        with open(config_path) as f:
             config = yaml.safe_load(f)
         llm_config = config.get("llm", {})
         base_url = llm_config.get("base_url", "")
@@ -142,7 +141,7 @@ class MockUIProtocol:
     def reset(self):
         self._interrupted = False
 
-    def set_rejection(self, call_id: str, with_feedback: Optional[str] = None):
+    def set_rejection(self, call_id: str, with_feedback: str | None = None):
         """Pre-configure a rejection for a specific call_id."""
         self._approval_decisions[call_id] = False
         self._rejection_feedback[call_id] = with_feedback
@@ -191,8 +190,8 @@ def live_agent(tmp_path):
 
 def make_tool_call(
     name: str,
-    arguments: Optional[Dict[str, Any]] = None,
-    call_id: Optional[str] = None,
+    arguments: dict[str, Any] | None = None,
+    call_id: str | None = None,
 ) -> ToolCall:
     """Create a ToolCall with given name and arguments."""
     return ToolCall(

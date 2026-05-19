@@ -12,7 +12,7 @@ import asyncio
 import json
 import time
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -23,15 +23,14 @@ from src.core.tool_status import ToolStatus as CoreToolStatus
 from src.session.models.message import ToolCall, ToolCallFunction
 from src.tools.base import ToolResult, ToolStatus
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 def make_tool_call(
     name: str,
-    arguments: Optional[Dict[str, Any]] = None,
-    call_id: Optional[str] = None,
+    arguments: dict[str, Any] | None = None,
+    call_id: str | None = None,
 ) -> ToolCall:
     """Create a ToolCall with given name and arguments."""
     return ToolCall(
@@ -311,7 +310,7 @@ class TestExecuteToolsParallel:
 
         # Tool at index 2 completes first, index 0 completes last
         for i, delay in enumerate([0.06, 0.04, 0.02]):
-            name = f"read_file"
+            name = "read_file"
             executor._delays[f"_key_{i}"] = delay
 
         # Use a custom result function that includes the file_path in output

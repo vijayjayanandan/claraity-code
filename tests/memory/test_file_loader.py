@@ -10,10 +10,12 @@ Tests cover:
 - Platform-specific paths
 """
 
-import pytest
 import platform
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
+
 from src.memory.file_loader import MemoryFileLoader
 
 

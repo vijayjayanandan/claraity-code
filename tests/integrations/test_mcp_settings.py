@@ -1,17 +1,17 @@
 """Tests for MCP settings manager - file-based config with per-tool visibility."""
 
 import json
-import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
+from src.integrations.mcp.config import McpServerConfig
 from src.integrations.mcp.settings import (
-    McpSettingsManager,
     McpServerSettings,
+    McpSettingsManager,
     McpToolOverride,
 )
-from src.integrations.mcp.config import McpServerConfig
-
 
 # ---------------------------------------------------------------------------
 # McpToolOverride

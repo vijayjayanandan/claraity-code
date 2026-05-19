@@ -8,13 +8,13 @@ Verifies pattern split, new structural patterns, and timeout clamping.
 """
 
 import pytest
+
 from src.tools.command_safety import (
     CommandSafety,
     CommandSafetyResult,
     check_command_safety,
     clamp_timeout,
 )
-
 
 # ---------------------------------------------------------------------------
 # Tier 1: HARD BLOCK patterns (no override)

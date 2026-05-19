@@ -4,21 +4,16 @@ Integration test for Windows compatibility layer with agent.
 Tests that the agent works properly with safe_print and emoji-free output.
 """
 
-import sys
 import os
-from pathlib import Path
-from io import StringIO
+import sys
 from contextlib import redirect_stdout
+from io import StringIO
+from pathlib import Path
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.platform import (
-    safe_print,
-    remove_emojis,
-    is_windows,
-    safe_encode_output
-)
+from src.platform import is_windows, remove_emojis, safe_encode_output, safe_print
 
 
 def test_safe_print_no_crash():
@@ -103,11 +98,10 @@ def test_safe_encode_output():
 def test_agent_import():
     """Test that agent can be imported with platform utilities."""
     try:
-        from src.core.agent import CodingAgent
-        from src.platform import safe_print
-
         # Verify agent has access to safe_print
         import src.core.agent as agent_module
+        from src.core.agent import CodingAgent
+        from src.platform import safe_print
         assert hasattr(agent_module, 'safe_print')
 
         print("[OK] Agent import test passed")

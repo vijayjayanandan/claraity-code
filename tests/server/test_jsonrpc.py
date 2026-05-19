@@ -4,7 +4,6 @@ import pytest
 
 from src.server.jsonrpc import JSONRPC_VERSION, is_jsonrpc, unwrap, wrap_notification
 
-
 # ---------------------------------------------------------------------------
 # wrap_notification
 # ---------------------------------------------------------------------------

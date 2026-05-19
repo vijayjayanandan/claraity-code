@@ -26,12 +26,11 @@ from datetime import datetime, timedelta
 import pytest
 
 from src.observability.log_store import (
-    LogRecord,
-    LogStore,
     MAX_EVENT_LENGTH,
     MAX_EXTRA_JSON_LENGTH,
+    LogRecord,
+    LogStore,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

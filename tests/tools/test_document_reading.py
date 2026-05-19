@@ -16,19 +16,18 @@ import importlib.util
 import json
 import subprocess
 import zipfile
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
-from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 # Prime import chain (see conftest.py)
 import src.core  # noqa: F401
-
+from src.llm.base import LLMBackendType, LLMConfig
 from src.tools import ReadFileTool
-from src.tools.file_operations import FileOperationTool
 from src.tools.base import ToolStatus
-from src.tools.document_extractor import extract_pdf, extract_docx, check_zip_bomb, _parse_pages
-from src.llm.base import LLMConfig, LLMBackendType
+from src.tools.document_extractor import _parse_pages, check_zip_bomb, extract_docx, extract_pdf
+from src.tools.file_operations import FileOperationTool
 
 
 @pytest.fixture(autouse=True)
@@ -620,8 +619,9 @@ class TestMultimodalExtraction:
 
     def test_pdf_scout_mode_shows_hints(self, tmp_path):
         """Test that scout mode (default) shows image hints but no images."""
-        import fitz
         import base64
+
+        import fitz
 
         pdf_path = tmp_path / "with_image.pdf"
         doc = fitz.open()
@@ -643,8 +643,9 @@ class TestMultimodalExtraction:
 
     def test_pdf_render_mode_returns_page_screenshots(self, tmp_path):
         """Test that render mode returns page screenshots for pages with images."""
-        import fitz
         import base64
+
+        import fitz
 
         pdf_path = tmp_path / "with_image.pdf"
         doc = fitz.open()
@@ -670,8 +671,9 @@ class TestMultimodalExtraction:
 
     def test_pdf_text_only_pages_not_rendered(self, tmp_path):
         """Test that text-only pages get no image rendering."""
-        import fitz
         import base64
+
+        import fitz
 
         pdf_path = tmp_path / "mixed.pdf"
         doc = fitz.open()
@@ -750,9 +752,10 @@ class TestMultimodalExtraction:
 
     def test_docx_scout_mode_shows_hints(self, tmp_path):
         """Test that DOCX scout mode shows image hints."""
+        import base64
+
         from docx import Document
         from docx.shared import Inches
-        import base64
 
         docx_path = tmp_path / "with_image.docx"
         doc = Document()
@@ -778,9 +781,10 @@ class TestMultimodalExtraction:
 
     def test_docx_render_mode_extracts_inline(self, tmp_path):
         """Test that DOCX render mode extracts images at paragraph position."""
+        import base64
+
         from docx import Document
         from docx.shared import Inches
-        import base64
 
         docx_path = tmp_path / "with_image.docx"
         doc = Document()
@@ -1114,9 +1118,9 @@ class TestSerializerMultimodal:
 
     def test_string_result_serialized_normally(self):
         """String results are serialized as before."""
-        from src.server.serializers import serialize_store_notification
         from src.core.events import ToolStatus as CoreToolStatus
-        from src.session.store.memory_store import StoreNotification, StoreEvent, ToolExecutionState
+        from src.server.serializers import serialize_store_notification
+        from src.session.store.memory_store import StoreEvent, StoreNotification, ToolExecutionState
 
         notification = StoreNotification(
             event=StoreEvent.TOOL_STATE_UPDATED,
@@ -1132,9 +1136,9 @@ class TestSerializerMultimodal:
 
     def test_list_result_extracted_to_text(self):
         """Multimodal list results are extracted to display text."""
-        from src.server.serializers import serialize_store_notification
         from src.core.events import ToolStatus as CoreToolStatus
-        from src.session.store.memory_store import StoreNotification, StoreEvent, ToolExecutionState
+        from src.server.serializers import serialize_store_notification
+        from src.session.store.memory_store import StoreEvent, StoreNotification, ToolExecutionState
 
         notification = StoreNotification(
             event=StoreEvent.TOOL_STATE_UPDATED,

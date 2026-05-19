@@ -2,11 +2,11 @@
 
 import pytest
 
-from src.core.background_tasks import BackgroundTaskInfo, BackgroundTaskStatus
 from src.core.background_context import (
-    inject_background_task_completions,
     OUTPUT_PREVIEW_CHARS,
+    inject_background_task_completions,
 )
+from src.core.background_tasks import BackgroundTaskInfo, BackgroundTaskStatus
 
 
 def _make_task(

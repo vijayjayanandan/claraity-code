@@ -21,16 +21,15 @@ from pathlib import Path
 import pytest
 
 from src.observability.error_store import ErrorRecord
-from src.observability.log_store import LogRecord
 from src.observability.log_query import (
     JsonlEntry,
+    _jsonl_to_log_record,
     format_error,
     format_jsonl,
     format_log,
     scan_jsonl_files,
-    _jsonl_to_log_record,
 )
-
+from src.observability.log_store import LogRecord
 
 # ---------------------------------------------------------------------------
 # Fixtures

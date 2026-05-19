@@ -3,12 +3,13 @@
 Verifies that path traversal is blocked across all tools that accept paths.
 """
 
-import pytest
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from src.tools.file_operations import FileOperationTool
+import pytest
+
 from src.tools.base import ToolStatus
+from src.tools.file_operations import FileOperationTool
 from src.tools.search_tools import validate_path_security
 
 

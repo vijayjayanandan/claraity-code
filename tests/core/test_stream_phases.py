@@ -5,16 +5,16 @@ No API calls needed - all inputs are plain data.
 """
 
 import json
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 from src.core.stream_phases import (
     build_assistant_context_message,
-    inject_controller_constraint,
-    fill_skipped_tool_results,
     build_pause_stats,
+    fill_skipped_tool_results,
+    inject_controller_constraint,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helper: create mock ToolCall objects

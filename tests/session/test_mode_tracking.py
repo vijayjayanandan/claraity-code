@@ -1,8 +1,9 @@
 """Test MessageStore mode tracking feature."""
 
 import pytest
-from src.session.store.memory_store import MessageStore
+
 from src.session.models.message import Message
+from src.session.store.memory_store import MessageStore
 
 
 class TestModeTracking:

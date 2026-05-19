@@ -14,13 +14,14 @@ Coverage targets:
 
 import json
 import os
-import pytest
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import Mock, MagicMock
+from unittest.mock import MagicMock, Mock
 
-from src.execution.checkpoint import CheckpointManager, ExecutionCheckpoint, CheckpointMetadata
+import pytest
+
+from src.execution.checkpoint import CheckpointManager, CheckpointMetadata, ExecutionCheckpoint
 
 
 class TestCheckpointManager:
@@ -127,7 +128,7 @@ class TestCheckpointManager:
         assert checkpoint_file.exists()
 
         # Verify it's valid JSON
-        with open(checkpoint_file, 'r', encoding='utf-8') as f:
+        with open(checkpoint_file, encoding='utf-8') as f:
             data = json.load(f)
             assert "metadata" in data
             assert "working_memory" in data

@@ -1,6 +1,7 @@
 """Tests for ContextAssemblyReport and context token tracking."""
 
 import pytest
+
 from src.core.context_builder import ContextAssemblyReport
 
 

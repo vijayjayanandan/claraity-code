@@ -5,23 +5,24 @@ Tests error classification, retry logic, exponential backoff,
 rate limit handling, timeout handling, and response validation.
 """
 
-import time
-import pytest
-from unittest.mock import Mock, patch
 import logging
+import time
+from unittest.mock import Mock, patch
+
+import pytest
 
 from src.llm.failure_handler import (
-    LLMFailureHandler,
-    LLMError,
-    RateLimitError,
-    TimeoutError,
-    NetworkError,
-    ValidationError,
+    ContentPolicyViolationError,
+    ContextLengthExceededError,
     InvalidAPIKeyError,
     InvalidModelError,
     InvalidRequestError,
-    ContextLengthExceededError,
-    ContentPolicyViolationError,
+    LLMError,
+    LLMFailureHandler,
+    NetworkError,
+    RateLimitError,
+    TimeoutError,
+    ValidationError,
     classify_provider_error,
 )
 

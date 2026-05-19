@@ -1,12 +1,12 @@
 """Tests for profile-based JiraConnection (mcp-atlassian + SecretStore)."""
 
 import json
-import pytest
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Optional
+
+import pytest
 
 from src.integrations.jira.connection import JiraConnection, _secret_key
-
 
 # ---------------------------------------------------------------------------
 # Fake SecretStore for testing (no OS keychain or encryption needed)
@@ -16,9 +16,9 @@ class FakeSecretStore:
     """In-memory SecretStore for test isolation."""
 
     def __init__(self):
-        self._data: Dict[str, str] = {}
+        self._data: dict[str, str] = {}
 
-    def get(self, key: str) -> Optional[str]:
+    def get(self, key: str) -> str | None:
         return self._data.get(key)
 
     def set(self, key: str, value: str) -> None:

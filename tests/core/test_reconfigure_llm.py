@@ -5,12 +5,12 @@ Tests hot-swap of LLM backend at runtime without losing session state.
 No API calls needed - all dependencies are mocked.
 """
 
+from unittest.mock import MagicMock, PropertyMock, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
 
 from src.llm.base import LLMBackendType, LLMConfig
 from src.llm.config_loader import LLMConfigData
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

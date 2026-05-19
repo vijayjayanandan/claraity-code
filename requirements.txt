@@ -16,14 +16,14 @@ pysqlite3-binary
 hf-transfer
 
 # Data Models & Validation
-pydantic>=2.7.0
-pydantic-settings>=2.2.0
+pydantic>=2.11.0
+pydantic-settings>=2.9.0
 
 # Web Framework (optional - for future API)
 fastapi>=0.111.0
 uvicorn[standard]>=0.29.0
-httpx>=0.27.0
-websockets>=12.0
+httpx>=0.28.0
+websockets>=15.0
 beautifulsoup4>=4.12.0  # HTML text extraction for web_fetch tool
 
 # Async I/O
@@ -35,26 +35,26 @@ sqlalchemy>=2.0.30
 alembic>=1.13.0
 
 # Document Reading (PDF, Word)
-PyMuPDF>=1.23.0  # PDF text + table extraction (import as fitz)
+PyMuPDF>=1.25.0  # PDF text + table extraction (import as fitz)
 python-docx>=1.0.0  # Word .docx paragraph + table extraction
 
 # CLI & UI
 rich>=13.7.0
 prompt_toolkit>=3.0.0  # Interactive CLI with autocomplete and key bindings
 typer>=0.12.0
-pygments>=2.17.0  # Syntax highlighting for code display
+pygments>=2.20.0  # Syntax highlighting for code display
 colorama>=0.4.6  # Cross-platform colored terminal text (Windows ANSI support)
 pyperclip>=1.8.0  # Cross-platform clipboard copy/paste
-Pillow>=10.0.0  # Image processing for screenshot clipboard support
+Pillow>=11.2.1  # Image processing for screenshot clipboard support
 
 # Testing
-pytest>=8.0.0
+pytest>=9.0.3
 pytest-asyncio>=0.23.0
 
 # Configuration
-python-dotenv>=1.0.0
+python-dotenv>=1.2.2
 pyyaml>=6.0.1
-jinja2>=3.1.4
+jinja2>=3.1.6
 pathspec>=0.9.0  # Gitignore-style pattern matching for .claraityignore
 
 # Git Integration (optional)
@@ -68,16 +68,16 @@ psutil>=5.9.8
 
 # MCP (Model Context Protocol)
 mcp>=1.23.0  # Official MCP Python SDK -- streamablehttp_client, sse_client, OAuth 2.1
-keyring>=23.0.0  # OS keyring for OAuth token storage (Windows Credential Manager / macOS Keychain)
+keyring>=25.6.0  # OS keyring for OAuth token storage (Windows Credential Manager / macOS Keychain)
 
 # LLM Backends (install as needed)
 # ollama  # Use official Ollama installation instead
 # requests>=2.31.0  # For Ollama API calls (typically already installed)
-openai>=1.30.0  # For OpenAI-compatible API backends (OpenAI, Alibaba Cloud, Azure, Groq, etc.)
+openai>=1.82.0  # For OpenAI-compatible API backends (OpenAI, Alibaba Cloud, Azure, Groq, etc.)
 
 # Observability (LLM tracing, metrics, cost tracking)
 langfuse>=2.0.0  # Production-grade LLM observability platform
-structlog>=24.1.0  # Structured logging with context binding
+structlog>=25.1.0  # Structured logging with context binding
 
 # Note: For GPU acceleration, install Ollama on your system
 # CPU: Works but slow (30-60s per query)

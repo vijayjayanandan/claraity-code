@@ -1,13 +1,14 @@
 """Tests for SessionManager (Schema v2.1)."""
 
-import pytest
 import asyncio
 import json
 import tempfile
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
-from src.session.manager import SessionManager, SessionInfo
+import pytest
+
+from src.session.manager import SessionInfo, SessionManager
 from src.session.models import Message
 
 
@@ -24,7 +25,7 @@ class TestSessionInfo:
         )
         assert info.session_id == "sess-123"
         assert info.message_count == 10
-        assert info.is_new == True
+        assert info.is_new
 
 
 class TestSessionManagerCreation:
@@ -36,11 +37,11 @@ class TestSessionManagerCreation:
 
             info = manager.create_session()
 
-            assert info.is_new == True
+            assert info.is_new
             assert info.message_count == 0
             # File is NOT created until first write (lazy creation by design)
             assert not info.file_path.exists()
-            assert manager.is_active == True
+            assert manager.is_active
 
     def test_create_session_with_cwd(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -118,7 +119,7 @@ class TestSessionManagerResume:
 
             resumed_info = manager.resume_session(session_id)
 
-            assert resumed_info.is_new == False
+            assert not resumed_info.is_new
             assert resumed_info.message_count == 1
             assert manager.store.message_count == 1
 
@@ -194,7 +195,7 @@ class TestSessionManagerLifecycle:
             await manager.start_writer()
             await manager.close()
 
-            assert manager.is_active == False
+            assert not manager.is_active
             assert manager.store is None
             assert manager.context is None
 
@@ -316,9 +317,9 @@ class TestSessionManagerDiscovery:
             with open(info.file_path, 'w') as f:
                 f.write(json.dumps(msg.to_dict()) + "\n")
 
-            assert manager.session_exists(info.session_id) == True
+            assert manager.session_exists(info.session_id)
             # Use valid UUID format for nonexistent check
-            assert manager.session_exists("00000000-0000-0000-0000-000000000000") == False
+            assert not manager.session_exists("00000000-0000-0000-0000-000000000000")
 
     def test_session_exists_invalid_id_raises(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -364,7 +365,7 @@ class TestSessionManagerDelete:
 
             result = manager.delete_session(session_id)
 
-            assert result == True
+            assert result
             assert not info.file_path.exists()
 
     def test_delete_nonexistent_session(self):
@@ -374,7 +375,7 @@ class TestSessionManagerDelete:
             # Use valid UUID format for nonexistent session
             result = manager.delete_session("00000000-0000-0000-0000-000000000000")
 
-            assert result == False
+            assert not result
 
     def test_delete_invalid_session_id_raises(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -421,11 +422,11 @@ class TestSessionManagerAccessors:
         with tempfile.TemporaryDirectory() as tmpdir:
             manager = SessionManager(sessions_dir=tmpdir)
 
-            assert manager.is_active == False
+            assert not manager.is_active
 
             manager.create_session()
 
-            assert manager.is_active == True
+            assert manager.is_active
 
     def test_sessions_dir_property(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -487,7 +488,7 @@ class TestSessionManagerIntegration:
             await manager.close()
 
             # Verify file content
-            with open(info.file_path, 'r') as f:
+            with open(info.file_path) as f:
                 lines = f.readlines()
             assert len(lines) == 2
 

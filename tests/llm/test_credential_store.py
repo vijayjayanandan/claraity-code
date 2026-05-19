@@ -1,10 +1,11 @@
 """Tests for src.llm.credential_store -- API key loading from env vars."""
 
 import os
-import pytest
 from unittest.mock import patch
 
-from src.llm.credential_store import load_api_key, has_api_key
+import pytest
+
+from src.llm.credential_store import has_api_key, load_api_key
 
 
 class TestLoadApiKey:

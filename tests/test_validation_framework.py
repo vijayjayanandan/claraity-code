@@ -4,21 +4,22 @@ Tests for Validation Framework
 Tests the validation framework components without running full validation.
 """
 
-import pytest
 from pathlib import Path
 
+import pytest
+
 from src.validation.scenario import (
-    ValidationScenario,
-    ValidationResult,
     DifficultyLevel,
-    ValidationStep,
     StepType,
-    SuccessCriteria
+    SuccessCriteria,
+    ValidationResult,
+    ValidationScenario,
+    ValidationStep,
 )
 from src.validation.scenarios import (
     VALIDATION_SCENARIOS,
     get_scenario_by_id,
-    get_scenarios_by_difficulty
+    get_scenarios_by_difficulty,
 )
 
 

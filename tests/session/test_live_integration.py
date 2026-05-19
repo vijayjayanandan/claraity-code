@@ -6,26 +6,27 @@ They are skipped if required environment variables are not set.
 Run with: pytest tests/session/test_live_integration.py -v -s
 """
 
-import pytest
 import asyncio
 import os
 import tempfile
 from pathlib import Path
+
+import pytest
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
+from src.session.manager import SessionManager
 from src.session.models import Message, ToolCall, ToolCallFunction
-from src.session.store import MessageStore
 from src.session.persistence import SessionWriter, load_session
 from src.session.providers import from_openai, to_openai
-from src.session.manager import SessionManager
+from src.session.store import MessageStore
 
 
 def get_llm_config():
     """Get LLM configuration from environment."""
-    from src.llm.base import LLMConfig, LLMBackendType
+    from src.llm.base import LLMBackendType, LLMConfig
 
     backend_type = os.getenv("LLM_BACKEND", "openai")
     model_name = os.getenv("LLM_MODEL", "gpt-4")
@@ -127,8 +128,8 @@ class TestLiveLLMIntegration:
     @pytest.mark.asyncio
     async def test_tool_calling_and_persist(self):
         """Test: LLM tool call -> Parse response -> Persist -> Reload -> Verify."""
-        from src.llm.openai_backend import OpenAIBackend
         from src.llm.base import ToolDefinition
+        from src.llm.openai_backend import OpenAIBackend
 
         with tempfile.TemporaryDirectory() as tmpdir:
             file_path = Path(tmpdir) / "tool_test.jsonl"
@@ -230,9 +231,9 @@ class TestLiveLLMIntegration:
                 assert resumed_store.message_count >= 3
                 assert any(m.role == "tool" for m in messages)
                 assert messages[1].has_tool_calls()
-                print(f"[LIVE TEST] Tool call roundtrip successful!")
+                print("[LIVE TEST] Tool call roundtrip successful!")
             else:
-                print(f"[LIVE TEST] LLM responded without tool call (normal text response)")
+                print("[LIVE TEST] LLM responded without tool call (normal text response)")
 
     @pytest.mark.asyncio
     async def test_streaming_and_persist(self):
@@ -512,4 +513,4 @@ class TestProviderTranslatorLive:
             assert openai_format[0]["role"] == "assistant"
             assert "meta" not in openai_format[0]  # Meta should be stripped
 
-            print(f"[LIVE TEST] Provider translation roundtrip successful!")
+            print("[LIVE TEST] Provider translation roundtrip successful!")

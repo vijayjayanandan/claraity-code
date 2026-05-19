@@ -15,7 +15,6 @@ import pytest
 from src.memory.compaction.summarizer import PrioritizedSummarizer
 from src.memory.memory_manager import MemoryManager
 
-
 # ============================================================
 # Fixtures
 # ============================================================

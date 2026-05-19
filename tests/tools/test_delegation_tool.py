@@ -1,12 +1,13 @@
 """Unit tests for DelegateToSubagentTool."""
 
-import pytest
 from pathlib import Path
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
 
-from src.tools.delegation import DelegateToSubagentTool
-from src.tools.base import ToolStatus
+import pytest
+
 from src.subagents import SubAgentManager, SubAgentResult
+from src.tools.base import ToolStatus
+from src.tools.delegation import DelegateToSubagentTool
 
 
 @pytest.fixture

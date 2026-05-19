@@ -1,11 +1,12 @@
 """End-to-end integration tests for subagent system."""
 
-import pytest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from src.subagents import SubAgentManager, SubAgentConfig, SubAgent, SubAgentResult
+import pytest
+
 from src.llm import LLMBackendType, LLMResponse
+from src.subagents import SubAgent, SubAgentConfig, SubAgentManager, SubAgentResult
 
 
 @pytest.fixture

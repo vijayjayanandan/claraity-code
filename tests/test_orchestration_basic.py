@@ -13,18 +13,18 @@ Test Coverage:
 """
 
 import json
-import pytest
+import shutil
+import tempfile
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import Mock, MagicMock, patch, mock_open
-import tempfile
-import shutil
+from unittest.mock import MagicMock, Mock, mock_open, patch
 
-from src.orchestration.models import AgentMessage, AgentResponse, ConversationLog
-from src.orchestration.conversation import ConversationSession
-from src.orchestration.agent_orchestrator import AgentOrchestrator
+import pytest
+
 from src.core.agent import CodingAgent
-
+from src.orchestration.agent_orchestrator import AgentOrchestrator
+from src.orchestration.conversation import ConversationSession
+from src.orchestration.models import AgentMessage, AgentResponse, ConversationLog
 
 # ====================
 # Fixtures

@@ -1,11 +1,11 @@
 """Tests for src.ui.store_renderer - store-driven message rendering."""
 
-import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.ui.store_renderer import StoreRenderer
-
 
 # ---- Helpers ----
 

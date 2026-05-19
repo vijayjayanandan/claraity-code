@@ -4,11 +4,10 @@ import pytest
 
 from src.ui.error_helpers import (
     classify_error,
-    generate_error_reference,
     extract_user_content_text,
     format_user_error,
+    generate_error_reference,
 )
-
 
 # ---- classify_error ----
 
