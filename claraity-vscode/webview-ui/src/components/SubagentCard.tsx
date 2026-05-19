@@ -81,9 +81,11 @@ export function SubagentCard({ info, toolCards: toolCardsList, postMessage }: Su
   }
   const statsText = statsParts.join(" | ");
 
+  const [open, setOpen] = useState(false);
+
   return (
     <div className={`tool-card${info.active ? " subagent-active" : ""}`}>
-      <details>
+      <details open={open} onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
         <summary className="tool-header" style={{ cursor: "pointer" }}>
           <span className="tool-icon">SA</span>
           <span className="tool-name">
@@ -117,8 +119,15 @@ export function SubagentCard({ info, toolCards: toolCardsList, postMessage }: Su
         </div>
       </details>
 
-      {/* Status line — visible whether expanded or collapsed */}
-      <div className="subagent-status">
+      {/* Status line — visible whether expanded or collapsed; clickable to collapse when open */}
+      <div
+        className={`subagent-status${open ? " collapsible" : ""}`}
+        onClick={open ? () => setOpen(false) : undefined}
+        role={open ? "button" : undefined}
+        tabIndex={open ? 0 : undefined}
+        onKeyDown={open ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen(false); } } : undefined}
+      >
+        {open && <i className="codicon codicon-chevron-up sa-collapse-icon" />}
         <span className="sa-current-tool">{statusText}</span>
         <span className="sa-stats">{statsText}</span>
       </div>

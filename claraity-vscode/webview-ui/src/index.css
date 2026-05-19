@@ -2127,10 +2127,22 @@ button, .toolbar-icon, .session-card, .mention-item, .tool-badge {
 
 .subagent-status {
   display: flex;
+  align-items: center;
   padding: 3px 10px;
   font-size: var(--font-size-sm);
   border-top: 1px solid var(--app-border);
   color: var(--app-fg-muted);
+}
+.subagent-status.collapsible {
+  cursor: pointer;
+}
+.subagent-status.collapsible:hover {
+  background: var(--app-bg-hover, rgba(255, 255, 255, 0.04));
+}
+.sa-collapse-icon {
+  margin-right: 4px;
+  font-size: 12px;
+  opacity: 0.7;
 }
 
 .sa-current-tool {
@@ -4918,6 +4930,15 @@ button, .toolbar-icon, .session-card, .mention-item, .tool-badge {
 }
 .bead-external-ref {
   font-style: italic;
+  white-space: nowrap;
+}
+.bead-external-ref.empty {
+  opacity: 0.35;
+}
+.bead-col-sep {
+  border-left: 1px solid var(--app-border, rgba(255, 255, 255, 0.12));
+  padding-left: 6px;
+  margin-left: 6px;
 }
 
 /* ── Defer info ── */

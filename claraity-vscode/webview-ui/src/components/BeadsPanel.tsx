@@ -188,10 +188,13 @@ function BeadItem({ bead, parentTitle }: { bead: BeadData; parentTitle?: string 
         <span className={`bead-priority priority-${bead.priority}`}>{priorityLabel(bead.priority)}</span>
         {showType && <span className={`bead-issue-type ${issueTypeClass(issueType)}`}>{issueType}</span>}
         <span className="bead-title">{bead.title}</span>
-        <span className="bead-id">{bead.id}</span>
+        <span className={`bead-external-ref bead-col-sep${bead.external_ref ? "" : " empty"}`} title={bead.external_ref ?? "No external ref"}>
+          <i className="codicon codicon-link-external" /> {bead.external_ref ?? "--"}
+        </span>
+        <span className="bead-id bead-col-sep">{bead.id}</span>
       </div>
       {/* Meta row: parent crumb, tags, assignee, due date */}
-      {(parentTitle || bead.tags.length > 0 || bead.assignee || hasDueDate || bead.external_ref) && (
+      {(parentTitle || bead.tags.length > 0 || bead.assignee || hasDueDate) && (
         <div className="bead-meta-row">
           {parentTitle && (
             <span className="bead-epic-crumb">
@@ -209,11 +212,6 @@ function BeadItem({ bead, parentTitle }: { bead: BeadData; parentTitle?: string 
           {hasDueDate && (
             <span className={`bead-due ${isOverdue ? "overdue" : ""}`} title={`Due: ${bead.due_at}`}>
               <i className="codicon codicon-calendar" /> {new Date(bead.due_at!).toLocaleDateString()}
-            </span>
-          )}
-          {bead.external_ref && (
-            <span className="bead-external-ref" title={bead.external_ref}>
-              <i className="codicon codicon-link-external" /> {bead.external_ref}
             </span>
           )}
         </div>
@@ -476,6 +474,10 @@ function TreeNodeCard({ node, statusMap, depth = 0 }: {
           <span className={`bead-priority priority-${bead.priority}`}>{priorityLabel(bead.priority)}</span>
           {showType && <span className={`bead-issue-type ${issueTypeClass(issueType)}`}>{issueType}</span>}
           <span className="epic-title">{bead.title}</span>
+          <span className={`bead-external-ref bead-col-sep${bead.external_ref ? "" : " empty"}`} title={bead.external_ref ?? "No external ref"}>
+            <i className="codicon codicon-link-external" /> {bead.external_ref ?? "--"}
+          </span>
+          <span className="bead-id bead-col-sep">{bead.id}</span>
           {total > 0 && <span className="epic-progress-label">{closedCount}/{total}</span>}
         </button>
         {total > 0 && (
@@ -524,6 +526,10 @@ function TreeNodeCard({ node, statusMap, depth = 0 }: {
         <span className="epic-child-title">{bead.title}</span>
         <span className={`bead-priority priority-${bead.priority}`}>{priorityLabel(bead.priority)}</span>
         {childProgress && <span className="epic-progress-label">{childProgress.closed}/{childProgress.total}</span>}
+        <span className={`bead-external-ref tree-meta bead-col-sep${bead.external_ref ? "" : " empty"}`} title={bead.external_ref ?? "No external ref"}>
+          <i className="codicon codicon-link-external" /> {bead.external_ref ?? "--"}
+        </span>
+        <span className="bead-id tree-meta bead-col-sep">{bead.id}</span>
         {bead.assignee && bead.assignee !== "agent" && (
           <span className="bead-assignee tree-meta">
             <i className="codicon codicon-person" />
