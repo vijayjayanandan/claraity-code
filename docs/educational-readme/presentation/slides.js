@@ -332,13 +332,499 @@ The LLM never executes anything itself — it only **requests** actions. The age
     },
 
     // ==========================================================
-    //  CHAPTER 4 — THE CONNECTOR: MCP (MODEL CONTEXT PROTOCOL)
+    //  CHAPTER 4 — THE GUARD: TOOL GATING
+    // ==========================================================
+
+    {
+      id: 'ch5-title',
+      layout: 'chapter-title',
+      chapter: 4,
+      title: 'The Guard',
+      subtitle: 'Tool Gating',
+      notes: `"The agent now has 27 tools. It can read files, write code, run commands, fetch web pages. That's a lot of power — and power without guardrails is dangerous. This chapter is about the single checkpoint that stands between the LLM's intention and real-world action."`
+    },
+
+    {
+      id: 'ch5-the-problem',
+      layout: 'center-text',
+      title: 'The Single Checkpoint',
+      body: `Every tool call — without exception — passes through the **ToolGatingService** before it executes. This is the one place where safety is enforced.
+
+The LLM can request any tool it wants — but every request is verified before it reaches the real world.`,
+      notes: `"Imagine the agent is an employee who needs approval before doing certain things. Reading a document? Go ahead. Deleting a file? Let me check with your manager first. Running 'rm -rf /'? Absolutely not, ever." Technically: "ToolGatingService.evaluate() is called for every tool invocation in the agent loop. It's the centralized gate — before this design, approval logic was scattered across tool implementations, and some tools had no checks at all. Now there's exactly one code path."`
+    },
+
+    {
+      id: 'ch5-pipeline',
+      layout: 'diagram-only',
+      title: 'The 5-Check Pipeline',
+      caption: 'Every tool call passes through these checks **in sequence**. First check that fires wins.',
+      diagram: 'gating-pipeline',
+      notes: `Walk through each check: "1. Repeat Detection — if this exact call already failed, block it. Prevents infinite loops. 2. Plan Mode — if we're planning, only read tools are allowed. 3. Command Safety Floor — hardcoded blocklist for dangerous commands. Cannot be overridden. 4. Outside-Workspace Gate — files outside your project need approval. 5. Approval Check — should we ask the user before proceeding?" Technically: "The evaluate() method runs these in sequence. First DENY/BLOCK wins. GateResult has four outcomes: ALLOW, DENY, NEEDS_APPROVAL, BLOCKED_REPEAT. DENY and BLOCKED_REPEAT are sent back to the LLM as tool results — it sees the reason and adjusts its approach."`
+    },
+
+    {
+      id: 'ch5-dangerous',
+      layout: 'comparison',
+      title: 'Two Tiers of Dangerous Commands',
+      left: {
+        heading: 'Hard Blocked (never runs)',
+        items: [
+          'Reverse shells (curl | bash)',
+          'Disk destruction (mkfs, dd, shred)',
+          'Env variable exfiltration',
+          'PowerShell code execution',
+          'Base64 decode to shell'
+        ]
+      },
+      right: {
+        heading: 'Needs Approval (always asks)',
+        items: [
+          'rm -rf (recursive delete)',
+          'Credential file access (.ssh/)',
+          'chmod 777 (open permissions)',
+          'crontab modifications',
+          'PowerShell downloads'
+        ]
+      },
+      notes: `"Left column: these are things no legitimate coding task would ever need. The agent will never run them, period. Right column: these might be legitimate, but they're risky enough that the agent always asks first — even if you've told it to auto-approve other commands." Technically: "This is the Command Safety Floor in command_safety.py. Hard blocks use regex pattern matching — no configuration can override them. The second tier forces NEEDS_APPROVAL even if the execute category is set to auto-approve. There's also a newline comment injection detector that catches commands hiding dangerous args with embedded \\n# in quoted strings."`
+    },
+
+    {
+      id: 'ch5-approval',
+      layout: 'diagram-only',
+      title: 'The Approval Flow',
+      caption: 'When a tool needs approval, the agent **pauses** until you respond.',
+      diagram: 'approval-flow',
+      notes: `"When the agent wants to do something risky, it stops and shows you exactly what it wants to do. You have three choices: approve this one action, deny it, or say 'go ahead with all actions like this for the rest of the session.'" Technically: "Tools are grouped into approval categories: read (auto-approved), edit (needs approval), execute (needs approval), browser (needs approval). Three global modes: NORMAL (default — risky tools ask), AUTO (everything auto-approved), PLAN (read-only). The approval prompt in VS Code shows the tool name, arguments, and category. 'Yes, allow all' sets the entire category to auto-approve for the session."`
+    },
+
+    {
+      id: 'ch5-ssrf',
+      layout: 'center-text',
+      title: 'Web Security: 9 Layers Deep',
+      body: `The **web_fetch** tool has 9 security layers preventing access to internal networks — scheme/port/hostname filtering, DNS resolution with IP range blocking, no redirects, content-type filtering, streaming byte cap, per-turn budget, and caching.
+
+Every resolved IP is checked against private ranges, blocking even **DNS rebinding attacks**.`,
+      notes: `"When the agent fetches a webpage, it goes through 9 security checkpoints. It can only use standard web ports, can't access internal network addresses, can't follow redirects to unsafe destinations, and is limited in how much data it can download. It's like having a security escort every time the agent goes online." Technically: "IP blocking covers all RFC1918 ranges, loopback, link-local (catches AWS metadata at 169.254.169.254), CGNAT, and IPv6 equivalents. No redirects (follow_redirects=False) prevents redirect-based bypass. Streaming byte cap is 100KB in 8KB chunks, enforced during read. Max 5 fetches per turn, 15-min cache. web_search has its own controls: query sanitization, 500-char limit, 3 searches per turn, token-bucket rate limiter, 1-hour cache."`
+    },
+
+    {
+      id: 'ch5-key-insight',
+      layout: 'center-text',
+      title: 'The Design Principle',
+      body: `**Recipe: The Centralized Gate** — One evaluate() method, all tools, all code paths. Adding a safety check = one method + one line. No tool executes without passing through it. No code path can bypass it.
+
+This is the same pattern used in API gateways and middleware pipelines — centralize the policy, apply it uniformly. Scattered checks are a liability; a centralized gate is an invariant.
+
+**Live Demo** — [[Demo Prompt: Chapter 4]] — Adds a centralized safety gate that intercepts dangerous tools before they run, proving the agent can self-correct when denied.
+
+**Next up:** The agent can now act safely within a session. But when you close VS Code and come back tomorrow, everything is gone. Session Persistence solves that.`,
+      notes: `The centralised gate is a deliberate architectural choice. Before this design, safety logic was scattered across tool implementations. Some tools had checks, others didn't. A tool called from a different code path could skip gates entirely. Now it's impossible to bypass — the gate sits in the agent loop between 'LLM says do X' and 'X actually runs.' The API gateway parallel helps engineers connect this to patterns they already know — the same "one checkpoint, all traffic" principle they use in their distributed systems.`
+    },
+
+    // ==========================================================
+    //  CHAPTER 5 — THE NOTEBOOK: SESSION PERSISTENCE
+    // ==========================================================
+
+    {
+      id: 'ch6-title',
+      layout: 'chapter-title',
+      chapter: 5,
+      title: 'The Notebook',
+      subtitle: 'Session Persistence',
+      notes: `"The agent can now think, act, and stay safe. But the moment you close VS Code, everything is gone — the conversation, the decisions, the tool calls. An agent that forgets everything between sessions isn't a coding partner. This chapter is about how we make every session permanent."`
+    },
+
+    {
+      id: 'ch6-turns-and-streams',
+      layout: 'center-text',
+      title: 'Two Concepts: Turns and Streams',
+      body: `A **turn** is one round of conversation — you speak, the agent does everything it needs to do, then it replies. One turn can involve many tool calls and multiple LLM responses.
+
+A **stream** is how each response arrives — words appearing one at a time, like someone typing in front of you. One turn can contain multiple streams (the agent responds, calls tools, then responds again).
+
+These two concepts shape everything about how sessions are saved.`,
+      notes: `"A turn is like a rally in tennis — you hit, they hit back, the rally ends. A stream is like watching them write their response in real-time instead of handing you a finished letter." Technically: "turn_id increments on each user message (memory_manager.py). stream_id identifies chunks belonging to the same assistant response. MessageStore knows which messages belong to a turn via get_turn_uuids(), enabling features like 'delete this turn.' Multiple streams per turn happen when the agent interleaves text responses with tool calls."`
+    },
+
+    {
+      id: 'ch6-ledger',
+      layout: 'diagram-only',
+      title: 'A Ledger, Not a Database',
+      caption: 'Every session is saved as an **append-only JSONL file** — one JSON object per line, never modified.',
+      diagram: 'session-ledger',
+      notes: `"Think of a receipt book — every transaction is written on the next line. You never go back and erase a receipt. If you need to correct something, you add a new line. This makes it impossible to lose data — even if the app crashes mid-write, everything up to the last complete line is safe." Technically: "JSONL was chosen over SQLite for: crash safety (partial writes don't corrupt existing data), git-trackability (plain text, diffable), human readability (grep-able), streaming writes (append + flush, no transactions). The file lives at .claraity/sessions/<session-id>.jsonl. Only MESSAGE_ADDED and MESSAGE_FINALIZED events are persisted — the hundreds of intermediate MESSAGE_UPDATED chunks during streaming are shown live in the UI but deliberately skipped."`
+    },
+
+    {
+      id: 'ch6-jsonl-format',
+      layout: 'center-text',
+      title: 'JSONL: The Format',
+      body: `**JSONL** (JSON Lines) is a text format where each line is a complete, independent JSON object. No wrapping array, no commas between records, no closing bracket to corrupt.
+
+**Why it's everywhere in AI:**
+Streaming-friendly — append a line, flush, done. No transactions needed.
+Crash-safe — a partial last line is the only casualty; every previous line is intact.
+Git-diffable — each line is a meaningful unit; diffs show exactly what changed.
+Grep-able — search with standard Unix tools, no special parser required.
+
+It's the same format used by **OpenAI fine-tuning datasets**, **streaming API responses**, **ELK/Fluentd logging pipelines**, and **observability tools**. Choosing JSONL means your data is compatible with an entire ecosystem.`,
+      notes: `"You've all seen JSON — curly braces, key-value pairs. JSONL is just one JSON object per line. That's it. Each line parses independently. No commas between lines, no array wrapper. If the process crashes mid-write, the worst that happens is the last line is truncated — every line above it is a valid, complete record." Why this matters for agents: "An agent session can run for hours. If we used a regular JSON file (one big array), a crash during write could corrupt the entire file — the closing bracket is missing, the array is invalid. With JSONL, only the line being written at crash time is affected. This is the same reason logging systems (ELK, Fluentd, structured logging) all adopted JSONL — reliability at write time." The format is also used for OpenAI fine-tuning datasets (each training example is one JSONL line), OpenAI streaming API responses (each server-sent event carries a JSON object), and LLM evaluation datasets. Choosing JSONL means your session files can be processed by any of these tools without conversion.`
+    },
+
+    {
+      id: 'ch6-session-schema',
+      layout: 'diagram-only',
+      title: 'The Session Schema',
+      caption: 'Every line in the session file follows this structure — a **portable recipe** any agent can adopt.',
+      diagram: 'session-schema',
+      notes: `Show a real example line from a session file: {"role": "assistant", "content": "I'll read the file first.", "meta": {"turn_id": 3, "stream_id": "s-7a2f", "timestamp": "2026-05-13T10:23:41Z", "model": "gpt-4.1"}}. Walk through each field: "role is one of the four message roles from Chapter 1. content is what was said or returned. meta carries the envelope — turn and stream IDs, timestamp, model used." Key design choices: (1) meta is an extensible bag — add new fields without breaking old parsers. (2) Only finalized messages are written — the hundreds of intermediate streaming chunks are shown live in the UI but deliberately not persisted. (3) Same schema for user, assistant, system, and tool messages — the role field distinguishes them. This schema is used three times in ClarAIty: session files (.claraity/sessions/*.jsonl), knowledge export (claraity_knowledge.jsonl), and task export (claraity_beads.jsonl). Same format, same tools, same reliability guarantees.`
+    },
+
+    {
+      id: 'ch6-ledger-vs-projection',
+      layout: 'comparison',
+      title: 'Ledger vs Projection',
+      left: {
+        heading: 'JSONL File (Ledger)',
+        items: [
+          '**Source of truth**',
+          'Append-only — never modified',
+          'Every finalized message recorded',
+          'Survives crashes',
+          'Git-trackable, human-readable'
+        ]
+      },
+      right: {
+        heading: 'MessageStore (Projection)',
+        items: [
+          '**Derived** — rebuilt on resume',
+          'In-memory, updated reactively',
+          'Assistant messages collapsed by stream',
+          'Rebuilt from ledger on restart',
+          'Optimized for display, not truth'
+        ]
+      },
+      notes: `"The ledger is the official record — like a bank's transaction history. The projection is what you see on screen — your account balance. If the screen glitches, they just recalculate from the transaction history. Same here — if the in-memory store gets corrupted, replay the JSONL and it's restored perfectly." Technically: "MessageStore is NOT authoritative for persistence — this is a critical invariant. SessionHydrator replays JSONL into a fresh MessageStore on resume. The parser is streaming (line by line, no readlines()), tolerates truncated last lines (crash recovery), enforces 10MB per-line limit (DoS protection), and skips unknown roles (forward compatibility)."`
+    },
+
+    {
+      id: 'ch6-write-pipeline',
+      layout: 'diagram-only',
+      title: 'The Write Pipeline',
+      caption: 'MemoryManager is the **sole writer** — no other component touches the store directly.',
+      diagram: 'write-pipeline',
+      notes: `"There's exactly one pen that can write in the notebook. This prevents two things from writing at the same time and creating a mess." Technically: "MemoryManager is the single writer — enforced as a hard architectural invariant. Violating it causes race conditions, duplicate messages, and broken seq ordering. StoreAdapter is READ-ONLY — it converts UIEvents to Messages but routes through MemoryManager. The JSONL file is created lazily (first write) to prevent empty session files. On POSIX, file permissions are set to 600 (owner only). flush() is called after every write — after flush() returns, the data survives a process crash. We deliberately don't use fsync() (would also survive power failure) because it's too slow for interactive use."`
+    },
+
+    {
+      id: 'ch6-key-insight',
+      layout: 'center-text',
+      title: 'The Key Insight',
+      body: `**Recipe: Append-Only JSONL Ledger** — JSONL file is the source of truth. In-memory store is a derived projection, rebuilt from the ledger on restart. Single writer enforces consistency. Crash-safe by construction.
+
+This pattern recurs three times in ClarAIty — sessions, knowledge export, and task export — and it's the same pattern used by financial transaction logs, database write-ahead logs, and git's object store. If it's good enough for your bank, it's good enough for your agent.
+
+**Live Demo** — [[Demo Prompt: Chapter 5]] — Turns the script into an interactive CLI application and adds a JSONL ledger to permanently remember past turns.
+
+**Next up:** Sessions solve forgetting between conversations. But what happens when a single conversation gets so long that it no longer fits in the context window? That's Context Compaction.`,
+      notes: `Emphasize the recipe nature of this slide: "This isn't a ClarAIty implementation detail — it's a pattern you can adopt for any agent. JSONL ledger as truth, in-memory projection for speed, single writer for consistency, replay for recovery." The audience should leave thinking "I could build this for our agent." Tease Chapter 7: "A 128K context window fills up fast when you have system prompt + tools + memory + a long conversation. What do we do when it's full?"`
+    },
+
+    // ==========================================================
+    //  CHAPTER 6 — THE CONDUCTOR: THE AGENT LOOP
+    // ==========================================================
+
+    {
+      id: 'ch10-title',
+      layout: 'chapter-title',
+      chapter: 6,
+      title: 'The Conductor',
+      subtitle: 'The Agent Loop',
+      notes: `"We've built all the pieces — LLM, context, tools, MCP, gating, sessions, compaction, knowledge, tasks. Now we see how they all come together in the orchestration loop. This is the heartbeat of the agent."`
+    },
+
+    {
+      id: 'ch10-the-loop',
+      layout: 'center-text',
+      title: 'The Heartbeat',
+      body: `The core of every AI agent is a **Think → Act → Observe** loop — a while loop that repeats until the task is done:
+
+**1.** Build context and call the LLM
+**2.** Tool calls? → Gate them → Execute them
+**3.** Add results to context → loop back to step 1
+**4.** Text response with no tool calls → deliver to user
+
+Every iteration checks budgets (iteration count, time, interrupts). Any limit hit → pause and ask the user.`,
+      notes: `This is stream_response() in agent.py — the single async generator that drives everything. ToolLoopState is a dataclass carrying all per-iteration state (replacing what would otherwise be 12+ local variables). The loop tracks: MAX_ITERATIONS (configurable), wall-time budget, tool call count (cap at 200), and pause-continue count (max 3). When the loop pauses, the user sees stats: how many tool calls, how much time elapsed, what triggered the pause.`
+    },
+
+    {
+      id: 'ch10-loop-diagram',
+      layout: 'diagram-only',
+      title: 'Think, Act, Observe — Repeat',
+      caption: 'Every iteration is one pass through the loop. Each arrow is a function call in the agent.',
+      diagram: 'agent-loop',
+      notes: `This is the Think-Act-Observe loop — implemented as stream_response() in agent.py. THINK = call the LLM. ACT = execute the tool calls it requests. OBSERVE = read the results. The loop repeats until the LLM responds with text only (finish_reason: stop) or a budget limit is hit.`
+    },
+
+    {
+      id: 'ch10-state',
+      layout: 'diagram-only',
+      title: 'What the Loop Tracks',
+      caption: 'The **ToolLoopState** carries all state across iterations — budgets, counters, and results.',
+      diagram: 'agent-loop-state',
+      notes: `ToolLoopState is a dataclass with: iteration counter, total tool_call_count, response content, tool messages, blocked calls, and provider errors. It has two key methods: reset_iteration() clears per-loop state between iterations, and reset_budgets_after_continue() resets counters when the user says "Continue" at a pause prompt. The budget system prevents runaway execution — a misbehaving LLM that keeps requesting tools will be stopped, not allowed to run forever.`
+    },
+
+    {
+      id: 'ch10-key-insight',
+      layout: 'center-text',
+      title: 'The Key Insight',
+      body: `**Recipe: Agent Loop Skeleton** — while True: (1) build context, call LLM. (2) If tool_calls in response → gate each one → execute approved ones → add results to context → continue loop. (3) If text response with no tool_calls → deliver to user → break. Check budgets (iteration count, time, tool call count) on every iteration. When a budget is hit → pause, show stats, ask the user.
+
+The orchestration loop is the spine. Everything else connects to it.
+
+**Next up:** Why does the agent feel responsive? Because you see tokens as they arrive, not as a wall of text. That's Streaming.`,
+      notes: `The loop is an async generator — it yields UIEvents as they happen. Text deltas, tool state updates, pause prompts, errors — all streamed to the UI in real time. This is why streaming (Chapter 11) is architecturally coupled to the loop, not just a UI feature. The recipe gives the audience a concrete pseudocode skeleton they can implement. Budget checks prevent runaway execution — a misbehaving LLM that keeps requesting tools will be stopped, not allowed to run forever.`
+    },
+
+    // ==========================================================
+    //  CHAPTER 7 — THE VOICE: STREAMING UX
+    // ==========================================================
+
+    {
+      id: 'ch11-title',
+      layout: 'chapter-title',
+      chapter: 7,
+      title: 'The Voice',
+      subtitle: 'Streaming UX',
+      notes: `"The agent could return its entire response at once — but that would mean staring at a blank screen for 30 seconds. Streaming is what makes the agent feel alive."`
+    },
+
+    {
+      id: 'ch11-why-streaming',
+      layout: 'center-text',
+      title: 'Words as They Arrive',
+      body: `Without streaming, you send a question and wait. 10 seconds. 20 seconds. Then the entire response appears at once. It feels like talking to a wall.
+
+With streaming, words appear as the LLM generates them — like watching someone type. You can read the beginning while the end is still being written, and interrupt immediately if it's going wrong.`,
+      notes: `The LLM's stream flag enables token-by-token delivery via Server-Sent Events. Each token arrives as a ProviderDelta object with a text fragment. The StreamingPipeline (single canonical parser) processes each delta — detecting code fence boundaries, thinking blocks, tool call JSON assembly — all in real time. The TUI renders segments directly from the pipeline. It does zero parsing of its own — the pipeline is the single source of truth for structural decisions.`
+    },
+
+    {
+      id: 'ch11-pipeline',
+      layout: 'diagram-only',
+      title: 'The Streaming Pipeline',
+      caption: 'Tokens flow from the LLM through a **single parser** that detects structure — then directly to the UI.',
+      diagram: 'streaming-pipeline',
+      notes: `The pipeline detects: text segments, code blocks (language + content), thinking blocks (for reasoning models), and tool call JSON. It emits UIEvents: TextDelta, CodeBlockStart/Delta/End, ThinkingStart/Delta/End. The TUI renders these events directly — it never parses LLM output itself. This prevents a common bug in AI UIs where the rendering layer and parsing layer have different ideas about where a code block starts and ends.`
+    },
+
+    {
+      id: 'ch11-what-parser-detects',
+      layout: 'comparison',
+      title: 'What the Parser Detects',
+      left: {
+        heading: 'Structure',
+        items: [
+          '**Code fences** — language tag, content, closing fence',
+          '**Thinking blocks** — native (provider-level) and tag-based (<thinking>)',
+          '**Tool call JSON** — incrementally assembled from fragments',
+          '**Text segments** — everything else, the prose between structures'
+        ]
+      },
+      right: {
+        heading: 'Why it\'s hard',
+        items: [
+          'Tokens arrive **mid-word** — "```py" might arrive as "``" then "`py"',
+          'Thinking blocks vary by provider — Anthropic, OpenAI, Gemini all differ',
+          'Tool call arguments arrive as **JSON fragments** over dozens of deltas',
+          'A code block inside a thinking block requires **nested state tracking**'
+        ]
+      },
+      notes: `"Streaming parsing looks simple until you actually build it. The LLM doesn't send neat lines — it sends fragments of tokens. A code fence might arrive as two backticks in one delta and the third backtick plus the language tag in the next. The parser has to buffer, detect, and emit the right event at exactly the right time. This is why it needs to be one centralized parser — distributing this logic across UI components is a bug factory." Technically: "StreamingPipeline maintains a StreamingState with in-flight accumulators for each structural type. ToolCallAccumulator buffers arguments_delta strings and only parses JSON when the tool call is finalized. Code fence detection uses regex on the accumulated buffer, not individual deltas. Thinking blocks support two modes: native (provider sends thinking_delta on ProviderDelta) and tag-based (<thinking> tags parsed from text stream)."`
+    },
+
+    {
+      id: 'ch11-war-story',
+      layout: 'center-text',
+      title: 'The Lesson We Learned',
+      body: `Early in development, both the streaming pipeline and the UI had their own code fence detection logic. They would **subtly diverge** — the pipeline thought a code block ended on line 42, the UI thought it ended on line 45.
+
+The result: rendering bugs that only appeared with specific code patterns, impossible to reproduce consistently. The fix wasn't better synchronization — it was **removing the duplication entirely**. One parser, one source of truth, zero divergence.
+
+This is a general principle: when two components must agree on structure, **don't coordinate — centralize**.`,
+      notes: `This war story builds credibility — the audience sees that the single-parser pattern wasn't a theoretical decision, it was earned through painful debugging. The general principle ("don't coordinate, centralize") applies far beyond streaming — it's the same insight behind the single-writer pattern in Chapter 6 and the centralized gate in Chapter 5. These patterns keep appearing because distributed agreement is fundamentally harder than centralized authority. The audience should notice this recurring theme: single writer, single gate, single parser.`
+    },
+
+    {
+      id: 'ch11-key-insight',
+      layout: 'center-text',
+      title: 'The Key Insight',
+      body: `**Recipe: Single-Parser Streaming** — One parser owns all structural decisions. The UI renders what the parser emits. No parsing in the rendering layer, no structural decisions in the display code.
+
+This is the same principle as single-writer persistence (Ch 6) and centralized gating (Ch 5) — when correctness depends on agreement, **centralize the authority**.
+
+**Next up:** What happens when things go wrong? Tools fail, APIs timeout, the LLM gets stuck. That's Error Recovery.`,
+      notes: `Draw the parallel explicitly: "Notice the pattern? Single writer for persistence. Single gate for safety. Single parser for streaming. Every time we tried to distribute these responsibilities, we got bugs. Centralizing them eliminated entire classes of problems." This is a recurring architectural theme the audience should take home: when multiple components must agree, don't coordinate — centralize.`
+    },
+
+    // ==========================================================
+    //  CHAPTER 8 — THE SAFETY NET: ERROR RECOVERY
+    // ==========================================================
+
+    {
+      id: 'ch12-title',
+      layout: 'chapter-title',
+      chapter: 8,
+      title: 'The Safety Net',
+      subtitle: 'Error Recovery',
+      notes: `"A production agent must handle failure gracefully. Tools fail, APIs timeout, the LLM gets stuck in a loop. This chapter is about how the agent recovers — automatically when possible, with human help when needed."`
+    },
+
+    {
+      id: 'ch12-two-kinds',
+      layout: 'comparison',
+      title: 'Two Kinds of Failure',
+      left: {
+        heading: 'Tool Failures',
+        items: [
+          'File not found, permission denied',
+          'Command returns an error',
+          'Timeout after 2 minutes',
+          'Same call that already failed'
+        ]
+      },
+      right: {
+        heading: 'LLM Failures',
+        items: [
+          'API timeout or rate limit',
+          'Authentication error',
+          'Model overloaded',
+          'Network connectivity issues'
+        ]
+      },
+      notes: `Tool failures are handled by the agent — it blocks exact repeats, tracks per-tool error budgets, and injects constraints telling the LLM what failed and why. The LLM reads these and tries a different approach. LLM failures are escalated to the user — the agent pauses with an error message and the user decides to retry or stop. The key insight: tool failures are expected (part of exploring a codebase), LLM failures are exceptional (something is wrong with the infrastructure).`
+    },
+
+    {
+      id: 'ch12-self-correction',
+      layout: 'center-text',
+      title: 'Self-Correction',
+      body: `When a tool fails, the agent doesn't just retry. It **blocks the exact call** that failed and tells the LLM: "This was blocked because it previously failed. Try a different approach."
+
+The LLM adapts — different tool, different arguments, or diagnosing the root cause first. Per-tool error budgets cap failures at **4 identical attempts** before blocking the tool entirely for the remainder of the request.`,
+      notes: `ErrorRecoveryTracker uses stable hashing to normalize tool arguments — catching "wiggling" where the LLM changes whitespace or formatting but the call is functionally identical. The controller constraint injection appends a message to LLM context listing blocked calls and the reasons they failed. This is the same pattern used by the gating pipeline — feeding rejection reasons back to the LLM as tool-role messages so it can self-correct.`
+    },
+
+    {
+      id: 'ch12-stable-hash',
+      layout: 'center-text',
+      title: 'Catching the Wiggle',
+      body: `LLMs are creative — even when retrying a failed call, they'll change whitespace, reformat arguments, or reorder parameters. The call is **functionally identical**, but string comparison says it's "new."
+
+The solution: **stable hashing**. Normalize arguments (collapse whitespace, normalize file paths, sort keys), hash the result with SHA-256, and compare hashes. Same hash = same call = blocked.
+
+This catches the subtle case where the LLM appears to be trying something new, but is actually repeating the same failure with cosmetic changes.`,
+      notes: `ErrorRecoveryTracker._stable_signature() uses json.dumps(sort_keys=True) for deterministic key ordering, then SHA-256 for collision-resistant hashing (first 32 hex chars = 128 bits). Tool-specific normalization: run_command collapses whitespace, file tools normalize path separators (/ vs \\) and strip. Deliberately does NOT normalize patch content or file content — changing the actual content IS a different call. This catches the common pattern where the LLM fails to write a file, then "retries" with the exact same content but different indentation in the JSON arguments.`
+    },
+
+    {
+      id: 'ch12-flow',
+      layout: 'diagram-only',
+      title: 'The Recovery Flow',
+      caption: 'Automatic self-correction for tool failures. Human escalation when the agent is stuck.',
+      diagram: 'error-recovery-flow',
+      notes: `Walk through the flow: "A tool fails (file not found, timeout, permission denied). The agent blocks that exact call from running again — including cosmetically different versions caught by stable hashing. It injects a constraint message into the LLM context: 'This call failed because...' The LLM reads the constraint and tries a different approach. If it keeps failing (per-tool budget of 4), the tool is blocked entirely. If total failures hit 10, the agent pauses for the user. The user can Continue (budgets reset), Stop, or Retry the LLM call."`
+    },
+
+    {
+      id: 'ch12-key-insight',
+      layout: 'center-text',
+      title: 'The Key Insight',
+      body: `**Recipe: Error Recovery Pattern** — Block the exact failed call (including cosmetic variants via stable hashing). Inject the failure reason into LLM context as a constraint message. The LLM self-corrects. Escalate to the user when automatic recovery is exhausted.
+
+This is the same feedback loop as tool gating (Ch 5) — tell the LLM **why** something was blocked, and it adapts. Never silently retry. Never leave the user in the dark.
+
+**Next up:** Some tasks need a specialist. How does the agent delegate work to focused subagents with their own context, tools, and even their own LLM model?`,
+      notes: `The pause flow gives the user full transparency: what happened, how many tool calls were made, how much time elapsed, and what went wrong. The user can Continue (budgets reset, loop resumes), Stop (end the response), or in some cases Retry (re-attempt the LLM call). The pattern is applicable to any system where an LLM takes actions: block repeats, explain why, let the LLM adapt. This is fundamentally different from traditional retry logic (exponential backoff) — the LLM can reason about the failure and choose an alternative strategy.`
+    },
+
+    // ==========================================================
+    //  CHAPTER 9 — THE SUMMARIZER: CONTEXT COMPACTION
+    // ==========================================================
+
+    {
+      id: 'ch7-title',
+      layout: 'chapter-title',
+      chapter: 9,
+      title: 'The Summarizer',
+      subtitle: 'Context Compaction',
+      notes: `"Sessions are now saved permanently. But there's a different problem — the context window is finite. After a few hours of deep work, the conversation gets so long it no longer fits. What happens when the desk is full?"`
+    },
+
+    {
+      id: 'ch7-the-wall',
+      layout: 'center-text',
+      title: 'The Context Window Is Finite',
+      body: `Every model has a limit on how much text it can read at once — its **context window**. GPT-4 supports ~128K tokens. Claude goes up to 200K. That sounds enormous, but it fills up fast.
+
+System prompt + tool schemas + memory + conversation history + tool results — it all has to fit. Read ten files, run a few commands, have a long discussion — and the desk is full.
+
+What happens then?`,
+      notes: `"Think of it as the agent's working desk. Everything it can currently 'see' has to fit on that desk. When the desk fills up, older papers fall off the edge — and those things are gone from the agent's view." Technically: "A token is roughly 3/4 of a word. Tool results alone can dump thousands of tokens per call. ClarAIty tracks utilization using the token count reported by the LLM response — this is the ground truth, not an estimate."`
+    },
+
+    {
+      id: 'ch7-budget',
+      layout: 'diagram-only',
+      title: 'The Budget Problem',
+      caption: 'Context windows are finite. Every token spent on context is a token less for the response.',
+      diagram: 'context-budget',
+      notes: `"Think of the context window as a desk. System prompt, project instructions, 27 tool schemas, memory, knowledge, and the entire conversation — they all need to fit. The conversation grows with every exchange, squeezing everything else." Walk through the breakdown: "System prompt + instructions take ~19K. Tool schemas cost ~3K. Memory + knowledge ~6K. That's 28K consumed before the user says a word. Conversation history grows from there. Reserved output (12K) guarantees room for the LLM's response. The pressure gauge at the bottom shows where we are: green (<70%) means plenty of room, yellow (70-85%) means getting full, orange (85%) triggers automatic compaction, red (>95%) is critically full." Technically: "Utilization = input_tokens / max_context_tokens. Checked after every assistant response in stream_response(). Compaction fires at 85%. Two guardrails: (1) _compaction_failed cooldown — if it errors, skip for the rest of that response, reset on next user message, (2) minimum 4 messages — nothing meaningful to summarize yet."`
+    },
+
+    {
+      id: 'ch7-how-it-works',
+      layout: 'center-text',
+      title: 'The LLM Summarizes Itself',
+      body: `When the context is full, the agent makes **a separate LLM call** — sending the conversation history with the instruction: "Summarize this for continuation."
+
+The LLM writes a structured summary — goals, your messages (verbatim), code, errors, files, and current state. A 128K conversation compacts to ~6,000 tokens — a **95% reduction** — and replaces the old messages in context.`,
+      notes: `"Imagine a three-hour meeting with a full whiteboard. You ask the smartest person in the room to write a one-page summary — what was decided, what matters, what's next. Then you clear the board and pin that summary. If that person is unavailable, a colleague writes the summary using a checklist instead." Technically: "compact_conversation_async() sends the full message history in native format (not flattened — that would waste tokens) to the LLM with a summarization system prompt. The summary template follows a priority order: Goal/Decisions (800 tokens), User Messages (2000, verbatim), Code Snippets (1500), Errors/Fixes (600), Files Modified (400), Current State (400), Tool Summary (300). The deterministic fallback in summarizer.py uses regex to extract code blocks (skipping diagrams/data formats), error sentences, and file paths from tool calls."`
+    },
+
+    {
+      id: 'ch7-boundary',
+      layout: 'diagram-only',
+      title: 'How It Works',
+      caption: 'A **compact boundary** marker fences off old messages. The LLM only sees the summary going forward.',
+      diagram: 'compaction-flow',
+      notes: `Walk through the flow: "After each LLM response, the agent checks utilization. At 85%, compaction fires. The LLM summarizes the conversation. A compact_boundary marker is inserted — all messages before it are hidden from the LLM's context. The summary becomes the new starting point. You can still scroll back in the UI and see the full history — it's in the JSONL file, just fenced off." Technically: "MessageStore.compact() inserts two messages: (1) compact_boundary (system message, include_in_llm_context=False), (2) summary (user message, is_compact_summary=True). get_llm_context() returns only messages after the boundary. The JSONL ledger is never rewritten — old messages remain. Session resume correctly applies boundaries."`
+    },
+
+    {
+      id: 'ch7-key-insight',
+      layout: 'center-text',
+      title: 'The Key Insight',
+      body: `**Recipe: Compaction Trigger + Summary Template** — Monitor utilization after every LLM response. At 85%, fire a separate LLM call with the instruction "summarize for continuation." Use a priority-based template: goals/decisions (800 tokens), user messages verbatim (2000), code snippets (1500), errors (600), files modified (400), current state (400), tool summary (300). Insert a boundary marker — LLM only sees the summary going forward. If the LLM summarizer fails, fall back to deterministic extraction (regex for code blocks, error patterns, file paths).
+
+With this, the agent runs **indefinitely**. The desk clears itself.
+
+**Next up:** How does the agent understand your project's architecture — not just individual files, but the relationships between modules, components, and decisions? That's the Knowledge Graph.`,
+      notes: `Milestone moment — the core loop is complete. Chapters 1-7 form the foundation that every agent needs. Chapters 8+ add deep project understanding, task planning, and orchestration. The deterministic fallback is a key production detail — if the LLM summarizer fails (rate limit, timeout), the agent doesn't lose the session. It extracts code blocks (skipping diagrams and data formats), error sentences, and file paths from tool calls using regex. Not as good as an LLM summary, but good enough to continue.`
+    },
+
+    // ==========================================================
+    //  CHAPTER 10 — THE CONNECTOR: MCP (MODEL CONTEXT PROTOCOL)
     // ==========================================================
 
     {
       id: 'ch4-title',
       layout: 'chapter-title',
-      chapter: 4,
+      chapter: 10,
       title: 'The Connector',
       subtitle: 'MCP — External Tools',
       notes: `"We have 27 built-in tools. But every team has different needs — Jira, Confluence, databases, internal APIs. Building a custom tool for each one doesn't scale. MCP is the industry standard that solves this — and it's a pattern every agent builder should know."`
@@ -455,279 +941,13 @@ For any agent you build: adopt MCP early. The ecosystem already has hundreds of 
     },
 
     // ==========================================================
-    //  CHAPTER 5 — THE GUARD: TOOL GATING
-    // ==========================================================
-
-    {
-      id: 'ch5-title',
-      layout: 'chapter-title',
-      chapter: 5,
-      title: 'The Guard',
-      subtitle: 'Tool Gating',
-      notes: `"The agent now has 27 tools. It can read files, write code, run commands, fetch web pages. That's a lot of power — and power without guardrails is dangerous. This chapter is about the single checkpoint that stands between the LLM's intention and real-world action."`
-    },
-
-    {
-      id: 'ch5-the-problem',
-      layout: 'center-text',
-      title: 'The Single Checkpoint',
-      body: `Every tool call — without exception — passes through the **ToolGatingService** before it executes. This is the one place where safety is enforced.
-
-The LLM can request any tool it wants — but every request is verified before it reaches the real world.`,
-      notes: `"Imagine the agent is an employee who needs approval before doing certain things. Reading a document? Go ahead. Deleting a file? Let me check with your manager first. Running 'rm -rf /'? Absolutely not, ever." Technically: "ToolGatingService.evaluate() is called for every tool invocation in the agent loop. It's the centralized gate — before this design, approval logic was scattered across tool implementations, and some tools had no checks at all. Now there's exactly one code path."`
-    },
-
-    {
-      id: 'ch5-pipeline',
-      layout: 'diagram-only',
-      title: 'The 5-Check Pipeline',
-      caption: 'Every tool call passes through these checks **in sequence**. First check that fires wins.',
-      diagram: 'gating-pipeline',
-      notes: `Walk through each check: "1. Repeat Detection — if this exact call already failed, block it. Prevents infinite loops. 2. Plan Mode — if we're planning, only read tools are allowed. 3. Command Safety Floor — hardcoded blocklist for dangerous commands. Cannot be overridden. 4. Outside-Workspace Gate — files outside your project need approval. 5. Approval Check — should we ask the user before proceeding?" Technically: "The evaluate() method runs these in sequence. First DENY/BLOCK wins. GateResult has four outcomes: ALLOW, DENY, NEEDS_APPROVAL, BLOCKED_REPEAT. DENY and BLOCKED_REPEAT are sent back to the LLM as tool results — it sees the reason and adjusts its approach."`
-    },
-
-    {
-      id: 'ch5-dangerous',
-      layout: 'comparison',
-      title: 'Two Tiers of Dangerous Commands',
-      left: {
-        heading: 'Hard Blocked (never runs)',
-        items: [
-          'Reverse shells (curl | bash)',
-          'Disk destruction (mkfs, dd, shred)',
-          'Env variable exfiltration',
-          'PowerShell code execution',
-          'Base64 decode to shell'
-        ]
-      },
-      right: {
-        heading: 'Needs Approval (always asks)',
-        items: [
-          'rm -rf (recursive delete)',
-          'Credential file access (.ssh/)',
-          'chmod 777 (open permissions)',
-          'crontab modifications',
-          'PowerShell downloads'
-        ]
-      },
-      notes: `"Left column: these are things no legitimate coding task would ever need. The agent will never run them, period. Right column: these might be legitimate, but they're risky enough that the agent always asks first — even if you've told it to auto-approve other commands." Technically: "This is the Command Safety Floor in command_safety.py. Hard blocks use regex pattern matching — no configuration can override them. The second tier forces NEEDS_APPROVAL even if the execute category is set to auto-approve. There's also a newline comment injection detector that catches commands hiding dangerous args with embedded \\n# in quoted strings."`
-    },
-
-    {
-      id: 'ch5-approval',
-      layout: 'diagram-only',
-      title: 'The Approval Flow',
-      caption: 'When a tool needs approval, the agent **pauses** until you respond.',
-      diagram: 'approval-flow',
-      notes: `"When the agent wants to do something risky, it stops and shows you exactly what it wants to do. You have three choices: approve this one action, deny it, or say 'go ahead with all actions like this for the rest of the session.'" Technically: "Tools are grouped into approval categories: read (auto-approved), edit (needs approval), execute (needs approval), browser (needs approval). Three global modes: NORMAL (default — risky tools ask), AUTO (everything auto-approved), PLAN (read-only). The approval prompt in VS Code shows the tool name, arguments, and category. 'Yes, allow all' sets the entire category to auto-approve for the session."`
-    },
-
-    {
-      id: 'ch5-ssrf',
-      layout: 'center-text',
-      title: 'Web Security: 9 Layers Deep',
-      body: `The **web_fetch** tool has 9 security layers preventing access to internal networks — scheme/port/hostname filtering, DNS resolution with IP range blocking, no redirects, content-type filtering, streaming byte cap, per-turn budget, and caching.
-
-Every resolved IP is checked against private ranges, blocking even **DNS rebinding attacks**.`,
-      notes: `"When the agent fetches a webpage, it goes through 9 security checkpoints. It can only use standard web ports, can't access internal network addresses, can't follow redirects to unsafe destinations, and is limited in how much data it can download. It's like having a security escort every time the agent goes online." Technically: "IP blocking covers all RFC1918 ranges, loopback, link-local (catches AWS metadata at 169.254.169.254), CGNAT, and IPv6 equivalents. No redirects (follow_redirects=False) prevents redirect-based bypass. Streaming byte cap is 100KB in 8KB chunks, enforced during read. Max 5 fetches per turn, 15-min cache. web_search has its own controls: query sanitization, 500-char limit, 3 searches per turn, token-bucket rate limiter, 1-hour cache."`
-    },
-
-    {
-      id: 'ch5-key-insight',
-      layout: 'center-text',
-      title: 'The Design Principle',
-      body: `**Recipe: The Centralized Gate** — One evaluate() method, all tools, all code paths. Adding a safety check = one method + one line. No tool executes without passing through it. No code path can bypass it.
-
-This is the same pattern used in API gateways and middleware pipelines — centralize the policy, apply it uniformly. Scattered checks are a liability; a centralized gate is an invariant.
-
-**Live Demo** — [[Demo Prompt: Chapter 4]] — Adds a centralized safety gate that intercepts dangerous tools before they run, proving the agent can self-correct when denied.
-
-**Next up:** The agent can now act safely within a session. But when you close VS Code and come back tomorrow, everything is gone. Session Persistence solves that.`,
-      notes: `The centralised gate is a deliberate architectural choice. Before this design, safety logic was scattered across tool implementations. Some tools had checks, others didn't. A tool called from a different code path could skip gates entirely. Now it's impossible to bypass — the gate sits in the agent loop between 'LLM says do X' and 'X actually runs.' The API gateway parallel helps engineers connect this to patterns they already know — the same "one checkpoint, all traffic" principle they use in their distributed systems.`
-    },
-
-    // ==========================================================
-    //  CHAPTER 6 — THE NOTEBOOK: SESSION PERSISTENCE
-    // ==========================================================
-
-    {
-      id: 'ch6-title',
-      layout: 'chapter-title',
-      chapter: 6,
-      title: 'The Notebook',
-      subtitle: 'Session Persistence',
-      notes: `"The agent can now think, act, and stay safe. But the moment you close VS Code, everything is gone — the conversation, the decisions, the tool calls. An agent that forgets everything between sessions isn't a coding partner. This chapter is about how we make every session permanent."`
-    },
-
-    {
-      id: 'ch6-turns-and-streams',
-      layout: 'center-text',
-      title: 'Two Concepts: Turns and Streams',
-      body: `A **turn** is one round of conversation — you speak, the agent does everything it needs to do, then it replies. One turn can involve many tool calls and multiple LLM responses.
-
-A **stream** is how each response arrives — words appearing one at a time, like someone typing in front of you. One turn can contain multiple streams (the agent responds, calls tools, then responds again).
-
-These two concepts shape everything about how sessions are saved.`,
-      notes: `"A turn is like a rally in tennis — you hit, they hit back, the rally ends. A stream is like watching them write their response in real-time instead of handing you a finished letter." Technically: "turn_id increments on each user message (memory_manager.py). stream_id identifies chunks belonging to the same assistant response. MessageStore knows which messages belong to a turn via get_turn_uuids(), enabling features like 'delete this turn.' Multiple streams per turn happen when the agent interleaves text responses with tool calls."`
-    },
-
-    {
-      id: 'ch6-ledger',
-      layout: 'diagram-only',
-      title: 'A Ledger, Not a Database',
-      caption: 'Every session is saved as an **append-only JSONL file** — one JSON object per line, never modified.',
-      diagram: 'session-ledger',
-      notes: `"Think of a receipt book — every transaction is written on the next line. You never go back and erase a receipt. If you need to correct something, you add a new line. This makes it impossible to lose data — even if the app crashes mid-write, everything up to the last complete line is safe." Technically: "JSONL was chosen over SQLite for: crash safety (partial writes don't corrupt existing data), git-trackability (plain text, diffable), human readability (grep-able), streaming writes (append + flush, no transactions). The file lives at .claraity/sessions/<session-id>.jsonl. Only MESSAGE_ADDED and MESSAGE_FINALIZED events are persisted — the hundreds of intermediate MESSAGE_UPDATED chunks during streaming are shown live in the UI but deliberately skipped."`
-    },
-
-    {
-      id: 'ch6-jsonl-format',
-      layout: 'center-text',
-      title: 'JSONL: The Format',
-      body: `**JSONL** (JSON Lines) is a text format where each line is a complete, independent JSON object. No wrapping array, no commas between records, no closing bracket to corrupt.
-
-**Why it's everywhere in AI:**
-Streaming-friendly — append a line, flush, done. No transactions needed.
-Crash-safe — a partial last line is the only casualty; every previous line is intact.
-Git-diffable — each line is a meaningful unit; diffs show exactly what changed.
-Grep-able — search with standard Unix tools, no special parser required.
-
-It's the same format used by **OpenAI fine-tuning datasets**, **streaming API responses**, **ELK/Fluentd logging pipelines**, and **observability tools**. Choosing JSONL means your data is compatible with an entire ecosystem.`,
-      notes: `"You've all seen JSON — curly braces, key-value pairs. JSONL is just one JSON object per line. That's it. Each line parses independently. No commas between lines, no array wrapper. If the process crashes mid-write, the worst that happens is the last line is truncated — every line above it is a valid, complete record." Why this matters for agents: "An agent session can run for hours. If we used a regular JSON file (one big array), a crash during write could corrupt the entire file — the closing bracket is missing, the array is invalid. With JSONL, only the line being written at crash time is affected. This is the same reason logging systems (ELK, Fluentd, structured logging) all adopted JSONL — reliability at write time." The format is also used for OpenAI fine-tuning datasets (each training example is one JSONL line), OpenAI streaming API responses (each server-sent event carries a JSON object), and LLM evaluation datasets. Choosing JSONL means your session files can be processed by any of these tools without conversion.`
-    },
-
-    {
-      id: 'ch6-session-schema',
-      layout: 'diagram-only',
-      title: 'The Session Schema',
-      caption: 'Every line in the session file follows this structure — a **portable recipe** any agent can adopt.',
-      diagram: 'session-schema',
-      notes: `Show a real example line from a session file: {"role": "assistant", "content": "I'll read the file first.", "meta": {"turn_id": 3, "stream_id": "s-7a2f", "timestamp": "2026-05-13T10:23:41Z", "model": "gpt-4.1"}}. Walk through each field: "role is one of the four message roles from Chapter 1. content is what was said or returned. meta carries the envelope — turn and stream IDs, timestamp, model used." Key design choices: (1) meta is an extensible bag — add new fields without breaking old parsers. (2) Only finalized messages are written — the hundreds of intermediate streaming chunks are shown live in the UI but deliberately not persisted. (3) Same schema for user, assistant, system, and tool messages — the role field distinguishes them. This schema is used three times in ClarAIty: session files (.claraity/sessions/*.jsonl), knowledge export (claraity_knowledge.jsonl), and task export (claraity_beads.jsonl). Same format, same tools, same reliability guarantees.`
-    },
-
-    {
-      id: 'ch6-ledger-vs-projection',
-      layout: 'comparison',
-      title: 'Ledger vs Projection',
-      left: {
-        heading: 'JSONL File (Ledger)',
-        items: [
-          '**Source of truth**',
-          'Append-only — never modified',
-          'Every finalized message recorded',
-          'Survives crashes',
-          'Git-trackable, human-readable'
-        ]
-      },
-      right: {
-        heading: 'MessageStore (Projection)',
-        items: [
-          '**Derived** — rebuilt on resume',
-          'In-memory, updated reactively',
-          'Assistant messages collapsed by stream',
-          'Rebuilt from ledger on restart',
-          'Optimized for display, not truth'
-        ]
-      },
-      notes: `"The ledger is the official record — like a bank's transaction history. The projection is what you see on screen — your account balance. If the screen glitches, they just recalculate from the transaction history. Same here — if the in-memory store gets corrupted, replay the JSONL and it's restored perfectly." Technically: "MessageStore is NOT authoritative for persistence — this is a critical invariant. SessionHydrator replays JSONL into a fresh MessageStore on resume. The parser is streaming (line by line, no readlines()), tolerates truncated last lines (crash recovery), enforces 10MB per-line limit (DoS protection), and skips unknown roles (forward compatibility)."`
-    },
-
-    {
-      id: 'ch6-write-pipeline',
-      layout: 'diagram-only',
-      title: 'The Write Pipeline',
-      caption: 'MemoryManager is the **sole writer** — no other component touches the store directly.',
-      diagram: 'write-pipeline',
-      notes: `"There's exactly one pen that can write in the notebook. This prevents two things from writing at the same time and creating a mess." Technically: "MemoryManager is the single writer — enforced as a hard architectural invariant. Violating it causes race conditions, duplicate messages, and broken seq ordering. StoreAdapter is READ-ONLY — it converts UIEvents to Messages but routes through MemoryManager. The JSONL file is created lazily (first write) to prevent empty session files. On POSIX, file permissions are set to 600 (owner only). flush() is called after every write — after flush() returns, the data survives a process crash. We deliberately don't use fsync() (would also survive power failure) because it's too slow for interactive use."`
-    },
-
-    {
-      id: 'ch6-key-insight',
-      layout: 'center-text',
-      title: 'The Key Insight',
-      body: `**Recipe: Append-Only JSONL Ledger** — JSONL file is the source of truth. In-memory store is a derived projection, rebuilt from the ledger on restart. Single writer enforces consistency. Crash-safe by construction.
-
-This pattern recurs three times in ClarAIty — sessions, knowledge export, and task export — and it's the same pattern used by financial transaction logs, database write-ahead logs, and git's object store. If it's good enough for your bank, it's good enough for your agent.
-
-**Live Demo** — [[Demo Prompt: Chapter 5]] — Turns the script into an interactive CLI application and adds a JSONL ledger to permanently remember past turns.
-
-**Next up:** Sessions solve forgetting between conversations. But what happens when a single conversation gets so long that it no longer fits in the context window? That's Context Compaction.`,
-      notes: `Emphasize the recipe nature of this slide: "This isn't a ClarAIty implementation detail — it's a pattern you can adopt for any agent. JSONL ledger as truth, in-memory projection for speed, single writer for consistency, replay for recovery." The audience should leave thinking "I could build this for our agent." Tease Chapter 7: "A 128K context window fills up fast when you have system prompt + tools + memory + a long conversation. What do we do when it's full?"`
-    },
-
-    // ==========================================================
-    //  CHAPTER 7 — THE SUMMARIZER: CONTEXT COMPACTION
-    // ==========================================================
-
-    {
-      id: 'ch7-title',
-      layout: 'chapter-title',
-      chapter: 7,
-      title: 'The Summarizer',
-      subtitle: 'Context Compaction',
-      notes: `"Sessions are now saved permanently. But there's a different problem — the context window is finite. After a few hours of deep work, the conversation gets so long it no longer fits. What happens when the desk is full?"`
-    },
-
-    {
-      id: 'ch7-the-wall',
-      layout: 'center-text',
-      title: 'The Context Window Is Finite',
-      body: `Every model has a limit on how much text it can read at once — its **context window**. GPT-4 supports ~128K tokens. Claude goes up to 200K. That sounds enormous, but it fills up fast.
-
-System prompt + tool schemas + memory + conversation history + tool results — it all has to fit. Read ten files, run a few commands, have a long discussion — and the desk is full.
-
-What happens then?`,
-      notes: `"Think of it as the agent's working desk. Everything it can currently 'see' has to fit on that desk. When the desk fills up, older papers fall off the edge — and those things are gone from the agent's view." Technically: "A token is roughly 3/4 of a word. Tool results alone can dump thousands of tokens per call. ClarAIty tracks utilization using the token count reported by the LLM response — this is the ground truth, not an estimate."`
-    },
-
-    {
-      id: 'ch7-budget',
-      layout: 'diagram-only',
-      title: 'The Budget Problem',
-      caption: 'Context windows are finite. Every token spent on context is a token less for the response.',
-      diagram: 'context-budget',
-      notes: `"Think of the context window as a desk. System prompt, project instructions, 27 tool schemas, memory, knowledge, and the entire conversation — they all need to fit. The conversation grows with every exchange, squeezing everything else." Walk through the breakdown: "System prompt + instructions take ~19K. Tool schemas cost ~3K. Memory + knowledge ~6K. That's 28K consumed before the user says a word. Conversation history grows from there. Reserved output (12K) guarantees room for the LLM's response. The pressure gauge at the bottom shows where we are: green (<70%) means plenty of room, yellow (70-85%) means getting full, orange (85%) triggers automatic compaction, red (>95%) is critically full." Technically: "Utilization = input_tokens / max_context_tokens. Checked after every assistant response in stream_response(). Compaction fires at 85%. Two guardrails: (1) _compaction_failed cooldown — if it errors, skip for the rest of that response, reset on next user message, (2) minimum 4 messages — nothing meaningful to summarize yet."`
-    },
-
-    {
-      id: 'ch7-how-it-works',
-      layout: 'center-text',
-      title: 'The LLM Summarizes Itself',
-      body: `When the context is full, the agent makes **a separate LLM call** — sending the conversation history with the instruction: "Summarize this for continuation."
-
-The LLM writes a structured summary — goals, your messages (verbatim), code, errors, files, and current state. A 128K conversation compacts to ~6,000 tokens — a **95% reduction** — and replaces the old messages in context.`,
-      notes: `"Imagine a three-hour meeting with a full whiteboard. You ask the smartest person in the room to write a one-page summary — what was decided, what matters, what's next. Then you clear the board and pin that summary. If that person is unavailable, a colleague writes the summary using a checklist instead." Technically: "compact_conversation_async() sends the full message history in native format (not flattened — that would waste tokens) to the LLM with a summarization system prompt. The summary template follows a priority order: Goal/Decisions (800 tokens), User Messages (2000, verbatim), Code Snippets (1500), Errors/Fixes (600), Files Modified (400), Current State (400), Tool Summary (300). The deterministic fallback in summarizer.py uses regex to extract code blocks (skipping diagrams/data formats), error sentences, and file paths from tool calls."`
-    },
-
-    {
-      id: 'ch7-boundary',
-      layout: 'diagram-only',
-      title: 'How It Works',
-      caption: 'A **compact boundary** marker fences off old messages. The LLM only sees the summary going forward.',
-      diagram: 'compaction-flow',
-      notes: `Walk through the flow: "After each LLM response, the agent checks utilization. At 85%, compaction fires. The LLM summarizes the conversation. A compact_boundary marker is inserted — all messages before it are hidden from the LLM's context. The summary becomes the new starting point. You can still scroll back in the UI and see the full history — it's in the JSONL file, just fenced off." Technically: "MessageStore.compact() inserts two messages: (1) compact_boundary (system message, include_in_llm_context=False), (2) summary (user message, is_compact_summary=True). get_llm_context() returns only messages after the boundary. The JSONL ledger is never rewritten — old messages remain. Session resume correctly applies boundaries."`
-    },
-
-    {
-      id: 'ch7-key-insight',
-      layout: 'center-text',
-      title: 'The Key Insight',
-      body: `**Recipe: Compaction Trigger + Summary Template** — Monitor utilization after every LLM response. At 85%, fire a separate LLM call with the instruction "summarize for continuation." Use a priority-based template: goals/decisions (800 tokens), user messages verbatim (2000), code snippets (1500), errors (600), files modified (400), current state (400), tool summary (300). Insert a boundary marker — LLM only sees the summary going forward. If the LLM summarizer fails, fall back to deterministic extraction (regex for code blocks, error patterns, file paths).
-
-With this, the agent runs **indefinitely**. The desk clears itself.
-
-**Next up:** How does the agent understand your project's architecture — not just individual files, but the relationships between modules, components, and decisions? That's the Knowledge Graph.`,
-      notes: `Milestone moment — the core loop is complete. Chapters 1-7 form the foundation that every agent needs. Chapters 8+ add deep project understanding, task planning, and orchestration. The deterministic fallback is a key production detail — if the LLM summarizer fails (rate limit, timeout), the agent doesn't lose the session. It extracts code blocks (skipping diagrams and data formats), error sentences, and file paths from tool calls using regex. Not as good as an LLM summary, but good enough to continue.`
-    },
-
-    // ==========================================================
-    //  CHAPTER 8 — THE WIKI: KNOWLEDGE GRAPH
+    //  CHAPTER 11 — THE WIKI: KNOWLEDGE GRAPH
     // ==========================================================
 
     {
       id: 'ch8-title',
       layout: 'chapter-title',
-      chapter: 8,
+      chapter: 11,
       title: 'The Wiki',
       subtitle: 'Knowledge Graph',
       notes: `"The agent can now read files, but understanding a codebase is more than reading individual files. 'What does the core module depend on?' shouldn't require reading 50 files to answer. The Knowledge Graph gives the agent a map of the architecture."`
@@ -809,13 +1029,13 @@ The pattern recurs: JSONL is the ledger, SQLite is the projection, each consumer
     },
 
     // ==========================================================
-    //  CHAPTER 9 — THE PLANNER: TASK TRACKING
+    //  CHAPTER 12 — THE PLANNER: TASK TRACKING
     // ==========================================================
 
     {
       id: 'ch9-title',
       layout: 'chapter-title',
-      chapter: 9,
+      chapter: 12,
       title: 'The Planner',
       subtitle: 'Task Tracking',
       notes: `"The agent understands the architecture and can work within a session. But complex tasks span multiple sessions — and when you come back tomorrow, the agent has no idea what it was working on, what's blocked, or what comes next. The task tracker solves this."`
@@ -891,226 +1111,6 @@ Clone the repo on a new machine? The JSONL travels with it. The SQLite database 
 
 We've now built every component of the agent. **The remaining chapters** bring it all together: the agent loop, streaming, error recovery, subagents, and the complete picture.`,
       notes: `This is the end of the "building blocks" section. Chapters 1-9 each added one capability. Chapters 10-13 are about orchestration — how these pieces work together as a system. Good moment to pause and take questions before the final stretch.`
-    },
-
-    // ==========================================================
-    //  CHAPTER 10 — THE CONDUCTOR: THE AGENT LOOP
-    // ==========================================================
-
-    {
-      id: 'ch10-title',
-      layout: 'chapter-title',
-      chapter: 10,
-      title: 'The Conductor',
-      subtitle: 'The Agent Loop',
-      notes: `"We've built all the pieces — LLM, context, tools, MCP, gating, sessions, compaction, knowledge, tasks. Now we see how they all come together in the orchestration loop. This is the heartbeat of the agent."`
-    },
-
-    {
-      id: 'ch10-the-loop',
-      layout: 'center-text',
-      title: 'The Heartbeat',
-      body: `The core of every AI agent is a **Think → Act → Observe** loop — a while loop that repeats until the task is done:
-
-**1.** Build context and call the LLM
-**2.** Tool calls? → Gate them → Execute them
-**3.** Add results to context → loop back to step 1
-**4.** Text response with no tool calls → deliver to user
-
-Every iteration checks budgets (iteration count, time, interrupts). Any limit hit → pause and ask the user.`,
-      notes: `This is stream_response() in agent.py — the single async generator that drives everything. ToolLoopState is a dataclass carrying all per-iteration state (replacing what would otherwise be 12+ local variables). The loop tracks: MAX_ITERATIONS (configurable), wall-time budget, tool call count (cap at 200), and pause-continue count (max 3). When the loop pauses, the user sees stats: how many tool calls, how much time elapsed, what triggered the pause.`
-    },
-
-    {
-      id: 'ch10-loop-diagram',
-      layout: 'diagram-only',
-      title: 'Think, Act, Observe — Repeat',
-      caption: 'Every iteration is one pass through the loop. Each arrow is a function call in the agent.',
-      diagram: 'agent-loop',
-      notes: `This is the Think-Act-Observe loop — implemented as stream_response() in agent.py. THINK = call the LLM. ACT = execute the tool calls it requests. OBSERVE = read the results. The loop repeats until the LLM responds with text only (finish_reason: stop) or a budget limit is hit.`
-    },
-
-    {
-      id: 'ch10-state',
-      layout: 'diagram-only',
-      title: 'What the Loop Tracks',
-      caption: 'The **ToolLoopState** carries all state across iterations — budgets, counters, and results.',
-      diagram: 'agent-loop-state',
-      notes: `ToolLoopState is a dataclass with: iteration counter, total tool_call_count, response content, tool messages, blocked calls, and provider errors. It has two key methods: reset_iteration() clears per-loop state between iterations, and reset_budgets_after_continue() resets counters when the user says "Continue" at a pause prompt. The budget system prevents runaway execution — a misbehaving LLM that keeps requesting tools will be stopped, not allowed to run forever.`
-    },
-
-    {
-      id: 'ch10-key-insight',
-      layout: 'center-text',
-      title: 'The Key Insight',
-      body: `**Recipe: Agent Loop Skeleton** — while True: (1) build context, call LLM. (2) If tool_calls in response → gate each one → execute approved ones → add results to context → continue loop. (3) If text response with no tool_calls → deliver to user → break. Check budgets (iteration count, time, tool call count) on every iteration. When a budget is hit → pause, show stats, ask the user.
-
-The orchestration loop is the spine. Everything else connects to it.
-
-**Next up:** Why does the agent feel responsive? Because you see tokens as they arrive, not as a wall of text. That's Streaming.`,
-      notes: `The loop is an async generator — it yields UIEvents as they happen. Text deltas, tool state updates, pause prompts, errors — all streamed to the UI in real time. This is why streaming (Chapter 11) is architecturally coupled to the loop, not just a UI feature. The recipe gives the audience a concrete pseudocode skeleton they can implement. Budget checks prevent runaway execution — a misbehaving LLM that keeps requesting tools will be stopped, not allowed to run forever.`
-    },
-
-    // ==========================================================
-    //  CHAPTER 11 — THE VOICE: STREAMING UX
-    // ==========================================================
-
-    {
-      id: 'ch11-title',
-      layout: 'chapter-title',
-      chapter: 11,
-      title: 'The Voice',
-      subtitle: 'Streaming UX',
-      notes: `"The agent could return its entire response at once — but that would mean staring at a blank screen for 30 seconds. Streaming is what makes the agent feel alive."`
-    },
-
-    {
-      id: 'ch11-why-streaming',
-      layout: 'center-text',
-      title: 'Words as They Arrive',
-      body: `Without streaming, you send a question and wait. 10 seconds. 20 seconds. Then the entire response appears at once. It feels like talking to a wall.
-
-With streaming, words appear as the LLM generates them — like watching someone type. You can read the beginning while the end is still being written, and interrupt immediately if it's going wrong.`,
-      notes: `The LLM's stream flag enables token-by-token delivery via Server-Sent Events. Each token arrives as a ProviderDelta object with a text fragment. The StreamingPipeline (single canonical parser) processes each delta — detecting code fence boundaries, thinking blocks, tool call JSON assembly — all in real time. The TUI renders segments directly from the pipeline. It does zero parsing of its own — the pipeline is the single source of truth for structural decisions.`
-    },
-
-    {
-      id: 'ch11-pipeline',
-      layout: 'diagram-only',
-      title: 'The Streaming Pipeline',
-      caption: 'Tokens flow from the LLM through a **single parser** that detects structure — then directly to the UI.',
-      diagram: 'streaming-pipeline',
-      notes: `The pipeline detects: text segments, code blocks (language + content), thinking blocks (for reasoning models), and tool call JSON. It emits UIEvents: TextDelta, CodeBlockStart/Delta/End, ThinkingStart/Delta/End. The TUI renders these events directly — it never parses LLM output itself. This prevents a common bug in AI UIs where the rendering layer and parsing layer have different ideas about where a code block starts and ends.`
-    },
-
-    {
-      id: 'ch11-what-parser-detects',
-      layout: 'comparison',
-      title: 'What the Parser Detects',
-      left: {
-        heading: 'Structure',
-        items: [
-          '**Code fences** — language tag, content, closing fence',
-          '**Thinking blocks** — native (provider-level) and tag-based (<thinking>)',
-          '**Tool call JSON** — incrementally assembled from fragments',
-          '**Text segments** — everything else, the prose between structures'
-        ]
-      },
-      right: {
-        heading: 'Why it\'s hard',
-        items: [
-          'Tokens arrive **mid-word** — "```py" might arrive as "``" then "`py"',
-          'Thinking blocks vary by provider — Anthropic, OpenAI, Gemini all differ',
-          'Tool call arguments arrive as **JSON fragments** over dozens of deltas',
-          'A code block inside a thinking block requires **nested state tracking**'
-        ]
-      },
-      notes: `"Streaming parsing looks simple until you actually build it. The LLM doesn't send neat lines — it sends fragments of tokens. A code fence might arrive as two backticks in one delta and the third backtick plus the language tag in the next. The parser has to buffer, detect, and emit the right event at exactly the right time. This is why it needs to be one centralized parser — distributing this logic across UI components is a bug factory." Technically: "StreamingPipeline maintains a StreamingState with in-flight accumulators for each structural type. ToolCallAccumulator buffers arguments_delta strings and only parses JSON when the tool call is finalized. Code fence detection uses regex on the accumulated buffer, not individual deltas. Thinking blocks support two modes: native (provider sends thinking_delta on ProviderDelta) and tag-based (<thinking> tags parsed from text stream)."`
-    },
-
-    {
-      id: 'ch11-war-story',
-      layout: 'center-text',
-      title: 'The Lesson We Learned',
-      body: `Early in development, both the streaming pipeline and the UI had their own code fence detection logic. They would **subtly diverge** — the pipeline thought a code block ended on line 42, the UI thought it ended on line 45.
-
-The result: rendering bugs that only appeared with specific code patterns, impossible to reproduce consistently. The fix wasn't better synchronization — it was **removing the duplication entirely**. One parser, one source of truth, zero divergence.
-
-This is a general principle: when two components must agree on structure, **don't coordinate — centralize**.`,
-      notes: `This war story builds credibility — the audience sees that the single-parser pattern wasn't a theoretical decision, it was earned through painful debugging. The general principle ("don't coordinate, centralize") applies far beyond streaming — it's the same insight behind the single-writer pattern in Chapter 6 and the centralized gate in Chapter 5. These patterns keep appearing because distributed agreement is fundamentally harder than centralized authority. The audience should notice this recurring theme: single writer, single gate, single parser.`
-    },
-
-    {
-      id: 'ch11-key-insight',
-      layout: 'center-text',
-      title: 'The Key Insight',
-      body: `**Recipe: Single-Parser Streaming** — One parser owns all structural decisions. The UI renders what the parser emits. No parsing in the rendering layer, no structural decisions in the display code.
-
-This is the same principle as single-writer persistence (Ch 6) and centralized gating (Ch 5) — when correctness depends on agreement, **centralize the authority**.
-
-**Next up:** What happens when things go wrong? Tools fail, APIs timeout, the LLM gets stuck. That's Error Recovery.`,
-      notes: `Draw the parallel explicitly: "Notice the pattern? Single writer for persistence. Single gate for safety. Single parser for streaming. Every time we tried to distribute these responsibilities, we got bugs. Centralizing them eliminated entire classes of problems." This is a recurring architectural theme the audience should take home: when multiple components must agree, don't coordinate — centralize.`
-    },
-
-    // ==========================================================
-    //  CHAPTER 12 — THE SAFETY NET: ERROR RECOVERY
-    // ==========================================================
-
-    {
-      id: 'ch12-title',
-      layout: 'chapter-title',
-      chapter: 12,
-      title: 'The Safety Net',
-      subtitle: 'Error Recovery',
-      notes: `"A production agent must handle failure gracefully. Tools fail, APIs timeout, the LLM gets stuck in a loop. This chapter is about how the agent recovers — automatically when possible, with human help when needed."`
-    },
-
-    {
-      id: 'ch12-two-kinds',
-      layout: 'comparison',
-      title: 'Two Kinds of Failure',
-      left: {
-        heading: 'Tool Failures',
-        items: [
-          'File not found, permission denied',
-          'Command returns an error',
-          'Timeout after 2 minutes',
-          'Same call that already failed'
-        ]
-      },
-      right: {
-        heading: 'LLM Failures',
-        items: [
-          'API timeout or rate limit',
-          'Authentication error',
-          'Model overloaded',
-          'Network connectivity issues'
-        ]
-      },
-      notes: `Tool failures are handled by the agent — it blocks exact repeats, tracks per-tool error budgets, and injects constraints telling the LLM what failed and why. The LLM reads these and tries a different approach. LLM failures are escalated to the user — the agent pauses with an error message and the user decides to retry or stop. The key insight: tool failures are expected (part of exploring a codebase), LLM failures are exceptional (something is wrong with the infrastructure).`
-    },
-
-    {
-      id: 'ch12-self-correction',
-      layout: 'center-text',
-      title: 'Self-Correction',
-      body: `When a tool fails, the agent doesn't just retry. It **blocks the exact call** that failed and tells the LLM: "This was blocked because it previously failed. Try a different approach."
-
-The LLM adapts — different tool, different arguments, or diagnosing the root cause first. Per-tool error budgets cap failures at **4 identical attempts** before blocking the tool entirely for the remainder of the request.`,
-      notes: `ErrorRecoveryTracker uses stable hashing to normalize tool arguments — catching "wiggling" where the LLM changes whitespace or formatting but the call is functionally identical. The controller constraint injection appends a message to LLM context listing blocked calls and the reasons they failed. This is the same pattern used by the gating pipeline — feeding rejection reasons back to the LLM as tool-role messages so it can self-correct.`
-    },
-
-    {
-      id: 'ch12-stable-hash',
-      layout: 'center-text',
-      title: 'Catching the Wiggle',
-      body: `LLMs are creative — even when retrying a failed call, they'll change whitespace, reformat arguments, or reorder parameters. The call is **functionally identical**, but string comparison says it's "new."
-
-The solution: **stable hashing**. Normalize arguments (collapse whitespace, normalize file paths, sort keys), hash the result with SHA-256, and compare hashes. Same hash = same call = blocked.
-
-This catches the subtle case where the LLM appears to be trying something new, but is actually repeating the same failure with cosmetic changes.`,
-      notes: `ErrorRecoveryTracker._stable_signature() uses json.dumps(sort_keys=True) for deterministic key ordering, then SHA-256 for collision-resistant hashing (first 32 hex chars = 128 bits). Tool-specific normalization: run_command collapses whitespace, file tools normalize path separators (/ vs \\) and strip. Deliberately does NOT normalize patch content or file content — changing the actual content IS a different call. This catches the common pattern where the LLM fails to write a file, then "retries" with the exact same content but different indentation in the JSON arguments.`
-    },
-
-    {
-      id: 'ch12-flow',
-      layout: 'diagram-only',
-      title: 'The Recovery Flow',
-      caption: 'Automatic self-correction for tool failures. Human escalation when the agent is stuck.',
-      diagram: 'error-recovery-flow',
-      notes: `Walk through the flow: "A tool fails (file not found, timeout, permission denied). The agent blocks that exact call from running again — including cosmetically different versions caught by stable hashing. It injects a constraint message into the LLM context: 'This call failed because...' The LLM reads the constraint and tries a different approach. If it keeps failing (per-tool budget of 4), the tool is blocked entirely. If total failures hit 10, the agent pauses for the user. The user can Continue (budgets reset), Stop, or Retry the LLM call."`
-    },
-
-    {
-      id: 'ch12-key-insight',
-      layout: 'center-text',
-      title: 'The Key Insight',
-      body: `**Recipe: Error Recovery Pattern** — Block the exact failed call (including cosmetic variants via stable hashing). Inject the failure reason into LLM context as a constraint message. The LLM self-corrects. Escalate to the user when automatic recovery is exhausted.
-
-This is the same feedback loop as tool gating (Ch 5) — tell the LLM **why** something was blocked, and it adapts. Never silently retry. Never leave the user in the dark.
-
-**Next up:** Some tasks need a specialist. How does the agent delegate work to focused subagents with their own context, tools, and even their own LLM model?`,
-      notes: `The pause flow gives the user full transparency: what happened, how many tool calls were made, how much time elapsed, and what went wrong. The user can Continue (budgets reset, loop resumes), Stop (end the response), or in some cases Retry (re-attempt the LLM call). The pattern is applicable to any system where an LLM takes actions: block repeats, explain why, let the LLM adapt. This is fundamentally different from traditional retry logic (exponential backoff) — the LLM can reason about the failure and choose an alternative strategy.`
     },
 
     // ==========================================================
