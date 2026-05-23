@@ -157,14 +157,15 @@ class TestExitPlanModeTool:
         assert excerpt is not None
         assert "Plan:" in excerpt  # From template
 
-    def test_execute_indicates_truncation(self, exit_tool, plan_state):
-        """Test execution indicates if content was truncated."""
-        # Write large content
-        plan_state.plan_file_path.write_text("x" * 10000, encoding="utf-8")
+    def test_execute_truncated_always_false(self, exit_tool, plan_state):
+        """Test execution never truncates content regardless of size."""
+        large_content = "x" * 10000
+        plan_state.plan_file_path.write_text(large_content, encoding="utf-8")
 
         result = exit_tool.execute()
 
-        assert result.metadata.get("truncated") is True
+        assert result.metadata.get("truncated") is False
+        assert result.metadata.get("excerpt") == large_content
 
     def test_execute_fails_without_plan_state(self):
         """Test execution fails without plan_mode_state."""

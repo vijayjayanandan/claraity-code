@@ -137,8 +137,8 @@ class TestPlanModeState:
         assert "truncated" in result
         assert result["truncated"] is False  # Template is small
 
-    def test_exit_for_approval_truncates_large_content(self, plan_state):
-        """Test exiting truncates content over 8000 chars."""
+    def test_exit_for_approval_sends_full_content(self, plan_state):
+        """Test exiting sends full content without truncation."""
         plan_state.enter("test-session")
 
         # Write large content
@@ -147,9 +147,8 @@ class TestPlanModeState:
 
         result = plan_state.exit_for_approval()
 
-        assert result["truncated"] is True
-        assert len(result["excerpt"]) == 8003  # 8000 + "..."
-        assert result["excerpt"].endswith("...")
+        assert result["truncated"] is False
+        assert result["excerpt"] == large_content
 
     def test_exit_for_approval_error_when_not_active(self, plan_state):
         """Test exiting when not active returns error."""

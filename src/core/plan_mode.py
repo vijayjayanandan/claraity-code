@@ -233,16 +233,11 @@ class PlanModeState:
         self.is_active = False
         self._awaiting_approval = True
 
-        # Truncate for context injection (8000 chars max)
-        max_excerpt_len = 8000
-        truncated = len(content) > max_excerpt_len
-        excerpt = content[:max_excerpt_len] + ("..." if truncated else "")
-
         return {
             "status": "awaiting_approval",
             "plan_hash": self.plan_hash,
-            "excerpt": excerpt,
-            "truncated": truncated,
+            "excerpt": content,
+            "truncated": False,
             "plan_path": str(self.plan_file_path),
         }
 

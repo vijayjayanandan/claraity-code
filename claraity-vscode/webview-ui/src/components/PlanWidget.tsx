@@ -20,8 +20,6 @@ interface PlanWidgetProps {
 export function PlanWidget({
   planHash,
   excerpt,
-  truncated,
-  planPath,
   postMessage,
   onDismiss,
 }: PlanWidgetProps) {
@@ -61,12 +59,6 @@ export function PlanWidget({
           dangerouslySetInnerHTML={{ __html: planHtml }}
         />
       </div>
-
-      {truncated && (
-        <div className="truncation-note">
-          Plan was truncated. Full plan saved to: {planPath || "plan file"}
-        </div>
-      )}
 
       <div className="widget-actions">
         <button className="btn-primary" onClick={() => handleApprove(false)}>
