@@ -805,14 +805,14 @@ TASK_CREATE_TOOL = ToolDefinition(
 
 TASK_UPDATE_TOOL = ToolDefinition(
     name="task_update",
-    description="Update a task's lifecycle: start, close, note, defer, reopen, or claim.",
+    description="Update a task's lifecycle: start, close, note, defer, reopen, claim, or reparent.",
     parameters={
         "type": "object",
         "properties": {
             "bead_id": {"type": "string", "description": "Task ID (e.g., bd-a1b2)"},
             "action": {
                 "type": "string",
-                "enum": ["start", "close", "note", "defer", "reopen", "claim"],
+                "enum": ["start", "close", "note", "defer", "reopen", "claim", "reparent"],
             },
             "summary": {
                 "type": "string",
@@ -824,6 +824,10 @@ TASK_UPDATE_TOOL = ToolDefinition(
             },
             "defer_until": {"type": "string", "description": "For defer: ISO8601 date to reappear"},
             "claimant": {"type": "string", "description": "For claim: identity of claimer"},
+            "parent_id": {
+                "type": "string",
+                "description": "For reparent: epic/parent task ID. Omit to detach from current parent.",
+            },
         },
         "required": ["bead_id", "action"],
     },

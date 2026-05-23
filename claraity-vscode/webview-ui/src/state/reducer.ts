@@ -36,6 +36,9 @@ const SILENT_TOOLS = new Set([
   "task_update",
   "task_list",
   "task_get",
+  "task_show",
+  "task_link",
+  "task_block",
   "enter_plan_mode",
 ]);
 

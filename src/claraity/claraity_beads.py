@@ -546,6 +546,22 @@ class BeadStore:
                 (json.dumps(existing), now, now, bead_id),
             )
 
+    def set_parent(self, bead_id: str, parent_id: str | None):
+        """Set or clear the parent of a bead (move into/out of an epic)."""
+        now = self._now()
+        with self._cursor() as cur:
+            cur.execute("SELECT id FROM beads WHERE id=?", (bead_id,))
+            if cur.fetchone() is None:
+                raise ValueError(f"Bead '{bead_id}' not found")
+            if parent_id is not None:
+                cur.execute("SELECT id FROM beads WHERE id=?", (parent_id,))
+                if cur.fetchone() is None:
+                    raise ValueError(f"Parent bead '{parent_id}' not found")
+            cur.execute(
+                "UPDATE beads SET parent_id=?, updated_at=?, last_activity=? WHERE id=?",
+                (parent_id, now, now, bead_id),
+            )
+
     # -- Session lifecycle -----------------------------------------------------
 
     STALE_CLAIM_MINUTES = 30

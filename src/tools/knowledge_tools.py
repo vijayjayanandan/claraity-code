@@ -683,6 +683,7 @@ class BeadUpdateTool(Tool):
         close_reason: str = "",
         defer_until: str = "",
         claimant: str = "",
+        parent_id: str = "",
         **kwargs: Any,
     ) -> ToolResult:
         from src.claraity.claraity_beads import BeadStore
@@ -755,12 +756,26 @@ class BeadUpdateTool(Tool):
                         output=None,
                         error=f"Already claimed by {bead['assignee']}",
                     )
+            elif action == "reparent":
+                new_parent = parent_id or None
+                store.set_parent(bead_id, new_parent)
+                msg = (
+                    f"Moved {bead_id} under epic {new_parent}"
+                    if new_parent
+                    else f"Removed {bead_id} from its epic"
+                )
+                return ToolResult(
+                    tool_name=self.name,
+                    status=ToolStatus.SUCCESS,
+                    output=msg,
+                    metadata={"bead_id": bead_id, "parent_id": new_parent},
+                )
             else:
                 return ToolResult(
                     tool_name=self.name,
                     status=ToolStatus.ERROR,
                     output=None,
-                    error=f"Unknown action: {action}. Use start, close, note, defer, reopen, or claim.",
+                    error=f"Unknown action: {action}. Use start, close, note, defer, reopen, claim, or reparent.",
                 )
         except Exception as e:
             return ToolResult(
@@ -779,11 +794,12 @@ class BeadUpdateTool(Tool):
                 "bead_id": {"type": "string", "description": "Task ID (e.g., bd-a1b2)"},
                 "action": {
                     "type": "string",
-                    "enum": ["start", "close", "note", "defer", "reopen", "claim"],
+                    "enum": ["start", "close", "note", "defer", "reopen", "claim", "reparent"],
                     "description": (
                         "start: begin work. close: mark done. note: add comment. "
                         "defer: park task. reopen: un-close or un-defer. "
-                        "claim: atomic ownership (prevents parallel sessions from double-claiming)."
+                        "claim: atomic ownership (prevents parallel sessions from double-claiming). "
+                        "reparent: move task into an epic (set parent_id) or out of one (omit parent_id)."
                     ),
                 },
                 "summary": {
@@ -801,6 +817,10 @@ class BeadUpdateTool(Tool):
                 "claimant": {
                     "type": "string",
                     "description": "For claim: identity of claimer (e.g., 'claraity:session-abc'). Default: 'agent'.",
+                },
+                "parent_id": {
+                    "type": "string",
+                    "description": "For reparent: epic/parent task ID to move this task under. Omit to detach from current parent.",
                 },
             },
             "required": ["bead_id", "action"],
