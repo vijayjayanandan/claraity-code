@@ -423,11 +423,24 @@ export class ClarAItySidebarProvider implements vscode.WebviewViewProvider {
                     });
                 }
 
-                // Forward config to agent — include api_key so the running process
-                // can hot-swap backends without a restart.  The Python side uses it
-                // for reconfigure_llm() but never persists it to config.yaml.
+                // Resolve the API key to forward to the running agent for hot-swapping.
+                // If the user typed a new key (apiKey exists), use it.
+                // Otherwise, pull the existing key from SecretStorage so the agent
+                // doesn't fall back to a stale CLARAITY_API_KEY from process spawn time.
+                let finalApiKey = apiKey;
+                if (!finalApiKey && this.secrets) {
+                    finalApiKey = await this.secrets.get('claraity.apiKey');
+                }
+
+                // Forward config to agent. The Python side uses api_key for reconfigure_llm()
+                // but never persists it to config.yaml.
                 // Strip search_key only (injected via env var at spawn).
                 const { search_key: _sStripped, ...configWithoutSearchKey } = config;
+                
+                if (finalApiKey) {
+                    configWithoutSearchKey.api_key = finalApiKey;
+                }
+
                 this.connection?.send({ type: 'save_config', config: configWithoutSearchKey } as ClientMessage);
                 break;
             }
