@@ -22,6 +22,13 @@ When bumping package versions, update **both** files — they declare the same v
 
 `claraity-server.spec` lists **module names** only (not versions) for PyInstaller hidden imports. Only update it when **adding or removing** a package, not when bumping versions.
 
+**ALWAYS update `claraity-server.spec` when:**
+- Adding a new `src.*` module (e.g. `src.llm.openai_native_backend`, `src.llm.backend_factory`) -- PyInstaller cannot discover modules that are lazy-imported (local imports inside functions). Every new source module used in the server path must be explicitly listed under `hiddenimports`.
+- Adding a new third-party package or using a new submodule of an existing package (e.g. `openai.resources.responses`).
+- Upgrading an SDK that adds new submodules used at runtime.
+
+**Rule:** Any time a new Python file is created under `src/`, ask: "Is this reachable from `src.server.__main__`?" If yes, add it to `claraity-server.spec`. When in doubt, add it -- a redundant entry is harmless, a missing one causes `ImportError` in the bundled binary.
+
 ## CI Multi-Platform Build (production releases)
 
 Workflow: `.github/workflows/build-vsix.yml`

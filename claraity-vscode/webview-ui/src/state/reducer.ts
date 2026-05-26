@@ -298,7 +298,6 @@ export function appReducer(state: AppState, action: Action): AppState {
     case "THINKING_END": {
       if (!state.currentThinking) return state;
       const thinkingContent = state.currentThinking.content;
-      const thinkingTokenCount = state.currentThinking.tokenCount;
       const [thinkId, thinkState] = nextTimelineId(state, "thinking");
       return {
         ...thinkState,
@@ -309,7 +308,7 @@ export function appReducer(state: AppState, action: Action): AppState {
             type: "thinking" as const,
             id: thinkId,
             content: thinkingContent,
-            tokenCount: thinkingTokenCount,
+            tokenCount: action.tokenCount,
           },
         ],
       };

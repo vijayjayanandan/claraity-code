@@ -13,7 +13,6 @@ Requires openai>=2.34.0 (client.responses surface is available).
 """
 
 import json
-import time
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
@@ -69,9 +68,6 @@ _SAMPLING_CAPABLE_PREFIXES = ("gpt-4", "gpt-3.5", "chatgpt-")
 # o-series models: use reasoning_effort for thinking control.
 O_SERIES_PREFIXES = ("o1", "o3", "o4")
 
-# Models that only support the Responses API (/v1/responses), not Chat Completions.
-RESPONSES_API_ONLY_PREFIXES = ("o1-pro",)
-
 
 def _supports_sampling_params(model: str) -> bool:
     """True if model accepts temperature and top_p.
@@ -89,12 +85,6 @@ def _is_o_series(model: str) -> bool:
     """True if model uses o-series parameter schema (reasoning_effort etc.)."""
     lower = model.lower()
     return any(lower.startswith(p) for p in O_SERIES_PREFIXES)
-
-
-def _requires_responses_api(model: str) -> bool:
-    """True if model must use /v1/responses instead of /v1/chat/completions."""
-    lower = model.lower()
-    return any(lower.startswith(p) for p in RESPONSES_API_ONLY_PREFIXES)
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +130,7 @@ class OpenAINativeBackend(LLMBackend):
             "OpenAINativeBackend init",
             model=config.model_name,
             o_series=_is_o_series(config.model_name),
-            responses_api=_requires_responses_api(config.model_name),
+            api="responses",
         )
 
         if not _supports_sampling_params(config.model_name) and not _is_o_series(config.model_name):
@@ -201,69 +191,140 @@ class OpenAINativeBackend(LLMBackend):
         return {}
 
     # ------------------------------------------------------------------
-    # Parameter building
+    # Message format translation
     # ------------------------------------------------------------------
 
-    def _build_chat_params(
-        self,
-        messages: list[dict],
-        tools: list[ToolDefinition] | None = None,
-        tool_choice: str = "auto",
-        stream: bool = False,
-        **overrides: Any,
-    ) -> dict[str, Any]:
-        """Build request params for /v1/chat/completions."""
-        model = self.config.model_name
-        params: dict[str, Any] = {"model": model, "messages": messages, "stream": stream}
+    @staticmethod
+    def _translate_content_blocks(content: "str | list | None", role: str) -> "str | list | None":
+        """Translate Chat Completions content blocks to Responses API format.
 
-        # max_completion_tokens is correct for all current OpenAI models.
-        # max_tokens is a legacy alias that newer models (gpt-5.x+) reject at the API level.
-        params["max_completion_tokens"] = overrides.get("max_tokens", self.config.max_tokens)
+        Chat Completions uses:
+          - {"type": "text",      "text": "..."}
+          - {"type": "image_url", "image_url": {"url": "data:..."}}
 
-        if _supports_sampling_params(model):
-            # Confirmed sampling-capable model (gpt-4.x, gpt-3.5, chatgpt-*).
-            params["temperature"] = overrides.get("temperature", self.config.temperature)
-            params["top_p"] = overrides.get("top_p", self.config.top_p)
+        Responses API uses (for user/system input):
+          - {"type": "input_text",  "text": "..."}
+          - {"type": "input_image", "image_url": "data:..."}
 
-        if _is_o_series(model) and self.config.reasoning_effort:
-            # /v1/chat/completions uses reasoning_effort as a flat string kwarg
-            params["reasoning_effort"] = self.config.reasoning_effort
+        For assistant output content the types are output_text / refusal (already correct
+        when we build them ourselves; leave them alone).
+        """
+        if not isinstance(content, list):
+            return content  # plain string -- SDK accepts it as-is
 
-        if tools:
-            params["tools"] = [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": t.name,
-                        "description": t.description,
-                        "parameters": t.parameters,
-                    },
-                }
-                for t in tools
-            ]
-            params["tool_choice"] = tool_choice
+        translated = []
+        for block in content:
+            if not isinstance(block, dict):
+                translated.append(block)
+                continue
+            btype = block.get("type")
+            if btype == "text" and role in ("user", "system"):
+                translated.append({"type": "input_text", "text": block.get("text", "")})
+            elif btype == "image_url" and role in ("user", "system"):
+                url = (block.get("image_url") or {}).get("url", "")
+                translated.append({"type": "input_image", "image_url": url})
+            else:
+                translated.append(block)
+        return translated
 
-        if stream:
-            params["stream_options"] = {"include_usage": True}
+    @staticmethod
+    def _prepare_responses_input(messages: list[dict]) -> list[dict]:
+        """Convert Chat Completions message history to Responses API input format.
 
-        return params
+        The agent's canonical history uses Chat Completions schema:
+          - role="tool"  with tool_call_id + content  (tool results)
+          - role="assistant" with tool_calls list      (tool requests)
+          - role="system" / "user" with content        (unchanged)
+
+        Responses API expects ALL items to be top-level in the input array:
+          - Tool result:    {"type": "function_call_output", "call_id": ..., "output": ...}
+          - Tool call:      {"type": "function_call", "call_id": ..., "name": ..., "arguments": ...}
+          - Assistant text: {"role": "assistant", "content": [{"type": "output_text", "text": ...}]}
+          - User/system:    pass through with content blocks translated to input_text / input_image
+        """
+        translated: list[dict] = []
+        for msg in messages:
+            role = msg.get("role")
+
+            # Tool result: {"role": "tool", "tool_call_id": "...", "content": "..."}
+            # -> top-level function_call_output item
+            if role == "tool":
+                translated.append({
+                    "type": "function_call_output",
+                    "call_id": msg.get("tool_call_id", ""),
+                    "output": msg.get("content", ""),
+                })
+
+            # Assistant with tool_calls: each call becomes a top-level function_call item.
+            # Any text content becomes a separate assistant message before the calls.
+            elif role == "assistant" and msg.get("tool_calls"):
+                text = msg.get("content")
+                if text:
+                    translated.append({
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": text}],
+                    })
+                for tc in msg["tool_calls"]:
+                    fn = tc.get("function", {})
+                    translated.append({
+                        "type": "function_call",
+                        "call_id": tc.get("id", ""),
+                        "name": fn.get("name", ""),
+                        "arguments": fn.get("arguments", "{}"),
+                    })
+
+            # User / system / plain assistant: translate content blocks, pass through
+            else:
+                new_msg = dict(msg)
+                new_msg["content"] = OpenAINativeBackend._translate_content_blocks(
+                    msg.get("content"), role or ""
+                )
+                translated.append(new_msg)
+
+        return translated
+
+    # ------------------------------------------------------------------
+    # Parameter building
+    # ------------------------------------------------------------------
 
     def _build_responses_params(
         self,
         messages: list[dict],
         tools: list[ToolDefinition] | None = None,
         tool_choice: str = "auto",
+        stream: bool = False,
+        **kwargs: Any,
     ) -> dict[str, Any]:
         """Build request params for /v1/responses API."""
         model = self.config.model_name
         params: dict[str, Any] = {
             "model": model,
-            "input": messages,
+            "input": self._prepare_responses_input(messages),
             "max_output_tokens": self.config.max_tokens,
             "store": False,
         }
+
+        # Handle M5 overrides from kwargs
+        if "max_tokens" in kwargs:
+            params["max_output_tokens"] = kwargs.pop("max_tokens")
+
+        # Sampling params (if supported)
+        if _supports_sampling_params(model):
+            params["temperature"] = kwargs.pop("temperature", self.config.temperature)
+            params["top_p"] = kwargs.pop("top_p", self.config.top_p)
+
         if self.config.reasoning_effort:
-            params["reasoning"] = {"effort": self.config.reasoning_effort}
+            reasoning: dict = {"effort": self.config.reasoning_effort}
+            if self.config.reasoning_summary:
+                # summary="auto" streams reasoning text back as thinking blocks.
+                # Requires OpenAI org verification -- opt-in only.
+                reasoning["summary"] = "auto"
+            params["reasoning"] = reasoning
+        
+        # Responses API uses `stream` at the top level
+        if stream:
+            params["stream"] = True
+
         if tools:
             params["tools"] = [
                 {
@@ -277,52 +338,21 @@ class OpenAINativeBackend(LLMBackend):
             # Responses API uses tool_choice differently; pass through if not "auto"
             if tool_choice != "auto":
                 params["tool_choice"] = tool_choice
+                
+        # Strip Anthropic-only kwargs that must not reach the Responses API
+        kwargs.pop("thinking_budget", None)
+
+        # Pass any remaining kwargs
+        params.update(kwargs)
         return params
 
     # ------------------------------------------------------------------
     # Response normalisation
     # ------------------------------------------------------------------
 
-    def _normalise_chat_response(self, response: Any) -> LLMResponse:
-        """Convert a chat completions response to LLMResponse."""
-        choice = response.choices[0]
-        msg = choice.message
-        usage = response.usage
-
-        tool_calls = None
-        if msg.tool_calls:
-            tool_calls = []
-            for tc in msg.tool_calls:
-                parsed_args = self._parse_tool_arguments(
-                    tc.function.arguments or "", tc.function.name
-                )
-                args_json = json.dumps(parsed_args) if isinstance(parsed_args, dict) else str(parsed_args)
-                tool_calls.append(
-                    ToolCall.from_provider(
-                        provider_id=tc.id,
-                        function=ToolCallFunction(name=tc.function.name, arguments=args_json),
-                    )
-                )
-
-        cached = self._extract_cached_tokens(usage)
-        if usage:
-            self.cache_tracker.record(usage)
-
-        return LLMResponse(
-            content=msg.content,
-            model=response.model,
-            finish_reason=choice.finish_reason,
-            prompt_tokens=getattr(usage, "prompt_tokens", None),
-            completion_tokens=getattr(usage, "completion_tokens", None),
-            total_tokens=getattr(usage, "total_tokens", None),
-            cached_tokens=cached,
-            tool_calls=tool_calls,
-            raw_response={"id": response.id, "created": response.created},
-        )
-
     def _normalise_responses_response(self, response: Any) -> LLMResponse:
         """Convert a Responses API response to LLMResponse."""
-        text_content = None
+        text_parts: list[str] = []
         tool_calls = None
 
         for item in getattr(response, "output", []):
@@ -330,7 +360,9 @@ class OpenAINativeBackend(LLMBackend):
             if item_type == "message":
                 for block in getattr(item, "content", []):
                     if getattr(block, "type", None) == "output_text":
-                        text_content = block.text
+                        text = getattr(block, "text", None)
+                        if text:
+                            text_parts.append(text)
             elif item_type == "function_call":
                 if tool_calls is None:
                     tool_calls = []
@@ -350,12 +382,13 @@ class OpenAINativeBackend(LLMBackend):
             self.cache_tracker.record(usage)
 
         return LLMResponse(
-            content=text_content,
+            content="".join(text_parts) or None,
             model=getattr(response, "model", self.config.model_name),
-            finish_reason="stop",
+            finish_reason=getattr(response, "finish_reason", None) or "stop",
             prompt_tokens=getattr(usage, "input_tokens", None),
             completion_tokens=getattr(usage, "output_tokens", None),
             total_tokens=getattr(usage, "total_tokens", None),
+            cached_tokens=self._extract_cached_tokens(usage),
             tool_calls=tool_calls,
         )
 
@@ -366,51 +399,54 @@ class OpenAINativeBackend(LLMBackend):
     def generate(self, messages: list[dict], **kwargs: Any) -> LLMResponse:
         """Synchronous non-streaming completion."""
         self.validate_messages(messages)
-        model = self.config.model_name
-
-        if _requires_responses_api(model):
-            def api_call():
-                return self.client.responses.create(**self._build_responses_params(messages))
-            try:
-                response = self.failure_handler.execute_with_retry(api_call, max_attempts=3, backoff_base=2.0)
-                return self._normalise_responses_response(response)
-            except Exception as e:
-                raise RuntimeError(f"OpenAI Responses API error: {e}") from e
-
-        params = self._build_chat_params(messages, stream=False, **kwargs)
+        params = self._build_responses_params(messages, **kwargs)
 
         def api_call():
-            return self.client.chat.completions.create(**params)
+            return self.client.responses.create(**params)
 
         try:
             response = self.failure_handler.execute_with_retry(api_call, max_attempts=3, backoff_base=2.0)
-            return self._normalise_chat_response(response)
+            return self._normalise_responses_response(response)
         except Exception as e:
-            raise RuntimeError(f"OpenAI API error: {e}") from e
+            raise RuntimeError(f"OpenAI Responses API error: {e}") from e
 
     def generate_stream(self, messages: list[dict], **kwargs: Any) -> Iterator[StreamChunk]:
         """Synchronous streaming completion."""
         self.validate_messages(messages)
-        params = self._build_chat_params(messages, stream=True, **kwargs)
+        params = self._build_responses_params(messages, stream=True, **kwargs)
+
         try:
-            stream = self.client.chat.completions.create(**params)
-            try:
-                for chunk in stream:
-                    if hasattr(chunk, "usage") and chunk.usage:
-                        self.cache_tracker.record(chunk.usage)
-                    if not chunk.choices:
-                        continue
-                    delta = chunk.choices[0].delta
-                    finish = chunk.choices[0].finish_reason
-                    yield StreamChunk(
-                        content=delta.content or "",
-                        done=bool(finish),
-                        model=chunk.model,
-                        finish_reason=finish,
-                    )
-            finally:
-                if hasattr(stream, "close"):
-                    stream.close()
+            # Note: Responses stream API is a context manager
+            with self.client.responses.stream(**params) as stream:
+                for event in stream:
+                    event_type = getattr(event, "type", None)
+                    if event_type == "response.output_text.delta":
+                        yield StreamChunk(
+                            content=getattr(event, "delta", ""),
+                            done=False,
+                            model=self.config.model_name,
+                            finish_reason=None,
+                        )
+                    elif event_type in {"response.completed", "response.done"}:
+                        response = getattr(event, "response", None)
+                        usage = getattr(response, "usage", None) if response else None
+                        if usage:
+                            self.cache_tracker.record(usage)
+                        finish_reason = (
+                            getattr(response, "finish_reason", None)
+                            or getattr(event, "finish_reason", None)
+                            or "stop"
+                        )
+                        yield StreamChunk(
+                            content="",
+                            done=True,
+                            model=getattr(response, "model", self.config.model_name) if response else self.config.model_name,
+                            finish_reason=finish_reason,
+                            prompt_tokens=getattr(usage, "input_tokens", None),
+                            completion_tokens=getattr(usage, "output_tokens", None),
+                            total_tokens=getattr(usage, "total_tokens", None),
+                            cached_tokens=self._extract_cached_tokens(usage),
+                        )
         except Exception as e:
             raise RuntimeError(f"OpenAI streaming error: {e}") from e
 
@@ -423,31 +459,16 @@ class OpenAINativeBackend(LLMBackend):
     ) -> LLMResponse:
         """Synchronous tool-calling completion."""
         self.validate_messages(messages)
-        model = self.config.model_name
-
-        if _requires_responses_api(model):
-            def api_call():
-                return self.client.responses.create(
-                    **self._build_responses_params(messages, tools=tools, tool_choice=tool_choice)
-                )
-            try:
-                response = self.failure_handler.execute_with_retry(api_call, max_attempts=3, backoff_base=2.0)
-                return self._normalise_responses_response(response)
-            except Exception as e:
-                raise RuntimeError(f"OpenAI Responses API tool error: {e}") from e
-
-        params = self._build_chat_params(
-            messages, tools=tools, tool_choice=tool_choice, stream=False, **kwargs
-        )
+        params = self._build_responses_params(messages, tools=tools, tool_choice=tool_choice, **kwargs)
 
         def api_call():
-            return self.client.chat.completions.create(**params)
+            return self.client.responses.create(**params)
 
         try:
             response = self.failure_handler.execute_with_retry(api_call, max_attempts=3, backoff_base=2.0)
-            return self._normalise_chat_response(response)
+            return self._normalise_responses_response(response)
         except Exception as e:
-            raise RuntimeError(f"OpenAI tool calling API error: {e}") from e
+            raise RuntimeError(f"OpenAI Responses API tool error: {e}") from e
 
     # ------------------------------------------------------------------
     # LLMBackend interface -- async streaming (primary agent path)
@@ -467,145 +488,9 @@ class OpenAINativeBackend(LLMBackend):
         """
         self.validate_messages(messages)
         sid = stream_id or generate_stream_id()
-        model = self.config.model_name
 
-        if _requires_responses_api(model):
-            async for delta in self._stream_responses_api(messages, tools or [], sid, tool_choice):
-                yield delta
-            return
-
-        # Extract kwargs overrides (M5)
-        overrides: dict[str, Any] = {}
-        for key in ("temperature", "max_tokens", "top_p"):
-            if key in kwargs:
-                overrides[key] = kwargs[key]
-
-        params = self._build_chat_params(
-            messages,
-            tools=tools,
-            tool_choice=tool_choice,
-            stream=True,
-            **overrides,
-        )
-
-        # thinking_budget not applicable to native OpenAI (o-series uses reasoning.effort)
-        # but accept it silently for interface parity
-
-        _t0 = time.monotonic()
-        _chunk_count = 0
-        try:
-            logger.debug("llm_stream_phase", phase="http_request_start", model=model)
-
-            # Track canonical tool call IDs by index (generated on first delta)
-            tool_call_ids: dict[int, str] = {}
-            finish_reason = None
-            usage_dict = None
-
-            # Use .create(stream=True) -- same as OpenAIBackend. Avoids the SDK's
-            # strict tool validation that .stream() enforces (which rejects our tools
-            # because they don't have strict=True in their schemas).
-            stream = await self.async_client.chat.completions.create(**params)
-            logger.debug(
-                "llm_stream_phase",
-                phase="http_request_done",
-                model=model,
-                elapsed_ms=round((time.monotonic() - _t0) * 1000),
-            )
-            try:
-                async for chunk in stream:
-                    _chunk_count += 1
-
-                    # Capture usage (comes in final chunk with stream_options)
-                    if hasattr(chunk, "usage") and chunk.usage:
-                        usage_dict = {
-                            "input_tokens": chunk.usage.prompt_tokens,
-                            "output_tokens": chunk.usage.completion_tokens,
-                            "cached_tokens": self._extract_cached_tokens(chunk.usage),
-                            "reasoning_tokens": getattr(
-                                getattr(chunk.usage, "completion_tokens_details", None),
-                                "reasoning_tokens",
-                                None,
-                            ),
-                        }
-                        self.cache_tracker.record(chunk.usage)
-
-                    # Skip usage-only chunks
-                    if not chunk.choices or len(chunk.choices) == 0:
-                        continue
-
-                    delta = chunk.choices[0].delta
-                    finish_reason = chunk.choices[0].finish_reason
-
-                    # Text delta
-                    if delta.content:
-                        yield ProviderDelta(stream_id=sid, text_delta=delta.content)
-
-                    # Reasoning content from o-series (if exposed as a dedicated field)
-                    _extra = getattr(delta, "model_extra", None) or {}
-                    reasoning_text = _extra.get("reasoning") or _extra.get("reasoning_content")
-                    if reasoning_text:
-                        yield ProviderDelta(stream_id=sid, thinking_delta=reasoning_text)
-
-                    # Tool call deltas -- emit id+name on first delta, args on subsequent
-                    if delta.tool_calls:
-                        for tc_delta in delta.tool_calls:
-                            idx = tc_delta.index
-
-                            # Generate canonical ID on first delta for this index
-                            if tc_delta.id and idx not in tool_call_ids:
-                                tool_call_ids[idx] = generate_tool_call_id()
-
-                            tc_id = tool_call_ids.get(idx) if tc_delta.id else None
-                            tc_name = (
-                                tc_delta.function.name
-                                if tc_delta.function and tc_delta.function.name
-                                else None
-                            )
-                            args_delta = (
-                                tc_delta.function.arguments
-                                if tc_delta.function and tc_delta.function.arguments
-                                else ""
-                            )
-
-                            yield ProviderDelta(
-                                stream_id=sid,
-                                tool_call_delta=ToolCallDelta(
-                                    index=idx,
-                                    id=tc_id,
-                                    name=tc_name,
-                                    arguments_delta=args_delta,
-                                ),
-                            )
-
-            finally:
-                if hasattr(stream, "close"):
-                    await stream.close()
-
-            # Emit finish delta with usage
-            logger.debug(
-                "llm_stream_phase",
-                phase="stream_complete",
-                total_chunks=_chunk_count,
-                finish_reason=finish_reason,
-                elapsed_ms=round((time.monotonic() - _t0) * 1000),
-            )
-            yield ProviderDelta(
-                stream_id=sid,
-                finish_reason=finish_reason or "stop",
-                usage=usage_dict,
-            )
-
-        except Exception as e:
-            error_type = type(e).__name__
-            error_msg = str(e).strip() or repr(e)
-            logger.exception(
-                "openai_native_async_provider_delta_error",
-                error_type=error_type,
-                model=model,
-            )
-            raise RuntimeError(
-                f"OpenAI native async provider delta error: {error_type}: {error_msg}"
-            ) from e
+        async for delta in self._stream_responses_api(messages, tools or [], sid, tool_choice, **kwargs):
+            yield delta
 
     async def _stream_responses_api(
         self,
@@ -613,13 +498,14 @@ class OpenAINativeBackend(LLMBackend):
         tools: list[ToolDefinition],
         stream_id: str,
         tool_choice: str = "auto",
+        **kwargs: Any,
     ) -> AsyncIterator[ProviderDelta]:
-        """Stream from Responses API for models that require it (e.g. o1-pro).
+        """Stream from Responses API.
 
         Emits a first ToolCallDelta with id+name, then subsequent deltas with
         arguments_delta only -- matching the chat completions pattern (C3).
         """
-        params = self._build_responses_params(messages, tools=tools, tool_choice=tool_choice)
+        params = self._build_responses_params(messages, tools=tools, tool_choice=tool_choice, **kwargs)
 
         # Track whether we have emitted the id+name header for each output_index
         tool_headers_emitted: dict[int, bool] = {}
@@ -627,85 +513,109 @@ class OpenAINativeBackend(LLMBackend):
         tool_call_meta: dict[int, dict[str, str]] = {}
 
         # NOTE: .stream() returns an async context manager directly -- do NOT await it.
-        async with self.async_client.responses.stream(**params) as stream:
-            async for event in stream:
-                event_type = getattr(event, "type", None)
+        logger.debug(
+            "responses_api_stream_params",
+            model=params.get("model"),
+            reasoning=params.get("reasoning"),
+            has_tools=bool(params.get("tools")),
+        )
+        try:
+            async with self.async_client.responses.stream(**params) as stream:
+                async for event in stream:
+                    event_type = getattr(event, "type", None)
 
-                if event_type == "response.output_text.delta":
-                    delta_text = getattr(event, "delta", "")
-                    if delta_text:
-                        yield ProviderDelta(stream_id=stream_id, text_delta=delta_text)
+                    if event_type == "response.output_text.delta":
+                        delta_text = getattr(event, "delta", "")
+                        if delta_text:
+                            yield ProviderDelta(stream_id=stream_id, text_delta=delta_text)
 
-                elif event_type == "response.output_item.added":
-                    # Capture tool call metadata (id, name) when the item is announced
-                    item = getattr(event, "item", None)
-                    if item and getattr(item, "type", None) == "function_call":
+                    elif event_type == "response.reasoning_summary_text.delta":
+                        delta_text = getattr(event, "delta", "")
+                        logger.debug("reasoning_summary_delta", chars=len(delta_text))
+                        if delta_text:
+                            yield ProviderDelta(stream_id=stream_id, thinking_delta=delta_text)
+
+                    elif event_type == "response.output_item.added":
+                        # Capture tool call metadata (id, name) when the item is announced
+                        item = getattr(event, "item", None)
+                        if item and getattr(item, "type", None) == "function_call":
+                            idx = getattr(event, "output_index", 0)
+                            tool_call_meta[idx] = {
+                                "id": getattr(item, "call_id", None) or generate_tool_call_id(),
+                                "name": getattr(item, "name", "") or "",
+                            }
+
+                    elif event_type == "response.function_call_arguments.start":
+                        # Start event carries call_id and name for this tool call (C3)
                         idx = getattr(event, "output_index", 0)
+                        call_id = getattr(event, "call_id", None)
+                        name = getattr(event, "name", "") or ""
                         tool_call_meta[idx] = {
-                            "id": generate_tool_call_id(),
-                            "name": getattr(item, "name", "") or "",
+                            "id": call_id or generate_tool_call_id(),
+                            "name": name,
                         }
 
-                elif event_type == "response.function_call_arguments.start":
-                    # Start event carries call_id and name for this tool call (C3)
-                    idx = getattr(event, "output_index", 0)
-                    call_id = getattr(event, "call_id", None)
-                    name = getattr(event, "name", "") or ""
-                    tool_call_meta[idx] = {
-                        "id": generate_tool_call_id(),
-                        "name": name,
-                    }
+                    elif event_type == "response.function_call_arguments.delta":
+                        args_delta = getattr(event, "delta", "")
+                        idx = getattr(event, "output_index", 0)
+                        meta = tool_call_meta.get(idx)
 
-                elif event_type == "response.function_call_arguments.delta":
-                    args_delta = getattr(event, "delta", "")
-                    idx = getattr(event, "output_index", 0)
+                        if not tool_headers_emitted.get(idx):
+                            # First delta for this tool call: emit id + name (C3)
+                            tool_headers_emitted[idx] = True
+                            yield ProviderDelta(
+                                stream_id=stream_id,
+                                tool_call_delta=ToolCallDelta(
+                                    index=idx,
+                                    id=meta["id"] if meta else generate_tool_call_id(),
+                                    name=meta["name"] if meta else "",
+                                    arguments_delta=args_delta,
+                                ),
+                            )
+                        else:
+                            # Subsequent deltas: arguments only
+                            yield ProviderDelta(
+                                stream_id=stream_id,
+                                tool_call_delta=ToolCallDelta(
+                                    index=idx,
+                                    arguments_delta=args_delta,
+                                ),
+                            )
 
-                    meta = tool_call_meta.get(idx)
-
-                    if not tool_headers_emitted.get(idx):
-                        # First delta for this tool call: emit id + name (C3)
-                        tool_headers_emitted[idx] = True
+                    elif event_type in {"response.completed", "response.done", "response.incomplete"}:
+                        # Capture usage from the completed/incomplete response
+                        response = getattr(event, "response", None)
+                        usage = getattr(response, "usage", None) if response else None
+                        usage_dict = None
+                        if usage:
+                            self.cache_tracker.record(usage)
+                            usage_dict = {
+                                "input_tokens": getattr(usage, "input_tokens", None),
+                                "output_tokens": getattr(usage, "output_tokens", None),
+                                "cached_tokens": self._extract_cached_tokens(usage),
+                                "reasoning_tokens": getattr(
+                                    getattr(usage, "output_tokens_details", None),
+                                    "reasoning_tokens",
+                                    None,
+                                ),
+                            }
+                        if event_type == "response.incomplete":
+                            finish_reason = "length"
+                        else:
+                            finish_reason = (
+                                getattr(response, "finish_reason", None)
+                                or getattr(event, "finish_reason", None)
+                                or "stop"
+                            )
                         yield ProviderDelta(
                             stream_id=stream_id,
-                            tool_call_delta=ToolCallDelta(
-                                index=idx,
-                                id=meta["id"] if meta else generate_tool_call_id(),
-                                name=meta["name"] if meta else "",
-                                arguments_delta=args_delta,
-                            ),
+                            finish_reason=finish_reason,
+                            usage=usage_dict,
                         )
-                    else:
-                        # Subsequent deltas: arguments only
-                        yield ProviderDelta(
-                            stream_id=stream_id,
-                            tool_call_delta=ToolCallDelta(
-                                index=idx,
-                                arguments_delta=args_delta,
-                            ),
-                        )
+        except Exception as e:
+            from src.llm.failure_handler import classify_provider_error
 
-                elif event_type == "response.completed":
-                    # Capture usage from the completed response
-                    response = getattr(event, "response", None)
-                    usage = getattr(response, "usage", None) if response else None
-                    usage_dict = None
-                    if usage:
-                        self.cache_tracker.record(usage)
-                        usage_dict = {
-                            "input_tokens": getattr(usage, "input_tokens", None),
-                            "output_tokens": getattr(usage, "output_tokens", None),
-                            "cached_tokens": None,
-                            "reasoning_tokens": getattr(
-                                getattr(usage, "output_tokens_details", None),
-                                "reasoning_tokens",
-                                None,
-                            ),
-                        }
-                    yield ProviderDelta(
-                        stream_id=stream_id,
-                        finish_reason="stop",
-                        usage=usage_dict,
-                    )
+            raise classify_provider_error(e) from e
 
     # ------------------------------------------------------------------
     # Utility methods

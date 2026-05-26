@@ -7,8 +7,8 @@ Subagent configurations are stored as Markdown files with YAML frontmatter:
 LLM configuration is nested under an ``llm:`` key::
 
     llm:
-      backend_type: openai        # "openai", "anthropic" (omit to inherit)
-      model: gpt-4o              # model name (omit or "inherit" to inherit)
+      backend_type: openai_native  # "openai_native", "openai_compatible", "anthropic" (omit to inherit)
+      model: gpt-4o               # model name (omit or "inherit" to inherit)
       base_url: https://...      # API endpoint (omit to inherit)
       context_window: 128000     # context size (omit to inherit)
 
@@ -33,7 +33,15 @@ import yaml
 logger = logging.getLogger(__name__)
 
 
-VALID_BACKEND_TYPES = {"openai", "vllm", "localai", "llamacpp", "anthropic"}
+VALID_BACKEND_TYPES = {
+    "openai",             # Deprecated alias -- normalised to openai_compatible at runtime
+    "openai_compatible",  # Generic OpenAI-compatible API
+    "openai_native",      # Native OpenAI API (api.openai.com)
+    "vllm",
+    "localai",
+    "llamacpp",
+    "anthropic",
+}
 
 
 @dataclass

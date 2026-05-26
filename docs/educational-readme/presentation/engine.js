@@ -117,7 +117,7 @@
         el.innerHTML =
             '<div class="slide-content">' +
                 sectionBadge(index) +
-                '<h2 class="slide-title">' + esc(section.title) + '</h2>' +
+                '<h2 class="slide-title">' + formatInline(section.title) + '</h2>' +
                 '<div class="slide-body">' + formatText(section.body || '') + '</div>' +
             '</div>';
         return el;
@@ -142,7 +142,7 @@
         el.innerHTML =
             '<div class="slide-content">' +
                 sectionBadge(index) +
-                '<h2 class="slide-title">' + esc(section.title) + '</h2>' +
+                '<h2 class="slide-title">' + formatInline(section.title) + '</h2>' +
                 '<div class="comparison-grid">' +
                     '<div class="comparison-col comparison-left">' +
                         '<h3 class="comparison-heading">' + esc(section.left.heading) + '</h3>' +
@@ -167,7 +167,7 @@
         el.innerHTML =
             '<div class="slide-content">' +
                 sectionBadge(index) +
-                '<h2 class="slide-title">' + esc(section.title) + '</h2>' +
+                '<h2 class="slide-title">' + formatInline(section.title) + '</h2>' +
                 '<div class="slide-body">' + formatText(section.body || '') + '</div>' +
                 '<div class="diagram-container">' + svg + '</div>' +
             '</div>';
@@ -185,7 +185,7 @@
             : '';
         el.innerHTML =
             '<div class="slide-content">' +
-                '<h2 class="slide-title">' + esc(section.title) + '</h2>' +
+                '<h2 class="slide-title">' + formatInline(section.title) + '</h2>' +
                 captionHtml +
                 '<div class="diagram-container">' + svg + '</div>' +
             '</div>';
@@ -211,7 +211,7 @@
         el.innerHTML =
             '<div class="slide-content">' +
                 sectionBadge(index) +
-                '<h2 class="slide-title">' + esc(section.title) + '</h2>' +
+                '<h2 class="slide-title">' + formatInline(section.title) + '</h2>' +
                 '<div class="slide-body">' + formatText(section.body || '') + '</div>' +
                 '<div class="roadmap-timeline">' + items + '</div>' +
             '</div>';
@@ -3595,7 +3595,11 @@
                 html += '<div class="glossary-desc">' + esc(entry.description) + '</div>';
                 html += '<div class="glossary-code-wrapper">';
                 html += '<button class="glossary-copy-btn" title="Copy to clipboard">Copy</button>';
-                html += '<pre class="glossary-code"><code>' + esc(entry.code) + '</code></pre>';
+                if (entry.language === 'text') {
+                    html += '<div class="glossary-prose">' + esc(entry.code).replace(/\n/g, '<br>') + '</div>';
+                } else {
+                    html += '<pre class="glossary-code"><code>' + esc(entry.code) + '</code></pre>';
+                }
                 html += '</div>';
                 popup.innerHTML = html;
 
@@ -3620,26 +3624,12 @@
 
                 popup.classList.add('visible');
 
-                // Position below the term, centered
-                var rect = term.getBoundingClientRect();
-                var popupWidth = Math.min(560, window.innerWidth - 32);
-                var left = rect.left + rect.width / 2 - popupWidth / 2;
-                if (left < 16) left = 16;
-                if (left + popupWidth > window.innerWidth - 16) left = window.innerWidth - popupWidth - 16;
-
-                // Show above if not enough room below
-                var top = rect.bottom + 8;
+                // Center in viewport horizontally and vertically
+                var popupWidth = Math.min(880, window.innerWidth - 32);
                 popup.style.maxWidth = popupWidth + 'px';
-                popup.style.left = left + 'px';
-                popup.style.top = top + 'px';
-
-                // Check if popup overflows viewport bottom, flip above if needed
-                requestAnimationFrame(function () {
-                    var popupRect = popup.getBoundingClientRect();
-                    if (popupRect.bottom > window.innerHeight - 16) {
-                        popup.style.top = (rect.top - popupRect.height - 8) + 'px';
-                    }
-                });
+                popup.style.left = Math.max(16, (window.innerWidth - popupWidth) / 2) + 'px';
+                popup.style.top = '50%';
+                popup.style.transform = 'translateY(-50%)';
                 return;
             }
 

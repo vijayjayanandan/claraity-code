@@ -37,6 +37,8 @@ interface ConfigSnapshot {
   maxTokens: number;
   contextWindow: number;
   thinkingBudget: string;
+  reasoningEffort: string;
+  reasoningSummary: boolean;
   searchProvider: string;
   webSearchBudget: string;
   hasSearchKey: boolean;
@@ -55,6 +57,8 @@ function snapshotEqual(a: ConfigSnapshot, b: ConfigSnapshot): boolean {
     a.maxTokens !== b.maxTokens ||
     a.contextWindow !== b.contextWindow ||
     a.thinkingBudget !== b.thinkingBudget ||
+    a.reasoningEffort !== b.reasoningEffort ||
+    a.reasoningSummary !== b.reasoningSummary ||
     a.searchProvider !== b.searchProvider ||
     a.webSearchBudget !== b.webSearchBudget ||
     a.enrichmentModel !== b.enrichmentModel ||
@@ -74,8 +78,11 @@ function snapshotEqual(a: ConfigSnapshot, b: ConfigSnapshot): boolean {
 
 /** Parse raw server config into a typed ConfigSnapshot. */
 function parseSnapshot(cfg: Record<string, unknown>): ConfigSnapshot {
+  // Normalise legacy "openai" -> "openai_compatible" for UI display
+  const rawBackend = typeof cfg.backend_type === "string" ? cfg.backend_type : "openai_compatible";
+  const backend = rawBackend === "openai" ? "openai_compatible" : rawBackend;
   return {
-    backend: typeof cfg.backend_type === "string" ? cfg.backend_type : "openai",
+    backend,
     baseUrl: typeof cfg.base_url === "string" ? cfg.base_url : "",
     hasApiKey: !!cfg.has_api_key,
     model: typeof cfg.model === "string" ? cfg.model : "",
@@ -83,6 +90,8 @@ function parseSnapshot(cfg: Record<string, unknown>): ConfigSnapshot {
     maxTokens: cfg.max_tokens != null ? Number(cfg.max_tokens) : 16384,
     contextWindow: cfg.context_window != null ? Number(cfg.context_window) : 131072,
     thinkingBudget: cfg.thinking_budget != null ? String(cfg.thinking_budget) : "",
+    reasoningEffort: typeof cfg.reasoning_effort === "string" && ["low", "medium", "high"].includes(cfg.reasoning_effort) ? cfg.reasoning_effort : "",
+    reasoningSummary: cfg.reasoning_summary === true,
     searchProvider: typeof cfg.web_search_provider === "string" ? cfg.web_search_provider : "tavily",
     webSearchBudget: cfg.web_search_budget != null ? String(cfg.web_search_budget) : "3",
     hasSearchKey: !!cfg.has_search_key,
@@ -125,6 +134,8 @@ export function ConfigPanel({
   const [maxTokens, setMaxTokens] = useState(16384);
   const [contextWindow, setContextWindow] = useState(131072);
   const [thinkingBudget, setThinkingBudget] = useState("");
+  const [reasoningEffort, setReasoningEffort] = useState("");
+  const [reasoningSummary, setReasoningSummary] = useState(false);
   const [searchProvider, setSearchProvider] = useState("tavily");
   const [webSearchBudget, setWebSearchBudget] = useState("3");
   const [searchKey, setSearchKey] = useState("");
@@ -192,6 +203,8 @@ export function ConfigPanel({
     setMaxTokens(snap.maxTokens);
     setContextWindow(snap.contextWindow);
     setThinkingBudget(snap.thinkingBudget);
+    setReasoningEffort(snap.reasoningEffort);
+    setReasoningSummary(snap.reasoningSummary);
     setSearchProvider(snap.searchProvider);
     setWebSearchBudget(snap.webSearchBudget);
     setHasSearchKey(snap.hasSearchKey);
@@ -234,6 +247,8 @@ export function ConfigPanel({
     maxTokens,
     contextWindow,
     thinkingBudget,
+    reasoningEffort,
+    reasoningSummary,
     searchProvider,
     webSearchBudget,
     hasSearchKey,
@@ -241,7 +256,7 @@ export function ConfigPanel({
     enrichmentModel,
     enrichmentSystemPrompt,
     enrichmentDefaultPrompt,
-  }), [backend, baseUrl, hasApiKey, model, temperature, maxTokens, contextWindow, thinkingBudget, searchProvider, webSearchBudget, hasSearchKey, subagentModels, enrichmentModel, enrichmentSystemPrompt, enrichmentDefaultPrompt]);
+  }), [backend, baseUrl, hasApiKey, model, temperature, maxTokens, contextWindow, thinkingBudget, reasoningEffort, reasoningSummary, searchProvider, webSearchBudget, hasSearchKey, subagentModels, enrichmentModel, enrichmentSystemPrompt, enrichmentDefaultPrompt]);
 
   const isDirty = useMemo(() => {
     if (!savedSnapshot.current) return false;
@@ -255,7 +270,10 @@ export function ConfigPanel({
   // ── Backend change ───────────────────────────────────────────────────────────
   const handleBackendChange = useCallback((val: string) => {
     setBackend(val);
-    if (val === "anthropic") setBaseUrl("");
+    // Clear Base URL for backends with fixed endpoints
+    if (val === "anthropic" || val === "openai_native") setBaseUrl("");
+    // Clear reasoning effort when leaving openai_native
+    if (val !== "openai_native") setReasoningEffort("");
   }, []);
 
   // ── Fetch models ─────────────────────────────────────────────────────────────
@@ -372,6 +390,8 @@ export function ConfigPanel({
       max_tokens: snap.maxTokens || null,
       context_window: snap.contextWindow || null,
       thinking_budget: snap.thinkingBudget || null,
+      reasoning_effort: snap.reasoningEffort || null,
+      reasoning_summary: snap.reasoningSummary,
       web_search_provider: snap.searchProvider,
       web_search_budget: snap.webSearchBudget ? parseInt(snap.webSearchBudget, 10) || 3 : 3,
       subagent_models: snap.subagentModels,
@@ -443,13 +463,14 @@ export function ConfigPanel({
           {/* Backend */}
           <Field label="Backend">
             <select className="form-input" value={backend} onChange={(e) => handleBackendChange(e.target.value)}>
-              <option value="openai">OpenAI-compatible</option>
+              <option value="openai_native">OpenAI</option>
+              <option value="openai_compatible">OpenAI-compatible</option>
               <option value="anthropic">Anthropic</option>
             </select>
           </Field>
 
-          {/* Base URL: not shown for Anthropic (hardcoded by SDK) */}
-          {backend !== "anthropic" && (
+          {/* Base URL: not shown for Anthropic (hardcoded by SDK) or OpenAI native (always api.openai.com) */}
+          {backend !== "anthropic" && backend !== "openai_native" && (
             <Field label="Base URL">
               <input
                 className="form-input"
@@ -562,16 +583,58 @@ export function ConfigPanel({
             />
           </Field>
 
-          {/* Thinking Budget: supported by Anthropic and OpenAI-compatible backends */}
-          <Field label="Thinking Budget (tokens)" hint="Tokens reserved for the model's internal reasoning before responding.">
-            <input
-              className="form-input"
-              type="text"
-              value={thinkingBudget}
-              onChange={(e) => setThinkingBudget(e.target.value)}
-              placeholder="(leave empty to disable)"
-            />
-          </Field>
+          {/* Thinking Budget: Anthropic and OpenAI-compatible only (token count) */}
+          {backend !== "openai_native" && (
+            <Field label="Thinking Budget (tokens)" hint="Tokens reserved for the model's internal reasoning before responding. Supported by Anthropic and compatible backends.">
+              <input
+                className="form-input"
+                type="text"
+                value={thinkingBudget}
+                onChange={(e) => setThinkingBudget(e.target.value)}
+                placeholder="(leave empty to disable)"
+              />
+            </Field>
+          )}
+
+          {/* Reasoning Effort: OpenAI native only (o-series models) */}
+          {backend === "openai_native" && (
+            <Field label="Reasoning Effort" hint="Controls how much the model reasons before responding. Applies to o-series models (o1, o3, o4-mini). Leave as Default for standard GPT models.">
+              <select
+                className="form-input"
+                value={reasoningEffort}
+                onChange={(e) => { setReasoningEffort(e.target.value); if (!e.target.value) setReasoningSummary(false); }}
+              >
+                <option value="">Default</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </Field>
+          )}
+
+          {/* Reasoning Summary: only shown when reasoning_effort is set */}
+          {backend === "openai_native" && reasoningEffort !== "" && (
+            <Field
+              label="Show Reasoning Summary"
+              hint={
+                <>
+                  Streams the model{"'"}s internal reasoning as a thinking block in the chat.{" "}
+                  <strong>Requires OpenAI organization verification.</strong>{" "}
+                  <a href="https://platform.openai.com/settings/organization/general" target="_blank" rel="noreferrer">
+                    Verify your org
+                  </a>{" "}
+                  then wait up to 15 minutes for access to propagate.
+                </>
+              }
+            >
+              <input
+                type="checkbox"
+                checked={reasoningSummary}
+                onChange={(e) => setReasoningSummary(e.target.checked)}
+                style={{ width: "auto", marginTop: "4px" }}
+              />
+            </Field>
+          )}
 
           {/* Web Search */}
           <div className="settings-section">
@@ -792,7 +855,7 @@ export function ConfigPanel({
   );
 }
 
-function Field({ label, hint, children }: { label: React.ReactNode; hint?: string; children: React.ReactNode }) {
+function Field({ label, hint, children }: { label: React.ReactNode; hint?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="form-field">
       <label className="form-label">{label}</label>

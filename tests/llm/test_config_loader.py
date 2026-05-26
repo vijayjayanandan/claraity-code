@@ -88,7 +88,7 @@ class TestLoadLLMConfig:
 
     def test_returns_defaults_when_file_missing(self, tmp_path):
         config = load_llm_config(str(tmp_path / "nonexistent.yaml"))
-        assert config.backend_type == "openai"
+        assert config.backend_type == "openai_compatible"
         assert config.model == ""
         assert config.temperature == 0.2
         assert config.subagents == {}
@@ -98,11 +98,12 @@ class TestLoadLLMConfig:
         path.write_text("logging:\n  level: INFO\n", encoding="utf-8")
         config = load_llm_config(str(path))
         assert config.model == ""
-        assert config.backend_type == "openai"
+        assert config.backend_type == "openai_compatible"
 
     def test_loads_full_config(self, sample_yaml):
         config = load_llm_config(sample_yaml)
-        assert config.backend_type == "openai"
+        # "openai" in YAML is normalised to "openai_compatible" (legacy alias)
+        assert config.backend_type == "openai_compatible"
         assert config.base_url == "http://localhost:8000/v1"
         assert config.api_key_env == "OPENAI_API_KEY"
         assert config.model == "gpt-4o"
@@ -119,7 +120,8 @@ class TestLoadLLMConfig:
         assert "test-writer" in config.subagents
         tw = config.subagents["test-writer"]
         assert tw.model == "gemini-2.0-flash"
-        assert tw.backend_type == "openai"
+        # "openai" in subagent config is normalised to "openai_compatible"
+        assert tw.backend_type == "openai_compatible"
         assert tw.base_url == "http://other-host/v1"
 
     def test_invalid_backend_type_ignored(self, config_dir):
@@ -130,7 +132,7 @@ class TestLoadLLMConfig:
         )
         config = load_llm_config(str(path))
         # Stays as default because "foobar" is invalid
-        assert config.backend_type == "openai"
+        assert config.backend_type == "openai_compatible"
 
     def test_invalid_numeric_field_ignored(self, config_dir):
         path = config_dir / "config.yaml"
@@ -355,7 +357,7 @@ class TestDataModels:
 
     def test_default_values(self):
         config = LLMConfigData()
-        assert config.backend_type == "openai"
+        assert config.backend_type == "openai_compatible"
         assert config.model == ""
         assert config.base_url == ""
         assert config.api_key == ""
@@ -382,3 +384,113 @@ class TestDataModels:
         )
         assert override.model == "gpt-4o"
         assert override.backend_type == "openai"
+
+
+# ---------------------------------------------------------------------------
+# LLM Backend Expansion -- new tests (T-5)
+# ---------------------------------------------------------------------------
+
+class TestLegacyOpenAIAlias:
+    """Tests for backward-compat normalisation of 'openai' -> 'openai_compatible'."""
+
+    def test_legacy_openai_alias_normalises_on_load(self, config_dir):
+        """YAML backend_type: openai should be normalised to 'openai_compatible' on load."""
+        path = config_dir / "config.yaml"
+        path.write_text(
+            "llm:\n  backend_type: openai\n  model: gpt-4o\n",
+            encoding="utf-8",
+        )
+        config = load_llm_config(str(path))
+        assert config.backend_type == "openai_compatible", (
+            "Legacy 'openai' alias must be silently normalised to 'openai_compatible'"
+        )
+
+    def test_legacy_openai_alias_in_subagent_normalises(self, config_dir):
+        """backend_type: openai inside a subagent block should also normalise."""
+        path = config_dir / "config.yaml"
+        path.write_text(
+            "llm:\n"
+            "  backend_type: openai_compatible\n"
+            "  model: gpt-4o\n"
+            "  subagents:\n"
+            "    test-writer:\n"
+            "      backend_type: openai\n"
+            "      model: gpt-4o-mini\n",
+            encoding="utf-8",
+        )
+        config = load_llm_config(str(path))
+        assert config.subagents["test-writer"].backend_type == "openai_compatible"
+
+
+class TestReasoningEffort:
+    """Tests for reasoning_effort field in load/save cycle."""
+
+    def test_reasoning_effort_roundtrip(self, config_dir):
+        """Save with reasoning_effort='high', reload, assert value is preserved."""
+        path = str(config_dir / "config.yaml")
+        config = LLMConfigData(
+            model="o3-mini",
+            base_url="https://api.openai.com/v1",
+            backend_type="openai_native",
+            reasoning_effort="high",
+        )
+        save_llm_config(config, path)
+
+        reloaded = load_llm_config(path)
+        assert reloaded.reasoning_effort == "high", (
+            "reasoning_effort='high' should survive a save/load roundtrip"
+        )
+
+    def test_reasoning_effort_medium_roundtrip(self, config_dir):
+        """reasoning_effort='medium' should also survive a save/load roundtrip."""
+        path = str(config_dir / "config.yaml")
+        config = LLMConfigData(
+            model="o3-mini",
+            base_url="https://api.openai.com/v1",
+            backend_type="openai_native",
+            reasoning_effort="medium",
+        )
+        save_llm_config(config, path)
+
+        reloaded = load_llm_config(path)
+        assert reloaded.reasoning_effort == "medium"
+
+    def test_reasoning_effort_none_not_written_to_yaml(self, config_dir):
+        """When reasoning_effort is None, the key must be absent from the saved YAML."""
+        import yaml
+
+        path = str(config_dir / "config.yaml")
+        config = LLMConfigData(
+            model="gpt-4o",
+            base_url="http://localhost:8000/v1",
+            reasoning_effort=None,
+        )
+        save_llm_config(config, path)
+
+        raw = Path(path).read_text(encoding="utf-8")
+        data = yaml.safe_load(raw)
+        assert "reasoning_effort" not in data.get("llm", {}), (
+            "reasoning_effort=None must not be written to YAML"
+        )
+
+    def test_reasoning_effort_invalid_value_ignored_on_load(self, config_dir):
+        """An invalid reasoning_effort value in YAML should be ignored (stays None)."""
+        path = config_dir / "config.yaml"
+        path.write_text(
+            "llm:\n  model: o3-mini\n  reasoning_effort: ultra\n",
+            encoding="utf-8",
+        )
+        config = load_llm_config(str(path))
+        assert config.reasoning_effort is None, (
+            "Invalid reasoning_effort 'ultra' must be ignored -- stays None"
+        )
+
+    def test_reasoning_effort_null_in_yaml_loads_as_none(self, config_dir):
+        """Explicit null in YAML should load as None (not a string)."""
+        path = config_dir / "config.yaml"
+        path.write_text(
+            "llm:\n  model: o3-mini\n  reasoning_effort: null\n",
+            encoding="utf-8",
+        )
+        config = load_llm_config(str(path))
+        assert config.reasoning_effort is None

@@ -73,7 +73,7 @@ keyring>=25.6.0  # OS keyring for OAuth token storage (Windows Credential Manage
 # LLM Backends (install as needed)
 # ollama  # Use official Ollama installation instead
 # requests>=2.31.0  # For Ollama API calls (typically already installed)
-openai>=1.82.0  # For OpenAI-compatible API backends (OpenAI, Alibaba Cloud, Azure, Groq, etc.)
+openai>=2.34.0  # For OpenAI-compatible API backends (OpenAI, Alibaba Cloud, Azure, Groq, etc.) + Responses API
 
 # Observability (LLM tracing, metrics, cost tracking)
 langfuse>=2.0.0  # Production-grade LLM observability platform

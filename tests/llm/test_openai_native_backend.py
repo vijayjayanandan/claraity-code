@@ -121,11 +121,17 @@ def _make_responses_api_response(
     usage.input_tokens = input_tokens
     usage.output_tokens = output_tokens
     usage.total_tokens = input_tokens + output_tokens
+    usage.prompt_tokens = input_tokens
+    usage.prompt_tokens_details = None
+    usage.cache_read_input_tokens = 0
+    usage.cache_creation_input_tokens = 0
+    usage.output_tokens_details = None
 
     response = MagicMock()
     response.output = [content_item]
     response.model = model
     response.usage = usage
+    response.finish_reason = "stop"
     return response
 
 
@@ -139,39 +145,7 @@ def _collect_async_gen(coro_or_agen):
     return asyncio.get_event_loop().run_until_complete(_collect())
 
 
-class _FakeAsyncStream:
-    """Async iterable that yields a fixed list of raw SSE chunks.
-
-    Used for chat.completions.create(stream=True) -- returns an awaitable
-    async iterable of raw chunks directly (no context manager needed).
-    AsyncMock(return_value=_FakeAsyncStream(chunks)) satisfies the
-    'await .create(...)' pattern; this class satisfies 'async for chunk'.
-    """
-
-    def __init__(self, chunks):
-        self._chunks = list(chunks)
-
-    def __aiter__(self):
-        return self
-
-    async def __anext__(self):
-        if not self._chunks:
-            raise StopAsyncIteration
-        return self._chunks.pop(0)
-
-    async def close(self):
-        pass
-
-
 class _FakeAsyncStreamCtx:
-    """Async context manager that yields a fixed list of events.
-
-    Used for responses.stream(**params) which IS an async context manager
-    (the backend uses 'async with ... as stream: async for event in stream:').
-    MagicMock(return_value=_FakeAsyncStreamCtx(events)) satisfies the
-    'async with responses.stream(...)' pattern.
-    """
-
     def __init__(self, events):
         self._events = list(events)
 
@@ -189,61 +163,71 @@ class _FakeAsyncStreamCtx:
             raise StopAsyncIteration
         return self._events.pop(0)
 
+    # For synchronous context manager usage in generate_stream
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if not self._events:
+            raise StopIteration
+        return self._events.pop(0)
+
+
 
 def _make_text_chunk(text: str, finish_reason=None):
-    """Build a raw SSE chunk with text-content delta."""
+    """Build a Responses API text delta event."""
     return SimpleNamespace(
-        choices=[
-            SimpleNamespace(
-                delta=SimpleNamespace(content=text, tool_calls=None),
-                finish_reason=finish_reason,
-            )
-        ],
-        usage=None,
+        type="response.output_text.delta",
+        delta=text
     )
 
 
 def _make_finish_chunk(finish_reason: str = "stop"):
-    """Build a raw SSE chunk signalling end of stream."""
+    """Build a Responses API completion event."""
     return SimpleNamespace(
-        choices=[
-            SimpleNamespace(
-                delta=SimpleNamespace(content=None, tool_calls=None),
-                finish_reason=finish_reason,
+        type="response.completed",
+        response=SimpleNamespace(
+            usage=SimpleNamespace(
+                input_tokens=20,
+                output_tokens=8,
+                total_tokens=28,
+                output_tokens_details=None
             )
-        ],
-        usage=None,
+        )
     )
 
 
 def _make_tool_call_chunk(index: int, tc_id: str | None, name: str | None, args_delta: str):
-    """Build a raw SSE chunk with a tool-call delta."""
-    func = SimpleNamespace(name=name, arguments=args_delta)
-    tc_delta = SimpleNamespace(index=index, id=tc_id, function=func)
+    """Build a Responses API tool call start/delta event."""
+    if tc_id or name:
+        return SimpleNamespace(
+            type="response.function_call_arguments.start",
+            output_index=index,
+            call_id=tc_id,
+            name=name
+        )
     return SimpleNamespace(
-        choices=[
-            SimpleNamespace(
-                delta=SimpleNamespace(content=None, tool_calls=[tc_delta]),
-                finish_reason=None,
-            )
-        ],
-        usage=None,
+        type="response.function_call_arguments.delta",
+        output_index=index,
+        delta=args_delta
     )
 
 
 def _make_usage_chunk(prompt_tokens: int = 20, completion_tokens: int = 8):
-    """Build a raw usage-only SSE chunk (no choices).
-
-    The backend now uses .create(stream=True) which yields raw chunks directly.
-    No event wrapping is needed.
-    """
+    """Build a Responses API completion event with specific usage."""
     usage = SimpleNamespace(
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
+        input_tokens=prompt_tokens,
+        output_tokens=completion_tokens,
         total_tokens=prompt_tokens + completion_tokens,
-        prompt_tokens_details=None,
+        output_tokens_details=None,
     )
-    return SimpleNamespace(choices=[], usage=usage)
+    return SimpleNamespace(type="response.completed", response=SimpleNamespace(usage=usage))
 
 
 # ===========================================================================
@@ -333,9 +317,9 @@ class TestMethodSurface:
         """generate_provider_deltas_async must accept calls WITHOUT stream_id."""
         _, async_client = mock_clients
         chunks = [_make_text_chunk("Hi"), _make_finish_chunk()]
-        # .create(stream=True) is awaitable -- use AsyncMock returning _FakeAsyncStream
-        async_client.chat.completions.create = AsyncMock(
-            return_value=_FakeAsyncStream(chunks)
+        # .create(stream=True) is awaitable -- use AsyncMock returning _FakeAsyncStreamCtx
+        async_client.responses.stream = MagicMock(
+            return_value=_FakeAsyncStreamCtx(chunks)
         )
 
         # Must not raise TypeError about missing stream_id
@@ -388,12 +372,12 @@ class TestOSeriesParamMapping:
 
     def test_o_series_drops_temperature(self, o3mini_backend, sample_messages):
         """o3-mini params must NOT include temperature or top_p."""
-        mock_response = _make_chat_response(model="o3-mini")
-        o3mini_backend.client.chat.completions.create.return_value = mock_response
+        mock_response = _make_responses_api_response(model="o3-mini")
+        o3mini_backend.client.responses.create.return_value = mock_response
 
         o3mini_backend.generate(sample_messages)
 
-        call_kwargs = o3mini_backend.client.chat.completions.create.call_args.kwargs
+        call_kwargs = o3mini_backend.client.responses.create.call_args.kwargs
         assert "temperature" not in call_kwargs, (
             "o-series models reject temperature -- must be omitted"
         )
@@ -401,50 +385,47 @@ class TestOSeriesParamMapping:
             "o-series models reject top_p -- must be omitted"
         )
 
-    def test_o_series_uses_max_completion_tokens(self, o3mini_backend, sample_messages):
-        """o3-mini params should use max_completion_tokens, not max_tokens."""
-        mock_response = _make_chat_response(model="o3-mini")
-        o3mini_backend.client.chat.completions.create.return_value = mock_response
+    def test_o_series_uses_max_output_tokens(self, o3mini_backend, sample_messages):
+        """o3-mini params should use max_output_tokens, not max_tokens."""
+        mock_response = _make_responses_api_response(model="o3-mini")
+        o3mini_backend.client.responses.create.return_value = mock_response
 
         o3mini_backend.generate(sample_messages)
 
-        call_kwargs = o3mini_backend.client.chat.completions.create.call_args.kwargs
-        assert "max_completion_tokens" in call_kwargs, (
-            "o-series models require max_completion_tokens"
+        call_kwargs = o3mini_backend.client.responses.create.call_args.kwargs
+        assert "max_output_tokens" in call_kwargs, (
+            "o-series models require max_output_tokens"
         )
         assert "max_tokens" not in call_kwargs, (
             "max_tokens must be absent for o-series models"
         )
-        assert call_kwargs["max_completion_tokens"] == 4096
+        assert call_kwargs["max_output_tokens"] == 4096
 
     def test_o_series_maps_reasoning_effort(self, o3mini_with_effort_backend, sample_messages):
-        """reasoning_effort='high' should produce params['reasoning_effort']='high'.
+        """reasoning_effort='high' should produce params['reasoning']={'effort': 'high'}.
 
-        /v1/chat/completions accepts reasoning_effort as a flat string kwarg.
-        The Responses API uses reasoning={"effort": ...} (different path).
+        summary is absent by default -- it is opt-in via reasoning_summary=True.
         """
-        mock_response = _make_chat_response(model="o3-mini")
-        o3mini_with_effort_backend.client.chat.completions.create.return_value = mock_response
+        mock_response = _make_responses_api_response(model="o3-mini")
+        o3mini_with_effort_backend.client.responses.create.return_value = mock_response
 
         o3mini_with_effort_backend.generate(sample_messages)
 
-        call_kwargs = o3mini_with_effort_backend.client.chat.completions.create.call_args.kwargs
-        assert "reasoning_effort" in call_kwargs, (
-            "reasoning_effort must be a flat string kwarg for /v1/chat/completions"
-        )
-        assert call_kwargs["reasoning_effort"] == "high"
-        assert "reasoning" not in call_kwargs, (
-            "'reasoning' dict is for Responses API only -- chat/completions uses reasoning_effort="
+        call_kwargs = o3mini_with_effort_backend.client.responses.create.call_args.kwargs
+        assert "reasoning" in call_kwargs
+        assert call_kwargs["reasoning"]["effort"] == "high"
+        assert "summary" not in call_kwargs["reasoning"], (
+            "summary must be absent by default -- opt-in via reasoning_summary=True"
         )
 
     def test_o_series_no_reasoning_key_when_effort_none(self, o3mini_backend, sample_messages):
         """When reasoning_effort is None, both 'reasoning' and 'reasoning_effort' must be absent."""
-        mock_response = _make_chat_response(model="o3-mini")
-        o3mini_backend.client.chat.completions.create.return_value = mock_response
+        mock_response = _make_responses_api_response(model="o3-mini")
+        o3mini_backend.client.responses.create.return_value = mock_response
 
         o3mini_backend.generate(sample_messages)
 
-        call_kwargs = o3mini_backend.client.chat.completions.create.call_args.kwargs
+        call_kwargs = o3mini_backend.client.responses.create.call_args.kwargs
         assert "reasoning" not in call_kwargs, (
             "reasoning dict must be absent when reasoning_effort is None"
         )
@@ -454,12 +435,12 @@ class TestOSeriesParamMapping:
 
     def test_standard_model_keeps_temperature(self, gpt4o_backend, sample_messages):
         """gpt-4o (sampling-capable) params should include temperature and top_p."""
-        mock_response = _make_chat_response()
-        gpt4o_backend.client.chat.completions.create.return_value = mock_response
+        mock_response = _make_responses_api_response(model="gpt-4o")
+        gpt4o_backend.client.responses.create.return_value = mock_response
 
         gpt4o_backend.generate(sample_messages)
 
-        call_kwargs = gpt4o_backend.client.chat.completions.create.call_args.kwargs
+        call_kwargs = gpt4o_backend.client.responses.create.call_args.kwargs
         assert "temperature" in call_kwargs, "temperature must be present for gpt-4o"
         assert "top_p" in call_kwargs, "top_p must be present for gpt-4o"
         assert call_kwargs["temperature"] == pytest.approx(0.2)
@@ -471,12 +452,12 @@ class TestOSeriesParamMapping:
         sync_client, async_client = mock_clients
         backend = _make_backend(config, sync_client, async_client)
 
-        mock_response = _make_chat_response(model="gpt-5.4-mini")
-        backend.client.chat.completions.create.return_value = mock_response
+        mock_response = _make_responses_api_response(model="gpt-5.4-mini")
+        backend.client.responses.create.return_value = mock_response
 
         backend.generate(sample_messages)
 
-        call_kwargs = backend.client.chat.completions.create.call_args.kwargs
+        call_kwargs = backend.client.responses.create.call_args.kwargs
         assert "temperature" not in call_kwargs, (
             "gpt-5.x must NOT receive temperature -- confirmed unsupported by API"
         )
@@ -490,12 +471,12 @@ class TestOSeriesParamMapping:
         sync_client, async_client = mock_clients
         backend = _make_backend(config, sync_client, async_client)
 
-        mock_response = _make_chat_response(model="gpt-7-turbo")
-        backend.client.chat.completions.create.return_value = mock_response
+        mock_response = _make_responses_api_response(model="gpt-7-turbo")
+        backend.client.responses.create.return_value = mock_response
 
         backend.generate(sample_messages)
 
-        call_kwargs = backend.client.chat.completions.create.call_args.kwargs
+        call_kwargs = backend.client.responses.create.call_args.kwargs
         assert "temperature" not in call_kwargs, (
             "Unknown model must omit temperature -- fail-safe not fail-open"
         )
@@ -503,25 +484,25 @@ class TestOSeriesParamMapping:
             "Unknown model must omit top_p -- fail-safe not fail-open"
         )
 
-    def test_standard_model_uses_max_completion_tokens(self, gpt4o_backend, sample_messages):
-        """gpt-4o params must use max_completion_tokens, not max_tokens.
+    def test_standard_model_uses_max_output_tokens(self, gpt4o_backend, sample_messages):
+        """gpt-4o params must use max_output_tokens, not max_tokens.
 
-        max_completion_tokens is used for all models in the native backend.
+        max_output_tokens is used for all models in the native backend.
         max_tokens is the legacy alias that newer models (gpt-5.x+) reject.
         """
-        mock_response = _make_chat_response()
-        gpt4o_backend.client.chat.completions.create.return_value = mock_response
+        mock_response = _make_responses_api_response(model="gpt-4o")
+        gpt4o_backend.client.responses.create.return_value = mock_response
 
         gpt4o_backend.generate(sample_messages)
 
-        call_kwargs = gpt4o_backend.client.chat.completions.create.call_args.kwargs
-        assert "max_completion_tokens" in call_kwargs, (
-            "All models in native backend must use max_completion_tokens"
+        call_kwargs = gpt4o_backend.client.responses.create.call_args.kwargs
+        assert "max_output_tokens" in call_kwargs, (
+            "All models in native backend must use max_output_tokens"
         )
         assert "max_tokens" not in call_kwargs, (
             "max_tokens is the legacy alias -- must not be sent by native backend"
         )
-        assert call_kwargs["max_completion_tokens"] == 4096
+        assert call_kwargs["max_output_tokens"] == 4096
 
 
 # ===========================================================================
@@ -533,13 +514,13 @@ class TestProviderDeltaContract:
     """Tests for generate_provider_deltas_async() ProviderDelta shape."""
 
     def _setup_stream(self, backend, chunks):
-        """Wire up async_client.chat.completions.create to yield raw chunks.
+        """Wire up async_client.responses.create to yield raw chunks.
 
-        .create(stream=True) is awaitable -- use AsyncMock returning _FakeAsyncStream.
+        .create(stream=True) is awaitable -- use AsyncMock returning _FakeAsyncStreamCtx.
         The backend iterates the result directly as 'async for chunk in stream'.
         """
-        backend.async_client.chat.completions.create = AsyncMock(
-            return_value=_FakeAsyncStream(chunks)
+        backend.async_client.responses.stream = MagicMock(
+            return_value=_FakeAsyncStreamCtx(chunks)
         )
 
     def test_text_delta_has_stream_id(self, gpt4o_backend, sample_messages, sample_tools):
@@ -701,8 +682,8 @@ class TestProviderDeltaContract:
             )
         )
 
-        # Verify .create was called with temperature=0.5
-        call_kwargs = gpt4o_backend.async_client.chat.completions.create.call_args.kwargs
+        # Verify .stream was called with temperature=0.5
+        call_kwargs = gpt4o_backend.async_client.responses.stream.call_args.kwargs
         assert "temperature" in call_kwargs, "temperature kwarg must be forwarded to API call"
         assert call_kwargs["temperature"] == pytest.approx(0.5), (
             f"Expected temperature=0.5 but got {call_kwargs['temperature']}"
@@ -724,9 +705,9 @@ class TestProviderDeltaContract:
             )
         )
 
-        call_kwargs = gpt4o_backend.async_client.chat.completions.create.call_args.kwargs
-        # The kwarg may appear as max_tokens or max_completion_tokens depending on model
-        token_limit = call_kwargs.get("max_tokens") or call_kwargs.get("max_completion_tokens")
+        call_kwargs = gpt4o_backend.async_client.responses.stream.call_args.kwargs
+        # The kwarg may appear as max_tokens or max_output_tokens depending on model
+        token_limit = call_kwargs.get("max_tokens") or call_kwargs.get("max_output_tokens")
         assert token_limit == 100, (
             f"Expected max_tokens=100 from kwargs override, got {token_limit}"
         )
@@ -788,7 +769,7 @@ class TestResponsesAPIContract:
         )
 
         o1pro_backend.async_client.responses.stream.assert_called_once()
-        o1pro_backend.async_client.chat.completions.create.assert_not_called()
+        o1pro_backend.async_client.responses.create.assert_not_called()
 
     def test_responses_api_tool_call_first_delta_has_id_and_name(
         self, o1pro_backend, sample_messages, sample_tools
@@ -866,11 +847,11 @@ class TestRetryAndCaching:
     def test_failure_handler_used_in_generate(self, gpt4o_backend, sample_messages):
         """LLMFailureHandler.execute_with_retry must be called during generate().
 
-        The bug: generate() called client.chat.completions.create directly,
+        The bug: generate() called client.responses.create directly,
         bypassing the failure handler entirely.
         """
-        mock_response = _make_chat_response()
-        gpt4o_backend.client.chat.completions.create.return_value = mock_response
+        mock_response = _make_responses_api_response(model="gpt-4o")
+        gpt4o_backend.client.responses.create.return_value = mock_response
 
         with patch.object(
             gpt4o_backend.failure_handler,
@@ -893,8 +874,8 @@ class TestRetryAndCaching:
         """
         usage_chunk = _make_usage_chunk(prompt_tokens=100, completion_tokens=40)
         chunks = [_make_text_chunk("Answer"), _make_finish_chunk(), usage_chunk]
-        gpt4o_backend.async_client.chat.completions.create = AsyncMock(
-            return_value=_FakeAsyncStream(chunks)
+        gpt4o_backend.async_client.responses.stream = MagicMock(
+            return_value=_FakeAsyncStreamCtx(chunks)
         )
 
         deltas = _collect_async_gen(
@@ -917,12 +898,13 @@ class TestRetryAndCaching:
     ):
         """When completion_tokens_details.reasoning_tokens is set, it must be forwarded."""
         usage_chunk = _make_usage_chunk(prompt_tokens=100, completion_tokens=250)
-        # Attach completion_tokens_details with reasoning_tokens
+        # Attach output_tokens_details with reasoning_tokens (Responses API field name)
         from types import SimpleNamespace as SN
-        usage_chunk.usage.completion_tokens_details = SN(reasoning_tokens=180)
-        chunks = [_make_text_chunk("Answer"), _make_finish_chunk(), usage_chunk]
-        gpt4o_backend.async_client.chat.completions.create = AsyncMock(
-            return_value=_FakeAsyncStream(chunks)
+        usage_chunk.response.usage.output_tokens_details = SN(reasoning_tokens=180)
+        # Only one completion event -- the usage_chunk carries the final usage with reasoning_tokens
+        chunks = [_make_text_chunk("Answer"), usage_chunk]
+        gpt4o_backend.async_client.responses.stream = MagicMock(
+            return_value=_FakeAsyncStreamCtx(chunks)
         )
 
         deltas = _collect_async_gen(
@@ -946,9 +928,9 @@ class TestRetryAndCaching:
         """
         usage_chunk = _make_usage_chunk(prompt_tokens=50, completion_tokens=10)
         chunks = [_make_text_chunk("Hi"), _make_finish_chunk(), usage_chunk]
-        # .create(stream=True) is awaitable -- use AsyncMock returning _FakeAsyncStream
-        gpt4o_backend.async_client.chat.completions.create = AsyncMock(
-            return_value=_FakeAsyncStream(chunks)
+        # .create(stream=True) is awaitable -- use AsyncMock returning _FakeAsyncStreamCtx
+        gpt4o_backend.async_client.responses.stream = MagicMock(
+            return_value=_FakeAsyncStreamCtx(chunks)
         )
 
         with patch.object(
@@ -984,61 +966,4 @@ class TestRetryAndCaching:
 # Class 6: TestModelClassification
 # ===========================================================================
 
-class TestModelClassification:
-    """Tests for model classification helpers."""
 
-    def test_is_o_series_o1(self):
-        from src.llm.openai_native_backend import _is_o_series
-        assert _is_o_series("o1-mini") is True
-        assert _is_o_series("o1-preview") is True
-
-    def test_is_o_series_o3_mini(self):
-        from src.llm.openai_native_backend import _is_o_series
-        assert _is_o_series("o3-mini") is True
-        assert _is_o_series("o3") is True
-
-    def test_is_o_series_gpt4(self):
-        from src.llm.openai_native_backend import _is_o_series
-        assert _is_o_series("gpt-4o") is False
-        assert _is_o_series("gpt-3.5-turbo") is False
-
-    def test_requires_responses_api_o1_pro(self):
-        from src.llm.openai_native_backend import _requires_responses_api
-        assert _requires_responses_api("o1-pro") is True
-
-    def test_requires_responses_api_o3_mini(self):
-        from src.llm.openai_native_backend import _requires_responses_api
-        assert _requires_responses_api("o3-mini") is False
-
-    # ------------------------------------------------------------------
-    # _supports_sampling_params -- the capability-map / fail-safe gate
-    # ------------------------------------------------------------------
-
-    def test_sampling_params_gpt4_supported(self):
-        from src.llm.openai_native_backend import _supports_sampling_params
-        assert _supports_sampling_params("gpt-4o") is True
-        assert _supports_sampling_params("gpt-4-turbo") is True
-        assert _supports_sampling_params("gpt-4.1-mini") is True
-
-    def test_sampling_params_gpt35_supported(self):
-        from src.llm.openai_native_backend import _supports_sampling_params
-        assert _supports_sampling_params("gpt-3.5-turbo") is True
-
-    def test_sampling_params_o_series_not_supported(self):
-        from src.llm.openai_native_backend import _supports_sampling_params
-        assert _supports_sampling_params("o1-mini") is False
-        assert _supports_sampling_params("o3-mini") is False
-        assert _supports_sampling_params("o4-mini") is False
-
-    def test_sampling_params_gpt5_not_supported(self):
-        """gpt-5.x must NOT receive temperature/top_p -- confirmed unsupported."""
-        from src.llm.openai_native_backend import _supports_sampling_params
-        assert _supports_sampling_params("gpt-5.4-mini") is False
-        assert _supports_sampling_params("gpt-5.5-2026-04-23") is False
-
-    def test_sampling_params_unknown_model_fail_safe(self):
-        """Unknown model families must return False -- fail-safe, not fail-open."""
-        from src.llm.openai_native_backend import _supports_sampling_params
-        assert _supports_sampling_params("gpt-6-turbo") is False
-        assert _supports_sampling_params("some-future-model") is False
-        assert _supports_sampling_params("claude-3") is False

@@ -329,7 +329,7 @@ export type ServerMessage =
   | { type: "code_block_end" }
   | { type: "thinking_start" }
   | { type: "thinking_delta"; content: string }
-  | { type: "thinking_end" }
+  | { type: "thinking_end"; token_count?: number }
   | { type: "file_read"; file_path: string; content?: string }
   | { type: "context_updated"; used: number; limit: number; iteration?: number }
   | { type: "context_compacting"; tokens_before: number }

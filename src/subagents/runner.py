@@ -56,20 +56,11 @@ def _create_llm_backend(llm_config_dict, api_key):
     Returns:
         LLMBackend instance
     """
-    from src.llm import LLMConfig, OpenAIBackend
+    from src.llm import LLMConfig
+    from src.llm.backend_factory import create_backend
 
     config = LLMConfig.model_validate(llm_config_dict)
-    backend_type = config.backend_type
-
-    OPENAI_COMPATIBLE = {"openai", "vllm", "localai", "llamacpp"}
-    if backend_type in OPENAI_COMPATIBLE:
-        return OpenAIBackend(config=config, api_key=api_key)
-    elif backend_type == "anthropic":
-        from src.llm.anthropic_backend import AnthropicBackend
-
-        return AnthropicBackend(config=config, api_key=api_key)
-    else:
-        raise ValueError(f"Unsupported backend_type: {backend_type}")
+    return create_backend(config, api_key=api_key, api_key_env="OPENAI_API_KEY")
 
 
 def _create_tool_executor(tools_allowlist=None, tools_blocklist=None):

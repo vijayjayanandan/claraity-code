@@ -22,7 +22,7 @@ export type Action =
   // Thinking
   | { type: "THINKING_START" }
   | { type: "THINKING_DELTA"; content: string }
-  | { type: "THINKING_END" }
+  | { type: "THINKING_END"; tokenCount?: number }
   // Messages
   | { type: "ADD_USER_MESSAGE"; content: string; attachments?: FileAttachment[]; images?: ImageAttachment[] }
   | { type: "MESSAGE_ADDED"; data: { uuid: string; role: string; content: string; stream_id?: string; is_compact_summary?: boolean }; subagentId?: string }

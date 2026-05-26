@@ -32,7 +32,15 @@ SYSTEM_CONFIG_PATH = os.path.join(SYSTEM_CONFIG_DIR, "config.yaml")
 
 DEFAULT_CONFIG_PATH = SYSTEM_CONFIG_PATH
 
-VALID_BACKEND_TYPES = {"openai", "vllm", "localai", "llamacpp", "anthropic"}
+VALID_BACKEND_TYPES = {
+    "openai",             # Deprecated alias -- normalised to openai_compatible on load
+    "openai_compatible",  # Generic OpenAI-compatible API (vLLM, LocalAI, llama.cpp, Groq, etc.)
+    "openai_native",      # Native OpenAI API (api.openai.com) -- o-series + Responses API
+    "vllm",
+    "localai",
+    "llamacpp",
+    "anthropic",
+}
 
 
 # =============================================================================
@@ -110,7 +118,7 @@ class LLMConfigData:
     ``api_key_env`` stores the NAME of an env var to check for the key.
     """
 
-    backend_type: str = "openai"
+    backend_type: str = "openai_compatible"
     base_url: str = ""
     api_key: str = ""  # Runtime only -- loaded from env/keyring, never in YAML
     api_key_env: str = "OPENAI_API_KEY"
@@ -120,6 +128,8 @@ class LLMConfigData:
     max_tokens: int = 16384
     top_p: float = 0.95
     thinking_budget: int | None = None  # Extended thinking token budget (Claude, etc.)
+    reasoning_effort: str | None = None  # "low", "medium", "high" -- OpenAI o-series only
+    reasoning_summary: bool = False  # Send reasoning.summary="auto" -- requires OpenAI org verification
     subagents: dict[str, SubAgentLLMOverride] = field(default_factory=dict)
     limits: LimitsConfig = field(default_factory=LimitsConfig)
     auto_approve: AutoApproveConfig = field(default_factory=AutoApproveConfig)
@@ -142,8 +152,19 @@ def _safe_stderr(message: str) -> None:
 
 
 def _validate_backend(backend: str, context: str) -> str | None:
-    """Validate backend type string. Returns lowercase or None if invalid."""
+    """Validate backend type string. Returns canonical lowercase or None if invalid.
+
+    The legacy value "openai" is silently normalised to "openai_compatible" so
+    existing config.yaml files continue to work after the backend split.
+    """
     lower = backend.lower()
+    if lower == "openai":
+        _safe_stderr(
+            f"backend_type 'openai' in {context} is deprecated -- "
+            "use 'openai_compatible' for generic OpenAI-compatible APIs or "
+            "'openai_native' for api.openai.com. Treating as 'openai_compatible'."
+        )
+        return "openai_compatible"
     if lower in VALID_BACKEND_TYPES:
         return lower
     _safe_stderr(f"Invalid backend_type '{backend}' in {context}, ignoring")
@@ -217,6 +238,23 @@ def load_llm_config(config_path: str = DEFAULT_CONFIG_PATH) -> LLMConfigData:
     # -- model --
     if "model" in llm_data and llm_data["model"]:
         config.model = str(llm_data["model"])
+
+    # -- reasoning_effort (string field, validate allowed values) --
+    if "reasoning_effort" in llm_data:
+        re_val = llm_data["reasoning_effort"]
+        if re_val is None:
+            config.reasoning_effort = None
+        elif str(re_val).lower() in ("low", "medium", "high"):
+            config.reasoning_effort = str(re_val).lower()
+        else:
+            _safe_stderr(f"Invalid reasoning_effort '{re_val}', must be low/medium/high -- ignoring")
+
+    # -- reasoning_summary (bool, opt-in -- requires OpenAI org verification) --
+    if "reasoning_summary" in llm_data:
+        try:
+            config.reasoning_summary = bool(llm_data["reasoning_summary"])
+        except (TypeError, ValueError):
+            _safe_stderr("Invalid value for llm.reasoning_summary, ignoring")
 
     # -- Numeric/float fields --
     for key, attr, type_fn in [
@@ -379,6 +417,14 @@ def save_llm_config(
     # Only write thinking_budget if set
     if config.thinking_budget is not None:
         llm_section["thinking_budget"] = config.thinking_budget
+
+    # Only write reasoning_effort if set
+    if config.reasoning_effort is not None:
+        llm_section["reasoning_effort"] = config.reasoning_effort
+
+    # Only write reasoning_summary if opted in (omit when False -- clean YAML)
+    if config.reasoning_summary:
+        llm_section["reasoning_summary"] = True
 
     # api_key is saved via credential_store.py (keyring/env only, never to YAML)
 

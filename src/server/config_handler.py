@@ -73,6 +73,8 @@ def get_config_response(config_path: str, working_directory: str = "") -> dict:
         "max_tokens": cfg.max_tokens,
         "top_p": cfg.top_p,
         "thinking_budget": cfg.thinking_budget,
+        "reasoning_effort": cfg.reasoning_effort,
+        "reasoning_summary": cfg.reasoning_summary,
         "has_api_key": bool(cfg.api_key),
     }
 
@@ -131,8 +133,15 @@ def save_config_from_request(data: dict, config_path: str) -> dict:
     raw = data.get("config", {})
 
     try:
+        re_val = raw.get("reasoning_effort")
+        reasoning_effort = (
+            str(re_val).lower()
+            if re_val and str(re_val).lower() in ("low", "medium", "high")
+            else None
+        )
+
         cfg = LLMConfigData(
-            backend_type=str(raw.get("backend_type", "openai")),
+            backend_type=str(raw.get("backend_type", "openai_compatible")),
             base_url=str(raw.get("base_url", "")),
             model=str(raw.get("model", "")),
             context_window=_int_or(raw.get("context_window"), 131072),
@@ -140,6 +149,8 @@ def save_config_from_request(data: dict, config_path: str) -> dict:
             max_tokens=_int_or(raw.get("max_tokens"), 16384),
             top_p=_float_or(raw.get("top_p"), 0.95),
             thinking_budget=_int_or_none(raw.get("thinking_budget")),
+            reasoning_effort=reasoning_effort,
+            reasoning_summary=bool(raw.get("reasoning_summary", False)),
         )
 
         # Subagent overrides
@@ -233,32 +244,21 @@ def _list_models(backend: str, base_url: str, api_key: str) -> list[str]:
     """
     from src.llm.base import LLMBackendType, LLMConfig
 
-    if backend == "anthropic":
-        from src.llm.anthropic_backend import AnthropicBackend
+    from src.llm.backend_factory import create_backend
 
-        config = LLMConfig(
-            backend_type=LLMBackendType.ANTHROPIC,
-            model_name="temp",
-            base_url=base_url,
-            temperature=0.2,
-            max_tokens=1024,
-            top_p=0.95,
-            context_window=4096,
-        )
-        return AnthropicBackend(config, api_key=api_key).list_models()
-    else:
-        from src.llm.openai_backend import OpenAIBackend
+    _VALID = {"openai_native", "openai_compatible", "openai", "anthropic", "vllm", "localai", "llamacpp"}
+    safe_backend = backend if backend in _VALID else "openai_compatible"
 
-        config = LLMConfig(
-            backend_type=LLMBackendType.OPENAI,
-            model_name="temp",
-            base_url=base_url,
-            temperature=0.2,
-            max_tokens=1024,
-            top_p=0.95,
-            context_window=4096,
-        )
-        return OpenAIBackend(config, api_key=api_key).list_models()
+    temp_config = LLMConfig(
+        backend_type=LLMBackendType(safe_backend),
+        model_name="temp",
+        base_url=base_url,
+        temperature=0.2,
+        max_tokens=1024,
+        top_p=0.95,
+        context_window=4096,
+    )
+    return create_backend(temp_config, api_key=api_key, api_key_env="OPENAI_API_KEY").list_models()
 
 
 # -- numeric coercion helpers --

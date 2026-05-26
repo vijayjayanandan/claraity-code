@@ -292,6 +292,27 @@ describe("appReducer — Thinking", () => {
     }
   });
 
+  test("THINKING_END with tokenCount sets it on the timeline entry", () => {
+    let s = reduce({ type: "THINKING_START" });
+    s = reduce({ type: "THINKING_DELTA", content: "Reasoning..." }, s);
+    s = reduce({ type: "THINKING_END", tokenCount: 180 }, s);
+    const thinkingEntry = s.timeline.find((e) => e.type === "thinking");
+    expect(thinkingEntry).toBeDefined();
+    if (thinkingEntry && thinkingEntry.type === "thinking") {
+      expect(thinkingEntry.tokenCount).toBe(180);
+    }
+  });
+
+  test("THINKING_END without tokenCount leaves tokenCount undefined", () => {
+    let s = reduce({ type: "THINKING_START" });
+    s = reduce({ type: "THINKING_DELTA", content: "Reasoning..." }, s);
+    s = reduce({ type: "THINKING_END" }, s);
+    const thinkingEntry = s.timeline.find((e) => e.type === "thinking");
+    if (thinkingEntry && thinkingEntry.type === "thinking") {
+      expect(thinkingEntry.tokenCount).toBeUndefined();
+    }
+  });
+
   test("THINKING_END is no-op without active thinking", () => {
     const s = reduce({ type: "THINKING_END" });
     expect(s).toBe(initialState);
@@ -1103,7 +1124,12 @@ describe("dispatchServerMessage", () => {
 
   test("thinking_end dispatches THINKING_END", () => {
     dispatchMsg({ type: "thinking_end" });
-    expect(dispatch).toHaveBeenCalledWith({ type: "THINKING_END" });
+    expect(dispatch).toHaveBeenCalledWith({ type: "THINKING_END", tokenCount: undefined });
+  });
+
+  test("thinking_end with token_count forwards tokenCount", () => {
+    dispatchMsg({ type: "thinking_end", token_count: 180 });
+    expect(dispatch).toHaveBeenCalledWith({ type: "THINKING_END", tokenCount: 180 });
   });
 
   // ── Context ──

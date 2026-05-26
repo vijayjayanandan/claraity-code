@@ -2475,7 +2475,8 @@ class StdioProtocol(UIProtocol):
         if not pe.model or pe.model == self._agent.llm.config.model_name:
             return self._agent.llm
 
-        from src.llm import LLMBackendType, LLMConfig, OpenAIBackend
+        from src.llm import LLMBackendType, LLMConfig
+        from src.llm.backend_factory import create_backend
 
         llm_config = LLMConfig(
             backend_type=LLMBackendType(cfg.backend_type),
@@ -2486,13 +2487,7 @@ class StdioProtocol(UIProtocol):
             top_p=0.95,
             context_window=8192,
         )
-        if cfg.backend_type == "anthropic":
-            from src.llm.anthropic_backend import AnthropicBackend
-
-            return AnthropicBackend(llm_config, api_key=cfg.api_key)
-
-        else:
-            return OpenAIBackend(llm_config, api_key=cfg.api_key)
+        return create_backend(llm_config, api_key=cfg.api_key, api_key_env=cfg.api_key_env)
 
     async def _handle_enrich_prompt(self, data: dict) -> None:
         """Rewrite a short user prompt into a clear, precise instruction using streaming LLM."""

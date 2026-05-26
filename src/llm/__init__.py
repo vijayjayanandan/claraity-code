@@ -18,6 +18,14 @@ try:
 except ImportError:
     AnthropicBackend = None  # type: ignore[assignment,misc]
 
+# Lazy import: OpenAINativeBackend requires openai>=2.34.0
+try:
+    from .openai_native_backend import OpenAINativeBackend
+except ImportError:
+    OpenAINativeBackend = None  # type: ignore[assignment,misc]
+
+from .backend_factory import create_backend
+
 __all__ = [
     "LLMBackend",
     "LLMBackendType",
@@ -28,6 +36,8 @@ __all__ = [
     "ToolParameter",
     "OpenAIBackend",
     "AnthropicBackend",
+    "OpenAINativeBackend",
     "ModelConfig",
     "get_model_config",
+    "create_backend",
 ]

@@ -26,7 +26,7 @@ from src.core.permission_mode import PermissionManager, PermissionMode
 
 # Plan mode (Claude Code-style planning workflow)
 from src.core.plan_mode import PlanGateDecision, PlanModeState
-from src.llm import LLMBackend, LLMBackendType, LLMConfig, OpenAIBackend
+from src.llm import LLMBackend, LLMBackendType, LLMConfig
 from src.llm.base import ProviderDelta
 from src.llm.config_loader import LimitsConfig
 from src.llm.failure_handler import LLMError, RateLimitError, TimeoutError
@@ -297,6 +297,8 @@ class CodingAgent(AgentInterface):
         api_key: str | None = None,
         api_key_env: str = "OPENAI_API_KEY",
         thinking_budget: int | None = None,
+        reasoning_effort: str | None = None,
+        reasoning_summary: bool = False,
         load_file_memories: bool = True,
         permission_mode: str = "normal",
         hook_manager: Optional["HookManager"] = None,
@@ -351,22 +353,12 @@ class CodingAgent(AgentInterface):
             else int(os.getenv("LLM_MAX_TOKENS", "16384")),
             top_p=top_p if top_p is not None else float(os.getenv("LLM_TOP_P", "0.95")),
             thinking_budget=thinking_budget,
+            reasoning_effort=reasoning_effort,
+            reasoning_summary=reasoning_summary,
         )
 
-        if backend == "openai":
-            self.llm: LLMBackend = OpenAIBackend(
-                llm_config, api_key=api_key, api_key_env=api_key_env
-            )
-        elif backend == "anthropic":
-            from src.llm.anthropic_backend import AnthropicBackend
-
-            self.llm: LLMBackend = AnthropicBackend(
-                llm_config,
-                api_key=api_key,
-                api_key_env=api_key_env if api_key_env != "OPENAI_API_KEY" else "ANTHROPIC_API_KEY",
-            )
-        else:
-            raise ValueError(f"Unsupported backend: {backend}")
+        from src.llm.backend_factory import create_backend
+        self.llm: LLMBackend = create_backend(llm_config, api_key=api_key, api_key_env=api_key_env)
 
         # Initialize memory system with file-based memory loading
         self.memory = MemoryManager(
@@ -582,6 +574,8 @@ class CodingAgent(AgentInterface):
             api_key=resolved_key,
             api_key_env=config.api_key_env,
             thinking_budget=config.thinking_budget,
+            reasoning_effort=config.reasoning_effort,
+            reasoning_summary=getattr(config, "reasoning_summary", False),
             working_directory=working_directory,
             load_file_memories=load_file_memories,
             permission_mode=permission_mode,
@@ -653,26 +647,16 @@ class CodingAgent(AgentInterface):
             max_tokens=config.max_tokens if config.max_tokens is not None else 16384,
             top_p=config.top_p if config.top_p is not None else 0.95,
             thinking_budget=config.thinking_budget,
+            reasoning_effort=config.reasoning_effort,
+            reasoning_summary=config.reasoning_summary,
         )
 
         # Construct new backend (before closing old one)
         resolved_key = api_key or config.api_key or None
         api_key_env = config.api_key_env
 
-        if config.backend_type == "openai":
-            new_backend: LLMBackend = OpenAIBackend(
-                new_llm_config, api_key=resolved_key, api_key_env=api_key_env
-            )
-        elif config.backend_type == "anthropic":
-            from src.llm.anthropic_backend import AnthropicBackend
-
-            new_backend = AnthropicBackend(
-                new_llm_config,
-                api_key=resolved_key,
-                api_key_env=api_key_env if api_key_env != "OPENAI_API_KEY" else "ANTHROPIC_API_KEY",
-            )
-        else:
-            raise ValueError(f"Unsupported backend: {config.backend_type}")
+        from src.llm.backend_factory import create_backend
+        new_backend: LLMBackend = create_backend(new_llm_config, api_key=resolved_key, api_key_env=api_key_env)
 
         # Close old backend, swap in new one
         self._close_llm_backend()
@@ -1993,6 +1977,8 @@ class CodingAgent(AgentInterface):
                     finalized_message = None
                     last_usage = None
                     _thinking_started = False
+                    # Defer ThinkingEnd until after loop so last_usage (reasoning_tokens) is populated
+                    _thinking_ended_mid_stream = False
 
                     logger.debug(
                         "stream_response_phase",
@@ -2012,9 +1998,11 @@ class CodingAgent(AgentInterface):
 
                         # Yield text deltas to TUI for incremental rendering
                         if delta.text_delta:
-                            # End thinking block when content starts
-                            if _thinking_started:
-                                yield ThinkingEnd()
+                            # Close thinking block visually when text starts, but defer
+                            # ThinkingEnd (with token_count) until after loop when usage is known
+                            if _thinking_started and not _thinking_ended_mid_stream:
+                                yield ThinkingEnd(token_count=None)
+                                _thinking_ended_mid_stream = True
                                 _thinking_started = False
                             yield TextDelta(content=delta.text_delta)
 
@@ -2026,9 +2014,11 @@ class CodingAgent(AgentInterface):
                         if ui.check_interrupted():
                             break
 
-                    # Close any open thinking block
+                    # Close any open thinking block (no text followed reasoning)
                     if _thinking_started:
-                        yield ThinkingEnd()
+                        yield ThinkingEnd(
+                            token_count=last_usage.get("reasoning_tokens") if last_usage else None
+                        )
                         _thinking_started = False
 
                     # 4. Extract tool_calls and response_content from finalized message

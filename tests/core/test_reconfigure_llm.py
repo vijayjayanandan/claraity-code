@@ -101,11 +101,11 @@ def _make_config(
 class TestReconfigureLlm:
     """Tests for CodingAgent.reconfigure_llm()."""
 
-    @patch("src.core.agent.OpenAIBackend")
-    def test_model_change_same_backend(self, MockOpenAI, mock_agent):
+    @patch("src.llm.backend_factory.create_backend")
+    def test_model_change_same_backend(self, mock_create, mock_agent):
         """Model change within same backend: updates model_name, swaps backend."""
         new_backend = MagicMock()
-        MockOpenAI.return_value = new_backend
+        mock_create.return_value = new_backend
 
         config = _make_config(model="gpt-4o")
         summary = mock_agent.reconfigure_llm(config, api_key="sk-test")
@@ -113,7 +113,7 @@ class TestReconfigureLlm:
         assert mock_agent.model_name == "gpt-4o"
         assert mock_agent.llm is new_backend
         assert "gpt-4 -> gpt-4o" in summary
-        MockOpenAI.assert_called_once()
+        mock_create.assert_called_once()
 
     @patch("src.llm.anthropic_backend.AnthropicBackend")
     def test_backend_swap(self, MockAnthropic, mock_agent):
@@ -135,20 +135,20 @@ class TestReconfigureLlm:
         # Old clients should have been closed
         old_llm.client.close.assert_called_once()
 
-    @patch("src.core.agent.OpenAIBackend")
-    def test_generation_params_only(self, MockOpenAI, mock_agent):
+    @patch("src.llm.backend_factory.create_backend")
+    def test_generation_params_only(self, mock_create, mock_agent):
         """Same model + backend but different temperature: summary says params updated."""
-        MockOpenAI.return_value = MagicMock()
+        mock_create.return_value = MagicMock()
 
         config = _make_config(model="gpt-4", temperature=0.8)
         summary = mock_agent.reconfigure_llm(config)
 
         assert summary == "Generation parameters updated"
 
-    @patch("src.core.agent.OpenAIBackend")
-    def test_context_window_change_retunes_memory(self, MockOpenAI, mock_agent):
+    @patch("src.llm.backend_factory.create_backend")
+    def test_context_window_change_retunes_memory(self, mock_create, mock_agent):
         """Context window change updates memory allocations."""
-        MockOpenAI.return_value = MagicMock()
+        mock_create.return_value = MagicMock()
 
         config = _make_config(context_window=65536)
         summary = mock_agent.reconfigure_llm(config)
@@ -159,10 +159,10 @@ class TestReconfigureLlm:
         assert mock_agent.context_builder.max_context_tokens == 65536
         assert "Context: 131072 -> 65536" in summary
 
-    @patch("src.core.agent.OpenAIBackend")
-    def test_context_window_unchanged_skips_retune(self, MockOpenAI, mock_agent):
+    @patch("src.llm.backend_factory.create_backend")
+    def test_context_window_unchanged_skips_retune(self, mock_create, mock_agent):
         """Same context window: memory allocations untouched."""
-        MockOpenAI.return_value = MagicMock()
+        mock_create.return_value = MagicMock()
         original_total = mock_agent.memory.total_context_tokens
 
         config = _make_config(model="gpt-4o", context_window=131072)
@@ -172,8 +172,8 @@ class TestReconfigureLlm:
         # (it's a MagicMock, so we check it wasn't set to a new value)
         assert mock_agent.memory.total_context_tokens == original_total
 
-    @patch("src.core.agent.OpenAIBackend", side_effect=ValueError("bad key"))
-    def test_construction_failure_preserves_old_backend(self, MockOpenAI, mock_agent):
+    @patch("src.llm.backend_factory.create_backend", side_effect=ValueError("bad key"))
+    def test_construction_failure_preserves_old_backend(self, mock_create, mock_agent):
         """If new backend fails to construct, old backend stays intact."""
         old_llm = mock_agent.llm
         old_model = mock_agent.model_name
@@ -186,12 +186,12 @@ class TestReconfigureLlm:
         assert mock_agent.llm is old_llm
         assert mock_agent.model_name == old_model
 
-    @patch("src.core.agent.OpenAIBackend")
-    def test_subagent_overrides_applied(self, MockOpenAI, mock_agent):
+    @patch("src.llm.backend_factory.create_backend")
+    def test_subagent_overrides_applied(self, mock_create, mock_agent):
         """Subagent overrides in config are forwarded to subagent_manager."""
         from src.llm.config_loader import SubAgentLLMOverride
 
-        MockOpenAI.return_value = MagicMock()
+        mock_create.return_value = MagicMock()
 
         overrides = {"code-reviewer": SubAgentLLMOverride(model="gpt-4o-mini")}
         config = _make_config(model="gpt-4o", subagents=overrides)
@@ -201,11 +201,11 @@ class TestReconfigureLlm:
             config, force=True
         )
 
-    @patch("src.core.agent.OpenAIBackend")
-    def test_old_clients_closed(self, MockOpenAI, mock_agent):
+    @patch("src.llm.backend_factory.create_backend")
+    def test_old_clients_closed(self, mock_create, mock_agent):
         """Both sync and async clients on old backend are closed."""
         old_llm = mock_agent.llm
-        MockOpenAI.return_value = MagicMock()
+        mock_create.return_value = MagicMock()
 
         config = _make_config(model="gpt-4o")
         mock_agent.reconfigure_llm(config)

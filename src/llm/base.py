@@ -21,7 +21,9 @@ class LLMBackendType(str, Enum):
     VLLM = "vllm"
     LOCALAI = "localai"
     LLAMACPP = "llamacpp"
-    OPENAI = "openai"  # Generic OpenAI-compatible API
+    OPENAI = "openai"  # Deprecated alias -- normalised to OPENAI_COMPATIBLE on load
+    OPENAI_COMPATIBLE = "openai_compatible"  # Generic OpenAI-compatible API (vLLM, LocalAI, etc.)
+    OPENAI_NATIVE = "openai_native"  # Native OpenAI API (api.openai.com) -- o-series + Responses API
     ANTHROPIC = "anthropic"  # Native Anthropic Messages API
 
 
@@ -45,6 +47,10 @@ class LLMConfig(BaseModel):
 
     # Extended thinking (Claude, etc.)
     thinking_budget: int | None = None  # Token budget for thinking blocks
+
+    # Reasoning effort (OpenAI o-series models)
+    reasoning_effort: str | None = None  # "low", "medium", "high" or None (provider default)
+    reasoning_summary: bool = False  # Stream reasoning text -- requires OpenAI org verification
 
     # Context settings
     context_window: int

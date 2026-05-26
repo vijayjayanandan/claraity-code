@@ -91,13 +91,17 @@ _MESSAGES = [{"role": "user", "content": "Say hello in exactly three words."}]
 
 
 def _make_config(model: str, reasoning_effort: str | None = None) -> LLMConfig:
+    # o-series models reason internally before producing output -- they need
+    # enough token budget to complete the reasoning phase. 64 is sufficient
+    # for gpt-4o-mini but causes response.incomplete for o4-mini.
+    max_tokens = 1024 if model.startswith(("o1", "o3", "o4")) else 64
     return LLMConfig(
         backend_type=LLMBackendType.OPENAI_NATIVE,
         model_name=model,
         base_url="https://api.openai.com/v1",
         context_window=131072,
         temperature=0.2,
-        max_tokens=64,
+        max_tokens=max_tokens,
         top_p=0.95,
         reasoning_effort=reasoning_effort,
     )
@@ -350,4 +354,115 @@ class TestOSeriesModelStreaming:
         finish_deltas = [d for d in deltas if d.finish_reason]
         assert len(finish_deltas) >= 1, (
             f"{O_SERIES_MODEL} stream ended without a finish delta"
+        )
+
+
+    def test_o_series_reasoning_tokens_in_usage(self):
+        """Usage delta must include reasoning_tokens for o-series with reasoning_effort."""
+        config = _make_config(O_SERIES_MODEL, reasoning_effort="medium")
+        backend = _make_backend(config)
+
+        deltas = asyncio.get_event_loop().run_until_complete(
+            _collect(
+                backend.generate_provider_deltas_async(
+                    _MESSAGES,
+                    tools=[_SAMPLE_TOOL],
+                    stream_id="integ-oseries-usage",
+                )
+            )
+        )
+
+        usage_deltas = [d for d in deltas if d.usage]
+        assert usage_deltas, "No usage delta emitted for o-series stream"
+        usage = usage_deltas[-1].usage
+        assert "reasoning_tokens" in usage, (
+            f"reasoning_tokens missing from usage dict: {usage}"
+        )
+        # reasoning_tokens may be 0 if the model skipped reasoning, but key must exist
+        assert usage["reasoning_tokens"] is not None, (
+            "reasoning_tokens is None -- extraction from output_tokens_details failed"
+        )
+
+
+@skip_if_no_key
+class TestReasoningSummary:
+    """Test reasoning summary streaming for gpt-5.4 and o-series models.
+
+    These tests print all received event types and thinking delta counts
+    to help diagnose whether summary events are actually firing.
+    """
+
+    GPT54_MODEL = "gpt-5.4-2026-03-05"
+    REASONING_MESSAGES = [{"role": "user", "content": "What is 17 * 23? Think step by step."}]
+
+    def _make_summary_config(self, model: str) -> LLMConfig:
+        max_tokens = 2048
+        return LLMConfig(
+            backend_type=LLMBackendType.OPENAI_NATIVE,
+            model_name=model,
+            base_url="https://api.openai.com/v1",
+            context_window=131072,
+            temperature=0.2,
+            max_tokens=max_tokens,
+            top_p=0.95,
+            reasoning_effort="medium",
+            reasoning_summary=True,
+        )
+
+    def test_gpt54_reasoning_summary_yields_thinking_deltas(self):
+        """gpt-5.4 with reasoning_effort + reasoning_summary should yield thinking_delta."""
+        config = self._make_summary_config(self.GPT54_MODEL)
+        backend = _make_backend(config)
+
+        deltas = asyncio.get_event_loop().run_until_complete(
+            _collect(
+                backend.generate_provider_deltas_async(
+                    self.REASONING_MESSAGES,
+                    stream_id="integ-summary-gpt54",
+                )
+            )
+        )
+
+        thinking_deltas = [d for d in deltas if d.thinking_delta]
+        text_deltas = [d for d in deltas if d.text_delta]
+        usage_deltas = [d for d in deltas if d.usage]
+
+        print(f"\n[gpt-5.4] thinking_deltas={len(thinking_deltas)}, "
+              f"text_deltas={len(text_deltas)}, "
+              f"usage={usage_deltas[-1].usage if usage_deltas else None}")
+
+        assert len(text_deltas) > 0, "No text content received -- model may have failed"
+        assert len(thinking_deltas) > 0, (
+            "No thinking_delta received for gpt-5.4 with reasoning_summary=True. "
+            "Either the model does not support summary events, the org is not verified, "
+            "or the reasoning param is not reaching the API."
+        )
+
+    def test_o4mini_reasoning_summary_yields_thinking_deltas(self):
+        """o4-mini with reasoning_summary should yield thinking_delta."""
+        config = self._make_summary_config(O_SERIES_MODEL)
+        backend = _make_backend(config)
+
+        deltas = asyncio.get_event_loop().run_until_complete(
+            _collect(
+                backend.generate_provider_deltas_async(
+                    self.REASONING_MESSAGES,
+                    stream_id="integ-summary-o4mini",
+                )
+            )
+        )
+
+        thinking_deltas = [d for d in deltas if d.thinking_delta]
+        text_deltas = [d for d in deltas if d.text_delta]
+        usage_deltas = [d for d in deltas if d.usage]
+
+        print(f"\n[o4-mini] thinking_deltas={len(thinking_deltas)}, "
+              f"text_deltas={len(text_deltas)}, "
+              f"usage={usage_deltas[-1].usage if usage_deltas else None}")
+
+        assert len(text_deltas) > 0, "No text content received -- model may have failed"
+        assert len(thinking_deltas) > 0, (
+            "No thinking_delta received for o4-mini with reasoning_summary=True. "
+            "Either org is not verified for summary access, "
+            "or the reasoning.summary param is not reaching the API."
         )

@@ -45,7 +45,9 @@ a = Analysis(
         "src.core.tool_metadata",
         # LLM backends
         "src.llm.base",
+        "src.llm.backend_factory",
         "src.llm.openai_backend",
+        "src.llm.openai_native_backend",
         "src.llm.ollama_backend",
         "src.llm.anthropic_backend",
         "src.llm.config_loader",
@@ -130,6 +132,7 @@ a = Analysis(
         "aiohttp",
         "aiohttp.web",
         "openai",
+        "openai.resources.responses",   # Responses API -- used by OpenAINativeBackend
         "httpx",
         "pydantic",
         "yaml",

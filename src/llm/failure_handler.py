@@ -29,7 +29,6 @@ Thread Safety:
 
 import asyncio
 import json
-import logging
 import random
 import re
 import time
@@ -37,7 +36,14 @@ from collections.abc import Callable
 from functools import wraps
 from typing import Any, Optional
 
-logger = logging.getLogger(__name__)
+try:
+    from src.observability import get_logger
+
+    logger = get_logger("llm.failure_handler")
+except ImportError:
+    import logging
+
+    logger = logging.getLogger(__name__)
 
 # Windows compatibility: Use text markers instead of emojis
 from src.platform import safe_print
@@ -340,6 +346,7 @@ def _extract_root_cause_message(exc: Exception) -> str:
 # Maps known SDK field path fragments to the Settings label the user sees.
 _FIELD_TO_SETTING: list[tuple[str, str]] = [
     ("budget_tokens", "Settings > Thinking Budget"),
+    ("reasoning.summary", "Settings > Show Reasoning Summary"),
     ("temperature", "Settings > Temperature"),
     ("max_tokens", "Settings > Max Tokens"),
     ("top_p", "Settings"),
@@ -538,7 +545,7 @@ class LLMFailureHandler:
 
     def __init__(
         self,
-        logger_instance: logging.Logger | None = None,
+        logger_instance: Any | None = None,
         max_backoff_delay: float = 15.0,
         max_rate_limit_delay: float = 30.0,
         rate_limit_base_delay: float = 10.0,

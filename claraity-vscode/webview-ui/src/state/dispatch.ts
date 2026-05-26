@@ -49,7 +49,7 @@ export function dispatchServerMessage(
       break;
 
     case "thinking_end":
-      dispatch({ type: "THINKING_END" });
+      dispatch({ type: "THINKING_END", tokenCount: msg.token_count ?? undefined });
       break;
 
     // ── Context ──

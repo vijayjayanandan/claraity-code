@@ -775,7 +775,9 @@ strong {
     border: 1px solid #334155;
     border-radius: 8px;
     padding: 1.25rem 1.5rem;
-    max-width: 560px;
+    max-width: 880px;
+    max-height: 80vh;
+    overflow-y: auto;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
     font-family: var(--font-sans);
     font-size: 0.9rem;
@@ -840,6 +842,19 @@ strong {
     overflow-x: auto;
     max-height: 320px;
     overflow-y: auto;
+}
+
+.glossary-prose {
+    background: #0F172A;
+    border: 1px solid #1E293B;
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    font-family: var(--font-sans);
+    font-size: 0.88rem;
+    line-height: 1.75;
+    color: #CBD5E1;
+    white-space: normal;
+    overflow-x: hidden;
 }
 
 .glossary-code code {
