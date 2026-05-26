@@ -964,6 +964,62 @@ class TestRetryAndCaching:
 
 # ===========================================================================
 # Class 6: TestModelClassification
+# Direct unit tests for _is_o_series() and _supports_sampling_params().
+# These guard against prefix typos and logic inversions in the capability map.
 # ===========================================================================
 
+
+class TestModelClassification:
+    """Direct unit tests for model classification helper functions."""
+
+    # ------------------------------------------------------------------
+    # _is_o_series
+    # ------------------------------------------------------------------
+
+    @pytest.mark.parametrize("model", ["o1", "o1-mini", "o1-pro", "o3", "o3-mini", "o4", "o4-mini"])
+    def test_o_series_detected(self, model: str):
+        """All o-series model names must be classified as o-series."""
+        from src.llm.openai_native_backend import _is_o_series
+        assert _is_o_series(model), f"{model!r} must be detected as o-series"
+
+    @pytest.mark.parametrize("model", ["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo", "gpt-5.4-mini", "chatgpt-4o-latest"])
+    def test_non_o_series_not_detected(self, model: str):
+        """GPT and chatgpt models must NOT be classified as o-series."""
+        from src.llm.openai_native_backend import _is_o_series
+        assert not _is_o_series(model), f"{model!r} must NOT be detected as o-series"
+
+    def test_o_series_case_insensitive(self):
+        """_is_o_series must be case-insensitive."""
+        from src.llm.openai_native_backend import _is_o_series
+        assert _is_o_series("O4-mini")
+        assert _is_o_series("O1-PRO")
+
+    # ------------------------------------------------------------------
+    # _supports_sampling_params
+    # ------------------------------------------------------------------
+
+    @pytest.mark.parametrize("model", ["gpt-4o", "gpt-4-turbo", "gpt-4o-mini", "gpt-3.5-turbo", "chatgpt-4o-latest"])
+    def test_sampling_capable_models(self, model: str):
+        """GPT-4.x, GPT-3.5, and chatgpt- models must support sampling params."""
+        from src.llm.openai_native_backend import _supports_sampling_params
+        assert _supports_sampling_params(model), f"{model!r} must support sampling params"
+
+    @pytest.mark.parametrize("model", ["o1", "o3", "o4-mini", "gpt-5.4-mini", "gpt-5.4-2026-03-05"])
+    def test_non_sampling_capable_models(self, model: str):
+        """o-series and gpt-5.x must NOT support sampling params (fail-safe)."""
+        from src.llm.openai_native_backend import _supports_sampling_params
+        assert not _supports_sampling_params(model), f"{model!r} must NOT support sampling params"
+
+    def test_unknown_model_fails_safe(self):
+        """Unknown model families must default to NOT supporting sampling params."""
+        from src.llm.openai_native_backend import _supports_sampling_params
+        assert not _supports_sampling_params("gpt-7-turbo"), (
+            "Unknown model must fail-safe: omit sampling params rather than risk a 400"
+        )
+
+    def test_sampling_params_case_insensitive(self):
+        """_supports_sampling_params must be case-insensitive."""
+        from src.llm.openai_native_backend import _supports_sampling_params
+        assert _supports_sampling_params("GPT-4o")
+        assert _supports_sampling_params("GPT-3.5-TURBO")
 

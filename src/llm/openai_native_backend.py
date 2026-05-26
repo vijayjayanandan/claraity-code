@@ -413,7 +413,9 @@ class OpenAINativeBackend(LLMBackend):
     def generate_stream(self, messages: list[dict], **kwargs: Any) -> Iterator[StreamChunk]:
         """Synchronous streaming completion."""
         self.validate_messages(messages)
-        params = self._build_responses_params(messages, stream=True, **kwargs)
+        # Do NOT pass stream=True -- .stream() sets it in the HTTP body automatically
+        # and rejects stream= as a kwarg (same constraint as the async path).
+        params = self._build_responses_params(messages, **kwargs)
 
         try:
             # Note: Responses stream API is a context manager
