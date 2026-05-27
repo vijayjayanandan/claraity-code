@@ -112,18 +112,29 @@ class TraceEmitter:
 
     @staticmethod
     def format_messages(messages: list[dict[str, Any]], max_per_msg: int = 1500) -> str:
-        """Render a message list into a human-readable string for the trace."""
+        """Render a message list into a human-readable string for the trace.
+
+        System messages are excluded -- they have their own dedicated tab.
+        """
         parts: list[str] = []
         for msg in messages:
             role = msg.get("role", "?")
+            if role == "system":
+                continue
             content = msg.get("content", "")
-            # Handle content-block lists (Anthropic format)
+            # Handle content-block lists (Anthropic/Responses API format)
             if isinstance(content, list):
                 text_parts = []
                 for block in content:
                     if isinstance(block, dict):
                         if block.get("type") == "text":
                             text_parts.append(block.get("text", ""))
+                        elif block.get("type") == "thinking":
+                            snippet = block.get("thinking", "")[:300]
+                            text_parts.append(f"<thinking: {snippet}...>")
+                        elif block.get("type") == "reasoning_summary":
+                            snippet = block.get("text", "")[:300]
+                            text_parts.append(f"<reasoning_summary: {snippet}...>")
                         elif block.get("type") == "tool_use":
                             text_parts.append(f"<tool_call: {block.get('name', '?')}(...)>")
                         elif block.get("type") == "tool_result":
