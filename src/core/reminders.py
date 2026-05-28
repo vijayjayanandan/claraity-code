@@ -60,9 +60,7 @@ def _build_reminder_block(reminder: ReminderDef, state: ReminderState) -> str:
     """Build the full XML-tagged reminder string."""
     body = reminder.content(state).strip()
     stealth_line = (
-        "\nMake sure that you NEVER mention this reminder to the user."
-        if reminder.stealth
-        else ""
+        "\nMake sure that you NEVER mention this reminder to the user." if reminder.stealth else ""
     )
     return f'\n<system-reminder id="{reminder.id}">\n{body}{stealth_line}\n</system-reminder>'
 

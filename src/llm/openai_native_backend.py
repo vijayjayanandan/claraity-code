@@ -249,29 +249,35 @@ class OpenAINativeBackend(LLMBackend):
             # Tool result: {"role": "tool", "tool_call_id": "...", "content": "..."}
             # -> top-level function_call_output item
             if role == "tool":
-                translated.append({
-                    "type": "function_call_output",
-                    "call_id": msg.get("tool_call_id", ""),
-                    "output": msg.get("content", ""),
-                })
+                translated.append(
+                    {
+                        "type": "function_call_output",
+                        "call_id": msg.get("tool_call_id", ""),
+                        "output": msg.get("content", ""),
+                    }
+                )
 
             # Assistant with tool_calls: each call becomes a top-level function_call item.
             # Any text content becomes a separate assistant message before the calls.
             elif role == "assistant" and msg.get("tool_calls"):
                 text = msg.get("content")
                 if text:
-                    translated.append({
-                        "role": "assistant",
-                        "content": [{"type": "output_text", "text": text}],
-                    })
+                    translated.append(
+                        {
+                            "role": "assistant",
+                            "content": [{"type": "output_text", "text": text}],
+                        }
+                    )
                 for tc in msg["tool_calls"]:
                     fn = tc.get("function", {})
-                    translated.append({
-                        "type": "function_call",
-                        "call_id": tc.get("id", ""),
-                        "name": fn.get("name", ""),
-                        "arguments": fn.get("arguments", "{}"),
-                    })
+                    translated.append(
+                        {
+                            "type": "function_call",
+                            "call_id": tc.get("id", ""),
+                            "name": fn.get("name", ""),
+                            "arguments": fn.get("arguments", "{}"),
+                        }
+                    )
 
             # User / system / plain assistant: translate content blocks, pass through
             else:
@@ -369,7 +375,9 @@ class OpenAINativeBackend(LLMBackend):
                 parsed_args = self._parse_tool_arguments(
                     getattr(item, "arguments", "") or "", item.name
                 )
-                args_json = json.dumps(parsed_args) if isinstance(parsed_args, dict) else str(parsed_args)
+                args_json = (
+                    json.dumps(parsed_args) if isinstance(parsed_args, dict) else str(parsed_args)
+                )
                 tool_calls.append(
                     ToolCall.from_provider(
                         provider_id=getattr(item, "call_id", None) or generate_tool_call_id(),
@@ -405,7 +413,9 @@ class OpenAINativeBackend(LLMBackend):
             return self.client.responses.create(**params)
 
         try:
-            response = self.failure_handler.execute_with_retry(api_call, max_attempts=3, backoff_base=2.0)
+            response = self.failure_handler.execute_with_retry(
+                api_call, max_attempts=3, backoff_base=2.0
+            )
             return self._normalise_responses_response(response)
         except Exception as e:
             raise RuntimeError(f"OpenAI Responses API error: {e}") from e
@@ -442,7 +452,9 @@ class OpenAINativeBackend(LLMBackend):
                         yield StreamChunk(
                             content="",
                             done=True,
-                            model=getattr(response, "model", self.config.model_name) if response else self.config.model_name,
+                            model=getattr(response, "model", self.config.model_name)
+                            if response
+                            else self.config.model_name,
                             finish_reason=finish_reason,
                             prompt_tokens=getattr(usage, "input_tokens", None),
                             completion_tokens=getattr(usage, "output_tokens", None),
@@ -461,13 +473,17 @@ class OpenAINativeBackend(LLMBackend):
     ) -> LLMResponse:
         """Synchronous tool-calling completion."""
         self.validate_messages(messages)
-        params = self._build_responses_params(messages, tools=tools, tool_choice=tool_choice, **kwargs)
+        params = self._build_responses_params(
+            messages, tools=tools, tool_choice=tool_choice, **kwargs
+        )
 
         def api_call():
             return self.client.responses.create(**params)
 
         try:
-            response = self.failure_handler.execute_with_retry(api_call, max_attempts=3, backoff_base=2.0)
+            response = self.failure_handler.execute_with_retry(
+                api_call, max_attempts=3, backoff_base=2.0
+            )
             return self._normalise_responses_response(response)
         except Exception as e:
             raise RuntimeError(f"OpenAI Responses API tool error: {e}") from e
@@ -491,7 +507,9 @@ class OpenAINativeBackend(LLMBackend):
         self.validate_messages(messages)
         sid = stream_id or generate_stream_id()
 
-        async for delta in self._stream_responses_api(messages, tools or [], sid, tool_choice, **kwargs):
+        async for delta in self._stream_responses_api(
+            messages, tools or [], sid, tool_choice, **kwargs
+        ):
             yield delta
 
     async def _stream_responses_api(
@@ -507,7 +525,9 @@ class OpenAINativeBackend(LLMBackend):
         Emits a first ToolCallDelta with id+name, then subsequent deltas with
         arguments_delta only -- matching the chat completions pattern (C3).
         """
-        params = self._build_responses_params(messages, tools=tools, tool_choice=tool_choice, **kwargs)
+        params = self._build_responses_params(
+            messages, tools=tools, tool_choice=tool_choice, **kwargs
+        )
 
         # Track whether we have emitted the id+name header for each output_index
         tool_headers_emitted: dict[int, bool] = {}
@@ -584,7 +604,11 @@ class OpenAINativeBackend(LLMBackend):
                                 ),
                             )
 
-                    elif event_type in {"response.completed", "response.done", "response.incomplete"}:
+                    elif event_type in {
+                        "response.completed",
+                        "response.done",
+                        "response.incomplete",
+                    }:
                         # Capture usage from the completed/incomplete response
                         response = getattr(event, "response", None)
                         usage = getattr(response, "usage", None) if response else None

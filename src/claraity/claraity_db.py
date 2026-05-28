@@ -1098,7 +1098,10 @@ class ClaraityStore:
                     props["flow_rank"] = 0
                     props["flow_col"] = 0
                     with self._cursor() as cur:
-                        cur.execute("UPDATE nodes SET properties = ? WHERE id = ?", (json.dumps(props), comp_ids[0]))
+                        cur.execute(
+                            "UPDATE nodes SET properties = ? WHERE id = ?",
+                            (json.dumps(props), comp_ids[0]),
+                        )
                     comp_updated += 1
                 continue
 
@@ -1110,7 +1113,11 @@ class ClaraityStore:
             for e in edges:
                 if e["type"] in ("contains", "constrains"):
                     continue
-                if e["from_id"] in comp_set and e["to_id"] in comp_set and e["from_id"] != e["to_id"]:
+                if (
+                    e["from_id"] in comp_set
+                    and e["to_id"] in comp_set
+                    and e["from_id"] != e["to_id"]
+                ):
                     cgraph[e["from_id"]].add(e["to_id"])
                     creverse[e["to_id"]].add(e["from_id"])
 
@@ -1124,8 +1131,13 @@ class ClaraityStore:
 
             def c_strongconnect(  # noqa: B023 — Tarjan's SCC uses shared closure state
                 v: str,
-                _idx=c_index_counter, _stk=c_stack, _low=c_lowlink,
-                _ix=c_index, _on=c_on_stack, _gr=cgraph, _sccs=c_sccs,
+                _idx=c_index_counter,
+                _stk=c_stack,
+                _low=c_lowlink,
+                _ix=c_index,
+                _on=c_on_stack,
+                _gr=cgraph,
+                _sccs=c_sccs,
             ):
                 _ix[v] = _idx[0]
                 _low[v] = _idx[0]
@@ -1217,7 +1229,9 @@ class ClaraityStore:
                 props["flow_rank"] = comp_rank.get(comp_id, 0)
                 props["flow_col"] = comp_col.get(comp_id, 0)
                 with self._cursor() as cur:
-                    cur.execute("UPDATE nodes SET properties = ? WHERE id = ?", (json.dumps(props), comp_id))
+                    cur.execute(
+                        "UPDATE nodes SET properties = ? WHERE id = ?", (json.dumps(props), comp_id)
+                    )
                 comp_updated += 1
 
         updated += comp_updated

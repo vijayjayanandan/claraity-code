@@ -336,9 +336,7 @@ class ContextBuilder:
 
         # Emit user memory source (agent-managed, cross-project)
         if _emit_sources:
-            user_persistent_mem = getattr(
-                self.memory, "user_persistent_memory_content", ""
-            )
+            user_persistent_mem = getattr(self.memory, "user_persistent_memory_content", "")
             self._trace.on_context_source(
                 "User Memory",
                 user_persistent_mem if user_persistent_mem else "(no user memories)",
@@ -357,9 +355,13 @@ class ContextBuilder:
                 if Path(_umd).resolve() != Path(project_memory_dir).resolve():
                     user_memory_dir_val = _umd
 
-            system_prompt = system_prompt + "\n\n" + get_persistent_memory_injection(
-                project_memory_dir=project_memory_dir,
-                user_memory_dir=user_memory_dir_val,
+            system_prompt = (
+                system_prompt
+                + "\n\n"
+                + get_persistent_memory_injection(
+                    project_memory_dir=project_memory_dir,
+                    user_memory_dir=user_memory_dir_val,
+                )
             )
 
             # Inject actual memory content into the system prompt so the
@@ -373,7 +375,10 @@ class ContextBuilder:
             # if full content exceeds the token budget.
             user_mem_full = getattr(self.memory, "user_memory_full_content", "")
             _USER_MEMORY_TOKEN_BUDGET = 2000
-            if user_mem_full and self.optimizer.count_tokens(user_mem_full) <= _USER_MEMORY_TOKEN_BUDGET:
+            if (
+                user_mem_full
+                and self.optimizer.count_tokens(user_mem_full) <= _USER_MEMORY_TOKEN_BUDGET
+            ):
                 user_mem_display = user_mem_full
             else:
                 user_mem_display = user_mem_index
@@ -382,14 +387,10 @@ class ContextBuilder:
                 mem_section = "\n\n## Your Current Memories\n\n"
                 if user_mem_display and user_memory_dir_val:
                     mem_section += (
-                        f"### User Memory ({user_memory_dir_val})\n\n"
-                        f"{user_mem_display}\n\n"
+                        f"### User Memory ({user_memory_dir_val})\n\n{user_mem_display}\n\n"
                     )
                 if project_mem:
-                    mem_section += (
-                        f"### Project Memory ({project_memory_dir})\n\n"
-                        f"{project_mem}\n\n"
-                    )
+                    mem_section += f"### Project Memory ({project_memory_dir})\n\n{project_mem}\n\n"
                 elif user_mem_display and not user_memory_dir_val:
                     # Overlapping dirs: already shown as project memories
                     mem_section += f"{user_mem_display}\n\n"

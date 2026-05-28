@@ -74,6 +74,7 @@ class KeyringTokenStorage(TokenStorage):
     def _kr_get(self, key: str) -> str | None:
         try:
             import keyring
+
             return keyring.get_password(KEYRING_SERVICE, f"{self.server_id}:{key}")
         except Exception as e:
             logger.warning("mcp_keyring_read_failed", key=key, error=str(e))
@@ -82,6 +83,7 @@ class KeyringTokenStorage(TokenStorage):
     def _kr_set(self, key: str, value: str) -> None:
         try:
             import keyring
+
             keyring.set_password(KEYRING_SERVICE, f"{self.server_id}:{key}", value)
         except Exception as e:
             logger.warning("mcp_keyring_write_failed", key=key, error=str(e))
@@ -89,6 +91,7 @@ class KeyringTokenStorage(TokenStorage):
     def _kr_delete(self, key: str) -> None:
         try:
             import keyring
+
             keyring.delete_password(KEYRING_SERVICE, f"{self.server_id}:{key}")
         except Exception:
             pass
@@ -155,7 +158,11 @@ class KeyringTokenStorage(TokenStorage):
             await asyncio.to_thread(self._kr_set, "tokens", value)
         else:
             await asyncio.to_thread(self._file_write, "tokens", value)
-        logger.info("mcp_token_saved", server=self.server_id, backend="keyring" if self._use_keyring else "file")
+        logger.info(
+            "mcp_token_saved",
+            server=self.server_id,
+            backend="keyring" if self._use_keyring else "file",
+        )
 
     async def get_client_info(self) -> OAuthClientInformationFull | None:
         if self._use_keyring:
@@ -176,7 +183,11 @@ class KeyringTokenStorage(TokenStorage):
             await asyncio.to_thread(self._kr_set, "client", value)
         else:
             await asyncio.to_thread(self._file_write, "client", value)
-        logger.info("mcp_client_info_saved", server=self.server_id, backend="keyring" if self._use_keyring else "file")
+        logger.info(
+            "mcp_client_info_saved",
+            server=self.server_id,
+            backend="keyring" if self._use_keyring else "file",
+        )
 
     def clear(self) -> None:
         """Remove all stored credentials for this server. Forces re-login on next connect."""

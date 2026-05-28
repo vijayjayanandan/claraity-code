@@ -694,7 +694,14 @@ class StdioProtocol(UIProtocol):
             return
         if content.strip() or images or active_skill:
             logger.info("chat_message_received", active_skill=active_skill or "(none)")
-            await self._chat_queue.put({"content": content, "images": images, "active_skill": active_skill, "skill_arguments": skill_arguments})
+            await self._chat_queue.put(
+                {
+                    "content": content,
+                    "images": images,
+                    "active_skill": active_skill,
+                    "skill_arguments": skill_arguments,
+                }
+            )
 
     def _parse_slash_command(self, content: str) -> "tuple[str, str, str] | None":
         """Parse /skill-name args from user input.
@@ -2609,7 +2616,9 @@ class StdioProtocol(UIProtocol):
     # Streaming
     # -----------------------------------------------------------------
 
-    async def _stream_and_send(self, agent, chat_content: str, attachments=None, active_skill=None, skill_arguments="") -> int:
+    async def _stream_and_send(
+        self, agent, chat_content: str, attachments=None, active_skill=None, skill_arguments=""
+    ) -> int:
         """Stream agent response and send each event to the client.
 
         Checks for TCP disconnect to avoid burning tokens when the client
@@ -2617,8 +2626,11 @@ class StdioProtocol(UIProtocol):
         """
         count = 0
         async for event in agent.stream_response(
-            user_input=chat_content, ui=self, attachments=attachments,
-            active_skill=active_skill, skill_arguments=skill_arguments,
+            user_input=chat_content,
+            ui=self,
+            attachments=attachments,
+            active_skill=active_skill,
+            skill_arguments=skill_arguments,
         ):
             if self._closed:
                 logger.warning("stdio_tcp_disconnected_during_stream")
@@ -2890,7 +2902,9 @@ async def run_stdio_server(
                 )
                 raw_images = chat_msg.get("images", []) if isinstance(chat_msg, dict) else []
                 active_skill = chat_msg.get("active_skill") if isinstance(chat_msg, dict) else None
-                skill_arguments = chat_msg.get("skill_arguments", "") if isinstance(chat_msg, dict) else ""
+                skill_arguments = (
+                    chat_msg.get("skill_arguments", "") if isinstance(chat_msg, dict) else ""
+                )
 
                 # Build attachments
                 attachments = None
@@ -2943,7 +2957,13 @@ async def run_stdio_server(
                 logger.debug("stdio_stream_start")
 
                 streaming_task = asyncio.create_task(
-                    protocol._stream_and_send(agent, chat_content, attachments, active_skill=active_skill, skill_arguments=skill_arguments)
+                    protocol._stream_and_send(
+                        agent,
+                        chat_content,
+                        attachments,
+                        active_skill=active_skill,
+                        skill_arguments=skill_arguments,
+                    )
                 )
                 protocol.set_streaming_task(streaming_task)
                 try:

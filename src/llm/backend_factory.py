@@ -42,21 +42,20 @@ def create_backend(
 
     if backend_type == "openai_native":
         from src.llm.openai_native_backend import OpenAINativeBackend
+
         return OpenAINativeBackend(config, api_key=api_key, api_key_env=api_key_env)
 
     if backend_type in _OPENAI_COMPATIBLE_TYPES:
         from src.llm.openai_backend import OpenAIBackend
+
         return OpenAIBackend(config, api_key=api_key, api_key_env=api_key_env)
 
     if backend_type == "anthropic":
         from src.llm.anthropic_backend import AnthropicBackend
+
         # Callers that haven't updated their api_key_env still pass OPENAI_API_KEY.
         # Correct it here so Anthropic picks up the right credential automatically.
-        corrected_env = (
-            "ANTHROPIC_API_KEY"
-            if api_key_env == "OPENAI_API_KEY"
-            else api_key_env
-        )
+        corrected_env = "ANTHROPIC_API_KEY" if api_key_env == "OPENAI_API_KEY" else api_key_env
         return AnthropicBackend(config, api_key=api_key, api_key_env=corrected_env)
 
     raise ValueError(

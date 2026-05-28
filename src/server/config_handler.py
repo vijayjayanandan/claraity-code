@@ -245,7 +245,15 @@ def _list_models(backend: str, base_url: str, api_key: str) -> list[str]:
     from src.llm.backend_factory import create_backend
     from src.llm.base import LLMBackendType, LLMConfig
 
-    _VALID = {"openai_native", "openai_compatible", "openai", "anthropic", "vllm", "localai", "llamacpp"}
+    _VALID = {
+        "openai_native",
+        "openai_compatible",
+        "openai",
+        "anthropic",
+        "vllm",
+        "localai",
+        "llamacpp",
+    }
     safe_backend = backend if backend in _VALID else "openai_compatible"
 
     temp_config = LLMConfig(

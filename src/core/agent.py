@@ -358,6 +358,7 @@ class CodingAgent(AgentInterface):
         )
 
         from src.llm.backend_factory import create_backend
+
         self.llm: LLMBackend = create_backend(llm_config, api_key=api_key, api_key_env=api_key_env)
 
         # Initialize memory system with file-based memory loading
@@ -656,7 +657,10 @@ class CodingAgent(AgentInterface):
         api_key_env = config.api_key_env
 
         from src.llm.backend_factory import create_backend
-        new_backend: LLMBackend = create_backend(new_llm_config, api_key=resolved_key, api_key_env=api_key_env)
+
+        new_backend: LLMBackend = create_backend(
+            new_llm_config, api_key=resolved_key, api_key_env=api_key_env
+        )
 
         # Close old backend, swap in new one
         self._close_llm_backend()
@@ -680,6 +684,7 @@ class CodingAgent(AgentInterface):
 
         # Refresh web search budget
         from src.tools.web_tools import RunBudget
+
         self._web_search_budget = config.web_search_budget
         self._web_run_budget = RunBudget(max_searches=self._web_search_budget, max_fetches=5)
         self._web_search_tool.set_run_budget(self._web_run_budget)
@@ -1675,7 +1680,9 @@ class CodingAgent(AgentInterface):
                         import uuid as _uuid
 
                         _preprocess_call_id = f"skill-preprocess-{_uuid.uuid4().hex[:8]}"
-                        _commands_summary = "\n".join(f"  {i+1}. {c}" for i, c in enumerate(_commands))
+                        _commands_summary = "\n".join(
+                            f"  {i + 1}. {c}" for i, c in enumerate(_commands)
+                        )
                         # Show approval card via store notification
                         if self.memory.message_store:
                             self.memory.message_store.update_tool_state(
@@ -1701,7 +1708,8 @@ class CodingAgent(AgentInterface):
                         if _preprocess_approved:
                             if self.memory.message_store:
                                 self.memory.message_store.update_tool_state(
-                                    _preprocess_call_id, CoreToolStatus.RUNNING,
+                                    _preprocess_call_id,
+                                    CoreToolStatus.RUNNING,
                                     tool_name="skill_preprocess",
                                 )
                             try:
@@ -1710,14 +1718,20 @@ class CodingAgent(AgentInterface):
                                 )
                                 if self.memory.message_store:
                                     self.memory.message_store.update_tool_state(
-                                        _preprocess_call_id, CoreToolStatus.SUCCESS,
+                                        _preprocess_call_id,
+                                        CoreToolStatus.SUCCESS,
                                         tool_name="skill_preprocess",
                                     )
-                                logger.info("skill_preprocess_approved", skill_id=_skill.id, commands=len(_commands))
+                                logger.info(
+                                    "skill_preprocess_approved",
+                                    skill_id=_skill.id,
+                                    commands=len(_commands),
+                                )
                             except (asyncio.CancelledError, KeyboardInterrupt):
                                 if self.memory.message_store:
                                     self.memory.message_store.update_tool_state(
-                                        _preprocess_call_id, CoreToolStatus.CANCELLED,
+                                        _preprocess_call_id,
+                                        CoreToolStatus.CANCELLED,
                                         tool_name="skill_preprocess",
                                     )
                                 logger.info("skill_preprocess_cancelled", skill_id=_skill.id)
@@ -1725,15 +1739,21 @@ class CodingAgent(AgentInterface):
                             except Exception as _preprocess_err:
                                 if self.memory.message_store:
                                     self.memory.message_store.update_tool_state(
-                                        _preprocess_call_id, CoreToolStatus.ERROR,
+                                        _preprocess_call_id,
+                                        CoreToolStatus.ERROR,
                                         tool_name="skill_preprocess",
                                         error=str(_preprocess_err),
                                     )
-                                logger.warning("skill_preprocess_error", skill_id=_skill.id, error=str(_preprocess_err))
+                                logger.warning(
+                                    "skill_preprocess_error",
+                                    skill_id=_skill.id,
+                                    error=str(_preprocess_err),
+                                )
                         else:
                             if self.memory.message_store:
                                 self.memory.message_store.update_tool_state(
-                                    _preprocess_call_id, CoreToolStatus.REJECTED,
+                                    _preprocess_call_id,
+                                    CoreToolStatus.REJECTED,
                                     tool_name="skill_preprocess",
                                 )
                             logger.info("skill_preprocess_denied", skill_id=_skill.id)
@@ -1810,7 +1830,6 @@ class CodingAgent(AgentInterface):
                 file_references=file_references if file_references else None,
                 agent_state=_todo_state if _todo_state.get("todos") else None,
                 plan_mode_state=self.plan_mode_state,
-
                 iteration=0,
             )
             logger.debug(
@@ -2114,7 +2133,6 @@ class CodingAgent(AgentInterface):
                                         if _todo_state.get("todos")
                                         else None,
                                         plan_mode_state=self.plan_mode_state,
-
                                         iteration=iteration,
                                     )
                             except Exception as compact_err:
@@ -2681,7 +2699,12 @@ class CodingAgent(AgentInterface):
                         # Track tool usage for system reminders
                         if tool_name:
                             _reminder_tools_used.add(tool_name)
-                            if tool_name in ("task_create", "task_update", "task_link", "task_block"):
+                            if tool_name in (
+                                "task_create",
+                                "task_update",
+                                "task_link",
+                                "task_block",
+                            ):
                                 _reminder_last_task_tool_iter = iteration
                         if tool_name in ("task_create", "task_update", "task_link", "task_block"):
                             ui.notify_todos_updated(self._get_bead_todos())
@@ -2870,7 +2893,8 @@ class CodingAgent(AgentInterface):
                     iteration=iteration,
                     tools_used=_reminder_tools_used,
                     last_task_tool_iteration=_reminder_last_task_tool_iter,
-                    skills_exist=_skills_dir.is_dir() and any(p.is_dir() for p in _skills_dir.iterdir()),
+                    skills_exist=_skills_dir.is_dir()
+                    and any(p.is_dir() for p in _skills_dir.iterdir()),
                     working_directory=str(self.working_directory),
                 )
                 inject_reminders(current_context, _reminder_state, REMINDERS)
@@ -3409,7 +3433,10 @@ class CodingAgent(AgentInterface):
                         if key in result.metadata:
                             edit_meta[key] = result.metadata[key]
                 self.memory.message_store.update_tool_state(
-                    call_id, CoreToolStatus.SUCCESS, result=output, duration_ms=duration_ms,
+                    call_id,
+                    CoreToolStatus.SUCCESS,
+                    result=output,
+                    duration_ms=duration_ms,
                     extra_metadata=edit_meta or None,
                 )
             self.memory.add_tool_result(
@@ -3437,7 +3464,9 @@ class CodingAgent(AgentInterface):
 
             framed_content = _frame_tool_result(content_for_store, tc.function.name)
             if tc.function.name == "check_background_task":
-                framed_content += "\n\n[STOP] Do not call check_background_task again. Wait for the user to ask."
+                framed_content += (
+                    "\n\n[STOP] Do not call check_background_task again. Wait for the user to ask."
+                )
             outcome["tool_msg"] = {
                 "role": "tool",
                 "tool_call_id": call_id,

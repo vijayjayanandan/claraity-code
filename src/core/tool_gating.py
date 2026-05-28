@@ -111,10 +111,17 @@ class ToolGatingService:
     # Tools that access file paths and should prompt (not hard-block)
     # when targeting paths outside all workspace roots.
     # safety_reason is set so auto-approve cannot bypass the prompt.
-    _TOOLS_WITH_PATH = frozenset({
-        "read_file", "list_directory", "grep", "glob",
-        "write_file", "edit_file", "append_to_file",
-    })
+    _TOOLS_WITH_PATH = frozenset(
+        {
+            "read_file",
+            "list_directory",
+            "grep",
+            "glob",
+            "write_file",
+            "edit_file",
+            "append_to_file",
+        }
+    )
 
     def __init__(
         self,
@@ -364,7 +371,11 @@ class ToolGatingService:
                 continue
 
         # Path is outside all workspace roots — require approval
-        verb = "writing to" if tool_name in ("write_file", "edit_file", "append_to_file") else "accessing"
+        verb = (
+            "writing to"
+            if tool_name in ("write_file", "edit_file", "append_to_file")
+            else "accessing"
+        )
         return GateResult(
             action=GateAction.NEEDS_APPROVAL,
             safety_reason=(

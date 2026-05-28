@@ -516,9 +516,7 @@ class SdkTransport(McpTransport):
         self._shutdown = shutdown
         self._error = None
 
-        self._task = asyncio.ensure_future(
-            self._run_session(config, auth_headers, ready, shutdown)
-        )
+        self._task = asyncio.ensure_future(self._run_session(config, auth_headers, ready, shutdown))
 
         # Wait until the session is initialised or an error occurs
         try:
@@ -595,6 +593,7 @@ class SdkTransport(McpTransport):
             existing_client = await storage.get_client_info()
             if existing_client and existing_client.redirect_uris:
                 from urllib.parse import urlparse as _urlparse
+
                 parsed = _urlparse(str(existing_client.redirect_uris[0]))
                 if parsed.port:
                     preferred_port = parsed.port
@@ -628,7 +627,9 @@ class SdkTransport(McpTransport):
                 client_metadata=oauth_metadata,
                 storage=storage,
                 redirect_handler=self._oauth_redirect_handler,
-                callback_handler=lambda: self._await_oauth_callback(callback_server, callback_future),
+                callback_handler=lambda: self._await_oauth_callback(
+                    callback_server, callback_future
+                ),
                 timeout=300.0,
             )
             headers = dict(config.extra_headers)
@@ -636,6 +637,7 @@ class SdkTransport(McpTransport):
         # SSE endpoint vs streamable HTTP -- detected from URL suffix
         if config.server_url.rstrip("/").endswith("/sse"):
             from mcp.client.sse import sse_client
+
             ctx = sse_client(
                 url=config.server_url,
                 auth=auth,
@@ -646,6 +648,7 @@ class SdkTransport(McpTransport):
                 await self._init_session(config, read_stream, write_stream, ready, shutdown)
         else:
             from mcp.client.streamable_http import streamablehttp_client
+
             ctx = streamablehttp_client(
                 url=config.server_url,
                 auth=auth,
@@ -694,8 +697,8 @@ class SdkTransport(McpTransport):
             await session.initialize()
             self._session = session
             logger.info("sdk_transport_connected", server=config.name)
-            ready.set()           # unblock connect() -- uses local, not self._ready
-            await shutdown.wait() # hold open until disconnect() -- uses local
+            ready.set()  # unblock connect() -- uses local, not self._ready
+            await shutdown.wait()  # hold open until disconnect() -- uses local
             self._session = None
 
     # -- OAuth browser flow callbacks --
@@ -703,6 +706,7 @@ class SdkTransport(McpTransport):
     async def _oauth_redirect_handler(self, url: str) -> None:
         """Open browser for OAuth login."""
         import webbrowser
+
         logger.info("mcp_oauth_browser_open", url=url)
         try:
             webbrowser.open(url)
@@ -736,15 +740,19 @@ class SdkTransport(McpTransport):
                 state = params.get("state", [None])[0]
 
                 html = (
-                    "<html><body style='font-family:sans-serif;padding:40px'>"
-                    "<h2>Login successful!</h2>"
-                    "<p>You can close this tab and return to ClarAIty.</p>"
-                    "</body></html>"
-                ) if code else (
-                    "<html><body style='font-family:sans-serif;padding:40px'>"
-                    "<h2>Something went wrong</h2>"
-                    "<p>No authorization code received.</p>"
-                    "</body></html>"
+                    (
+                        "<html><body style='font-family:sans-serif;padding:40px'>"
+                        "<h2>Login successful!</h2>"
+                        "<p>You can close this tab and return to ClarAIty.</p>"
+                        "</body></html>"
+                    )
+                    if code
+                    else (
+                        "<html><body style='font-family:sans-serif;padding:40px'>"
+                        "<h2>Something went wrong</h2>"
+                        "<p>No authorization code received.</p>"
+                        "</body></html>"
+                    )
                 )
                 status = "200 OK" if code else "400 Bad Request"
                 response = (

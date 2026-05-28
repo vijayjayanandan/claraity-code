@@ -29,10 +29,7 @@ def validate_skill(skill_dir: Path) -> list[str]:
     # Main file naming convention
     main_file = skill_dir / f"skill-{dir_name}.md"
     if not main_file.is_file():
-        issues.append(
-            f"Missing main file 'skill-{dir_name}.md' "
-            f"(directory is '{dir_name}/')"
-        )
+        issues.append(f"Missing main file 'skill-{dir_name}.md' (directory is '{dir_name}/')")
         return issues  # Can't continue without main file
 
     # --- Read and parse ---
@@ -100,17 +97,23 @@ def validate_skill(skill_dir: Path) -> list[str]:
     if "tags" in fm:
         tags = fm["tags"]
         if not isinstance(tags, (list, str)):
-            issues.append(f"'tags' should be a list or comma-separated string, got {type(tags).__name__}")
+            issues.append(
+                f"'tags' should be a list or comma-separated string, got {type(tags).__name__}"
+            )
 
     if "arguments" in fm:
         args = fm["arguments"]
         if not isinstance(args, (list, str)):
-            issues.append(f"'arguments' should be a list or comma-separated string, got {type(args).__name__}")
+            issues.append(
+                f"'arguments' should be a list or comma-separated string, got {type(args).__name__}"
+            )
 
     if "allowed-tools" in fm:
         tools = fm["allowed-tools"]
         if not isinstance(tools, (list, str)):
-            issues.append(f"'allowed-tools' should be a list or space-separated string, got {type(tools).__name__}")
+            issues.append(
+                f"'allowed-tools' should be a list or space-separated string, got {type(tools).__name__}"
+            )
 
     if "disable-model-invocation" in fm:
         val = fm["disable-model-invocation"]
@@ -129,10 +132,7 @@ def validate_skill(skill_dir: Path) -> list[str]:
         if f"{subdir_name}/" in body:
             subdir_path = skill_dir / subdir_name
             if not subdir_path.is_dir():
-                issues.append(
-                    f"Body references '{subdir_name}/' but directory "
-                    f"does not exist"
-                )
+                issues.append(f"Body references '{subdir_name}/' but directory does not exist")
 
     # --- Shell command safety ---
     if "!`" in body or "```!" in body:

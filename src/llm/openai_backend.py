@@ -66,9 +66,7 @@ from .failure_handler import LLMFailureHandler
 # LiteLLM injects "[System: Empty message content sanitised to satisfy protocol]"
 # when proxying empty assistant content to Anthropic's API.
 # See: https://github.com/BerriAI/litellm/issues/19061
-_LITELLM_PLACEHOLDER_RE = re.compile(
-    r"\[System: Empty message content sanitised to satisfy \w+\]"
-)
+_LITELLM_PLACEHOLDER_RE = re.compile(r"\[System: Empty message content sanitised to satisfy \w+\]")
 
 
 class ThinkTagParser:
@@ -504,7 +502,11 @@ class OpenAIBackend(LLMBackend):
 
                 if chunk.choices and len(chunk.choices) > 0:
                     delta = chunk.choices[0].delta
-                    content = (self._strip_litellm_placeholder(delta.content) or "") if delta.content else ""
+                    content = (
+                        (self._strip_litellm_placeholder(delta.content) or "")
+                        if delta.content
+                        else ""
+                    )
                     finish_reason = chunk.choices[0].finish_reason
 
                     yield StreamChunk(
@@ -831,7 +833,9 @@ class OpenAIBackend(LLMBackend):
 
                     # Yield text content chunks - strip <think> tags
                     # (thinking suppressed in v1; StreamChunk has no thinking field)
-                    _content = self._strip_litellm_placeholder(delta.content) if delta.content else None
+                    _content = (
+                        self._strip_litellm_placeholder(delta.content) if delta.content else None
+                    )
                     if _content:
                         for kind, text in think_parser.feed(_content):
                             if kind == "text":
@@ -1072,7 +1076,9 @@ class OpenAIBackend(LLMBackend):
 
                     # Yield text content chunks - strip <think> tags
                     # (thinking suppressed in v1; StreamChunk has no thinking field)
-                    _content = self._strip_litellm_placeholder(delta.content) if delta.content else None
+                    _content = (
+                        self._strip_litellm_placeholder(delta.content) if delta.content else None
+                    )
                     if _content:
                         for kind, text in think_parser.feed(_content):
                             if kind == "text":
@@ -1351,7 +1357,9 @@ class OpenAIBackend(LLMBackend):
                     finish_reason = chunk.choices[0].finish_reason
 
                     # Emit text delta - parse <think> tags to separate reasoning
-                    _content = self._strip_litellm_placeholder(delta.content) if delta.content else None
+                    _content = (
+                        self._strip_litellm_placeholder(delta.content) if delta.content else None
+                    )
                     if _content:
                         for kind, text in think_parser.feed(_content):
                             if kind == "thinking":
@@ -1596,7 +1604,9 @@ class OpenAIBackend(LLMBackend):
                     finish_reason = chunk.choices[0].finish_reason
 
                     # Emit text delta - parse <think> tags to separate reasoning
-                    _content = self._strip_litellm_placeholder(delta.content) if delta.content else None
+                    _content = (
+                        self._strip_litellm_placeholder(delta.content) if delta.content else None
+                    )
                     if _content:
                         for kind, text in think_parser.feed(_content):
                             if kind == "thinking":

@@ -255,18 +255,27 @@ async def _run_commands_async(commands: str, cwd: Path) -> str:
             except asyncio.TimeoutError:
                 proc.kill()
                 await proc.wait()
-                parts.append(f"Command: `{cmd}`\nOutput:\n[Error: command timed out after {_SHELL_COMMAND_TIMEOUT}s]")
+                parts.append(
+                    f"Command: `{cmd}`\nOutput:\n[Error: command timed out after {_SHELL_COMMAND_TIMEOUT}s]"
+                )
                 logger.warning("skill_preprocess_timeout", command=cmd[:80])
                 continue
 
             output = (stdout_bytes or b"").decode("utf-8", errors="replace").strip()
             if len(output) > _MAX_COMMAND_OUTPUT:
-                output = output[:_MAX_COMMAND_OUTPUT] + f"\n[... truncated at {_MAX_COMMAND_OUTPUT // 1000}KB]"
+                output = (
+                    output[:_MAX_COMMAND_OUTPUT]
+                    + f"\n[... truncated at {_MAX_COMMAND_OUTPUT // 1000}KB]"
+                )
             stderr = (stderr_bytes or b"").decode("utf-8", errors="replace").strip()
             if stderr:
                 label = "[Warnings]" if proc.returncode == 0 else "[Errors]"
-                stderr_capped = stderr[:_MAX_COMMAND_OUTPUT] if len(stderr) > _MAX_COMMAND_OUTPUT else stderr
-                output = f"{output}\n{label}\n{stderr_capped}" if output else f"{label}\n{stderr_capped}"
+                stderr_capped = (
+                    stderr[:_MAX_COMMAND_OUTPUT] if len(stderr) > _MAX_COMMAND_OUTPUT else stderr
+                )
+                output = (
+                    f"{output}\n{label}\n{stderr_capped}" if output else f"{label}\n{stderr_capped}"
+                )
             parts.append(f"Command: `{cmd}`\nOutput:\n{output}")
             logger.info("skill_preprocess_command", command=cmd[:80], exit_code=proc.returncode)
         except asyncio.CancelledError:

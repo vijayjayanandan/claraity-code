@@ -139,7 +139,9 @@ def _workspace_hint(searched_path: Path | None) -> str:
         return ""
 
     other = [str(r) for r in roots[1:]]
-    return f"\n(Workspace also contains: {', '.join(other)} -- search these with file_path if needed)"
+    return (
+        f"\n(Workspace also contains: {', '.join(other)} -- search these with file_path if needed)"
+    )
 
 
 def validate_regex_safety(pattern: str, max_length: int = 500) -> None:
@@ -306,9 +308,7 @@ class GrepTool(Tool):
 
             # Validate path for security (prevent path traversal)
             try:
-                search_path = validate_path_security(
-                    file_path, allow_files_outside_workspace=True
-                )
+                search_path = validate_path_security(file_path, allow_files_outside_workspace=True)
             except ValueError as e:
                 return ToolResult(
                     tool_name=self.name, status=ToolStatus.ERROR, output=None, error=str(e)
@@ -795,9 +795,7 @@ class GlobTool(Tool):
 
             # Validate path for security (prevent path traversal)
             try:
-                search_path = validate_path_security(
-                    file_path, allow_files_outside_workspace=True
-                )
+                search_path = validate_path_security(file_path, allow_files_outside_workspace=True)
             except ValueError as e:
                 return ToolResult(
                     tool_name=self.name, status=ToolStatus.ERROR, output=None, error=str(e)

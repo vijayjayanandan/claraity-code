@@ -281,4 +281,3 @@ class SpecialToolHandlers:
 
         except asyncio.CancelledError:
             return ("Plan approval was cancelled.", True)
-

@@ -23,7 +23,9 @@ class LLMBackendType(str, Enum):
     LLAMACPP = "llamacpp"
     OPENAI = "openai"  # Deprecated alias -- normalised to OPENAI_COMPATIBLE on load
     OPENAI_COMPATIBLE = "openai_compatible"  # Generic OpenAI-compatible API (vLLM, LocalAI, etc.)
-    OPENAI_NATIVE = "openai_native"  # Native OpenAI API (api.openai.com) -- o-series + Responses API
+    OPENAI_NATIVE = (
+        "openai_native"  # Native OpenAI API (api.openai.com) -- o-series + Responses API
+    )
     ANTHROPIC = "anthropic"  # Native Anthropic Messages API
 
 

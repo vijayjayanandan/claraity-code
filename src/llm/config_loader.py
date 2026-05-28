@@ -33,9 +33,9 @@ SYSTEM_CONFIG_PATH = os.path.join(SYSTEM_CONFIG_DIR, "config.yaml")
 DEFAULT_CONFIG_PATH = SYSTEM_CONFIG_PATH
 
 VALID_BACKEND_TYPES = {
-    "openai",             # Deprecated alias -- normalised to openai_compatible on load
+    "openai",  # Deprecated alias -- normalised to openai_compatible on load
     "openai_compatible",  # Generic OpenAI-compatible API (vLLM, LocalAI, llama.cpp, Groq, etc.)
-    "openai_native",      # Native OpenAI API (api.openai.com) -- o-series + Responses API
+    "openai_native",  # Native OpenAI API (api.openai.com) -- o-series + Responses API
     "vllm",
     "localai",
     "llamacpp",
@@ -129,7 +129,9 @@ class LLMConfigData:
     top_p: float = 0.95
     thinking_budget: int | None = None  # Extended thinking token budget (Claude, etc.)
     reasoning_effort: str | None = None  # "low", "medium", "high" -- OpenAI o-series only
-    reasoning_summary: bool = False  # Send reasoning.summary="auto" -- requires OpenAI org verification
+    reasoning_summary: bool = (
+        False  # Send reasoning.summary="auto" -- requires OpenAI org verification
+    )
     subagents: dict[str, SubAgentLLMOverride] = field(default_factory=dict)
     limits: LimitsConfig = field(default_factory=LimitsConfig)
     auto_approve: AutoApproveConfig = field(default_factory=AutoApproveConfig)
@@ -247,7 +249,9 @@ def load_llm_config(config_path: str = DEFAULT_CONFIG_PATH) -> LLMConfigData:
         elif str(re_val).lower() in ("low", "medium", "high"):
             config.reasoning_effort = str(re_val).lower()
         else:
-            _safe_stderr(f"Invalid reasoning_effort '{re_val}', must be low/medium/high -- ignoring")
+            _safe_stderr(
+                f"Invalid reasoning_effort '{re_val}', must be low/medium/high -- ignoring"
+            )
 
     # -- reasoning_summary (bool, opt-in -- requires OpenAI org verification) --
     if "reasoning_summary" in llm_data:

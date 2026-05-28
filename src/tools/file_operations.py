@@ -284,9 +284,7 @@ class ReadFileTool(FileOperationTool):
             # Reads allow outside-workspace paths because the gating service
             # enforces an approval prompt before execution reaches here.
             try:
-                path = self._validate_path(
-                    file_path, must_exist=True, allow_outside_workspace=True
-                )
+                path = self._validate_path(file_path, must_exist=True, allow_outside_workspace=True)
             except ValueError as e:
                 return ToolResult(
                     tool_name=self.name, status=ToolStatus.ERROR, output=None, error=str(e)
@@ -725,9 +723,7 @@ class EditFileTool(FileOperationTool):
             # Outside-workspace edits are allowed here because the gating
             # service enforces an approval prompt before execution.
             try:
-                path = self._validate_path(
-                    file_path, must_exist=True, allow_outside_workspace=True
-                )
+                path = self._validate_path(file_path, must_exist=True, allow_outside_workspace=True)
             except ValueError as e:
                 return ToolResult(
                     tool_name=self.name, status=ToolStatus.ERROR, output=None, error=str(e)

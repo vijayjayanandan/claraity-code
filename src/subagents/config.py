@@ -34,9 +34,9 @@ logger = logging.getLogger(__name__)
 
 
 VALID_BACKEND_TYPES = {
-    "openai",             # Deprecated alias -- normalised to openai_compatible at runtime
+    "openai",  # Deprecated alias -- normalised to openai_compatible at runtime
     "openai_compatible",  # Generic OpenAI-compatible API
-    "openai_native",      # Native OpenAI API (api.openai.com)
+    "openai_native",  # Native OpenAI API (api.openai.com)
     "vllm",
     "localai",
     "llamacpp",

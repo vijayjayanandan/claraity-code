@@ -981,6 +981,7 @@ class KnowledgeExportTool(Tool):
 
         try:
             from src.claraity.export_html import generate
+
             out = generate()
             results.append(f"HTML: {out}")
         except Exception as e:
