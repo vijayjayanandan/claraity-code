@@ -320,7 +320,7 @@ class OpenAINativeBackend(LLMBackend):
                 # Requires OpenAI org verification -- opt-in only.
                 reasoning["summary"] = "auto"
             params["reasoning"] = reasoning
-        
+
         # Responses API uses `stream` at the top level
         if stream:
             params["stream"] = True
@@ -338,7 +338,7 @@ class OpenAINativeBackend(LLMBackend):
             # Responses API uses tool_choice differently; pass through if not "auto"
             if tool_choice != "auto":
                 params["tool_choice"] = tool_choice
-                
+
         # Strip Anthropic-only kwargs that must not reach the Responses API
         kwargs.pop("thinking_budget", None)
 
