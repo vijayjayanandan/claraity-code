@@ -142,7 +142,7 @@ def _collect_async_gen(coro_or_agen):
         async for item in coro_or_agen:
             results.append(item)
         return results
-    return asyncio.get_event_loop().run_until_complete(_collect())
+    return asyncio.run(_collect())
 
 
 class _FakeAsyncStreamCtx:
