@@ -1,0 +1,96 @@
+This is Chapter 2: The LLM Abstraction and Context Manager.
+
+We are adding two things: (1) a provider abstraction layer so the agent can
+switch between FuelIX, OpenAI, Azure, or Ollama by changing one environment
+variable, and (2) a ContextManager that owns the growing messages chain --
+making the stateless LLM / stateful agent split explicit in code.
+
+Please follow the rules in your memory to plan and track the subtasks, then
+build the following:
+
+1. `llm/base.py`
+   Define a dataclass called LLMResponse with four fields: content (str),
+   finish_reason (str), total_tokens (int), tool_calls (list, default None).
+   This is the single return type every LLM backend must produce.
+
+   Create an abstract base class called LLMBackend with:
+   - Abstract method: complete(messages, config, tools=None) -> LLMResponse
+   - Abstract method: count_tokens(messages) -> int
+   These two methods are the only contract the rest of the agent ever uses.
+   No other file will import the OpenAI SDK directly after this chapter.
+   Use get_logger from observability/logger.py.
+
+2. `llm/openai_backend.py`
+   A concrete class called OpenAIBackend that extends LLMBackend:
+   - Reads FUELIX_API_KEY and FUELIX_API_BASE_URL from environment.
+   - Initializes the OpenAI client pointing at the FuelIX endpoint.
+   - Implements complete(): calls the API, logs request (model, message
+     count, temperature) and response (finish_reason, total_tokens),
+     returns LLMResponse.
+   - Implements count_tokens(): word-based estimate for now. Add comment:
+     "Will be replaced with tiktoken in a later chapter for accuracy."
+   - Handles three errors explicitly with clear log messages and re-raise:
+     1. Authentication error
+     2. Connection error
+     3. Rate limit error
+
+3. `prompts/system_prompt.py`
+   A function called get_system_prompt() returning the full system prompt
+   string for the Benefits Navigator:
+   - Identity: Telus Health Benefits Navigator
+   - Purpose: help employees with benefits, coverage, claims
+   - Boundaries: always accurate, never guess, say "I don't know" when
+     uncertain, never give medical advice
+   - Tone: professional, empathetic, clear
+   Use get_logger to log when the system prompt is loaded including its
+   character count.
+
+4. `core/context_manager.py`
+   A class called ContextManager that owns the entire messages chain.
+   Methods:
+   - __init__(system_prompt, config): initializes messages list with
+     the system message. Logs initialization.
+   - add_user_message(content): appends user role message, logs it.
+   - add_assistant_message(content, tool_calls=None): appends assistant
+     role message. If tool_calls provided, includes them in the message.
+   - add_tool_result(call_id, tool_name, content): appends tool role
+     message with call_id matching the assistant's request. Logs it.
+   - get_messages() -> list: returns the full messages list. This is
+     what gets sent to the LLM on every call.
+   - token_estimate() -> int: returns word-based token estimate of the
+     current messages list.
+   - message_count() -> int: returns number of messages in the chain.
+   Use get_logger throughout.
+
+5. Refactor `main.py`
+   Replace raw messages list with ContextManager. Replace raw OpenAI
+   SDK call with OpenAIBackend. Import get_system_prompt.
+   The execution now reads:
+     ctx = ContextManager(get_system_prompt(), config)
+     ctx.add_user_message(user_question)
+     response = backend.complete(ctx.get_messages(), config)
+     ctx.add_assistant_message(response.content)
+   File gets shorter and the stateless/stateful split is obvious.
+   Keep all console helpers from core/console.py.
+
+6. Verify `.env.example`
+   Confirm FUELIX_API_KEY and FUELIX_API_BASE_URL only.
+
+7. `tests/test_llm_abstraction.py`
+   NO real API calls. Tests:
+   - LLMResponse stores all fields, tool_calls defaults to None
+   - LLMBackend is abstract -- TypeError if instantiated directly
+   - OpenAIBackend instantiates with correct env vars set
+   - get_system_prompt() returns string containing "Benefits Navigator"
+   - ContextManager initializes with one system message
+   - add_user_message: message count increases, role is "user"
+   - add_assistant_message: role is "assistant"
+   - add_tool_result: role is "tool", call_id is preserved
+   - get_messages: returns list starting with system message
+   - Full chain: system -> user -> assistant -> tool -- assert get_messages()
+     returns all 4 messages in correct order.
+
+After completing all subtasks, apply your formatting rules from memory.
+For "WHAT CHANGED", use two analogies:
+1. "The Power Socket" for LLMBackend.
+2. "The Chief of Staff" for ContextManager.

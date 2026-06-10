@@ -1,0 +1,57 @@
+This is Chapter 7: The Voice (Streaming UX). Right now, the agent pauses for
+seconds while the LLM thinks, then prints a wall of text. It feels dead.
+We are going to stream the output token-by-token so it feels alive.
+
+Please follow the rules in your memory to plan and track the subtasks, then
+build the following:
+
+1. Update `llm/base.py`
+   Define a new dataclass `ProviderDelta`:
+   - `text_delta: str | None = None`
+   - `tool_call_delta: dict | None = None` (used for buffering JSON chunks)
+   - `finish_reason: str | None = None`
+   - `usage: dict | None = None`
+   Add abstract method `stream(messages, config, tools=None) -> Iterator[ProviderDelta]`
+   to `LLMBackend`. This replaces `complete()`.
+
+2. Update `llm/openai_backend.py`
+   Implement the `stream()` method:
+   - Call OpenAI with `stream=True`.
+   - Iterate over the chunks yielded by the API.
+   - For text chunks, yield `ProviderDelta(text_delta=chunk.content)`.
+   - For tool chunks, yield `ProviderDelta(tool_call_delta=chunk.tool_calls[0])`.
+   - When finished, yield the final `finish_reason` and `usage`.
+
+3. Create `core/streaming.py`
+   A class called `StreamingPipeline`. This is the single canonical parser.
+   - `__init__(backend: LLMBackend)`
+   - `run(messages, config, tools) -> LLMResponse`:
+     1. Iterate over `backend.stream()`.
+     2. Maintain a string buffer for text and a dictionary buffer for tool calls.
+     3. When a `text_delta` arrives, yield it immediately.
+     4. When a `tool_call_delta` arrives, SILENTLY buffer the JSON arguments. Do not yield them.
+     5. When the stream ends, parse the buffered tool JSON.
+     6. Return a finalized `LLMResponse` object identical to what `complete()` used to return.
+
+4. Update `core/console.py`
+   Add a helper `print_text_stream(delta: str)` that uses `print(delta, end="", flush=True)`
+   so tokens appear on the same line instantly.
+
+5. Update `core/agent.py`
+   In the orchestration loop (`run_turn`):
+   - Replace `backend.complete()` with `pipeline = StreamingPipeline(self.backend)`.
+   - Iterate over `pipeline.run()`. If it yields a string, pass it to `print_text_stream()`.
+   - The pipeline still returns the final `LLMResponse` at the end, so the rest of the
+     tool loop logic (gating, execution, iteration cap) stays exactly the same.
+
+6. Write `tests/test_streaming.py`
+   - Test `StreamingPipeline` separates text and tool chunks correctly. Mock a stream
+     that yields text, then tool chunks, and assert it yields the text but silently
+     buffers the tools into a valid `LLMResponse`.
+
+After completing all subtasks, apply your formatting rules from memory.
+For "WHAT CHANGED", use the analogy of "The Interpreter." Before, the LLM
+wrote a letter and sent it. Now, it speaks live to an Interpreter (the StreamingPipeline).
+The Interpreter translates normal speech directly to you, but if the LLM starts speaking
+JSON (tool calls), the Interpreter silently translates it in the background before
+handing it to the agent.

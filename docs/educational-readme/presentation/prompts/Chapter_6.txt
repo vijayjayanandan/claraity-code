@@ -1,0 +1,71 @@
+This is Chapter 6: The Conductor (Agent Loop). Right now, the tool loop
+is a script block inside main.py. It has no budget tracking, no proper
+state management, and mixes UI concerns (input/print) with agent
+orchestration logic. We are separating these concerns to match production
+architecture.
+
+Please follow the rules in your memory to plan and track the subtasks, then
+build the following:
+
+1. Update `core/config.py`
+   Add `MAX_TOOL_CALLS_PER_TURN = 20` to `LLMConfig`.
+   Add a comment: "This is a hard budget cap. A misbehaving LLM that gets
+   caught in a loop of trying and failing tools will be terminated before it
+   runs up a massive API bill."
+
+2. Create `core/agent.py`
+   Define `ToolLoopState` dataclass:
+   - `iteration: int = 0`
+   - `total_tool_calls: int = 0`
+   - `aborted: bool = False`
+
+   Define `BenefitsAgent` class:
+   - `__init__(backend: LLMBackend, tools: list[Tool], gating: ToolGatingService, config: LLMConfig)`
+   - Method `run_turn(self, context: ContextManager)`:
+     This is the orchestration loop. It replaces the logic currently sitting in main.py.
+     1. Initialize `state = ToolLoopState()`.
+     2. `while state.iteration < self.config.MAX_TOOL_ITERATIONS:`
+     3. Call `print_iteration()`.
+     4. Call `self.backend.complete()`.
+     5. Call `print_llm_decision()`.
+     6. If `finish_reason` is 'stop': add assistant message to context,
+        print the response, and return.
+     7. If `finish_reason` is 'tool_calls':
+        - Check budgets: if `state.total_tool_calls >= self.config.MAX_TOOL_CALLS_PER_TURN`,
+          print an error, log a warning, set `aborted=True`, and return.
+        - Add assistant message to context (with tool_calls).
+        - For each tool call:
+          - Increment `state.total_tool_calls`.
+          - Print tool call.
+          - Find tool in registry.
+          - Evaluate with `self.gating.evaluate()`.
+          - If approved, execute. If denied, frame rejection.
+          - Print tool result.
+          - Add tool result to context.
+        - Increment `state.iteration`.
+   - Use `get_logger()` throughout.
+
+3. Refactor `main.py`
+   This file is now just the UI layer. It knows nothing about tool execution loops.
+   - Initialize `LLMConfig`, `OpenAIBackend`, `ALL_TOOLS`, and `ToolGatingService`.
+   - Initialize `agent = BenefitsAgent(backend, ALL_TOOLS, gating_service, config)`.
+   - Initialize `ContextManager`.
+   - In the `while True:` UI loop:
+     1. Get user input.
+     2. Call `ctx.add_user_message(user_input)`.
+     3. Call `agent.run_turn(ctx)`.
+
+4. Write `tests/test_agent.py`
+   - NO real API calls. Mock `LLMBackend.complete`.
+   - Test that `run_turn` exits cleanly when `finish_reason` is 'stop'.
+   - Test that `run_turn` correctly increments `total_tool_calls` when tools are executed.
+   - Test the budget cap: mock `backend.complete` to always return `tool_calls`.
+     Assert that `run_turn` aborts when `MAX_TOOL_CALLS_PER_TURN` is reached,
+     rather than looping forever.
+
+After completing all subtasks, apply your formatting rules from memory.
+For "WHAT CHANGED", use the analogy of "The Conductor."
+Before this chapter, the UI (the concert hall) and the brain were tangled
+together. Now, main.py is just the UI, and BenefitsAgent is the Conductor.
+The Conductor enforces the budget so the orchestra doesn't play forever
+and bankrupt the venue.

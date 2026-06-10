@@ -1,0 +1,190 @@
+This is Chapter 9: The Summarizer (Context Compaction).
+
+The agent has been running great, but there is a silent time bomb: every
+message we add to the conversation makes the next LLM call more expensive and
+slower. Eventually the context window fills up completely and the API call
+fails. A production agent does not crash when this happens -- it summarizes
+its own memory and keeps going.
+
+Please follow the rules in your memory to plan and track the subtasks, then
+build the following:
+
+
+## What We Are Building and Why
+
+Every LLM has a context window -- a limit on how much text it can read in a
+single call. Think of it as the model's desk: it can only hold so many papers
+at once. As a conversation grows, more and more papers pile up on the desk.
+Eventually the desk is full and the model cannot accept any more. When that
+happens, the API call fails with an error.
+
+The solution is context compaction: when the desk gets too full, we pick up
+the older papers, write a tight summary of what they contained, file the
+originals away permanently, and put just the summary back on the desk. The
+agent continues with a clear desk, full memory of what matters, and nothing
+lost.
+
+This chapter builds that compaction system. There are several important design
+decisions baked into it, explained below.
+
+
+### 1. Add the Compaction Threshold to the Configuration
+
+Add a new setting to the configuration object: the compaction threshold,
+expressed as a decimal between 0 and 1 (default: 0.85, meaning 85%).
+
+Add a comment in the code explaining how this threshold is used: when the
+conversation consumes 85% of the model's context window, we summarize the
+older messages and replace them with a compact summary.
+
+Also explain in the comment how we measure usage: the LLM API reports the
+exact number of input tokens it processed after every call, in the usage data
+of the response. We use that real number -- not an estimate -- as the
+numerator. The denominator is the context window size that was configured in
+Chapter 1 (the `MAX_CONTEXT_TOKENS` setting). This is why it was important to
+configure the context window size from the beginning: Chapter 9 depends on it.
+
+
+### 2. Create the Summarizer
+
+Create a new component in the memory layer called `PrioritizedSummarizer`.
+Its job is to take a list of messages and produce a compact summary that
+preserves everything the agent needs to continue the conversation effectively.
+
+The summarizer should accept the LLM backend when created, and a token budget
+that caps how long the summary should be (default: 6000 tokens).
+
+When asked to generate a summary, it should:
+
+**Step 1: Format the messages into a readable transcript.**
+Convert the list of messages into a human-readable format that the LLM can
+understand.
+
+**Step 2: Make a real LLM call to generate the summary.**
+The LLM summarizes itself. This is intentional -- who better to summarize a
+conversation than the model that had it? Use the non-streaming `complete()`
+method for this call (not the streaming pipeline).
+
+The summarization prompt must be tailored for the benefits domain. It should
+instruct the LLM to produce a summary with these six sections, in this order:
+
+- **Employee Goal**: What is the employee trying to accomplish? What benefit,
+  coverage, or claim are they asking about? Be specific (e.g., "Employee wants
+  to submit a physiotherapy claim for $350").
+
+- **All Employee Messages**: Include ALL employee messages in chronological
+  order, verbatim. These are the ground truth of intent. Format as a numbered
+  list with the full text of each message. This section must never be
+  abbreviated or paraphrased.
+
+- **Benefits Context**: Any specific plan details, coverage amounts, claim
+  numbers, or dates that came up. Claim numbers and dollar amounts must be
+  preserved exactly -- never rounded or approximated.
+
+- **Clarifications Made**: Any corrections mid-conversation (e.g., the employee
+  said "dental" then corrected to "vision"). This prevents the agent from
+  repeating the same misunderstanding after compaction.
+
+- **Pending Actions**: Any actions discussed but not yet completed (e.g.,
+  "employee was about to submit claim CLM-XXXX"). If nothing is pending,
+  write "None."
+
+- **Current State**: What was just answered or completed? What is the logical
+  next step?
+
+The prompt should also include these guidelines for the LLM:
+- Preserve employee messages verbatim -- they are the ground truth of intent
+- Always preserve claim numbers, dollar amounts, and dates exactly
+- Never guess or infer coverage details that were not explicitly stated
+- Keep the summary focused and actionable
+- Target approximately the configured token budget in length
+
+The summary should be returned as clean markdown.
+
+**Step 3: Handle failure gracefully.**
+If the LLM call fails for any reason, fall back to a deterministic summary:
+join all user messages verbatim with their role labels. This fallback is
+intentionally simple -- it is not as good as the LLM summary, but it is
+better than crashing. Log a warning when the fallback is used so the operator
+knows the LLM summarization failed.
+
+
+### 3. Record Compaction Events in the Session Store
+
+Add a new method to the session store from Chapter 5. When compaction happens,
+this method should write a special entry to the JSONL ledger that records the
+full summary text, marked with metadata indicating it is a compaction event.
+
+This is a critical design principle: **nothing is ever lost on disk**. Even
+though the in-memory context window shrinks (the old messages are replaced by
+the summary), the original messages are already in the JSONL ledger from when
+they were first written. The compaction event adds the summary to the ledger
+as well. Anyone who needs to reconstruct the full conversation can read the
+JSONL file -- the in-memory context is just a working copy.
+
+
+### 4. Add Compaction Logic to the Agent Orchestrator
+
+After the streaming pipeline returns its final response object for each LLM
+call, add a compaction check. The check should:
+
+**Measure real token usage**: Read the input token count from the response's
+usage data. This is the number the LLM API actually reported -- not an
+estimate. Divide it by the configured context window size to get the
+utilization percentage.
+
+**Trigger compaction at the threshold**: If utilization is at or above 85%
+(the configured threshold):
+1. Print a message to the console: "[System] Context at {percentage} --
+   summarizing memory..."
+2. Identify which messages to summarize: everything in the context except the
+   system prompt and the last few recent exchanges (keep the most recent
+   messages intact so the agent does not lose track of what it was just doing).
+   Only the older middle section gets summarized.
+3. Call the summarizer with those older messages
+4. Record the compaction event in the session store (so nothing is lost on disk)
+5. Replace the old messages in the context with a single summary message
+   (a system-role message containing the summary text)
+6. Print: "[System] Memory compacted. Continuing..."
+
+**Handle compaction failure safely**: Add a flag to the agent that tracks
+whether compaction has already failed in this turn. If the compaction process
+raises an exception:
+- Set the flag to true
+- Log a warning
+- Print: "[Warning] Compaction failed. Consider starting a new session if
+  responses degrade."
+- Do not crash. Continue the conversation without compacting.
+- Do not attempt compaction again in the same turn (the flag prevents this).
+  This cooldown prevents the agent from repeatedly trying and failing to
+  compact on every subsequent LLM call within the same turn.
+
+
+### 5. Tests
+
+Write unit tests that verify the compaction system works correctly without
+making any real API calls. Mock the LLM backend to control what it returns.
+
+Tests should cover:
+- The summarizer calls the backend and returns the backend's response content
+  as the summary
+- The fallback: if the backend raises an exception, the summarizer returns a
+  non-empty string (the deterministic fallback) rather than crashing
+- The threshold check: mock a response with usage data showing input tokens
+  at 90% of the configured context window size, and verify that the compaction
+  path is triggered in the agent's `run_turn` method
+- The session store compaction event: verify that calling the new method writes
+  a line to the JSONL file with the compaction event marker in the metadata
+
+
+---
+
+After completing all subtasks, apply your formatting rules from memory.
+For "WHAT CHANGED", use the analogy of "The Filing Cabinet." Before this
+chapter, the agent kept every single piece of paper on its desk (the context
+window) until the desk collapsed. Now, when the desk hits 85% full, the
+Summarizer picks up the older papers, writes a tight executive summary
+(using the LLM itself -- who better to summarize a conversation than the
+LLM?), files the originals away in the JSONL ledger permanently, and places
+just the summary back on the desk. The agent continues with a clear desk,
+full memory of what matters, and nothing lost.

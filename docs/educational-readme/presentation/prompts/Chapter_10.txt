@@ -1,0 +1,26 @@
+This is Chapter 10: The Connector (MCP - External Tools). An agent is only as good as what it can interact with. Instead of hardcoding every tool, we will implement the Model Context Protocol (MCP) to let the agent discover tools dynamically.
+
+Please follow the rules in your memory to plan and track the subtasks, then build the following:
+
+1. Create `integrations/mcp_client.py`
+   Define an `McpConnectionManager`:
+   - Ability to connect to a local MCP server via stdio (use `subprocess.Popen` to run an external script).
+   - Implement `get_tools()` which sends a JSON-RPC request to the MCP server to list its available tools.
+   - Implement `call_tool(name, args)` which sends the execution request and returns the result.
+
+2. Create `tools/mcp_bridge.py`
+   Define a `DynamicMCPTool` that inherits from your `ToolBase`.
+   - This tool is a proxy. It takes the schema provided by the MCP server and registers it with the agent.
+   - Its `execute` method simply forwards the call to `McpConnectionManager.call_tool()`.
+
+3. Update `core/agent.py`
+   - In `_register_tools()`, initialize the `McpConnectionManager` (connect it to a dummy test script for now).
+   - Fetch tools from the manager and dynamically add `DynamicMCPTool` instances to the agent's available tools list before calling the LLM.
+
+4. Create `tests/dummy_mcp_server.py`
+   - A simple python script that reads JSON-RPC from `sys.stdin` and writes to `sys.stdout`.
+   - It should expose one tool: `get_weather(location: str) -> str`.
+   - Write a test in `tests/test_mcp.py` verifying the agent can discover and execute this tool via the bridge.
+
+After completing all subtasks, apply your formatting rules from memory.
+For "WHAT CHANGED", use the analogy of "The Universal Plug." Before, every tool had to be hardwired directly into the agent's brain (hardcoded Python). Now, we've installed a universal USB port (MCP). You can plug in any external program, it tells the agent "Here is what I can do," and the agent can instantly use it without any new hardcoded logic.

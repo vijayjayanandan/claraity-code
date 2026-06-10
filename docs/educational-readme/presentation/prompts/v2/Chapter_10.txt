@@ -1,0 +1,121 @@
+This is Chapter 10: The Connector (MCP).
+
+The agent is fully functional and safe, but its hands are tied to its own
+codebase. Its tools use hardcoded sample data. In the real world, benefits
+data lives in external databases and HR systems, and a developer should not
+have to write custom integration code for every new system.
+
+Please follow the rules in your memory to plan and track the subtasks, then
+build the following:
+
+
+## What We Are Building and Why
+
+Instead of writing custom code to integrate with databases or APIs, we are
+going to adopt MCP (Model Context Protocol). MCP is an open standard that
+allows any external system to expose tools to an AI agent in a universal way.
+
+We will build two MCP servers -- both external to the agent process -- and
+update the agent to connect to them dynamically. One runs locally as a
+subprocess over stdio (auto-started by the agent). The other runs over HTTP
+and must be started manually before launching the agent.
+
+The agent will no longer own the benefits data. It will ask the external
+servers to do the work.
+
+
+### 1. Build a Local MCP Server (The Plan Database)
+
+Create a new directory called `benefits_mcp` and make it a Python package
+(add an `__init__.py`) so it can be launched with `python -m`. Inside it,
+build a local MCP server using the official MCP Python SDK (`mcp` package).
+Name it `plan_server.py`.
+
+This server simulates a secure internal database containing plan details. It
+should use stdio transport (the default for local servers in the MCP SDK).
+
+Move the logic from the three read-only hardcoded tools from Chapter 3 into
+this server as MCP tools using the `@server.tool()` decorator:
+- `lookup_coverage` (benefit category, optional plan type)
+- `search_faq` (search query)
+- `check_claim_status` (claim number)
+
+Keep the same sample data that was in the hardcoded tools. The tool names,
+descriptions, and parameter names must stay identical to the originals so the
+LLM continues to call them correctly.
+
+
+### 2. Build a Remote MCP Server (The Submission API)
+
+Inside `benefits_mcp`, build a second MCP server. Name it `submission_server.py`.
+
+This server simulates a cloud API for processing write actions. Use FastAPI,
+uvicorn, and the MCP SDK's SSE server transport to expose tools over HTTP on
+a fixed port (e.g., `http://localhost:8001/sse`). The server must check for a
+static API key in the `Authorization` header and reject requests without it
+with a 401 response.
+
+Move the logic from the hardcoded `submit_claim` tool from Chapter 4 into
+this server:
+- `submit_claim` (benefit category, amount, date of service)
+
+This server must be started manually before running the agent. Document the
+start command clearly in the setup instructions.
+
+
+### 3. Update the Agent to Use MCP
+
+The agent needs to connect to both servers at startup and merge their tools
+into its existing registry.
+
+**The Configuration:**
+Create an `mcp_settings.json` file in the project root. Configure the local
+server using a `command` (e.g., `python -m benefits_mcp.plan_server`).
+Configure the remote server using a `serverUrl` (e.g.,
+`http://localhost:8001/sse`) and store the API key in `.env` -- never
+hardcode it.
+
+**The Client:**
+In the core layer, create an `McpClient` that uses the official MCP Python
+SDK. At startup, it should:
+1. Read `mcp_settings.json`
+2. Connect to both servers (stdio for the local one, SSE for the remote one)
+3. Ask each server what tools they have (tool discovery)
+4. Wrap each discovered tool as a standard native tool using the Bridge
+   pattern, so it looks exactly like the old hardcoded tools: same name,
+   same parameter schema, same plain-English description, and the Chapter 3
+   security framing applied to every result before it is returned to the LLM
+5. For `submit_claim`, the wrapped native tool must set `requires_approval=True`
+   so the Chapter 4 GatingService continues to intercept it and ask for human
+   approval -- exactly as it did before
+6. Register all wrapped tools in the tool registry
+
+**Migration:**
+Remove the in-process tool implementations from the agent's local registry
+after their logic has been moved into the MCP servers. The logic itself (the
+sample data, the return values) now lives in the servers -- do not delete it,
+move it. The agent loop in `main.py` and the GatingService do not need to
+change at all.
+
+
+### 4. Tests
+
+Write unit tests that verify the MCP bridge works without launching the real
+servers. Tests should cover:
+- Tool Discovery: mock an MCP client returning tool definitions for the three
+  read-only tools, and verify the agent wraps them as native tools and adds
+  them to the registry with matching names and schemas
+- Gating continuity: verify that the wrapped `submit_claim` tool has
+  `requires_approval=True` so the GatingService will intercept it correctly
+
+
+---
+
+After completing all subtasks, apply your formatting rules from memory.
+For "WHAT CHANGED", use the analogy of "The Universal Plug." Before, the agent
+had its tools permanently welded to its hands -- changing them meant editing
+the agent's code. Now, it has universal ports. It does not matter who built
+the tool, what language it is written in, or whether it runs on your laptop or
+in the cloud -- as long as it speaks MCP, the agent can use it instantly. The
+gating system did not need to change at all, because the bridge made the new
+tools look exactly like the old ones.

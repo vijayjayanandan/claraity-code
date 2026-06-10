@@ -1,0 +1,99 @@
+This is Chapter 5: Session Persistence.
+
+Right now, the agent works perfectly in memory, but when the script ends, the
+conversation vanishes. A production agent needs a permanent record of past
+conversations. We are also going to turn this from a single-question script
+into an interactive CLI application.
+
+Please follow the rules in your memory to plan and track the subtasks, then
+build the following:
+
+
+## What We Are Building and Why
+
+Every conversation the agent has currently exists only in RAM. The moment the
+Python script exits, everything is gone -- the questions asked, the tools
+called, the answers given. If the agent crashes mid-conversation, there is no
+way to know what happened or recover where it left off.
+
+We are adding a persistence layer that writes every message to disk the moment
+it is added to the conversation. We are also turning the script into a proper
+interactive application that keeps running until the user decides to quit.
+
+
+### 1. A Session Store (The Permanent Ledger)
+
+Create a session store component in the memory layer of the project. Its job
+is to write every message to a file on disk immediately and permanently.
+
+The store should:
+- Accept a session ID when created and use it to name the file. Store files
+  in a `.claraity/sessions/` directory. Create that directory automatically
+  if it does not exist.
+- Write each message as a single JSON object on its own line (this format is
+  called JSONL -- JSON Lines). Each entry must include: the role (who said it),
+  the content (what was said), the timestamp (when it was said), and any
+  metadata (extra context like tool call IDs).
+- Flush the file to disk immediately after every write. This is the crash-safety
+  guarantee: even if the process dies a millisecond after writing, the message
+  is already on disk.
+
+Add a note in the file explaining why JSONL is used instead of a database:
+JSONL is append-only (you can never accidentally overwrite old data), it
+survives crashes (each line is independent), and it is grep-able (you can
+search it with standard command-line tools without any special software).
+The JSONL ledger is the source of truth.
+
+
+### 2. Connect the Session Store to the Context Manager
+
+Update the Context Manager from Chapter 2 to automatically persist every
+message it receives.
+
+The Context Manager should now accept an optional session ID. If a session ID
+is provided, it creates a Session Store internally. From that point on, every
+time a message is added -- whether it is a user message, an assistant message,
+or a tool result -- the Context Manager writes it to the store before returning.
+Any metadata (like tool call IDs or claim numbers) should be included in the
+persisted record.
+
+The key design principle here is that the rest of the application does not need
+to know about persistence. The Context Manager handles it silently. Callers
+just add messages as before.
+
+
+### 3. Turn main.py into an Interactive Application
+
+Replace the hardcoded single question with a proper interactive loop.
+
+The application should:
+- Generate a unique session ID when it starts (use a UUID or timestamp)
+- Initialize the Context Manager with that session ID so all messages are
+  persisted from the start
+- Print a welcome message showing the session ID: "Telus Health Benefits
+  Navigator. Session: {session_id}. Type 'quit' to exit."
+- Enter a loop that:
+  1. Prompts the user to type a question
+  2. Exits cleanly if the user types "quit" or "exit"
+  3. Adds the user's message to the context
+  4. Runs the full tool loop (exactly as it worked before)
+- The tool loop logic itself does not change -- only the outer structure changes
+
+
+### 4. Tests
+
+Write unit tests that verify persistence works correctly without making any
+real API calls. Tests should cover:
+- Writing three messages to the session store, then reading the file back and
+  confirming there are exactly three lines and each line parses as valid JSON
+- Confirming that the file is flushed to disk immediately after each write
+  (use mocking to verify the flush call happens)
+
+
+---
+
+After completing all subtasks, apply your formatting rules from memory.
+For "WHAT CHANGED", use the analogy of "The Permanent Ledger" to explain
+why the Chief of Staff (Context Manager) now writes everything to an
+indestructible logbook (JSONL) instead of throwing it away at the end
+of the day. Explain why JSONL is used instead of a standard database.

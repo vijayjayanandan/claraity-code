@@ -1,0 +1,131 @@
+This is Chapter 4: Tool Gating.
+
+Power without guardrails is dangerous. We are adding a single centralized
+checkpoint that every tool call must pass through before it executes. This
+gives the human final say over destructive or sensitive actions.
+
+Please follow the rules in your memory to plan and track the subtasks, then
+build the following:
+
+
+## What We Are Building and Why
+
+In Chapter 3, we gave the agent the ability to call tools. But right now, once
+the LLM decides to call a tool, it just executes -- no questions asked. That is
+fine for read-only lookups like checking coverage or searching the FAQ. But what
+about a tool that submits a claim? Or one that modifies an employee's record?
+Those actions have real consequences and should require human approval before
+they run.
+
+We are also fixing two gaps in our console output so the demo audience can see
+exactly what the LLM is deciding and why.
+
+
+### 1. Fix the Console Output (Two Gaps)
+
+The console currently does not show the audience two important things. Fix both:
+
+**Gap 1: The tools available to the LLM**
+When we print the request being sent to the LLM, we should also show which
+tools the LLM has access to. Update the request-printing function to accept
+an optional list of tools. If tools are provided, print a clearly labelled
+block before the messages showing each tool's name, description, and parameters.
+This lets the audience see exactly what capabilities the LLM is aware of.
+
+**Gap 2: The LLM's decision**
+Immediately after the LLM responds, we should print what it decided to do.
+Add a new function that prints the finish reason. If the LLM decided to call
+tools, print the name and arguments of each tool it intends to call in a
+clearly labelled "LLM DECISION" block. This makes the agent's reasoning
+visible to the audience in real time.
+
+
+### 2. Mark Tools as Safe or Requiring Approval
+
+Add a flag to the tool base class that indicates whether a tool requires human
+approval before it can run. By default, all tools are considered safe and can
+run automatically. Individual tools can override this flag to require approval.
+
+This flag is the foundation of the gating system -- the checkpoint reads it to
+decide whether to ask the human or proceed automatically.
+
+
+### 3. Add a Write Tool: Submit Claim
+
+Add a new tool that simulates submitting a health benefits claim. This is the
+first tool that writes data rather than just reading it, so it must require
+human approval.
+
+The tool should:
+- Be named `submit_claim`
+- Have a description that clearly states it writes data to the claims system
+  (this is important -- the LLM reads this description to understand what the
+  tool does)
+- Accept three parameters: the benefit category (required), the claim amount
+  in dollars (required), and the date of service (required)
+- Require human approval before executing
+- Return a fake claim reference number (e.g., "CLM-998877") to simulate a
+  successful submission
+- Apply the security framing wrapper to its output
+
+Add this tool to the tool registry.
+
+
+### 4. The Tool Gating Service (The Safety Checkpoint)
+
+Create a centralized gating service in a new gating layer of the project.
+This is the single checkpoint that every tool call must pass through.
+
+The service should:
+- Accept a tool and the arguments the LLM wants to pass to it
+- If the tool does not require approval: automatically approve it and return
+  a result indicating it was auto-approved (no user interaction needed)
+- If the tool requires approval: pause and ask the user via the terminal
+  whether they approve. Show the tool name and the exact arguments the LLM
+  wants to use. Accept "y" for approval and anything else as denial.
+- Return a result object that contains two pieces of information: whether it
+  was approved (true/false) and the reason (e.g., "Auto-approved",
+  "User approved", "User denied")
+- Log every evaluation and its outcome
+
+This is called the "Single Checkpoint pattern." Instead of each tool
+implementing its own approval logic, there is one place in the system that
+handles all approvals. This makes it easy to audit, change, or extend the
+approval logic later.
+
+
+### 5. Wire the Gate into the Tool Loop in main.py
+
+Update the tool execution loop to use the gating service:
+- Pass the tool list to the request-printing function so the audience sees
+  what tools are available
+- Call the decision-printing function immediately after every LLM response
+- Before executing any tool, call the gating service
+- If approved: execute the tool normally
+- If denied: do not execute the tool. Instead, feed the rejection reason back
+  to the LLM as the tool result, framed with the security wrapper. Add a
+  comment explaining why: feeding the rejection back to the LLM allows it to
+  self-correct and try a different approach rather than getting stuck.
+
+
+### 6. Tests
+
+Write unit tests that verify the gating logic works correctly without making
+any real API calls. Use mocking to simulate user input so the tests do not
+require someone to type at the keyboard.
+
+Tests should cover:
+- Auto-approval: when a tool does not require approval, the gating service
+  approves it without asking for user input
+- User approval: when a tool requires approval and the user types "y", the
+  result is approved
+- User denial: when a tool requires approval and the user types anything other
+  than "y", the result is denied
+- The submit claim tool schema is valid
+
+
+---
+
+After completing all subtasks, apply your formatting rules from memory.
+For "WHAT CHANGED", use the analogy of "The Security Checkpoint" and
+explain the "Single Checkpoint pattern" and the "Feedback Loop".

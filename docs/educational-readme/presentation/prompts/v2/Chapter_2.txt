@@ -1,0 +1,161 @@
+This is Chapter 2: The LLM Abstraction and Context Manager.
+
+We are adding two things: (1) a provider abstraction layer so the agent can
+switch between FuelIX, OpenAI, Azure, or Ollama by changing one environment
+variable, and (2) a ContextManager that owns the growing messages chain --
+making the stateless LLM / stateful agent split explicit in code.
+
+Please follow the rules in your memory to plan and track the subtasks, then
+build the following:
+
+
+## What We Are Building and Why
+
+Right now, the OpenAI SDK is called directly inside `main.py`. That means if
+Telus Health ever wants to switch from FuelIX to a different provider, or run
+a local model for testing, someone has to rewrite the entire file. That is
+fragile. We are fixing it by introducing two new concepts: a provider
+abstraction and a context manager.
+
+
+### 1. A Standard Response Object and Provider Contract
+
+Every LLM provider -- FuelIX, OpenAI, Azure, Ollama -- returns data in
+slightly different formats. The rest of our agent should not have to care
+about those differences. We need a single standard response object that every
+provider must produce, and a contract (an abstract base class) that every
+provider must honour.
+
+The standard response object should capture four things:
+- The text the LLM wrote (its answer)
+- Why it stopped generating (e.g., it finished naturally, or it wants to call
+  a tool)
+- How many tokens were used in total (important for cost tracking and for the
+  context compaction we will build in Chapter 9)
+- Any tool calls the LLM requested (we will use this in Chapter 3; for now
+  it defaults to empty)
+
+The provider contract should define exactly two capabilities that every backend
+must implement:
+- The ability to send a list of messages and get a response back
+- The ability to estimate how many tokens a list of messages will consume
+
+After this chapter, no other file in the project will import the OpenAI SDK
+directly. All LLM communication goes through this contract. This is the
+"power socket" pattern: the agent plugs into the socket, and the socket hides
+whether the power comes from FuelIX, OpenAI, or anywhere else.
+
+Place this in the llm layer of the project.
+
+
+### 2. The FuelIX Backend (The First Concrete Provider)
+
+Build the first real implementation of the provider contract, wired to FuelIX.
+It should:
+- Read the FuelIX API key and base URL from environment variables and use them
+  to initialize the OpenAI SDK client (FuelIX is OpenAI-compatible, so the
+  same SDK works)
+- When asked to complete a conversation, call the API, log the key details
+  before and after (model used, number of messages, temperature, finish reason,
+  token count), and return the standard response object
+- For token counting, use a word-based estimate for now. Add a comment noting
+  this will be replaced with a proper tokenizer in a later chapter
+- Handle three specific error conditions gracefully with clear log messages
+  before re-raising: authentication failures (wrong API key), connection
+  failures (network is down), and rate limit errors (too many requests)
+
+Place this in the llm layer of the project.
+
+
+### 3. The System Prompt
+
+The agent needs a consistent identity. Create a dedicated module that returns
+the system prompt string for the Benefits Navigator. The prompt should:
+- Identify the assistant as a Telus Health Benefits Navigator
+- State its purpose: helping employees with benefits questions, coverage
+  details, and claims
+- Set clear boundaries: always be accurate, never guess, say "I don't know"
+  when uncertain, never give medical advice
+- Set the tone: professional, empathetic, and clear
+
+Log when the system prompt is loaded, including how long it is. This helps
+confirm the right prompt is active during debugging.
+
+Place this in a prompts layer of the project.
+
+
+### 4. The Context Manager (The Agent's Working Memory)
+
+The LLM itself is stateless -- it has no memory between calls. The illusion
+of a continuous conversation is created by sending the entire conversation
+history with every API call. Something needs to own and manage that growing
+list of messages. That is the Context Manager.
+
+The Context Manager should:
+- Start with the system prompt already in the message list when created
+- Provide a way to add a user message (and log it)
+- Provide a way to add an assistant message, optionally including any tool
+  calls the assistant requested (we will need this in Chapter 3)
+- Provide a way to add a tool result, linked back to the specific tool call
+  that requested it (the link is a call ID that must be preserved exactly)
+- Provide a way to retrieve the full message list (this is what gets sent to
+  the LLM on every call)
+- Provide a rough token estimate of the current message list
+- Report how many messages are currently in the list
+
+The Context Manager is the single source of truth for the conversation state.
+Nothing else should build or modify the messages list directly.
+
+Place this in the core layer of the project.
+
+
+### 5. Refactor main.py
+
+Now that we have the abstraction and the context manager, simplify `main.py`
+to use them. The file should get noticeably shorter and cleaner. The execution
+flow should read almost like plain English:
+- Create a context manager with the system prompt
+- Add the user's question to the context
+- Ask the backend to complete the conversation
+- Add the assistant's answer back to the context
+
+The stateless/stateful split should now be obvious to anyone reading the file:
+the backend is stateless (it just answers questions), the context manager is
+stateful (it remembers everything).
+
+
+### 6. Verify the Environment File
+
+Confirm that the `.env.example` file from Chapter 1 already contains the
+FuelIX API key and base URL variables. No new variables are needed this chapter.
+
+
+### 7. Tests
+
+Write unit tests that verify the abstraction works correctly without making any
+real API calls. Tests should cover:
+- The standard response object stores all four fields correctly, and the tool
+  calls field defaults to empty when not provided
+- The provider contract cannot be instantiated directly -- it must be subclassed
+  (this proves the abstraction is enforced)
+- The FuelIX backend can be instantiated when the correct environment variables
+  are set
+- The system prompt function returns a string that contains the words
+  "Benefits Navigator"
+- The context manager starts with exactly one message (the system prompt)
+- Adding a user message increases the message count and the new message has
+  the role "user"
+- Adding an assistant message produces a message with the role "assistant"
+- Adding a tool result produces a message with the role "tool" and the correct
+  call ID
+- Retrieving messages returns a list that starts with the system message
+- A complete four-message chain (system, user, assistant, tool result) is
+  returned in the correct order
+
+
+---
+
+After completing all subtasks, apply your formatting rules from memory.
+For "WHAT CHANGED", use two analogies:
+1. "The Power Socket" for the LLM abstraction layer.
+2. "The Chief of Staff" for the Context Manager.

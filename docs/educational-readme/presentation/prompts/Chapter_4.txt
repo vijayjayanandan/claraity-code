@@ -1,0 +1,68 @@
+This is Chapter 4: Tool Gating. Power without guardrails is dangerous.
+We are adding a single centralized checkpoint that every tool call must
+pass through before it executes. This gives the human final say over
+destructive or sensitive actions.
+
+Please follow the rules in your memory to plan and track the subtasks, then
+build the following:
+
+1. Update `core/console.py`
+   Fix two gaps in our console trace so the audience sees what the LLM sees:
+   - Update `print_request(messages, tools=None)`: If tools are provided,
+     print a visually distinct block "Tools available to LLM:" before the
+     messages, showing each tool's name, description, and parameters.
+   - Add `print_llm_decision(finish_reason, tool_calls=None)`: Call this
+     immediately after the LLM responds. Print the finish_reason. If
+     tool_calls exist, print the name and arguments of each tool it intends
+     to call in a distinct block titled "LLM DECISION".
+
+2. Update `tools/base.py`
+   Add a class variable `requires_approval: bool = False` to the `Tool`
+   base class. By default, tools are read-only and safe to auto-execute.
+
+3. Update `tools/benefits_tools.py`
+   Add a new tool: `SubmitClaimTool`.
+   - name: "submit_claim"
+   - description: "Submit a new health benefits claim for reimbursement.
+     This writes data to the claims system."
+   - parameters: category (string, required), amount (number, required),
+     date (string, required).
+   - requires_approval = True
+   - execute: Return a fake claim reference number (e.g., "CLM-998877").
+     Remember to call frame_result().
+   Add it to ALL_TOOLS in `tools/tool_schemas.py`.
+
+4. Create `gating/tool_gating.py`
+   A centralized safety checkpoint.
+   - Define a dataclass `GateResult(is_approved: bool, reason: str)`.
+   - Create class `ToolGatingService`.
+   - Method `evaluate(tool: Tool, arguments: dict) -> GateResult`:
+     1. If `tool.requires_approval` is False, return GateResult(True, "Auto-approved").
+     2. If True, pause and ask the user using standard Python `input()`:
+        `"⚠️  Agent wants to execute '{tool.name}' with args {arguments}. Approve? (y/n): "`
+     3. If user types 'y', return GateResult(True, "User approved").
+     4. If user types anything else, return GateResult(False, "User denied").
+   - Use `get_logger()` to log every evaluation and its outcome.
+
+5. Update `main.py`
+   Wire the gate into the loop and apply the console fixes.
+   - Initialize `gating_service = ToolGatingService()` before the loop.
+   - In the loop:
+     1. Pass `tools` to `print_request(ctx.get_messages(), tools)`.
+     2. Call `print_llm_decision(response.finish_reason, response.tool_calls)`.
+     3. Before calling `tool.execute()`, call `gating_service.evaluate()`.
+     4. If `is_approved` is True: call `tool.execute()` normally.
+     5. If `is_approved` is False: DO NOT execute. Instead, frame the rejection
+        reason as the result: `tool.frame_result(f"ACTION BLOCKED: {gate_result.reason}")`.
+   - Add comment: "Feeding the rejection back to the LLM allows it to self-correct."
+
+6. Write `tests/test_gating.py`
+   NO real API calls. Use `unittest.mock.patch` for `builtins.input`.
+   - Test ToolGatingService auto-approve: input() not called, result is True.
+   - Test ToolGatingService approval: mock input 'y', result is True.
+   - Test ToolGatingService denial: mock input 'n', result is False.
+   - Test SubmitClaimTool schema validation.
+
+After completing all subtasks, apply your formatting rules from memory.
+For "WHAT CHANGED", use the analogy of "The Security Checkpoint" and
+explain the "Single Checkpoint pattern" and the "Feedback Loop".

@@ -1,0 +1,175 @@
+I am building a production-grade Benefits Navigator Agent for Telus Health.
+This agent will help employees answer questions about their health benefits,
+coverage, and claims. We are building this the right way from day one.
+
+Before writing any code, please save the following rules to your persistent
+memory so you apply them to every future prompt in this project:
+- The user is an absolute beginner to AI programming.
+- Before writing code for any new prompt, ALWAYS create a new task in the
+  task tracker (e.g. "Chapter 2 -- [Title]"). Read the prompt, autonomously
+  break it down into logical subtasks, and close them as you complete the work.
+- After every build step, always provide beginner-friendly SETUP INSTRUCTIONS
+  (venvs, pip installs, .env creation).
+- Always provide TEST INSTRUCTIONS (the exact pytest command, the python main.py
+  command, what console output to expect, and how to read the logs).
+- Always include a "WHAT CHANGED (The Story)" section at the end of each
+  chapter. Use a relatable, everyday analogy to explain the conceptual shift
+  that happened in that chapter -- something a non-technical person could
+  picture. The analogy should make clear what the agent could NOT do before,
+  what it CAN do now, and why that matters. Choose the analogy that best fits
+  the change; do not force a metaphor that does not fit.
+
+Once saved to memory, create an Epic for "Benefits Navigator Agent" and your
+first Task for "Chapter 1 -- Foundation". Break down the requirements below
+into subtasks, then build them:
+
+
+## What We Are Building and Why
+
+This chapter lays the foundation that every future chapter depends on. Think of
+it as pouring the concrete slab before building a house. We are not building any
+AI behaviour yet -- we are setting up the infrastructure that makes the whole
+project maintainable, observable, and configurable.
+
+There are five foundational pieces:
+
+
+### 1. A Structured Logger
+
+Every production system needs a way to record what happened and when. We are
+building a logger that writes every event to a log file in a structured format
+(one JSON object per line). This makes logs machine-readable and easy to search
+later.
+
+The logger should:
+- Write every log entry to a file called `agent.log`
+- Include four pieces of information in every entry: when it happened
+  (timestamp), how serious it is (level), which part of the system wrote it
+  (component), and what happened (message)
+- Expose a single function that any other module can call to get a logger for
+  itself -- this keeps all logging consistent across the project
+- Prevent the same log message from being written twice (a common Python
+  logging pitfall)
+
+This is the only logging interface the entire agent will ever use. No other
+module should configure logging directly.
+
+Place this in the observability layer of the project.
+
+
+### 2. A Console Output Helper
+
+During the demo, the audience needs to see what the agent is doing in real time.
+We need a shared module that every chapter imports for printing to the screen.
+This prevents each chapter from inventing its own print format.
+
+The helper should provide four functions:
+- One that prints a visual divider line (useful for separating sections)
+- One that prints a titled section header
+- One that shows the full list of messages being sent to the LLM (showing
+  who said what -- the "role" and the "content")
+- One that shows the LLM's response (what it wrote, why it stopped, and how
+  many tokens it used)
+
+All output goes through standard print statements. No external libraries needed.
+Add a note in the file that this is "the single source of truth for all console
+output" and our "simplified trace panel."
+
+Place this in the core layer of the project.
+
+
+### 3. A Configuration Object
+
+The agent needs several settings: which AI model to use, how long its responses
+can be, how creative it should be, and how verbose the logs should be. Hard-coding
+these values is a bad practice -- they need to come from environment variables so
+we can change them without touching code.
+
+Build a configuration object that reads all its values from environment variables,
+with sensible defaults if a variable is not set. The settings it needs to manage:
+- Which model to use (default: gpt-3.5-turbo)
+- The maximum length of the model's response in tokens (default: 1500)
+- How creative/random the model's responses are, from 0.0 to 1.0 (default: 0.7)
+- The log verbosity level (default: INFO)
+- The total size of the model's context window -- how much text the model can
+  read in a single call (default: 128000 tokens)
+
+The last setting deserves a clear comment in the code explaining the difference
+between the context window size (how much the model can READ) and the max tokens
+setting (how much the model can WRITE). These are two different limits and
+beginners frequently confuse them. We will use the context window size in a
+later chapter to detect when the conversation is getting too long.
+
+The configuration object should log all its loaded values at startup so we can
+see exactly what settings are active.
+
+Place this in the core layer of the project.
+
+
+### 4. The Entry Point (main.py)
+
+This is the file the user runs. For now it makes a single, hardcoded call to
+the LLM to prove everything is wired together. Think of it as a "hello world"
+for the agent.
+
+It should:
+- Load environment variables from a `.env` file as the very first thing it does,
+  before any other imports -- this is critical because other modules read those
+  variables at import time
+- Use the configuration object for all settings
+- Set the agent's identity via a system prompt that introduces it as a Telus
+  Health Benefits Navigator
+- Include one example user question about drug coverage
+- Print the full request to the console before sending it, then print
+  "WAITING FOR RESPONSE..." while the API call is in flight, then print the
+  response after it arrives
+- Log the key details before the call (model, temperature, message count) and
+  after the call (why it stopped, how many tokens were used)
+- End with a clearly labelled comment block listing everything this version
+  CANNOT do yet: no memory of previous questions, no knowledge of actual plan
+  data, no ability to look up real information, no safety checks, and no way
+  to switch LLM providers without rewriting the file
+
+That last point -- the inability to switch providers -- is intentional. We will
+fix it in Chapter 2.
+
+
+### 5. Project Setup Files
+
+We need three standard Python project files:
+- A production dependencies file listing the minimum versions of the libraries
+  we need (the OpenAI SDK and the python-dotenv library for reading .env files)
+- A development dependencies file listing testing tools (pytest and
+  pytest-asyncio)
+- A modern Python project configuration file (pyproject.toml) that declares
+  this project requires Python 3.10 or higher
+
+We also need a `.env.example` file that documents every environment variable
+the agent needs. This file is safe to commit to version control because it
+contains no real secrets -- just placeholder values and explanatory comments.
+It should document:
+- The FuelIX API key (FuelIX is an OpenAI-compatible endpoint provided by the
+  Telus Health team that gives access to multiple models)
+- The FuelIX base URL
+- All the configuration settings from item 3 above
+- A comment on the context window setting explaining the difference between
+  context window size and max tokens, so any developer reading the file
+  understands why both settings exist
+
+
+### 6. Tests
+
+Write unit tests that verify the foundation works correctly without making any
+real API calls. Tests should cover:
+- The logger produces valid JSON output and includes all required fields
+- The logger does not create duplicate log handlers if called multiple times
+- The configuration object reads its default values correctly
+- The configuration object correctly picks up overridden values from environment
+  variables
+- The console helper functions run without throwing errors
+
+
+---
+
+After completing all subtasks, apply your formatting rules from memory.
+For "WHAT CHANGED", use the analogy of "The Brilliant Consultant in a Vacuum."

@@ -1,0 +1,96 @@
+I am building a production-grade Benefits Navigator Agent for Telus Health.
+This agent will help employees answer questions about their health benefits,
+coverage, and claims. We are building this the right way from day one.
+
+Before writing any code, please save the following rules to your persistent
+memory so you apply them to every future prompt in this project:
+- The user is an absolute beginner to AI programming.
+- Before writing code for any new prompt, ALWAYS create a new task in the
+  task tracker (e.g. "Chapter 2 -- [Title]"). Read the prompt, autonomously
+  break it down into logical subtasks, and close them as you complete the work.
+- After every build step, always provide beginner-friendly SETUP INSTRUCTIONS 
+  (venvs, pip installs, .env creation).
+- Always provide TEST INSTRUCTIONS (the exact pytest command, the python main.py 
+  command, what console output to expect, and how to read the logs).
+- Always include a "WHAT CHANGED (The Story)" section explaining the conceptual 
+  evolution of the code using the specific analogy provided in the prompt.
+
+Once saved to memory, create an Epic for "Benefits Navigator Agent" and your
+first Task for "Chapter 1 -- Foundation". Break down the requirements below
+into subtasks, then build them:
+
+1. `observability/logger.py`
+   A structured logger that writes JSON lines to `agent.log`. Every log
+   entry must include: timestamp, level, component, and message. Expose a
+   single get_logger(name) function that any module can import and use.
+   Prevent duplicate logs from propagating to the root logger. This is
+   the only logging interface the agent will ever use.
+
+2. `core/console.py`
+   A console output helper module that every chapter will import. Define:
+   - print_separator(char='=', width=80)
+   - print_section(title)
+   - print_request(messages) -- shows role and content for each message
+   - print_response(content, finish_reason, total_tokens)
+   All functions use only standard print(). No external dependencies.
+   Add a module docstring: "Single source of truth for all console output.
+   This is our simplified trace panel."
+
+3. `core/config.py`
+   An LLMConfig class that reads environment variables using os.getenv().
+   Include: MODEL_NAME (default gpt-3.5-turbo), MAX_TOKENS (default 1500),
+   TEMPERATURE (default 0.7), LOG_LEVEL (default INFO),
+   MAX_CONTEXT_TOKENS (default 128000).
+   Add a comment above MAX_CONTEXT_TOKENS: "The total context window of the
+   model -- how much it can read in one call. This is NOT the same as
+   MAX_TOKENS (which caps the output). We will use this in a later chapter
+   to know when the conversation is getting too long and needs to be summarized."
+   Use get_logger to log the loaded configuration at startup.
+
+4. `main.py`
+   A minimal Python chat completion call using the OpenAI SDK.
+   - You MUST import and call load_dotenv() at the very top of the file
+     before any other imports so it reads the .env file first.
+   - Import get_logger from observability/logger.py.
+   - Import all console helpers from core/console.py.
+   - Use LLMConfig for model, max_tokens, and temperature.
+   - The system prompt should identify the assistant as a Telus Health
+     Benefits Navigator. Include one example user question about drug
+     coverage.
+   - Use print_request() BEFORE the API call.
+   - Print "WAITING FOR RESPONSE..." between request and response.
+   - Use print_response() AFTER the API call.
+   - Log BEFORE the API call: model name, temperature, message count.
+   - Log AFTER the API call: finish_reason, total_tokens.
+   - Add a comment block at the end titled "WHAT THIS CANNOT DO YET":
+     no memory of previous questions, no knowledge of actual plan data,
+     no ability to look up real information, no safety checks, cannot
+     switch LLM providers without rewriting this file.
+
+5. `requirements.txt`, `requirements-dev.txt`, `pyproject.toml`
+   Pin production dependencies with minimum versions: openai, python-dotenv.
+   Pin dev dependencies: pytest, pytest-asyncio.
+   Create a modern pyproject.toml (PEP 517/518) requiring Python >= 3.10.
+
+6. `.env.example`
+   Document every environment variable the agent needs. Use FuelIX as the
+   LLM provider -- it is an OpenAI-compatible endpoint provided by the
+   Telus Health team that gives access to multiple models. Include:
+   - FUELIX_API_KEY
+   - FUELIX_API_BASE_URL
+   - MODEL_NAME, MAX_TOKENS, TEMPERATURE, LOG_LEVEL
+   - MAX_CONTEXT_TOKENS -- add a comment in the file explaining: "This is
+     the model's total context window (how much it can read). MAX_TOKENS
+     is the output limit (how much it can write). They are different."
+
+7. `tests/test_core.py`
+   Unit tests for the foundation layer. NO real API calls.
+   Write tests for:
+   - Logger produces valid JSON output with all required fields.
+   - Logger prevents duplicate handlers.
+   - LLMConfig reads defaults correctly.
+   - LLMConfig reads env overrides correctly.
+   - Console helpers run without error.
+
+After completing all subtasks, apply your formatting rules from memory.
+For "WHAT CHANGED", use the analogy of "The Brilliant Consultant in a Vacuum."

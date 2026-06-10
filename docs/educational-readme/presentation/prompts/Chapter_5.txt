@@ -1,0 +1,52 @@
+This is Chapter 5: Session Persistence. Right now, the agent works perfectly
+in memory, but when the script ends, the conversation vanishes. A production
+agent needs a permanent memory of past conversations. We are also going to
+turn this from a single-question script into an interactive CLI application.
+
+Please follow the rules in your memory to plan and track the subtasks, then
+build the following:
+
+1. Create `memory/session_store.py`
+   A class called `SessionStore` that writes a JSONL ledger.
+   - `__init__(session_id: str)`: Creates `.claraity/sessions/{session_id}.jsonl`.
+     Ensure the `.claraity/sessions/` directory is created if it doesn't exist.
+   - `save_message(role: str, content: str, meta: dict = None)`: Appends
+     a single JSON object to the file and immediately calls `.flush()`.
+     The object must contain: role, content, timestamp (ISO format), and meta.
+   - Add a module docstring: "The JSONL ledger is the source of truth.
+     Append-only, crash-safe, and grep-able."
+
+2. Update `core/context_manager.py`
+   Integrate the store so every message added is immediately persisted.
+   - `__init__` now takes an optional `session_id`. If provided, initialize
+     `SessionStore`.
+   - In `add_user_message`, `add_assistant_message`, and `add_tool_result`,
+     call `store.save_message()` before returning. Pass the `tool_calls` or
+     `call_id` into the `meta` dictionary so it is persisted in the JSONL.
+
+3. Refactor `main.py`
+   Turn the script into an interactive CLI application.
+   - Generate a unique `session_id` (e.g., using `uuid` or timestamp) when
+     the script starts.
+   - Initialize `ContextManager` with this `session_id`.
+   - Delete the hardcoded user question.
+   - Wrap the entire execution in a `while True:` loop:
+     1. Prompt the user: `user_input = input("\nYou: ")`
+     2. If `user_input.lower() in ['quit', 'exit']`, break.
+     3. Add the user message to `ContextManager`.
+     4. Run the `MAX_TOOL_ITERATIONS` while loop exactly as before.
+   - Print a welcome message at startup: "Telus Health Benefits Navigator.
+     Session: {session_id}. Type 'quit' to exit."
+
+4. Write `tests/test_memory.py`
+   NO real API calls. Tests:
+   - Test `SessionStore.save_message()`: write 3 messages, read the file
+     back, assert there are exactly 3 lines and they parse as valid JSON.
+   - Test crash safety: assert that `flush()` is called on the file handle
+     (using mock).
+
+After completing all subtasks, apply your formatting rules from memory.
+For "WHAT CHANGED", use the analogy of "The Permanent Ledger" to explain
+why the Chief of Staff (ContextManager) now writes everything to an
+indestructible logbook (JSONL) instead of throwing it away at the end
+of the day. Explain why JSONL is used instead of a standard database.

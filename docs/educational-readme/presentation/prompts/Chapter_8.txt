@@ -1,0 +1,24 @@
+This is Chapter 8: The Safety Net (Error Recovery). The agent can crash if a tool returns unexpected output, if JSON parsing fails, or if an API connection drops. A production agent doesn't crash; it recovers.
+
+Please follow the rules in your memory to plan and track the subtasks, then build the following:
+
+1. Create `core/error_recovery.py`
+   Define a `RecoveryService`. It needs to intercept exceptions during tool execution or LLM parsing and convert them into actionable feedback for the LLM.
+   - Implement `wrap_execution(func)` that catches `Exception` and returns a string: `"[SYSTEM ERROR] The operation failed with: {str(e)}. Please correct your approach and try again."`
+   - Implement a deduplicator: `has_seen_error(error_message: str) -> bool`. Use a stable hash (like SHA-256 of the error string) to track if the agent is stuck in an error loop.
+
+2. Update `core/agent.py`
+   - Wrap the `execute_tool()` call inside `RecoveryService.wrap_execution`.
+   - Wrap the `StreamingPipeline.run()` call inside the same recovery wrapper to catch JSON parse errors.
+   - If the deduplicator flags that the agent has hit the *exact same* error 3 times in a row, the loop must break and ask the user for help instead of spinning forever.
+
+3. Update `core/streaming.py`
+   - Add a `try/except json.JSONDecodeError` block when parsing the buffered tool calls.
+   - If parsing fails, raise a custom `ToolParseError(raw_json)` so the recovery service can catch it and feed the raw broken JSON back to the LLM to fix.
+
+4. Write `tests/test_recovery.py`
+   - Test that `wrap_execution` catches exceptions and returns the properly formatted string.
+   - Test the stable hash deduplicator triggers after 3 identical errors.
+
+After completing all subtasks, apply your formatting rules from memory.
+For "WHAT CHANGED", use the analogy of "The Bumper Lanes." Before, if the LLM threw a gutterball (bad JSON or a broken tool call), the whole program crashed. Now, the Recovery Service acts like bumper lanes at a bowling alley. It catches the mistake, bounces it back to the LLM with an error message, and says "try again." If it throws 3 gutterballs in a row, it stops the game and asks the user for help.

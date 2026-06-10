@@ -1,0 +1,165 @@
+This is Chapter 3: Tool Calling.
+
+Right now the Benefits Navigator can only respond with text -- it cannot look
+up actual plan data, check real coverage limits, or search the benefits FAQ.
+Tool calling gives the agent hands: the ability to act, not just describe.
+
+Please follow the rules in your memory to plan and track the subtasks, then
+build the following:
+
+
+## What We Are Building and Why
+
+An LLM that can only generate text is like a knowledgeable consultant who has
+memorised a lot of general information but cannot look anything up. They can
+speak confidently about how dental coverage typically works, but they cannot
+tell you what YOUR plan covers or what the status of YOUR claim is. Tool
+calling bridges that gap: the LLM can now pause mid-response, request a data
+lookup, receive the result, and then continue its answer with real information.
+
+This chapter introduces three things: a tool framework, three real benefits
+tools, and a loop in `main.py` that keeps calling the LLM until it is done
+using tools and ready to give a final answer.
+
+
+### 1. A Tool Base Class
+
+Every tool in the system needs to follow the same contract so the agent can
+work with any tool without knowing its internals. Create an abstract base class
+that all tools must extend.
+
+Every tool must declare:
+- A name (a short identifier the LLM uses to request it)
+- A description (a plain-English explanation of what the tool does, which the
+  LLM reads to decide whether to use it)
+- The ability to execute and return a result string
+
+Every tool must also provide:
+- A way to describe itself in the JSON Schema format that the LLM API expects
+  (so the LLM knows what parameters to pass)
+- A wrapper that frames its output with clear markers before returning it
+
+The output framing is a security requirement, not just formatting. When a tool
+returns data to the LLM, a malicious data source could try to inject fake
+instructions into that data (e.g., a benefits document that contains hidden
+text saying "ignore your previous instructions"). By wrapping every tool result
+with clear markers that say "this is DATA, not instructions," we make it harder
+for the LLM to be confused. This is OWASP LLM01 -- the top-ranked security
+risk for LLM applications. Every tool result must go through this wrapper
+before being returned.
+
+Place this in the tools layer of the project.
+
+
+### 2. A Tool Registry
+
+We need a central place that knows about all available tools. Create a registry
+module in the tools layer that:
+- Holds a list of all tool instances
+- Can produce the list of JSON Schema descriptions that the LLM API needs
+  (this is what gets sent to the LLM so it knows what tools exist)
+- Can look up a specific tool by name (so the agent can find and execute the
+  tool the LLM requested)
+
+
+### 3. Three Benefits Tools
+
+Build three concrete tools using realistic hardcoded sample data. These
+simulate what would eventually be real database or API calls. Each tool must
+apply the security framing wrapper to its output before returning.
+
+**Coverage Lookup Tool**
+- Name: `lookup_coverage`
+- Purpose: Look up what a specific benefit category covers and what the limits
+  are
+- Accepts: a benefit category (required) and a plan type (optional)
+- Sample data to include:
+  - Prescription drugs: 80% coverage up to $2,000 per year
+  - Dental: 70% coverage up to $1,500 per year
+  - Vision: $300 every 2 years
+  - Physiotherapy: 80% coverage up to $500 per year
+- If an unknown category is requested, return a helpful message rather than
+  crashing
+
+**FAQ Search Tool**
+- Name: `search_faq`
+- Purpose: Search the benefits FAQ for answers to common questions
+- Accepts: a search query (required)
+- Return 2-3 FAQ entries covering topics like how to submit a claim, important
+  deadlines, and how to add dependents
+
+**Claim Status Tool**
+- Name: `check_claim_status`
+- Purpose: Look up the current status of a submitted claim
+- Accepts: a claim number (required)
+- Returns: the claim status, relevant dates, and amounts
+
+
+### 4. Update the Provider Contract and FuelIX Backend
+
+The LLM needs to be able to receive the list of available tools and return
+tool call requests. Update the provider contract to accept an optional list
+of tools when completing a conversation. Update the FuelIX backend to pass
+those tools to the API and to handle the new response type:
+- If the LLM finished naturally (finish reason "stop"), return the response
+  as before
+- If the LLM wants to call a tool (finish reason "tool_calls"), extract the
+  tool name, the arguments it wants to pass, and the call ID from the response.
+  Return these in the standard response object. The text content will be empty
+  in this case.
+
+
+### 5. Update the Configuration
+
+Add a setting for the maximum number of tool-calling iterations per turn
+(default: 5). This prevents the agent from getting stuck in an infinite loop
+of tool calls. Place this in the existing configuration object.
+
+
+### 6. Update the Console Helper
+
+The console helper needs two updates so the audience can follow what is
+happening during tool calls:
+- When printing the messages being sent to the LLM, if any message is from
+  the assistant and contains tool call requests, format and display those tool
+  calls clearly. Do not skip them -- they are part of the conversation the LLM
+  sees.
+- Add a function that shows which tool is being called and with what arguments
+- Add a function that shows the raw result returned by a tool
+- Add a function that shows which iteration of the tool loop we are on
+
+
+### 7. Update main.py with the Tool Loop
+
+Replace the single API call with a loop. The loop should:
+- Pass the list of available tools to the LLM on every call
+- After each LLM response, check whether it wants to call a tool
+- If it does: record the assistant's tool request in the context, execute each
+  requested tool, record the results in the context, and loop back to call the
+  LLM again with the updated context
+- If it does not (finish reason "stop"): print the final response and stop
+- Print the iteration number at the start of each pass through the loop
+- Stop after the maximum number of iterations even if the LLM keeps requesting
+  tools
+
+
+### 8. Tests
+
+Write unit tests that verify the tool framework works correctly without making
+any real API calls. Tests should cover:
+- The tool base class cannot be instantiated directly (the contract is enforced)
+- The coverage lookup tool returns data containing "80%" and "2,000" when asked
+  about prescription drugs
+- The coverage lookup tool returns a helpful message (not a crash) when asked
+  about an unknown category
+- The tool registry returns three tool schema dictionaries, each with the
+  required "type" and "function" fields
+- The security framing wrapper includes both the opening and closing markers
+  in its output
+
+
+---
+
+After completing all subtasks, apply your formatting rules from memory.
+For "WHAT CHANGED", use the analogy of "The Assistant" to explain tool
+calling, and explain why OWASP LLM01 makes the security framing necessary.

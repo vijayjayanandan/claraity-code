@@ -1,0 +1,114 @@
+This is Chapter 6: The Conductor (Agent Loop).
+
+Right now, the tool loop is a script block inside main.py. It has no budget
+tracking, no proper state management, and mixes UI concerns (input/print) with
+agent orchestration logic. We are separating these concerns to match production
+architecture.
+
+Please follow the rules in your memory to plan and track the subtasks, then
+build the following:
+
+
+## What We Are Building and Why
+
+`main.py` is doing too many jobs. It handles user input, manages the tool loop,
+tracks iterations, calls the LLM, executes tools, and prints output -- all in
+one place. This is fine for a demo script but it is not how production systems
+are built. When something goes wrong, it is hard to know which part failed.
+When you want to add a feature, you have to understand the whole file.
+
+We are splitting responsibilities: `main.py` becomes a thin user interface
+layer, and a new `BenefitsAgent` class becomes the brain that orchestrates
+everything. We are also adding a hard budget cap to prevent runaway API costs.
+
+
+### 1. Add a Hard Budget Cap to the Configuration
+
+Add a new setting to the configuration object: the maximum number of tool calls
+allowed in a single conversation turn (default: 20).
+
+Add a comment explaining why this exists: a misbehaving LLM that gets stuck in
+a loop of trying and failing tools will be terminated before it runs up a
+massive API bill. This is a hard ceiling, not a soft suggestion.
+
+
+### 2. Create the Agent Orchestrator
+
+Create a new component in the core layer called `BenefitsAgent`. This is the
+conductor: it knows how to run a full conversation turn, including all tool
+calls, gating checks, and budget enforcement. It does not know anything about
+user interfaces.
+
+The agent needs to track the state of each turn. Create a small state object
+that records:
+- Which iteration of the tool loop we are on
+- How many total tool calls have been made in this turn
+- Whether the turn was aborted (e.g., due to hitting the budget cap)
+
+The agent itself should accept four things when created: the LLM backend, the
+list of available tools, the gating service, and the configuration.
+
+The agent's main method runs a single conversation turn given a context manager.
+It should:
+1. Start a fresh state object for this turn
+2. Loop up to the maximum number of iterations:
+   a. Print the current iteration number
+   b. Call the LLM with the current context
+   c. Print the LLM's decision (what it chose to do)
+   d. If the LLM is done (finish reason "stop"): add its response to the
+      context, print the response, and return
+   e. If the LLM wants to call tools:
+      - Check the budget: if the total tool calls for this turn have hit the
+        maximum, print an error, log a warning, mark the turn as aborted,
+        and return
+      - Add the assistant's tool request to the context
+      - For each tool the LLM requested:
+        - Increment the tool call counter
+        - Print which tool is being called
+        - Find the tool in the registry
+        - Run it through the gating service
+        - If approved: execute the tool
+        - If denied: use the rejection reason as the result
+        - Print the result
+        - Add the result to the context
+      - Increment the iteration counter and loop back
+
+Log throughout using the structured logger.
+
+
+### 3. Simplify main.py to a Pure UI Layer
+
+`main.py` should now be a thin shell. It knows nothing about tool execution
+loops, gating, or iteration caps. Its only job is:
+- Set up all the components (config, backend, tools, gating service, agent,
+  context manager)
+- Run the interactive input loop
+- For each user message: add it to the context, then call `agent.run_turn()`
+
+The tool loop logic that used to live in `main.py` is now entirely inside
+`BenefitsAgent`. `main.py` should be noticeably shorter and simpler after
+this refactor.
+
+
+### 4. Tests
+
+Write unit tests that verify the agent orchestrator works correctly without
+making any real API calls. Mock the LLM backend to control what it returns.
+
+Tests should cover:
+- When the LLM returns finish reason "stop", the turn exits cleanly
+- When the LLM returns tool calls, the agent correctly increments the tool
+  call counter
+- Budget cap enforcement: mock the backend to always return tool calls and
+  verify that the agent aborts the turn when the maximum tool calls per turn
+  is reached, rather than looping forever
+
+
+---
+
+After completing all subtasks, apply your formatting rules from memory.
+For "WHAT CHANGED", use the analogy of "The Conductor."
+Before this chapter, the UI (the concert hall) and the brain were tangled
+together. Now, main.py is just the UI, and BenefitsAgent is the Conductor.
+The Conductor enforces the budget so the orchestra doesn't play forever
+and bankrupt the venue.

@@ -1,0 +1,121 @@
+This is Chapter 7: The Voice (Streaming UX).
+
+Right now, the agent pauses for seconds while the LLM thinks, then prints a
+wall of text all at once. It feels dead. We are going to stream the output
+token-by-token so it feels alive.
+
+Please follow the rules in your memory to plan and track the subtasks, then
+build the following:
+
+
+## What We Are Building and Why
+
+When you use ChatGPT or Claude, the response appears word by word as it is
+generated. That is streaming. Without it, the user stares at a blank screen
+for several seconds, then suddenly sees a complete paragraph. With it, the
+response feels immediate and alive -- the user can start reading while the
+model is still writing.
+
+Streaming is more complex than it sounds for an agent that also calls tools.
+When the LLM streams text, we can display each word as it arrives. But when
+the LLM streams a tool call request, the arguments come in as fragments of
+JSON that are useless until the entire JSON object is assembled. We need a
+pipeline that handles both cases: display text immediately, silently buffer
+tool call fragments until they are complete.
+
+
+### 1. Add a Streaming Delta Type to the Provider Contract
+
+The LLM API, when streaming, sends the response in small chunks rather than
+all at once. Each chunk contains a fragment of either text or a tool call.
+We need a standard type to represent one of these chunks.
+
+Add a new data type to the provider contract (the llm layer) that represents
+a single streaming chunk. It should be able to carry:
+- A fragment of text (a few words or even a single character)
+- A fragment of a tool call (a piece of the JSON arguments)
+- The finish reason (only present in the final chunk)
+- Token usage information (only present in the final chunk)
+
+Also add a new method to the provider contract that streams a conversation
+rather than completing it all at once. This method should yield these chunk
+objects one at a time as they arrive from the API.
+
+
+### 2. Implement Streaming in the FuelIX Backend
+
+Implement the streaming method in the FuelIX backend. It should:
+- Call the OpenAI-compatible API with streaming enabled
+- For each chunk the API sends back:
+  - If it contains text, yield a chunk object with the text fragment
+  - If it contains a tool call fragment, yield a chunk object with the
+    tool call fragment
+- When the stream ends, yield the final chunk containing the finish reason
+  and token usage
+
+
+### 3. Create a Streaming Pipeline
+
+Create a new component in the core layer called `StreamingPipeline`. This is
+the single canonical place that knows how to consume a stream of chunks and
+produce a final result. Nothing else in the system needs to understand the
+streaming protocol.
+
+The pipeline should:
+- Accept the backend and use it to start a stream
+- Maintain two buffers: one for assembling text, one for assembling tool call
+  JSON
+- As chunks arrive:
+  - If a chunk contains text: yield it immediately to the caller (so it can
+    be printed to the screen right away)
+  - If a chunk contains a tool call fragment: add it to the tool call buffer
+    silently. Do NOT yield it. The audience should not see raw JSON fragments
+    appearing on screen.
+- When the stream ends: parse the assembled tool call JSON from the buffer
+- Return a finalized standard response object (identical to what the old
+  non-streaming `complete()` method used to return) so the rest of the tool
+  loop does not need to change
+
+The key design insight: the pipeline presents two different interfaces. To the
+screen, it yields text in real time. To the agent loop, it returns a complete
+response object at the end. The agent loop does not know or care that streaming
+happened.
+
+
+### 4. Update the Console Helper
+
+Add a function to the console helper that prints a text fragment without
+adding a newline and flushes immediately. This is what makes the streaming
+output appear word-by-word on the same line rather than line-by-line.
+
+
+### 5. Update the Agent Orchestrator
+
+In the `BenefitsAgent` orchestration loop, replace the direct call to
+`backend.complete()` with the streaming pipeline. The loop should:
+- Create a streaming pipeline using the backend
+- Iterate over what the pipeline yields: if it yields a text fragment, pass
+  it to the console helper to print immediately
+- At the end, receive the final response object from the pipeline
+- Continue with the rest of the tool loop logic exactly as before (gating,
+  execution, iteration cap -- none of that changes)
+
+
+### 6. Tests
+
+Write unit tests that verify the streaming pipeline works correctly without
+making any real API calls. Mock a stream that yields a mix of text chunks and
+tool call chunks. Verify that:
+- Text chunks are yielded immediately by the pipeline
+- Tool call chunks are silently buffered and do not appear in the yielded output
+- The final response object contains the correctly assembled tool call
+
+
+---
+
+After completing all subtasks, apply your formatting rules from memory.
+For "WHAT CHANGED", use the analogy of "The Interpreter." Before, the LLM
+wrote a letter and sent it. Now, it speaks live to an Interpreter (the
+StreamingPipeline). The Interpreter translates normal speech directly to you,
+but if the LLM starts speaking JSON (tool calls), the Interpreter silently
+translates it in the background before handing it to the agent.

@@ -1,0 +1,123 @@
+This is Chapter 9: The Summarizer (Context Compaction). The agent has been
+running great, but there is a silent time bomb: every message we add to the
+conversation makes the next LLM call more expensive and slower. Eventually
+the context window fills up completely and the API call fails. A production
+agent doesn't crash when this happens -- it summarizes its own memory and
+keeps going.
+
+Please follow the rules in your memory to plan and track the subtasks, then
+build the following:
+
+1. Update `core/config.py`
+   Add `COMPACTION_THRESHOLD: float` (default 0.85) to LLMConfig.
+   Add a comment: "When the conversation consumes 85% of MAX_CONTEXT_TOKENS,
+   we summarize the old messages and replace them with a compact summary.
+   The LLM itself reports how many tokens were used (via usage.input_tokens
+   in the response) -- we use that real number, not an estimate."
+
+2. Create `memory/summarizer.py`
+   A class called `PrioritizedSummarizer`.
+   - `__init__(backend: LLMBackend, token_budget: int = 6000)`
+   - `generate_summary(messages: list) -> str`:
+     1. Format the messages into a readable transcript string.
+     2. Make a direct LLM call (use `backend.complete()`) with the following
+        summarization prompt tailored for a Benefits Navigator agent:
+
+        ---
+        Analyze this conversation and create a continuation summary for a
+        Telus Health Benefits Navigator agent.
+
+        CONVERSATION HISTORY:
+        {formatted_messages}
+
+        Generate a summary with these sections IN ORDER OF IMPORTANCE:
+
+        ## Employee Goal
+        What is the employee trying to accomplish? What benefit, coverage,
+        or claim are they asking about? Be specific
+        (e.g., "Employee wants to submit a physiotherapy claim for $350").
+
+        ## All Employee Messages
+        Include ALL employee messages in chronological order. These are the
+        ground truth of intent. Format: numbered list with full text of each.
+
+        ## Benefits Context
+        Any specific plan details, coverage amounts, claim numbers, or dates
+        that came up. Never forget a claim number or dollar amount.
+
+        ## Clarifications Made
+        Any corrections mid-conversation (e.g., employee said "dental" then
+        corrected to "vision"). This prevents repeating the same misunderstanding.
+
+        ## Pending Actions
+        Any actions discussed but not yet completed
+        (e.g., "employee was about to submit claim CLM-XXXX").
+        If nothing is pending, write "None."
+
+        ## Current State
+        What was just answered or completed? What is the logical next step?
+
+        IMPORTANT GUIDELINES:
+        - Preserve employee messages VERBATIM -- they are the ground truth of intent
+        - Always preserve claim numbers, dollar amounts, and dates exactly
+        - Never guess or infer coverage details that weren't stated
+        - Keep the summary focused and actionable
+        - Target approximately {token_budget} tokens
+
+        Output the summary in clean markdown format.
+        ---
+
+     3. Return the LLM's response content as the summary string.
+     4. If the LLM call fails for any reason, fall back to a deterministic
+        summary: join all user messages verbatim with their role labels.
+        Log a warning that the fallback was used.
+
+3. Update `memory/session_store.py`
+   Add a method `save_compaction_event(summary: str)`:
+   - Appends a special JSON line to the JSONL ledger with:
+     role="system", content=summary, meta={"event": "compaction"}.
+   - This ensures the full conversation history is never lost on disk
+     even though the in-memory window shrinks.
+
+4. Update `core/agent.py`
+   After `pipeline.run()` returns the final `LLMResponse`, add a
+   compaction check:
+   - Read `response.usage` (already on LLMResponse from Ch 7).
+   - Extract `input_tokens = response.usage.get("input_tokens", 0)`.
+   - Calculate `utilization = input_tokens / self.config.MAX_CONTEXT_TOKENS`.
+   - If `utilization >= self.config.COMPACTION_THRESHOLD`:
+     1. Print: `"[System] Context at {utilization:.0%} -- summarizing memory..."`
+     2. Identify the messages to summarize: everything in context except
+        the system prompt and the last 3 user/assistant exchanges
+        (keep recent context intact).
+     3. Call `PrioritizedSummarizer(self.backend).generate_summary(old_messages)`.
+     4. Call `context.save_compaction_event(summary)` to persist to the ledger.
+     5. Replace the old messages in context with a single summary message:
+        `{"role": "system", "content": "[Conversation Summary]\n" + summary}`.
+     6. Print: `"[System] Memory compacted. Continuing..."`
+   - Add a `_compaction_failed: bool = False` flag. If compaction raises an
+     exception, set the flag, log a warning, and print:
+     `"[Warning] Compaction failed. Consider starting a new session if responses degrade."`
+     Do not retry compaction within the same session turn.
+
+5. Write `tests/test_compaction.py`
+   NO real API calls. Mock `backend.complete`.
+   - Test that `PrioritizedSummarizer.generate_summary()` calls the backend
+     and returns its response content.
+   - Test the fallback: if `backend.complete` raises an exception, the
+     summarizer returns a non-empty string (the deterministic fallback).
+   - Test the threshold check: mock `response.usage` with input_tokens at
+     90% of MAX_CONTEXT_TOKENS and assert the compaction path is triggered
+     in `run_turn`.
+   - Test that `save_compaction_event` writes a line to the JSONL file
+     with event="compaction" in the meta field.
+
+After completing all subtasks, apply your formatting rules from memory.
+For "WHAT CHANGED", use the analogy of "The Filing Cabinet." Before this
+chapter, the agent kept every single piece of paper on its desk (the context
+window) until the desk collapsed. Now, when the desk hits 85% full, the
+Summarizer picks up the older papers, writes a tight executive summary
+(using the LLM itself -- who better to summarize a conversation than the
+LLM?), files the originals away in the JSONL ledger permanently, and places
+just the summary back on the desk. The agent continues with a clear desk,
+full memory of what matters, and nothing lost.

@@ -1,0 +1,91 @@
+This is Chapter 8: The Safety Net (Error Recovery).
+
+The agent can crash if a tool returns unexpected output, if JSON parsing fails,
+or if an API connection drops. A production agent does not crash; it recovers.
+
+Please follow the rules in your memory to plan and track the subtasks, then
+build the following:
+
+
+## What We Are Building and Why
+
+Right now, if anything goes wrong during a tool call or during the parsing of
+a streaming response, the entire agent crashes with a Python exception. In a
+demo, that is embarrassing. In production, that is unacceptable.
+
+We need the agent to catch errors, tell the LLM what went wrong, and give it
+a chance to try a different approach. We also need to detect when the agent is
+stuck in a loop -- hitting the same error over and over -- and stop it before
+it wastes API budget spinning in place.
+
+
+### 1. Create a Recovery Service
+
+Create a new component in the core layer called `RecoveryService`. Its job is
+to intercept failures and convert them into useful feedback for the LLM rather
+than letting them crash the program.
+
+The recovery service needs two capabilities:
+
+**Execution wrapper**: A method that accepts a function to run and executes it
+safely. If the function raises any exception, the wrapper catches it and returns
+a formatted error string instead of crashing. The error string should tell the
+LLM what failed and ask it to correct its approach and try again. The format
+should be something like: "[SYSTEM ERROR] The operation failed with: {error
+details}. Please correct your approach and try again."
+
+**Error loop detector**: A method that accepts an error message and returns
+whether the agent has seen this exact error before. Use a stable hash of the
+error message (SHA-256 is a good choice) to track which errors have occurred.
+The purpose is to detect when the agent is stuck: if it hits the exact same
+error three times in a row, something is fundamentally wrong and a human needs
+to intervene rather than the agent continuing to retry.
+
+
+### 2. Apply the Recovery Wrapper in the Agent Orchestrator
+
+Update `BenefitsAgent` to use the recovery service in two places:
+
+**Tool execution**: Wrap the tool execution call with the recovery wrapper. If
+a tool crashes (e.g., a data lookup fails unexpectedly), the error is caught,
+formatted as a string, and fed back to the LLM as the tool result. The LLM
+can then decide to try a different tool or ask the user for clarification.
+
+**Streaming pipeline**: Wrap the streaming pipeline call with the same recovery
+wrapper. If the stream fails or the JSON parsing fails, the error is caught and
+handled the same way.
+
+In both cases: after catching an error, check the loop detector. If the agent
+has hit the exact same error three times in a row, break out of the tool loop
+and ask the user for help instead of continuing to retry.
+
+
+### 3. Add JSON Parse Error Handling to the Streaming Pipeline
+
+Update the streaming pipeline to handle the specific case where the buffered
+tool call JSON cannot be parsed. Instead of crashing with a generic Python
+error, raise a custom error type that includes the raw broken JSON in its
+message. This gives the recovery service something meaningful to feed back to
+the LLM -- the LLM can see the broken JSON and potentially understand what
+went wrong.
+
+
+### 4. Tests
+
+Write unit tests that verify the recovery logic works correctly without making
+any real API calls. Tests should cover:
+- The execution wrapper catches exceptions and returns the correctly formatted
+  error string
+- The loop detector correctly identifies when the same error has occurred three
+  times in a row
+
+
+---
+
+After completing all subtasks, apply your formatting rules from memory.
+For "WHAT CHANGED", use the analogy of "The Bumper Lanes." Before, if the
+LLM threw a gutterball (bad JSON or a broken tool call), the whole program
+crashed. Now, the Recovery Service acts like bumper lanes at a bowling alley.
+It catches the mistake, bounces it back to the LLM with an error message, and
+says "try again." If it throws 3 gutterballs in a row, it stops the game and
+asks the user for help.
