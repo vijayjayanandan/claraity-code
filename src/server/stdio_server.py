@@ -2694,8 +2694,17 @@ async def run_stdio_server(
         permission_mode=permission_mode,
         api_key=api_key,
     )
-    # Apply trace capture setting from config (default: off)
-    agent._trace.set_enabled(load_trace_enabled(config_path))
+    # Apply trace capture setting from config (default: off).
+    # Must call init_session again after set_enabled because from_config() calls
+    # set_session_id() -> init_session() before trace is enabled, so the emitter
+    # is never created for the first session (init_session is a no-op when disabled).
+    trace_enabled = load_trace_enabled(config_path)
+    agent._trace.set_enabled(trace_enabled)
+    if trace_enabled:
+        agent._trace.init_session(
+            agent.session_id,
+            Path(working_directory) / ".claraity" / "sessions",
+        )
 
     # Set multi-root workspace folders if provided
     if workspace_folders:
