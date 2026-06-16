@@ -238,6 +238,53 @@ const STEP_LABELS: Record<StepType, string> = {
 // ─── CSS injection ──────────────────────────────────────────────────────────────
 
 const TRACE_CSS = `
+/* Theme-aware trace variables (dark defaults) */
+:root {
+  --trace-overlay-bg: rgba(255,255,255,0.04);
+  --trace-overlay-border: rgba(255,255,255,0.08);
+  --trace-muted-text: rgba(255,255,255,0.45);
+  --trace-edge-stroke: rgba(255,255,255,0.08);
+  --trace-dot-visited: rgba(255,255,255,0.3);
+  --trace-dot-future: rgba(255,255,255,0.1);
+  --trace-btn-border: rgba(255,255,255,0.15);
+  --trace-halo-fill: rgba(255,255,255,0.02);
+  --trace-tab-active-bg: rgba(255,255,255,0.12);
+  --trace-tab-inactive-bg: rgba(255,255,255,0.05);
+  --trace-idle-fill: rgba(255,255,255,0.2);
+  --trace-cloud-fill: #1C0828;
+  --trace-cloud-text: #E1BEE7;
+  --trace-cloud-text2: #CE93D8;
+  --trace-cloud-stroke: #AB47BC;
+  --trace-cloud-dot: #4A148C;
+  --trace-think-tab-bg: #4A148C;
+  --trace-think-tab-text: #E1BEE7;
+  --trace-think-pre-bg: rgba(74,20,140,0.2);
+  --trace-think-pre-border: rgba(171,71,188,0.4);
+  --trace-think-pre-text: #E1BEE7;
+}
+body.vscode-light {
+  --trace-overlay-bg: rgba(0,0,0,0.04);
+  --trace-overlay-border: rgba(0,0,0,0.1);
+  --trace-muted-text: rgba(0,0,0,0.5);
+  --trace-edge-stroke: rgba(0,0,0,0.12);
+  --trace-dot-visited: rgba(0,0,0,0.25);
+  --trace-dot-future: rgba(0,0,0,0.1);
+  --trace-btn-border: rgba(0,0,0,0.2);
+  --trace-halo-fill: rgba(0,0,0,0.03);
+  --trace-tab-active-bg: rgba(0,0,0,0.08);
+  --trace-tab-inactive-bg: rgba(0,0,0,0.04);
+  --trace-idle-fill: rgba(0,0,0,0.25);
+  --trace-cloud-fill: #F3E5F6;
+  --trace-cloud-text: #4A148C;
+  --trace-cloud-text2: #7B1FA2;
+  --trace-cloud-stroke: #CE93D8;
+  --trace-cloud-dot: #E1BEE7;
+  --trace-think-tab-bg: #E1BEE7;
+  --trace-think-tab-text: #4A148C;
+  --trace-think-pre-bg: rgba(206,147,216,0.15);
+  --trace-think-pre-border: rgba(171,71,188,0.3);
+  --trace-think-pre-text: #4A148C;
+}
 @keyframes trace-node-glow {
   0%, 100% { opacity: 0.7; }
   50% { opacity: 1; }
@@ -706,34 +753,34 @@ function ThinkingCloud({ thinking }: { thinking: string }) {
         { cx: 840, cy: 166, r: 2.5 },
       ].map((d, i) => (
         <circle key={i} cx={d.cx} cy={d.cy} r={d.r}
-          fill="#4A148C" stroke="#AB47BC" strokeWidth={1.5}
-          style={{ animation: `trace-dot-bounce 1.4s ease-in-out ${i * 0.2}s infinite` }}
+          strokeWidth={1.5}
+          style={{ fill: "var(--trace-cloud-dot)", stroke: "var(--trace-cloud-stroke)", animation: `trace-dot-bounce 1.4s ease-in-out ${i * 0.2}s infinite` }}
         />
       ))}
 
       {/* Cloud fill */}
       {bumps.map((b, i) => (
-        <ellipse key={`fill-${i}`} cx={b.cx} cy={b.cy} rx={b.rx} ry={b.ry} fill="#1C0828" />
+        <ellipse key={`fill-${i}`} cx={b.cx} cy={b.cy} rx={b.rx} ry={b.ry} style={{ fill: "var(--trace-cloud-fill)" }} />
       ))}
-      <rect x={782} y={90} width={126} height={20} fill="#1C0828" />
-      <ellipse cx={840} cy={108} rx={58} ry={10} fill="#1C0828" />
+      <rect x={782} y={90} width={126} height={20} style={{ fill: "var(--trace-cloud-fill)" }} />
+      <ellipse cx={840} cy={108} rx={58} ry={10} style={{ fill: "var(--trace-cloud-fill)" }} />
 
       {/* Cloud outlines */}
       {bumps.map((b, i) => (
         <ellipse key={`stroke-${i}`} cx={b.cx} cy={b.cy} rx={b.rx} ry={b.ry}
-          fill="none" stroke="#AB47BC" strokeWidth={1.5} opacity={0.75} />
+          fill="none" strokeWidth={1.5} opacity={0.75} style={{ stroke: "var(--trace-cloud-stroke)" }} />
       ))}
       <ellipse cx={840} cy={108} rx={58} ry={10}
-        fill="none" stroke="#AB47BC" strokeWidth={1.5} opacity={0.75} />
-      <rect x={784} y={91} width={122} height={18} fill="#1C0828" />
+        fill="none" strokeWidth={1.5} opacity={0.75} style={{ stroke: "var(--trace-cloud-stroke)" }} />
+      <rect x={784} y={91} width={122} height={18} style={{ fill: "var(--trace-cloud-fill)" }} />
 
-      <text x={840} y={100} textAnchor="middle" fontSize={9} fill="#E1BEE7"
-        fontFamily="var(--vscode-editor-font-family, monospace)" style={{ pointerEvents: "none" }}>
+      <text x={840} y={100} textAnchor="middle" fontSize={9}
+        fontFamily="var(--vscode-editor-font-family, monospace)" style={{ pointerEvents: "none", fill: "var(--trace-cloud-text)" }}>
         {line1}
       </text>
       {line2 && (
-        <text x={840} y={110} textAnchor="middle" fontSize={9} fill="#CE93D8"
-          fontFamily="var(--vscode-editor-font-family, monospace)" style={{ pointerEvents: "none" }}>
+        <text x={840} y={110} textAnchor="middle" fontSize={9}
+          fontFamily="var(--vscode-editor-font-family, monospace)" style={{ pointerEvents: "none", fill: "var(--trace-cloud-text2)" }}>
           {line2}
         </text>
       )}
@@ -1168,7 +1215,7 @@ export function TracePanel({ onBack, steps: externalSteps, traceEnabled = false,
               return (
                 <g key={`${a}-${b}`}>
                   {/* Dim base line */}
-                  <path d={d} stroke="rgba(255,255,255,0.08)" strokeWidth={2} fill="none" strokeDasharray="6 4" />
+                  <path d={d} strokeWidth={2} fill="none" strokeDasharray="6 4" style={{ stroke: "var(--trace-edge-stroke)" }} />
                   {/* Active animated line */}
                   {active && (
                     <path
@@ -1206,8 +1253,9 @@ export function TracePanel({ onBack, steps: externalSteps, traceEnabled = false,
                 >
                   {/* Background halo */}
                   <circle r={56}
-                    fill={active ? `${node.color}12` : "rgba(255,255,255,0.02)"}
+                    fill={active ? `${node.color}12` : undefined}
                     stroke={node.color}
+                    style={active ? undefined : { fill: "var(--trace-halo-fill)" }}
                     strokeWidth={active ? 2 : 1}
                     opacity={active ? 1 : 0.35}
                   />
@@ -1282,7 +1330,7 @@ export function TracePanel({ onBack, steps: externalSteps, traceEnabled = false,
                 x={110} y={420}
                 textAnchor="middle"
                 fontSize={12}
-                fill="rgba(255,255,255,0.2)"
+                style={{ fill: "var(--trace-idle-fill)" }}
               >
                 Press Play to visualize
               </text>
@@ -1355,8 +1403,8 @@ export function TracePanel({ onBack, steps: externalSteps, traceEnabled = false,
                     <pre style={{
                       margin: "6px 0 0 18px", fontSize: 10, lineHeight: 1.6,
                       whiteSpace: "pre-wrap", wordBreak: "break-word",
-                      background: "rgba(255,255,255,0.04)",
-                      border: "1px solid rgba(255,255,255,0.08)",
+                      background: "var(--trace-overlay-bg)",
+                      border: "1px solid var(--trace-overlay-border)",
                       padding: "8px 10px", borderRadius: 5,
                       color: "var(--vscode-editor-foreground)",
                     }}>
@@ -1406,11 +1454,11 @@ export function TracePanel({ onBack, steps: externalSteps, traceEnabled = false,
                           fontSize: 11, padding: "3px 10px", borderRadius: 4, border: "none",
                           cursor: "pointer", fontWeight: i === sideTabIndex ? 700 : 400,
                           background: i === sideTabIndex
-                            ? (tab === "Thinking" ? "#4A148C" : "rgba(255,255,255,0.12)")
-                            : "rgba(255,255,255,0.05)",
+                            ? (tab === "Thinking" ? "var(--trace-think-tab-bg)" : "var(--trace-tab-active-bg)")
+                            : "var(--trace-tab-inactive-bg)",
                           color: i === sideTabIndex
-                            ? (tab === "Thinking" ? "#E1BEE7" : "var(--vscode-editor-foreground)")
-                            : "rgba(255,255,255,0.45)",
+                            ? (tab === "Thinking" ? "var(--trace-think-tab-text)" : "var(--vscode-editor-foreground)")
+                            : "var(--trace-muted-text)",
                           transition: "all 0.15s",
                         }}>
                           {tab === "Thinking" ? "\uD83E\uDDE0 Thinking" : tab}
@@ -1427,10 +1475,10 @@ export function TracePanel({ onBack, steps: externalSteps, traceEnabled = false,
                     <pre style={{
                       flex: 1, fontSize: 11, lineHeight: 1.65,
                       whiteSpace: "pre-wrap", wordBreak: "break-word",
-                      background: isThinkingTab ? "rgba(74,20,140,0.2)" : "rgba(255,255,255,0.04)",
-                      border: `1px solid ${isThinkingTab ? "rgba(171,71,188,0.4)" : "rgba(255,255,255,0.08)"}`,
+                      background: isThinkingTab ? "var(--trace-think-pre-bg)" : "var(--trace-overlay-bg)",
+                      border: `1px solid ${isThinkingTab ? "var(--trace-think-pre-border)" : "var(--trace-overlay-border)"}`,
                       padding: 12, borderRadius: 6, margin: 0,
-                      color: isThinkingTab ? "#E1BEE7" : "var(--vscode-editor-foreground)",
+                      color: isThinkingTab ? "var(--trace-think-pre-text)" : "var(--vscode-editor-foreground)",
                       overflowY: "auto", fontStyle: isThinkingTab ? "italic" : "normal",
                       userSelect: "text", cursor: "text",
                     }}>
@@ -1442,8 +1490,8 @@ export function TracePanel({ onBack, steps: externalSteps, traceEnabled = false,
                 <pre style={{
                   flex: 1, fontSize: 11, lineHeight: 1.65,
                   whiteSpace: "pre-wrap", wordBreak: "break-word",
-                  background: "rgba(255,255,255,0.04)",
-                  border: "1px solid rgba(255,255,255,0.08)",
+                  background: "var(--trace-overlay-bg)",
+                  border: "1px solid var(--trace-overlay-border)",
                   padding: 12, borderRadius: 6, margin: 0,
                   color: "var(--vscode-editor-foreground)", overflowY: "auto",
                   userSelect: "text", cursor: "text",
@@ -1483,8 +1531,8 @@ export function TracePanel({ onBack, steps: externalSteps, traceEnabled = false,
                     i === currentStep
                       ? STEP_COLORS[s.type]
                       : i < currentStep
-                      ? "rgba(255,255,255,0.3)"
-                      : "rgba(255,255,255,0.1)",
+                      ? "var(--trace-dot-visited)"
+                      : "var(--trace-dot-future)",
                 }}
               />
             ))}
@@ -1531,7 +1579,7 @@ export function TracePanel({ onBack, steps: externalSteps, traceEnabled = false,
               { icon: "codicon-chevron-right",  title: "Last step",     go: () => handleStepClick(STEPS.length - 1) },
             ].map((btn) => (
               <button key={btn.title} onClick={btn.go} title={btn.title} style={{
-                background: "none", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 4,
+                background: "none", border: "1px solid var(--trace-btn-border)", borderRadius: 4,
                 padding: "3px 6px", cursor: "pointer", color: "var(--vscode-foreground)",
                 display: "flex", alignItems: "center", fontSize: 12,
               }}>
@@ -1568,7 +1616,7 @@ export function TracePanel({ onBack, steps: externalSteps, traceEnabled = false,
               onClick={handleReset}
               style={{
                 background: "none",
-                border: "1px solid rgba(255,255,255,0.15)",
+                border: "1px solid var(--trace-btn-border)",
                 borderRadius: 5, padding: "4px 10px",
                 cursor: "pointer", color: "var(--vscode-foreground)",
                 fontSize: 11, marginLeft: "auto",
