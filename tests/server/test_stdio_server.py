@@ -781,7 +781,7 @@ def _make_protocol_for_enrich(deltas: tuple[str, ...] = ("enriched text",)):
 
 def _run(coro):
     """Run a coroutine in the test event loop."""
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 class TestHandleEnrichPrompt:
