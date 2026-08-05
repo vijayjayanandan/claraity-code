@@ -4,7 +4,7 @@
  * Each action represents a user interaction or server event
  * that triggers a state transition.
  */
-import type { ToolStateData, SessionSummary, ReplayMessage, FileAttachment, ImageAttachment, JiraProfile, McpServerInfo, McpMarketplaceEntry, BeadsResponse, ArchitectureResponse, SubAgentInfo, SkillInfo, LimitsData, BackgroundTaskData } from "../types";
+import type { ToolStateData, SessionSummary, ReplayMessage, FileAttachment, ImageAttachment, JiraProfile, McpServerInfo, McpMarketplaceEntry, BeadsResponse, ArchitectureResponse, SubAgentInfo, SkillInfo, SkillLoadError, LimitsData, BackgroundTaskData } from "../types";
 import type { AppState, SubagentInfo } from "./state";
 
 export type Action =
@@ -97,7 +97,7 @@ export type Action =
   | { type: "LIMITS_LOADED"; limits: LimitsData }
   | { type: "LIMITS_SAVED"; success: boolean; message: string; limits?: LimitsData }
   // Skills
-  | { type: "SKILLS_LOADED"; skills: SkillInfo[] }
+  | { type: "SKILLS_LOADED"; skills: SkillInfo[]; failedSkills?: SkillLoadError[] }
   | { type: "SELECT_SKILL"; skillId: string }
   | { type: "CLEAR_SKILL" }
   // Prompt Enrichment

@@ -167,7 +167,8 @@ def _content_available_skills(state: ReminderState) -> str:
         from src.skills.skill_loader import SkillLoader
 
         loader = SkillLoader(working_directory=Path(state.working_directory))
-        for skill in loader.load_all():
+        skills, _ = loader.load_all()
+        for skill in skills:
             if not skill.disable_model_invocation:
                 skill_names.append(f"/{skill.id} - {skill.name}")
     except Exception:

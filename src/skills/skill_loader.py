@@ -60,6 +60,15 @@ logger = get_logger(__name__)
 
 
 @dataclass
+class SkillLoadError:
+    """Metadata for a skill directory that failed to load."""
+
+    id: str
+    filepath: Path
+    error: str
+
+
+@dataclass
 class SkillInfo:
     """Metadata + body for a single skill."""
 
@@ -341,25 +350,34 @@ class SkillLoader:
         # path to disable built-in skills in tests).
         self.builtins_dir = builtins_dir if builtins_dir is not None else self._BUILTINS_DIR
 
-    def load_all(self) -> list[SkillInfo]:
-        """Return all valid skills sorted by (category, name).
+    def load_all(self) -> tuple[list[SkillInfo], list[SkillLoadError]]:
+        """Return all valid skills sorted by (category, name), plus any load errors.
 
         Scans built-in skills first, then project skills.  Project skills
-        override built-ins with the same directory name.
+        override built-ins with the same directory name.  Errors from project
+        skills override errors from built-ins with the same directory name.
         """
         skills_by_id: dict[str, SkillInfo] = {}
+        errors_by_id: dict[str, SkillLoadError] = {}
 
         # Built-ins first (can be overridden)
-        for skill in self._scan_dir(self.builtins_dir):
+        builtin_skills, builtin_errors = self._scan_dir(self.builtins_dir)
+        for skill in builtin_skills:
             skills_by_id[skill.id] = skill
+        for error in builtin_errors:
+            errors_by_id[error.id] = error
 
         # Project skills override built-ins
-        for skill in self._scan_dir(self.skills_dir):
+        project_skills, project_errors = self._scan_dir(self.skills_dir)
+        for skill in project_skills:
             skills_by_id[skill.id] = skill
+            errors_by_id.pop(skill.id, None)  # clear any builtin error for same id
+        for error in project_errors:
+            errors_by_id[error.id] = error
 
         result = list(skills_by_id.values())
         result.sort(key=lambda s: (s.category, s.name))
-        return result
+        return result, list(errors_by_id.values())
 
     def get_skill(self, skill_id: str) -> SkillInfo | None:
         """Load a single skill by ID (directory name).
@@ -374,12 +392,13 @@ class SkillLoader:
         # Fall back to built-ins
         return self._get_from_dir(skill_id, self.builtins_dir)
 
-    def _scan_dir(self, base_dir: Path) -> list[SkillInfo]:
-        """Scan a directory for valid skills."""
+    def _scan_dir(self, base_dir: Path) -> tuple[list[SkillInfo], list[SkillLoadError]]:
+        """Scan a directory for valid skills, collecting load errors instead of silently dropping them."""
         if not base_dir.is_dir():
-            return []
+            return [], []
         resolved_base = base_dir.resolve()
         skills: list[SkillInfo] = []
+        errors: list[SkillLoadError] = []
         for skill_dir in sorted(base_dir.iterdir()):
             if not skill_dir.is_dir():
                 continue
@@ -392,9 +411,10 @@ class SkillLoader:
             try:
                 skill = self._load_skill_dir(skill_dir)
                 skills.append(skill)
-            except Exception:
-                logger.warning("skill_load_skipped", path=str(skill_dir))
-        return skills
+            except Exception as e:
+                logger.warning("skill_load_skipped", path=str(skill_dir), error=str(e))
+                errors.append(SkillLoadError(id=skill_dir.name, filepath=skill_dir, error=str(e)))
+        return skills, errors
 
     def _get_from_dir(self, skill_id: str, base_dir: Path) -> SkillInfo | None:
         """Load a single skill from a specific directory."""

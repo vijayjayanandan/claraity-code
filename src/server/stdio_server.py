@@ -2299,7 +2299,7 @@ class StdioProtocol(UIProtocol):
 
             working_dir = Path(self._working_directory) if self._working_directory else Path.cwd()
             loader = SkillLoader(working_directory=working_dir)
-            skills = loader.load_all()
+            skills, failed = loader.load_all()
             await self._send_json(
                 {
                     "type": "skills_list",
@@ -2314,6 +2314,10 @@ class StdioProtocol(UIProtocol):
                             **({"argumentHint": s.argument_hint} if s.argument_hint else {}),
                         }
                         for s in skills
+                    ],
+                    "failedSkills": [
+                        {"id": e.id, "error": e.error}
+                        for e in failed
                     ],
                 }
             )

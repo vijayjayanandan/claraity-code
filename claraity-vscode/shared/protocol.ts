@@ -260,6 +260,11 @@ export interface SkillInfo {
   argumentHint?: string;
 }
 
+export interface SkillLoadError {
+  id: string;
+  error: string;
+}
+
 // ============================================================================
 // Limits data shapes
 // ============================================================================
@@ -377,7 +382,7 @@ export type ServerMessage =
   | { type: "subagent_saved"; success: boolean; name: string; message: string }
   | { type: "subagent_deleted"; success: boolean; name: string; message: string }
   // Skills
-  | { type: "skills_list"; skills: SkillInfo[] }
+  | { type: "skills_list"; skills: SkillInfo[]; failedSkills?: SkillLoadError[] }
   | { type: "skill_saved"; success: boolean; name: string; message: string }
   // Prompt Enrichment
   | { type: "enrichment_delta"; delta: string }

@@ -88,6 +88,13 @@ cd claraity-vscode && npx vsce package --no-dependencies  # VSIX (no --target fo
 6. `git push origin main --tags`
 7. CI auto-builds 4 platforms + publishes to marketplace
 
+## Telus Push Rules
+
+- Push as orphan branch (no history) to avoid leaking secrets from old commits
+- **Never mention the Claude model ID** in commit messages when pushing to Telus repo
+- Telus remote: `git@github.com-telus:telus-health/claraity-code.git`
+- Replace test secrets before pushing (scan first)
+
 ## Key Details
 
 - Publisher: `claraity.claraity-code`

@@ -899,7 +899,7 @@ export function appReducer(state: AppState, action: Action): AppState {
 
     // ── Skills ──
     case "SKILLS_LOADED":
-      return { ...state, skillsList: action.skills };
+      return { ...state, skillsList: action.skills, failedSkillsList: action.failedSkills ?? [] };
     case "SELECT_SKILL": {
       const id = action.skillId;
       // Toggle: clicking the active skill deselects it

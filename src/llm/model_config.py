@@ -5,6 +5,31 @@ from typing import Optional
 from pydantic import BaseModel
 
 
+# Claude models that reject temperature/top_p (400) and only accept
+# adaptive thinking (thinking.type "enabled" + budget_tokens returns 400).
+# Substring match so provider-prefixed IDs work, e.g.
+# "vertex_ai/claude-sonnet-5", "anthropic.claude-opus-4-8".
+_ADAPTIVE_THINKING_MARKERS = (
+    "claude-fable-5",
+    "claude-mythos-5",
+    "claude-sonnet-5",
+    "claude-opus-4-7",
+    "claude-opus-4-8",
+)
+
+
+def uses_adaptive_thinking(model_name: str) -> bool:
+    """True for Claude 5-family / Opus 4.7+ models.
+
+    These models reject the ``temperature``/``top_p`` sampling params and
+    the ``thinking: {type: "enabled", budget_tokens: N}`` config outright
+    (HTTP 400). Callers must omit sampling params and use
+    ``thinking: {type: "adaptive"}`` instead.
+    """
+    name = (model_name or "").lower()
+    return any(marker in name for marker in _ADAPTIVE_THINKING_MARKERS)
+
+
 class ModelConfig(BaseModel):
     """Configuration for a specific model."""
 

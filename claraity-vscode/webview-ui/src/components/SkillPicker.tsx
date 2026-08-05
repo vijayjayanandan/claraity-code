@@ -3,12 +3,14 @@
  * with single-select (click to select, click again to deselect).
  */
 import { useState, useRef, useEffect, useCallback } from "react";
-import type { SkillInfo } from "../types";
+import type { SkillInfo, SkillLoadError } from "../types";
 
 interface SkillPickerProps {
   skills: SkillInfo[];
+  failedSkills: SkillLoadError[];
   activeSkill: string | null;
   onSelect: (skillId: string) => void;
+  onFixSkill: (id: string, error: string) => void;
   onRequestRefresh: () => void;
   onCreateSkill: () => void;
   onClose: () => void;
@@ -16,8 +18,10 @@ interface SkillPickerProps {
 
 export function SkillPicker({
   skills,
+  failedSkills,
   activeSkill,
   onSelect,
+  onFixSkill,
   onRequestRefresh,
   onCreateSkill,
   onClose,
@@ -128,6 +132,31 @@ export function SkillPicker({
           </div>
         ))}
       </div>
+
+      {failedSkills.length > 0 && (
+        <div className="skill-errors">
+          <div className="skill-category-header skill-category-header--error">
+            Failed to load
+          </div>
+          {failedSkills.map((s) => (
+            <div key={s.id} className="skill-item skill-item--error">
+              <div className="skill-item-text">
+                <div className="skill-name skill-name--error">
+                  <i className="codicon codicon-warning" /> {s.id}
+                </div>
+                <div className="skill-desc skill-desc--error">{s.error}</div>
+              </div>
+              <button
+                className="skill-fix-btn"
+                onClick={() => { onFixSkill(s.id, s.error); onClose(); }}
+                title="Ask the AI to fix this skill"
+              >
+                Fix with AI
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="skill-picker-footer">
         <button onClick={onCreateSkill}>

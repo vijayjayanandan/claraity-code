@@ -50,6 +50,8 @@ from src.session.models.base import generate_tool_call_id
 # Use Session Model ToolCall as the canonical type
 from src.session.models.message import ToolCall, ToolCallFunction
 
+from .model_config import uses_adaptive_thinking
+
 from .base import (
     LLMBackend,
     LLMConfig,
@@ -266,6 +268,24 @@ class OpenAIBackend(LLMBackend):
         return temperature
 
     @staticmethod
+    def _apply_adaptive_thinking_rules(params: dict) -> None:
+        """Sanitize request params for Claude 5-family / Opus 4.7+ models.
+
+        These models reject temperature/top_p and thinking budget_tokens
+        with HTTP 400. Strips sampling params and rewrites any thinking
+        config to adaptive (display=summarized keeps thinking text in the
+        stream; the server default omits it). Thinking depth is left at
+        the server default effort (high). No-op for all other models.
+        """
+        if not uses_adaptive_thinking(params.get("model", "")):
+            return
+        params.pop("temperature", None)
+        params.pop("top_p", None)
+        extra = params.get("extra_body")
+        if isinstance(extra, dict) and isinstance(extra.get("thinking"), dict):
+            extra["thinking"] = {"type": "adaptive", "display": "summarized"}
+
+    @staticmethod
     def _add_cache_control_to_message(message: dict[str, Any]) -> dict[str, Any]:
         """Add cache_control breakpoint to a message's content.
 
@@ -417,6 +437,7 @@ class OpenAIBackend(LLMBackend):
 
         # Wrap API call with failure handler (retry on transient errors)
         def api_call():
+            self._apply_adaptive_thinking_rules(params)
             return self.client.chat.completions.create(**params)
 
         try:
@@ -489,6 +510,7 @@ class OpenAIBackend(LLMBackend):
             params["stream_options"] = {"include_usage": True}
 
         try:
+            self._apply_adaptive_thinking_rules(params)
             stream = self.client.chat.completions.create(**params)
 
             for chunk in stream:
@@ -641,6 +663,7 @@ class OpenAIBackend(LLMBackend):
 
         # Wrap API call with failure handler (retry on transient errors)
         def api_call():
+            self._apply_adaptive_thinking_rules(params)
             return self.client.chat.completions.create(**params)
 
         try:
@@ -797,6 +820,7 @@ class OpenAIBackend(LLMBackend):
         # Initialize stream variable before try block to ensure cleanup works
         stream = None
         try:
+            self._apply_adaptive_thinking_rules(params)
             stream = self.client.chat.completions.create(**params)
 
             # Accumulate tool calls by index (for parallel calls)
@@ -1040,6 +1064,7 @@ class OpenAIBackend(LLMBackend):
         stream = None
         try:
             # Use async client for non-blocking API call
+            self._apply_adaptive_thinking_rules(params)
             stream = await self.async_client.chat.completions.create(**params)
 
             # Accumulate tool calls by index (for parallel calls)
@@ -1311,6 +1336,7 @@ class OpenAIBackend(LLMBackend):
         _chunk_count = 0
         try:
             logger.debug("llm_stream_phase", phase="http_request_start", model=params.get("model"))
+            self._apply_adaptive_thinking_rules(params)
             stream = self.client.chat.completions.create(**params)
             logger.debug(
                 "llm_stream_phase",
@@ -1558,6 +1584,7 @@ class OpenAIBackend(LLMBackend):
         _chunk_count = 0
         try:
             logger.debug("llm_stream_phase", phase="http_request_start", model=params.get("model"))
+            self._apply_adaptive_thinking_rules(params)
             stream = await self.async_client.chat.completions.create(**params)
             logger.debug(
                 "llm_stream_phase",

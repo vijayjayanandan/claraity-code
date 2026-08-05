@@ -424,7 +424,7 @@ These rules are hardcoded because trust depends on predictability. If an organis
 This agent will help employees answer questions about their health benefits,
 coverage, and claims. We are building this the right way from day one.
 
-Before writing any code, please save the following rules to your persistent
+Before writing any code, please save the following rules to this project
 memory so you apply them to every future prompt in this project:
 - The user is an absolute beginner to AI programming.
 - Before writing code for any new prompt, ALWAYS create a new task in the

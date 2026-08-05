@@ -56,6 +56,7 @@ from .base import (
 )
 from .cache_tracker import CacheTracker
 from .failure_handler import LLMFailureHandler
+from .model_config import uses_adaptive_thinking
 
 # Allowlisted image MIME types for multimodal content (security: reject unknown/malformed)
 _SAFE_IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
@@ -569,6 +570,23 @@ class AnthropicBackend(LLMBackend):
             "cache_write_tokens": getattr(usage, "cache_creation_input_tokens", 0) or 0,
         }
 
+    @staticmethod
+    def _apply_adaptive_thinking_rules(params: dict) -> None:
+        """Sanitize request params for Claude 5-family / Opus 4.7+ models.
+
+        These models reject temperature/top_p and thinking budget_tokens
+        with HTTP 400. Strips sampling params and rewrites any thinking
+        config to adaptive (display=summarized keeps thinking text in the
+        stream; the server default omits it). Thinking depth is left at
+        the server default effort (high). No-op for all other models.
+        """
+        if not uses_adaptive_thinking(params.get("model", "")):
+            return
+        params.pop("temperature", None)
+        params.pop("top_p", None)
+        if isinstance(params.get("thinking"), dict):
+            params["thinking"] = {"type": "adaptive", "display": "summarized"}
+
     # =========================================================================
     # Non-Streaming Methods
     # =========================================================================
@@ -603,6 +621,8 @@ class AnthropicBackend(LLMBackend):
         }
         if system_param:
             params["system"] = system_param
+
+        self._apply_adaptive_thinking_rules(params)
 
         def api_call():
             return self.client.messages.create(**params)
@@ -679,6 +699,7 @@ class AnthropicBackend(LLMBackend):
             params["system"] = system_param
 
         try:
+            self._apply_adaptive_thinking_rules(params)
             with self.client.messages.stream(
                 **{k: v for k, v in params.items() if k != "stream"}
             ) as stream:
@@ -765,6 +786,8 @@ class AnthropicBackend(LLMBackend):
             # Anthropic requires temperature=1 and no top_p with extended thinking
             params["temperature"] = 1
             # top_p already omitted from params
+
+        self._apply_adaptive_thinking_rules(params)
 
         def api_call():
             return self.client.messages.create(**params)
@@ -880,6 +903,7 @@ class AnthropicBackend(LLMBackend):
             model_name = self.config.model_name
             usage_dict = None
 
+            self._apply_adaptive_thinking_rules(params)
             with self.client.messages.stream(**params) as stream:
                 for event in stream:
                     event_type = getattr(event, "type", "")
@@ -1060,6 +1084,7 @@ class AnthropicBackend(LLMBackend):
             model_name = self.config.model_name
             usage_dict = None
 
+            self._apply_adaptive_thinking_rules(params)
             async with self.async_client.messages.stream(**params) as stream:
                 async for event in stream:
                     event_type = getattr(event, "type", "")
@@ -1260,6 +1285,7 @@ class AnthropicBackend(LLMBackend):
             finish_reason = None
             usage_dict = None
 
+            self._apply_adaptive_thinking_rules(params)
             with self.client.messages.stream(**params) as stream:
                 for event in stream:
                     event_type = getattr(event, "type", "")
@@ -1412,6 +1438,7 @@ class AnthropicBackend(LLMBackend):
             finish_reason = None
             usage_dict = None
 
+            self._apply_adaptive_thinking_rules(params)
             async with self.async_client.messages.stream(**params) as stream:
                 async for event in stream:
                     event_type = getattr(event, "type", "")

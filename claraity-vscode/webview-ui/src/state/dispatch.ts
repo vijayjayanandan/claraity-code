@@ -312,7 +312,7 @@ export function dispatchServerMessage(
 
     // ── Skills ──
     case "skills_list":
-      dispatch({ type: "SKILLS_LOADED", skills: msg.skills ?? [] });
+      dispatch({ type: "SKILLS_LOADED", skills: msg.skills ?? [], failedSkills: msg.failedSkills ?? [] });
       break;
 
     case "skill_saved":

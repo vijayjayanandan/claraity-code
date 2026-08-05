@@ -472,9 +472,16 @@ export function App() {
         draft={state.chatDraft}
         onDraftChange={(draft) => dispatch({ type: "SET_CHAT_DRAFT", draft })}
         skillsList={state.skillsList}
+        failedSkillsList={state.failedSkillsList}
         activeSkill={state.activeSkill}
         onSelectSkill={(skillId) => dispatch({ type: "SELECT_SKILL", skillId })}
         onRequestSkills={() => postMessage({ type: "getSkills" })}
+        onFixSkill={(id, error) => {
+          const content = `The skill '${id}' failed to load with this error:\n\n${error}\n\nPlease read the skill file and fix it.`;
+          dispatch({ type: "ADD_USER_MESSAGE", content });
+          postMessage({ type: "chatMessage", content });
+          dispatch({ type: "SET_ACTIVE_PANEL", panel: "chat" });
+        }}
         onCreateSkill={() => {
           // Invoke the built-in skill-creator skill directly.
           // We can't use dispatch(SELECT_SKILL) + handleSendMessage because

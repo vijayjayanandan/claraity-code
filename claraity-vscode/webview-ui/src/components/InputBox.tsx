@@ -2,7 +2,7 @@
  * Chat input box with @file mentions, file attachments, image paste, and send/interrupt.
  */
 import { useState, useRef, useCallback, useEffect } from "react";
-import type { FileAttachment, ImageAttachment, SkillInfo, WebViewMessage } from "../types";
+import type { FileAttachment, ImageAttachment, SkillInfo, SkillLoadError, WebViewMessage } from "../types";
 import { SkillPicker } from "./SkillPicker";
 
 interface InputBoxProps {
@@ -31,10 +31,12 @@ interface InputBoxProps {
   onDraftChange: (draft: string) => void;
   // Skills
   skillsList: SkillInfo[];
+  failedSkillsList?: SkillLoadError[];
   activeSkill: string | null;
   onSelectSkill: (skillId: string) => void;
   onRequestSkills: () => void;
   onCreateSkill: () => void;
+  onFixSkill?: (id: string, error: string) => void;
 }
 
 const MAX_IMAGES = 5;
@@ -76,10 +78,12 @@ export function InputBox({
   draft,
   onDraftChange,
   skillsList,
+  failedSkillsList = [],
   activeSkill,
   onSelectSkill,
   onRequestSkills,
   onCreateSkill,
+  onFixSkill,
 }: InputBoxProps) {
   const text = draft;
   const setText = onDraftChange;
@@ -629,8 +633,10 @@ export function InputBox({
           {showSkillPicker && (
             <SkillPicker
               skills={skillsList}
+              failedSkills={failedSkillsList}
               activeSkill={activeSkill}
               onSelect={onSelectSkill}
+              onFixSkill={(id, error) => onFixSkill?.(id, error)}
               onRequestRefresh={onRequestSkills}
               onCreateSkill={() => { setShowSkillPicker(false); onCreateSkill(); }}
               onClose={() => setShowSkillPicker(false)}

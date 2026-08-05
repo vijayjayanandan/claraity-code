@@ -125,7 +125,7 @@ class TestSkillLoader:
         )
 
         loader = SkillLoader(working_directory=tmp_path, builtins_dir=tmp_path / "_no_builtins")
-        skills = loader.load_all()
+        skills, _ = loader.load_all()
 
         assert len(skills) == 1
         s = skills[0]
@@ -143,11 +143,13 @@ class TestSkillLoader:
         skills_dir.mkdir(parents=True)
 
         loader = SkillLoader(working_directory=tmp_path, builtins_dir=tmp_path / "_no_builtins")
-        assert loader.load_all() == []
+        skills, _ = loader.load_all()
+        assert skills == []
 
     def test_no_skills_directory(self, tmp_path: Path):
         loader = SkillLoader(working_directory=tmp_path, builtins_dir=tmp_path / "_no_builtins")
-        assert loader.load_all() == []
+        skills, _ = loader.load_all()
+        assert skills == []
 
     def test_missing_skill_file_skipped(self, tmp_path: Path):
         skills_dir = tmp_path / ".claraity" / "skills"
@@ -155,7 +157,10 @@ class TestSkillLoader:
         (skills_dir / "bad-skill").mkdir(parents=True)
 
         loader = SkillLoader(working_directory=tmp_path, builtins_dir=tmp_path / "_no_builtins")
-        assert loader.load_all() == []
+        skills, errors = loader.load_all()
+        assert skills == []
+        assert len(errors) == 1
+        assert errors[0].id == "bad-skill"
 
     def test_malformed_frontmatter_skipped(self, tmp_path: Path):
         skills_dir = tmp_path / ".claraity" / "skills"
@@ -167,9 +172,11 @@ class TestSkillLoader:
         _create_skill_dir(skills_dir, "bad", "No frontmatter here")
 
         loader = SkillLoader(working_directory=tmp_path, builtins_dir=tmp_path / "_no_builtins")
-        skills = loader.load_all()
+        skills, errors = loader.load_all()
         assert len(skills) == 1
         assert skills[0].id == "good"
+        assert len(errors) == 1
+        assert errors[0].id == "bad"
 
     def test_missing_name_skipped(self, tmp_path: Path):
         skills_dir = tmp_path / ".claraity" / "skills"
@@ -180,7 +187,8 @@ class TestSkillLoader:
         )
 
         loader = SkillLoader(working_directory=tmp_path, builtins_dir=tmp_path / "_no_builtins")
-        assert loader.load_all() == []
+        skills, _ = loader.load_all()
+        assert skills == []
 
     def test_missing_description_skipped(self, tmp_path: Path):
         skills_dir = tmp_path / ".claraity" / "skills"
@@ -191,7 +199,8 @@ class TestSkillLoader:
         )
 
         loader = SkillLoader(working_directory=tmp_path, builtins_dir=tmp_path / "_no_builtins")
-        assert loader.load_all() == []
+        skills, _ = loader.load_all()
+        assert skills == []
 
     def test_id_from_directory_name(self, tmp_path: Path):
         skills_dir = tmp_path / ".claraity" / "skills"
@@ -202,7 +211,7 @@ class TestSkillLoader:
         )
 
         loader = SkillLoader(working_directory=tmp_path, builtins_dir=tmp_path / "_no_builtins")
-        skills = loader.load_all()
+        skills, _ = loader.load_all()
         assert skills[0].id == "test-driven-bugfix"
 
     def test_get_skill_by_id(self, tmp_path: Path):
@@ -242,7 +251,8 @@ class TestSkillLoader:
         )
 
         loader = SkillLoader(working_directory=tmp_path, builtins_dir=tmp_path / "_no_builtins")
-        assert loader.load_all()[0].category == "general"
+        skills, _ = loader.load_all()
+        assert skills[0].category == "general"
 
     def test_tags_as_csv_string(self, tmp_path: Path):
         skills_dir = tmp_path / ".claraity" / "skills"
@@ -253,8 +263,8 @@ class TestSkillLoader:
         )
 
         loader = SkillLoader(working_directory=tmp_path, builtins_dir=tmp_path / "_no_builtins")
-        skill = loader.load_all()[0]
-        assert skill.tags == ["bug", "fix", "test"]
+        skills, _ = loader.load_all()
+        assert skills[0].tags == ["bug", "fix", "test"]
 
     def test_sorted_by_category_then_name(self, tmp_path: Path):
         skills_dir = tmp_path / ".claraity" / "skills"
@@ -275,7 +285,7 @@ class TestSkillLoader:
         )
 
         loader = SkillLoader(working_directory=tmp_path, builtins_dir=tmp_path / "_no_builtins")
-        skills = loader.load_all()
+        skills, _ = loader.load_all()
         names = [s.name for s in skills]
         assert names == ["M Skill", "Z Skill", "A Skill"]
 
@@ -289,7 +299,8 @@ class TestSkillLoader:
             )
 
         loader = SkillLoader(working_directory=tmp_path, builtins_dir=tmp_path / "_no_builtins")
-        assert len(loader.load_all()) == 5
+        skills, _ = loader.load_all()
+        assert len(skills) == 5
 
     def test_extended_frontmatter(self, tmp_path: Path):
         skills_dir = tmp_path / ".claraity" / "skills"
@@ -310,7 +321,8 @@ class TestSkillLoader:
         )
 
         loader = SkillLoader(working_directory=tmp_path, builtins_dir=tmp_path / "_no_builtins")
-        skill = loader.load_all()[0]
+        skills, _ = loader.load_all()
+        skill = skills[0]
         assert skill.arguments == ["scope", "issue"]
         assert skill.argument_hint == "[scope] [issue-number]"
         assert skill.disable_model_invocation is True
@@ -333,7 +345,7 @@ class TestSkillLoader:
         )
 
         loader = SkillLoader(working_directory=tmp_path, builtins_dir=tmp_path / "_no_builtins")
-        skills = loader.load_all()
+        skills, _ = loader.load_all()
         assert len(skills) == 1
         assert skills[0].id == "new-style"
 
@@ -376,7 +388,7 @@ class TestDualDirectoryLoading:
         )
 
         loader = SkillLoader(working_directory=tmp_path, builtins_dir=builtins_dir)
-        skills = loader.load_all()
+        skills, _ = loader.load_all()
 
         assert len(skills) == 1
         assert skills[0].id == "my-builtin"
@@ -399,7 +411,7 @@ class TestDualDirectoryLoading:
         )
 
         loader = SkillLoader(working_directory=tmp_path, builtins_dir=builtins_dir)
-        skills = loader.load_all()
+        skills, _ = loader.load_all()
 
         assert len(skills) == 1
         assert skills[0].name == "Project Version"
@@ -422,7 +434,7 @@ class TestDualDirectoryLoading:
         )
 
         loader = SkillLoader(working_directory=tmp_path, builtins_dir=builtins_dir)
-        skills = loader.load_all()
+        skills, _ = loader.load_all()
 
         assert len(skills) == 2
         ids = {s.id for s in skills}

@@ -29,6 +29,7 @@ export type {
   KnowledgeApproval,
   SubAgentInfo,
   SkillInfo,
+  SkillLoadError,
   LimitsData,
   BackgroundTaskData,
 } from "../../shared/protocol";

@@ -16,6 +16,7 @@ import type {
   ArchitectureResponse,
   SubAgentInfo,
   SkillInfo,
+  SkillLoadError,
   LimitsData,
   BackgroundTaskData,
 } from "../types";
@@ -192,6 +193,7 @@ export interface AppState {
 
   // Skills
   skillsList: SkillInfo[];
+  failedSkillsList: SkillLoadError[];
   activeSkill: string | null;
 
   // Trace
@@ -298,6 +300,7 @@ export const initialState: AppState = {
   beadsData: null,
   architectureData: null,
   skillsList: [],
+  failedSkillsList: [],
   activeSkill: null,
   traceSteps: null,
   traceEnabled: false,

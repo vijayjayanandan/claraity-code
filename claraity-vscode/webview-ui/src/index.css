@@ -1867,6 +1867,50 @@ button, .toolbar-icon, .session-card, .mention-item, .tool-badge {
   background: var(--vscode-list-hoverBackground);
 }
 
+/* Skill error rows */
+
+.skill-category-header--error {
+  color: var(--vscode-editorWarning-foreground);
+}
+
+.skill-item--error {
+  border-left: 2px solid var(--vscode-editorWarning-foreground);
+  cursor: default;
+}
+
+.skill-item--error:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.skill-name--error {
+  color: var(--vscode-editorWarning-foreground);
+}
+
+.skill-desc--error {
+  color: var(--vscode-descriptionForeground);
+  font-size: 0.85em;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.skill-fix-btn {
+  margin-left: 8px;
+  flex-shrink: 0;
+  align-self: center;
+  font-size: 0.8em;
+  padding: 2px 8px;
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.skill-fix-btn:hover {
+  background: var(--vscode-button-hoverBackground);
+}
+
 /* Skill badges above textarea */
 
 .skill-badge-bar {
