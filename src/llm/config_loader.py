@@ -128,6 +128,8 @@ class LLMConfigData:
     max_tokens: int = 16384
     top_p: float = 0.95
     thinking_budget: int | None = None  # Extended thinking token budget (Claude, etc.)
+    route_claude_to_messages: bool = True  # Route modern Claude models to Messages API
+    route_gpt_to_responses: bool = True  # Route gpt-6+ models to the Responses API
     reasoning_effort: str | None = None  # "low", "medium", "high" -- OpenAI o-series only
     reasoning_summary: bool = (
         False  # Send reasoning.summary="auto" -- requires OpenAI org verification
@@ -252,6 +254,14 @@ def load_llm_config(config_path: str = DEFAULT_CONFIG_PATH) -> LLMConfigData:
             _safe_stderr(
                 f"Invalid reasoning_effort '{re_val}', must be low/medium/high -- ignoring"
             )
+
+    # -- protocol routing escape hatches (bool, default True) --
+    for route_key in ("route_claude_to_messages", "route_gpt_to_responses"):
+        if route_key in llm_data:
+            try:
+                setattr(config, route_key, bool(llm_data[route_key]))
+            except (TypeError, ValueError):
+                _safe_stderr(f"Invalid value for llm.{route_key}, ignoring")
 
     # -- reasoning_summary (bool, opt-in -- requires OpenAI org verification) --
     if "reasoning_summary" in llm_data:
@@ -425,6 +435,12 @@ def save_llm_config(
     # Only write reasoning_effort if set
     if config.reasoning_effort is not None:
         llm_section["reasoning_effort"] = config.reasoning_effort
+
+    # Only write routing flags when opted out (True is default -- clean YAML)
+    if not config.route_claude_to_messages:
+        llm_section["route_claude_to_messages"] = False
+    if not config.route_gpt_to_responses:
+        llm_section["route_gpt_to_responses"] = False
 
     # Only write reasoning_summary if opted in (omit when False -- clean YAML)
     if config.reasoning_summary:

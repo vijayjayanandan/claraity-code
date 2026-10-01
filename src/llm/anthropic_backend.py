@@ -111,16 +111,19 @@ class AnthropicBackend(LLMBackend):
         )
 
         # Build client kwargs (base_url is optional -- SDK defaults to api.anthropic.com)
-        client_kwargs: dict[str, Any] = {
-            "api_key": self.api_key,
-            "timeout": timeout,
-        }
+        client_kwargs: dict[str, Any] = {"timeout": timeout}
         if config.base_url:
             # Strip /v1 suffix — Anthropic SDK adds its own /v1/messages path
             base = config.base_url.rstrip("/")
             if base.endswith("/v1"):
                 base = base[:-3]
             client_kwargs["base_url"] = base
+            # Gateways (e.g. FuelIX) authenticate with Authorization: Bearer
+            # and 401 on x-api-key. auth_token sends only the Bearer header.
+            # Direct api.anthropic.com (no base_url) keeps x-api-key.
+            client_kwargs["auth_token"] = self.api_key
+        else:
+            client_kwargs["api_key"] = self.api_key
 
         # Sync client
         self.client = Anthropic(**client_kwargs)
@@ -578,7 +581,9 @@ class AnthropicBackend(LLMBackend):
         with HTTP 400. Strips sampling params and rewrites any thinking
         config to adaptive (display=summarized keeps thinking text in the
         stream; the server default omits it). Thinking depth is left at
-        the server default effort (high). No-op for all other models.
+        the server default effort (high). Forced tool_choice (any/tool)
+        is also rejected on Opus 5.5+ / Sonnet 5.5+ / Fable — downgrade
+        to auto. No-op for all other models.
         """
         if not uses_adaptive_thinking(params.get("model", "")):
             return
@@ -586,6 +591,9 @@ class AnthropicBackend(LLMBackend):
         params.pop("top_p", None)
         if isinstance(params.get("thinking"), dict):
             params["thinking"] = {"type": "adaptive", "display": "summarized"}
+        tool_choice = params.get("tool_choice")
+        if isinstance(tool_choice, dict) and tool_choice.get("type") in ("any", "tool"):
+            params["tool_choice"] = {"type": "auto"}
 
     # =========================================================================
     # Non-Streaming Methods

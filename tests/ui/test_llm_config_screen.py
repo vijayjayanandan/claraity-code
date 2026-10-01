@@ -47,7 +47,7 @@ class TestConfigLLMScreenInit:
         config_path = str(tmp_path / "nonexistent.yaml")
         screen = ConfigLLMScreen(config_path=config_path)
         assert screen._config.model == ""
-        assert screen._config.backend_type == "openai"
+        assert screen._config.backend_type == "openai_compatible"
 
 
 class TestListModels:

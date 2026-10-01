@@ -270,8 +270,9 @@ export function ConfigPanel({
   // ── Backend change ───────────────────────────────────────────────────────────
   const handleBackendChange = useCallback((val: string) => {
     setBackend(val);
-    // Clear Base URL for backends with fixed endpoints
-    if (val === "anthropic" || val === "openai_native") setBaseUrl("");
+    // Clear Base URL only for OpenAI native (always api.openai.com).
+    // Anthropic keeps it: empty = api.anthropic.com, set = gateway/proxy.
+    if (val === "openai_native") setBaseUrl("");
     // Clear reasoning effort when leaving openai_native
     if (val !== "openai_native") setReasoningEffort("");
   }, []);
@@ -469,15 +470,20 @@ export function ConfigPanel({
             </select>
           </Field>
 
-          {/* Base URL: not shown for Anthropic (hardcoded by SDK) or OpenAI native (always api.openai.com) */}
-          {backend !== "anthropic" && backend !== "openai_native" && (
-            <Field label="Base URL">
+          {/* Base URL: not shown for OpenAI native (always api.openai.com).
+              For Anthropic it is optional — empty means api.anthropic.com,
+              a value routes through a gateway/proxy (e.g. FuelIX /v1/messages). */}
+          {backend !== "openai_native" && (
+            <Field
+              label="Base URL"
+              hint={backend === "anthropic" ? "Optional. Leave empty for api.anthropic.com, or point at an Anthropic-compatible gateway." : undefined}
+            >
               <input
                 className="form-input"
                 type="text"
                 value={baseUrl}
                 onChange={(e) => setBaseUrl(e.target.value)}
-                placeholder="https://api.openai.com/v1"
+                placeholder={backend === "anthropic" ? "default: https://api.anthropic.com" : "https://api.openai.com/v1"}
               />
             </Field>
           )}

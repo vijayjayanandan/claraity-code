@@ -169,6 +169,145 @@ class TestCreateBackend:
             create_backend(config, api_key=None, api_key_env="OPENAI_API_KEY")
 
 
+class TestClaudeMessagesRouting:
+    """Modern Claude models on OpenAI-compatible backends route to AnthropicBackend.
+
+    Gateways (e.g. FuelIX) reject Claude 5-family / Opus 4.7+ models on
+    /v1/chat/completions -- premium models require prompt caching, which is
+    only expressible on the Anthropic Messages API. The factory routes those
+    models to AnthropicBackend with the same base_url and key. Older Claude
+    models stay on the proven chat completions path.
+    """
+
+    def test_modern_claude_on_openai_compatible_routes_to_anthropic(self):
+        config = _make_config("openai_compatible", model_name="claude-opus-5-5")
+        mock_instance = MagicMock()
+
+        with patch("src.llm.anthropic_backend.AnthropicBackend") as MockAnthropic:
+            MockAnthropic.return_value = mock_instance
+            result = create_backend(config, api_key="gw-key", api_key_env="OPENAI_API_KEY")
+
+        MockAnthropic.assert_called_once_with(
+            config, api_key="gw-key", api_key_env="OPENAI_API_KEY"
+        )
+        assert result is mock_instance
+
+    def test_routed_backend_keeps_gateway_api_key_env(self):
+        """Routing must NOT apply the OPENAI->ANTHROPIC env correction --
+        in the routed case the key is the gateway's, not a real Anthropic key."""
+        config = _make_config("openai_compatible", model_name="claude-fable-5")
+
+        with patch("src.llm.anthropic_backend.AnthropicBackend") as MockAnthropic:
+            MockAnthropic.return_value = MagicMock()
+            create_backend(config, api_key=None, api_key_env="OPENAI_API_KEY")
+
+        passed_env = MockAnthropic.call_args.kwargs.get("api_key_env")
+        assert passed_env == "OPENAI_API_KEY"
+
+    def test_provider_prefixed_modern_claude_routes(self):
+        config = _make_config("openai_compatible", model_name="anthropic.claude-opus-5-5")
+        mock_instance = MagicMock()
+
+        with patch("src.llm.anthropic_backend.AnthropicBackend") as MockAnthropic:
+            MockAnthropic.return_value = mock_instance
+            result = create_backend(config, api_key="k", api_key_env="OPENAI_API_KEY")
+
+        assert result is mock_instance
+
+    def test_older_claude_stays_on_openai_backend(self):
+        """sonnet-4-6 / haiku work on chat completions today -- don't move them."""
+        for model in ("claude-sonnet-4-6", "claude-haiku-4-5", "claude-opus-4-6"):
+            config = _make_config("openai_compatible", model_name=model)
+            mock_instance = MagicMock()
+
+            with patch("src.llm.openai_backend.OpenAIBackend") as MockCompat:
+                MockCompat.return_value = mock_instance
+                result = create_backend(config, api_key="k", api_key_env="OPENAI_API_KEY")
+
+            MockCompat.assert_called_once()
+            assert result is mock_instance
+
+    def test_opt_out_flag_disables_routing(self):
+        config = _make_config("openai_compatible", model_name="claude-opus-5-5")
+        config.route_claude_to_messages = False
+        mock_instance = MagicMock()
+
+        with patch("src.llm.openai_backend.OpenAIBackend") as MockCompat:
+            MockCompat.return_value = mock_instance
+            result = create_backend(config, api_key="k", api_key_env="OPENAI_API_KEY")
+
+        MockCompat.assert_called_once()
+        assert result is mock_instance
+
+    def test_non_claude_models_unaffected(self):
+        config = _make_config("openai_compatible", model_name="gpt-4o")
+        mock_instance = MagicMock()
+
+        with patch("src.llm.openai_backend.OpenAIBackend") as MockCompat:
+            MockCompat.return_value = mock_instance
+            result = create_backend(config, api_key="k", api_key_env="OPENAI_API_KEY")
+
+        MockCompat.assert_called_once()
+        assert result is mock_instance
+
+    def test_explicit_anthropic_backend_unchanged_by_flag(self):
+        """backend_type='anthropic' ignores routing entirely (and keeps env correction)."""
+        config = _make_config("anthropic", model_name="claude-opus-5-5")
+        config.route_claude_to_messages = False
+
+        with patch("src.llm.anthropic_backend.AnthropicBackend") as MockAnthropic:
+            MockAnthropic.return_value = MagicMock()
+            create_backend(config, api_key=None, api_key_env="OPENAI_API_KEY")
+
+        assert MockAnthropic.call_args.kwargs.get("api_key_env") == "ANTHROPIC_API_KEY"
+
+
+class TestGptResponsesRouting:
+    """gpt-6+ models on OpenAI-compatible backends route to OpenAINativeBackend.
+
+    Azure rejects function tools with reasoning on /v1/chat/completions for
+    gpt-6+ ("use /v1/responses or set reasoning_effort to 'none'"). The
+    native backend speaks the Responses API and honors base_url.
+    """
+
+    def test_gpt6_routes_to_native_backend(self):
+        config = _make_config("openai_compatible", model_name="gpt-6.1-sol")
+        mock_instance = MagicMock()
+
+        with patch("src.llm.openai_native_backend.OpenAINativeBackend") as MockNative:
+            MockNative.return_value = mock_instance
+            result = create_backend(config, api_key="gw-key", api_key_env="OPENAI_API_KEY")
+
+        MockNative.assert_called_once_with(
+            config, api_key="gw-key", api_key_env="OPENAI_API_KEY"
+        )
+        assert result is mock_instance
+
+    def test_gpt5_stays_on_openai_backend(self):
+        """gpt-5.x works with tools on chat completions -- don't move it."""
+        config = _make_config("openai_compatible", model_name="gpt-5.4-2026-03-05")
+        mock_instance = MagicMock()
+
+        with patch("src.llm.openai_backend.OpenAIBackend") as MockCompat:
+            MockCompat.return_value = mock_instance
+            result = create_backend(config, api_key="k", api_key_env="OPENAI_API_KEY")
+
+        MockCompat.assert_called_once()
+        assert result is mock_instance
+
+    def test_opt_out_flag_disables_gpt_routing(self):
+        config = _make_config("openai_compatible", model_name="gpt-6.1-sol")
+        config.route_gpt_to_responses = False
+        mock_instance = MagicMock()
+
+        with patch("src.llm.openai_backend.OpenAIBackend") as MockCompat:
+            MockCompat.return_value = mock_instance
+            result = create_backend(config, api_key="k", api_key_env="OPENAI_API_KEY")
+
+        MockCompat.assert_called_once()
+        assert result is mock_instance
+
+
 class TestBackendContractSurface:
     """Verify that backends produced by the factory expose the required contract methods.
 

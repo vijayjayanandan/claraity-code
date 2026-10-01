@@ -119,9 +119,14 @@ class OpenAINativeBackend(LLMBackend):
             pool=DEFAULT_POOL_TIMEOUT,
         )
 
-        # Always point at api.openai.com (base_url intentionally not set)
-        self.client = OpenAI(api_key=self.api_key, timeout=timeout)
-        self.async_client = AsyncOpenAI(api_key=self.api_key, timeout=timeout)
+        # Default: api.openai.com. A configured base_url points at an
+        # OpenAI-compatible gateway exposing /v1/responses (e.g. FuelIX) --
+        # required when the backend_factory routes modern GPT models here.
+        client_kwargs: dict[str, Any] = {"api_key": self.api_key, "timeout": timeout}
+        if config.base_url:
+            client_kwargs["base_url"] = config.base_url
+        self.client = OpenAI(**client_kwargs)
+        self.async_client = AsyncOpenAI(**client_kwargs)
 
         self.failure_handler = LLMFailureHandler(logger_instance=logger)
         self.cache_tracker = CacheTracker()

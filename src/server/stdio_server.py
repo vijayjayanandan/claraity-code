@@ -2497,6 +2497,8 @@ class StdioProtocol(UIProtocol):
             max_tokens=cfg.max_tokens,
             top_p=0.95,
             context_window=8192,
+            route_claude_to_messages=getattr(cfg, "route_claude_to_messages", True),
+            route_gpt_to_responses=getattr(cfg, "route_gpt_to_responses", True),
         )
         return create_backend(llm_config, api_key=cfg.api_key, api_key_env=cfg.api_key_env)
 

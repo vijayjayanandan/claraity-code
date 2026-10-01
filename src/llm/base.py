@@ -50,6 +50,19 @@ class LLMConfig(BaseModel):
     # Extended thinking (Claude, etc.)
     thinking_budget: int | None = None  # Token budget for thinking blocks
 
+    # Route modern Claude models (Claude 5-family / Opus 4.7+) from
+    # OpenAI-compatible backends to the native Anthropic Messages API.
+    # Gateways reject these models on /v1/chat/completions. Set False only
+    # for OpenAI-compatible servers hosting claude-named models without a
+    # /v1/messages endpoint.
+    route_claude_to_messages: bool = True
+
+    # Route gpt-6+ models from OpenAI-compatible backends to the Responses
+    # API (/v1/responses). These models reject function tools on
+    # /v1/chat/completions unless reasoning is disabled. Set False only for
+    # gateways without a /v1/responses endpoint.
+    route_gpt_to_responses: bool = True
+
     # Reasoning effort (OpenAI o-series models)
     reasoning_effort: str | None = None  # "low", "medium", "high" or None (provider default)
     reasoning_summary: bool = False  # Stream reasoning text -- requires OpenAI org verification

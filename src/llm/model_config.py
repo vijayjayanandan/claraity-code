@@ -1,5 +1,6 @@
 """Model configurations and recommendations."""
 
+import re
 from typing import Optional
 
 from pydantic import BaseModel
@@ -13,9 +14,49 @@ _ADAPTIVE_THINKING_MARKERS = (
     "claude-fable-5",
     "claude-mythos-5",
     "claude-sonnet-5",
+    "claude-opus-5",
     "claude-opus-4-7",
     "claude-opus-4-8",
 )
+
+
+# OpenAI reasoning-era models (o-series, gpt-5.x and newer) that reject the
+# legacy ``max_tokens`` param (400: use max_completion_tokens) and reject
+# non-default ``temperature``/``top_p``. Matched at the start of the ID or
+# after a provider-prefix separator so "azure/gpt-6.1-sol" works but
+# "solo1" or "gpt-4o" don't.
+_MODERN_OPENAI_RE = re.compile(r"(?:^|[/:.])(?:o[1-9](?:-|$)|gpt-(?:[5-9]|\d{2,}))")
+
+
+def uses_max_completion_tokens(model_name: str) -> bool:
+    """True for OpenAI o-series / gpt-5+ models (gpt-5.x, gpt-6.x, ...).
+
+    These models reject ``max_tokens`` (must send ``max_completion_tokens``)
+    and reject non-default ``temperature``/``top_p``. Applies to Azure/
+    LiteLLM-proxied deployments too, so the check is a substring match
+    tolerant of provider prefixes.
+    """
+    name = (model_name or "").lower()
+    return bool(_MODERN_OPENAI_RE.search(name))
+
+
+# OpenAI models that cannot use function tools on /v1/chat/completions
+# (Azure: "Function tools with reasoning_effort are not supported ... use
+# /v1/responses or set reasoning_effort to 'none'"). gpt-6 and later only --
+# gpt-5.x and o-mini models work with tools on chat completions today.
+_RESPONSES_API_RE = re.compile(r"(?:^|[/:.])gpt-(?:[6-9]|\d{2,})")
+
+
+def requires_responses_api(model_name: str) -> bool:
+    """True for OpenAI models that need /v1/responses for tool use (gpt-6+).
+
+    These reasoning models reject function tools on /v1/chat/completions
+    unless reasoning is disabled entirely. Routing them to the Responses
+    API keeps reasoning AND tools. Tolerant of provider prefixes
+    ("azure/gpt-6.1-sol").
+    """
+    name = (model_name or "").lower()
+    return bool(_RESPONSES_API_RE.search(name))
 
 
 def uses_adaptive_thinking(model_name: str) -> bool:

@@ -74,6 +74,41 @@ def sample_tools():
 
 
 # ============================================================================
+# Client Auth Tests
+# ============================================================================
+
+class TestClientAuth:
+    """Gateway base_url -> Bearer auth; direct Anthropic -> x-api-key."""
+
+    @staticmethod
+    def _build(config):
+        with patch("src.llm.anthropic_backend.Anthropic") as MockSync, \
+             patch("src.llm.anthropic_backend.AsyncAnthropic") as MockAsync:
+            from src.llm.anthropic_backend import AnthropicBackend
+            AnthropicBackend(config, api_key="test-key")
+            return MockSync.call_args.kwargs, MockAsync.call_args.kwargs
+
+    def test_gateway_base_url_uses_bearer_auth(self, llm_config):
+        """Gateways (FuelIX) 401 on x-api-key; key must go as auth_token (Bearer)."""
+        llm_config = llm_config.model_copy(
+            update={"base_url": "https://proxy.fuelix.ai/v1"}
+        )
+        sync_kwargs, async_kwargs = self._build(llm_config)
+        for kwargs in (sync_kwargs, async_kwargs):
+            assert kwargs.get("auth_token") == "test-key"
+            assert "api_key" not in kwargs
+            assert kwargs.get("base_url") == "https://proxy.fuelix.ai"  # /v1 stripped
+
+    def test_no_base_url_uses_x_api_key(self, llm_config):
+        llm_config = llm_config.model_copy(update={"base_url": ""})
+        sync_kwargs, async_kwargs = self._build(llm_config)
+        for kwargs in (sync_kwargs, async_kwargs):
+            assert kwargs.get("api_key") == "test-key"
+            assert "auth_token" not in kwargs
+            assert "base_url" not in kwargs
+
+
+# ============================================================================
 # Message Translation Tests
 # ============================================================================
 
