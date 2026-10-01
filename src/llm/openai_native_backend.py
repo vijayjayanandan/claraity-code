@@ -45,6 +45,7 @@ from src.llm.base import (
 )
 from src.llm.cache_tracker import CacheTracker
 from src.llm.failure_handler import LLMFailureHandler
+from src.llm.model_config import openai_effort
 from src.session.models.base import generate_stream_id, generate_tool_call_id
 from src.session.models.message import ToolCall, ToolCallFunction
 
@@ -286,11 +287,17 @@ class OpenAINativeBackend(LLMBackend):
 
             # User / system / plain assistant: translate content blocks, pass through
             else:
-                new_msg = dict(msg)
-                new_msg["content"] = OpenAINativeBackend._translate_content_blocks(
-                    msg.get("content"), role or ""
+                # Whitelist role/content only: history from other providers carries
+                # extra keys (thinking, thinking_signature, ...) that the Responses
+                # API rejects with 400 "Unknown parameter: input[N].thinking".
+                translated.append(
+                    {
+                        "role": role,
+                        "content": OpenAINativeBackend._translate_content_blocks(
+                            msg.get("content"), role or ""
+                        ),
+                    }
                 )
-                translated.append(new_msg)
 
         return translated
 
@@ -324,8 +331,9 @@ class OpenAINativeBackend(LLMBackend):
             params["temperature"] = kwargs.pop("temperature", self.config.temperature)
             params["top_p"] = kwargs.pop("top_p", self.config.top_p)
 
-        if self.config.reasoning_effort:
-            reasoning: dict = {"effort": self.config.reasoning_effort}
+        effort = openai_effort(self.config.reasoning_effort)
+        if effort:
+            reasoning: dict = {"effort": effort}
             if self.config.reasoning_summary:
                 # summary="auto" streams reasoning text back as thinking blocks.
                 # Requires OpenAI org verification -- opt-in only.
@@ -350,8 +358,10 @@ class OpenAINativeBackend(LLMBackend):
             if tool_choice != "auto":
                 params["tool_choice"] = tool_choice
 
-        # Strip Anthropic-only kwargs that must not reach the Responses API
+        # Strip agent-level kwargs that must not reach the Responses API
+        # (effort is read from self.config above).
         kwargs.pop("thinking_budget", None)
+        kwargs.pop("reasoning_effort", None)
 
         # Pass any remaining kwargs
         params.update(kwargs)

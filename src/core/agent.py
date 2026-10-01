@@ -30,6 +30,7 @@ from src.llm import LLMBackend, LLMBackendType, LLMConfig
 from src.llm.base import ProviderDelta
 from src.llm.config_loader import LimitsConfig
 from src.llm.failure_handler import LLMError, RateLimitError, TimeoutError
+from src.llm.model_config import effective_effort
 from src.memory import MemoryManager, TaskContext
 from src.tools import (
     AppendToFileTool,
@@ -1993,6 +1994,11 @@ class CodingAgent(AgentInterface):
                     _llm_kwargs = {}
                     if self.llm.config.thinking_budget:
                         _llm_kwargs["thinking_budget"] = self.llm.config.thinking_budget
+                    _effort = effective_effort(
+                        self.llm.config.model_name, self.llm.config.reasoning_effort
+                    )
+                    if _effort:
+                        _llm_kwargs["reasoning_effort"] = _effort
                     llm_stream = self.llm.generate_provider_deltas_async(
                         messages=current_context,
                         tools=self._get_tools(),

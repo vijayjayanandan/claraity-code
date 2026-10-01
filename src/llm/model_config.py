@@ -59,6 +59,43 @@ def requires_responses_api(model_name: str) -> bool:
     return bool(_RESPONSES_API_RE.search(name))
 
 
+# Thinking effort levels. llm.reasoning_effort holds one of ALL_EFFORT_LEVELS.
+# Claude adaptive models accept output_config.effort in CLAUDE_EFFORT_LEVELS
+# (verified live against claude-opus-5-5, 2026-10-01). OpenAI reasoning
+# models accept OPENAI_EFFORT_LEVELS; higher values are clamped to "high".
+# Mirrored in claraity-vscode/webview-ui/src/utils/modelThinking.ts.
+CLAUDE_EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
+OPENAI_EFFORT_LEVELS = ("low", "medium", "high")
+ALL_EFFORT_LEVELS = CLAUDE_EFFORT_LEVELS
+# Claude adaptive models with no saved effort run at this level, with thinking
+# shown. Matches Anthropic's own Opus 5.5 default.
+CLAUDE_DEFAULT_EFFORT = "medium"
+
+
+def normalize_effort(value: object) -> str | None:
+    """Return a valid lowercase effort level, or None for empty/invalid input."""
+    if value is None:
+        return None
+    lowered = str(value).strip().lower()
+    return lowered if lowered in ALL_EFFORT_LEVELS else None
+
+
+def openai_effort(effort: str | None) -> str | None:
+    """Map a stored effort level onto what OpenAI reasoning models accept."""
+    if not effort:
+        return None
+    if effort in OPENAI_EFFORT_LEVELS:
+        return effort
+    return "high" if effort in CLAUDE_EFFORT_LEVELS else None
+
+
+def effective_effort(model_name: str, effort: str | None) -> str | None:
+    """Effort the main agent loop sends: the saved level, or Medium for Claude adaptive."""
+    if effort:
+        return effort
+    return CLAUDE_DEFAULT_EFFORT if uses_adaptive_thinking(model_name) else None
+
+
 def uses_adaptive_thinking(model_name: str) -> bool:
     """True for Claude 5-family / Opus 4.7+ models.
 
@@ -69,6 +106,20 @@ def uses_adaptive_thinking(model_name: str) -> bool:
     """
     name = (model_name or "").lower()
     return any(marker in name for marker in _ADAPTIVE_THINKING_MARKERS)
+
+
+def thinking_mode(model_name: str) -> str:
+    """Which thinking control a model gets in settings UIs.
+
+    "claude_effort" (Claude adaptive), "openai_effort" (o-series / gpt-5+),
+    or "budget" (legacy token budget). Mirrors getThinkingMode() in
+    claraity-vscode/webview-ui/src/utils/modelThinking.ts.
+    """
+    if uses_adaptive_thinking(model_name):
+        return "claude_effort"
+    if uses_max_completion_tokens(model_name):
+        return "openai_effort"
+    return "budget"
 
 
 class ModelConfig(BaseModel):

@@ -34,14 +34,39 @@ from src.llm.config_loader import (
     load_llm_config,
     save_llm_config,
 )
+from src.llm.model_config import (
+    CLAUDE_DEFAULT_EFFORT,
+    CLAUDE_EFFORT_LEVELS,
+    openai_effort,
+    thinking_mode,
+)
 from src.observability import get_logger
 
 logger = get_logger("ui.llm_config_screen")
 
 # Backend choices for the Select widget
+# Values match config_loader.VALID_BACKEND_TYPES (load normalises "openai" to
+# "openai_compatible", so a bare "openai" choice would crash the Select).
 BACKEND_CHOICES = [
-    ("openai", "openai"),
-    ("anthropic", "anthropic"),
+    ("OpenAI-compatible", "openai_compatible"),
+    ("OpenAI (native)", "openai_native"),
+    ("Anthropic", "anthropic"),
+]
+
+# Thinking effort Select values. Claude adaptive models list only real levels
+# (nothing saved shows as Medium -- what the agent sends). "off" is OpenAI's
+# "Default": send no effort and let the provider decide.
+EFFORT_OFF = "off"
+_EFFORT_LABELS = {
+    "low": "Low",
+    "medium": "Medium",
+    "high": "High",
+    "xhigh": "Extra high",
+    "max": "Max",
+}
+CLAUDE_EFFORT_CHOICES = [(_EFFORT_LABELS[v], v) for v in CLAUDE_EFFORT_LEVELS]
+OPENAI_EFFORT_CHOICES = [("Default", EFFORT_OFF)] + [
+    (_EFFORT_LABELS[v], v) for v in ("low", "medium", "high")
 ]
 
 
@@ -134,6 +159,10 @@ class ConfigLLMScreen(ModalScreen[LLMConfigData | None]):
     ConfigLLMScreen .subagent-input {
         width: 1fr;
     }
+
+    ConfigLLMScreen #effort-group, ConfigLLMScreen #budget-group {
+        height: auto;
+    }
     """
 
     def __init__(
@@ -148,6 +177,8 @@ class ConfigLLMScreen(ModalScreen[LLMConfigData | None]):
         self._config_path = config_path
         self._config: LLMConfigData = load_llm_config(config_path)
         self._fetched_models: list[str] = []
+        # Current thinking effort choice; survives option swaps on model change.
+        self._effort: str = self._config.reasoning_effort or EFFORT_OFF
         # Hardcoded fallback ensures subagents always show
         self._subagent_names: list[str] = subagent_names or [
             "code-reviewer",
@@ -168,7 +199,11 @@ class ConfigLLMScreen(ModalScreen[LLMConfigData | None]):
             yield Static("Backend:", classes="field-label")
             yield Select(
                 BACKEND_CHOICES,
-                value=self._config.backend_type or "openai",
+                value=(
+                    self._config.backend_type
+                    if self._config.backend_type in {v for _, v in BACKEND_CHOICES}
+                    else "openai_compatible"
+                ),
                 id="backend-select",
                 allow_blank=False,
             )
@@ -249,12 +284,22 @@ class ConfigLLMScreen(ModalScreen[LLMConfigData | None]):
                 id="context-window",
             )
 
-            yield Static("Thinking Budget:", classes="field-label")
-            yield Input(
-                value=str(self._config.thinking_budget or ""),
-                placeholder="e.g. 10000 (blank to disable)",
-                id="thinking-budget",
-            )
+            # Thinking: effort dropdown or token budget, depending on the model
+            # (see _refresh_thinking_controls).
+            mode = thinking_mode(self._config.model or "")
+            label, choices, value = self._effort_choices(mode)
+            with Vertical(id="effort-group") as effort_group:
+                effort_group.display = mode != "budget"
+                yield Static(label, classes="field-label", id="effort-label")
+                yield Select(choices, value=value, id="thinking-effort", allow_blank=False)
+            with Vertical(id="budget-group") as budget_group:
+                budget_group.display = mode == "budget"
+                yield Static("Thinking Budget:", classes="field-label")
+                yield Input(
+                    value=str(self._config.thinking_budget or ""),
+                    placeholder="e.g. 10000 (blank to disable)",
+                    id="thinking-budget",
+                )
 
             # Buttons
             with Horizontal(id="btn-row"):
@@ -267,6 +312,38 @@ class ConfigLLMScreen(ModalScreen[LLMConfigData | None]):
         if self._config.model:
             option_list = self.query_one("#model-list", OptionList)
             option_list.add_option(Option(self._config.model, id=self._config.model))
+
+    def _claude_effort(self) -> str:
+        """Saved level, or Medium when nothing (or only an old budget) is saved."""
+        return self._effort if self._effort in CLAUDE_EFFORT_LEVELS else CLAUDE_DEFAULT_EFFORT
+
+    def _effort_choices(self, mode: str) -> tuple[str, list[tuple[str, str]], str]:
+        """Return (label, options, selected value) for the effort dropdown."""
+        if mode == "openai_effort":
+            # OpenAI accepts low/medium/high only -- clamp xhigh/max.
+            if self._effort != EFFORT_OFF:
+                self._effort = openai_effort(self._effort) or EFFORT_OFF
+            return "Reasoning Effort:", list(OPENAI_EFFORT_CHOICES), self._effort
+        return "Thinking Effort:", list(CLAUDE_EFFORT_CHOICES), self._claude_effort()
+
+    def _refresh_thinking_controls(self, model: str) -> None:
+        """Show the effort dropdown or the token budget field for this model."""
+        mode = thinking_mode(model)
+        self.query_one("#effort-group", Vertical).display = mode != "budget"
+        self.query_one("#budget-group", Vertical).display = mode == "budget"
+        if mode == "budget":
+            return
+        label, choices, value = self._effort_choices(mode)
+        self.query_one("#effort-label", Static).update(label)
+        select = self.query_one("#thinking-effort", Select)
+        with select.prevent(Select.Changed):
+            select.set_options(choices)
+            select.value = value
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        """Swap the thinking control when the model name changes."""
+        if event.input.id == "model-input":
+            self._refresh_thinking_controls(event.value.strip())
 
     # -----------------------------------------------------------------
     # Event handlers
@@ -282,7 +359,10 @@ class ConfigLLMScreen(ModalScreen[LLMConfigData | None]):
             self.dismiss(None)
 
     def on_select_changed(self, event: Select.Changed) -> None:
-        """Update default URL when backend changes."""
+        """Track thinking effort; update default URL when backend changes."""
+        if event.select.id == "thinking-effort":
+            self._effort = str(event.value)
+            return
         if event.select.id == "backend-select":
             backend = str(event.value)
             url_input = self.query_one("#base-url", Input)
@@ -293,8 +373,8 @@ class ConfigLLMScreen(ModalScreen[LLMConfigData | None]):
                 "http://localhost:8000/v1",
             }
             if current in known_defaults:
-                if backend == "anthropic":
-                    url_input.value = ""  # SDK defaults to api.anthropic.com
+                if backend in ("anthropic", "openai_native"):
+                    url_input.value = ""  # SDK defaults to the provider's API
                 else:
                     url_input.value = "http://localhost:8000/v1"
 
@@ -329,11 +409,11 @@ class ConfigLLMScreen(ModalScreen[LLMConfigData | None]):
         status.update("Fetching...")
 
         backend_val = self.query_one("#backend-select", Select).value
-        backend = str(backend_val) if backend_val is not Select.BLANK else "openai"
+        backend = str(backend_val) if backend_val is not Select.BLANK else "openai_compatible"
         base_url = self.query_one("#base-url", Input).value.strip()
         api_key = self.query_one("#api-key", Input).value.strip()
 
-        if not base_url and backend not in ("anthropic",):
+        if not base_url and backend not in ("anthropic", "openai_native"):
             status.update("[red]Set API URL first[/red]")
             return
 
@@ -380,10 +460,26 @@ class ConfigLLMScreen(ModalScreen[LLMConfigData | None]):
     # Save
     # -----------------------------------------------------------------
 
+    def _resolve_thinking(self, model: str) -> tuple[int | None, str | None]:
+        """Return (thinking_budget, reasoning_effort) to persist for this model.
+
+        Only the control shown for the model is saved; the other is cleared.
+        """
+        mode = thinking_mode(model)
+        if mode == "budget":
+            try:
+                tb_val = self.query_one("#thinking-budget", Input).value.strip()
+                return (int(tb_val) if tb_val else None), None
+            except (ValueError, TypeError):
+                return None, None
+        if mode == "claude_effort":
+            return None, self._claude_effort()
+        return None, openai_effort(None if self._effort == EFFORT_OFF else self._effort)
+
     def _save_config(self) -> None:
         """Collect values from widgets and save to config.yaml."""
         backend_val = self.query_one("#backend-select", Select).value
-        backend = str(backend_val) if backend_val is not Select.BLANK else "openai"
+        backend = str(backend_val) if backend_val is not Select.BLANK else "openai_compatible"
 
         base_url = self.query_one("#base-url", Input).value.strip()
         api_key = self.query_one("#api-key", Input).value.strip()
@@ -405,13 +501,7 @@ class ConfigLLMScreen(ModalScreen[LLMConfigData | None]):
         except (ValueError, TypeError):
             context_window = 131072
 
-        thinking_budget = None
-        try:
-            tb_val = self.query_one("#thinking-budget", Input).value.strip()
-            if tb_val:
-                thinking_budget = int(tb_val)
-        except (ValueError, TypeError):
-            thinking_budget = None
+        thinking_budget, reasoning_effort = self._resolve_thinking(model)
 
         # Subagent overrides (always read from inputs)
         subagents: dict[str, SubAgentLLMOverride] = {}
@@ -435,6 +525,8 @@ class ConfigLLMScreen(ModalScreen[LLMConfigData | None]):
             max_tokens=max_tokens,
             top_p=self._config.top_p,  # Keep existing top_p
             thinking_budget=thinking_budget,
+            reasoning_effort=reasoning_effort,
+            reasoning_summary=self._config.reasoning_summary,  # Not editable here; keep
             subagents=subagents,
         )
 

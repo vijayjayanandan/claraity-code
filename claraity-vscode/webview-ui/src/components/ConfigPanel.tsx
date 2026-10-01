@@ -9,6 +9,13 @@
  */
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import type { WebViewMessage } from "../types";
+import {
+  ALL_EFFORT_LEVELS,
+  CLAUDE_DEFAULT_EFFORT,
+  CLAUDE_EFFORT_OPTIONS,
+  OPENAI_EFFORT_OPTIONS,
+  getThinkingMode,
+} from "../utils/modelThinking";
 
 /** Sentinel value used to display dots in a password field without storing the real key. */
 const KEY_STORED_SENTINEL = "__stored__";
@@ -90,7 +97,7 @@ function parseSnapshot(cfg: Record<string, unknown>): ConfigSnapshot {
     maxTokens: cfg.max_tokens != null ? Number(cfg.max_tokens) : 16384,
     contextWindow: cfg.context_window != null ? Number(cfg.context_window) : 131072,
     thinkingBudget: cfg.thinking_budget != null ? String(cfg.thinking_budget) : "",
-    reasoningEffort: typeof cfg.reasoning_effort === "string" && ["low", "medium", "high"].includes(cfg.reasoning_effort) ? cfg.reasoning_effort : "",
+    reasoningEffort: typeof cfg.reasoning_effort === "string" && ALL_EFFORT_LEVELS.includes(cfg.reasoning_effort) ? cfg.reasoning_effort : "",
     reasoningSummary: cfg.reasoning_summary === true,
     searchProvider: typeof cfg.web_search_provider === "string" ? cfg.web_search_provider : "tavily",
     webSearchBudget: cfg.web_search_budget != null ? String(cfg.web_search_budget) : "3",
@@ -273,9 +280,23 @@ export function ConfigPanel({
     // Clear Base URL only for OpenAI native (always api.openai.com).
     // Anthropic keeps it: empty = api.anthropic.com, set = gateway/proxy.
     if (val === "openai_native") setBaseUrl("");
-    // Clear reasoning effort when leaving openai_native
-    if (val !== "openai_native") setReasoningEffort("");
   }, []);
+
+  // ── Thinking control ─────────────────────────────────────────────────────────
+  // The model name decides the control: effort dropdown for Claude adaptive and
+  // OpenAI reasoning models, token budget for everything else.
+  const thinkingMode = useMemo(() => getThinkingMode(model), [model]);
+
+  // OpenAI reasoning models only accept low/medium/high -- clamp a Claude-only
+  // level carried over from a previous model choice.
+  useEffect(() => {
+    if (thinkingMode === "openai_effort" && (reasoningEffort === "xhigh" || reasoningEffort === "max")) {
+      setReasoningEffort("high");
+    }
+  }, [thinkingMode, reasoningEffort]);
+
+  // Nothing saved (or an old token budget) shows as Medium -- what the agent sends.
+  const claudeEffortValue = reasoningEffort || CLAUDE_DEFAULT_EFFORT;
 
   // ── Fetch models ─────────────────────────────────────────────────────────────
   const handleFetchModels = useCallback(() => {
@@ -390,8 +411,12 @@ export function ConfigPanel({
       temperature: snap.temperature,
       max_tokens: snap.maxTokens || null,
       context_window: snap.contextWindow || null,
-      thinking_budget: snap.thinkingBudget || null,
-      reasoning_effort: snap.reasoningEffort || null,
+      // Only the control visible for this model is persisted.
+      thinking_budget: thinkingMode === "budget" ? (snap.thinkingBudget || null) : null,
+      reasoning_effort:
+        thinkingMode === "budget" ? null
+        : thinkingMode === "claude_effort" ? (snap.reasoningEffort || CLAUDE_DEFAULT_EFFORT)
+        : (snap.reasoningEffort || null),
       reasoning_summary: snap.reasoningSummary,
       web_search_provider: snap.searchProvider,
       web_search_budget: snap.webSearchBudget ? parseInt(snap.webSearchBudget, 10) || 3 : 3,
@@ -404,7 +429,7 @@ export function ConfigPanel({
       system_prompt: enrichmentSystemPrompt.trim(),
     };
     postMessage({ type: "saveConfig", config: payload });
-  }, [currentSnapshot, subagentModels, configSubagentNames, apiKey, searchKey, enrichmentModel, enrichmentSystemPrompt, postMessage]);
+  }, [currentSnapshot, thinkingMode, subagentModels, configSubagentNames, apiKey, searchKey, enrichmentModel, enrichmentSystemPrompt, postMessage]);
 
   // ── Cancel ───────────────────────────────────────────────────────────────────
   // Resets all fields to the last saved values. Does not navigate away.
@@ -589,9 +614,40 @@ export function ConfigPanel({
             />
           </Field>
 
-          {/* Thinking Budget: Anthropic and OpenAI-compatible only (token count) */}
-          {backend !== "openai_native" && (
-            <Field label="Thinking Budget (tokens)" hint="Tokens reserved for the model's internal reasoning before responding. Supported by Anthropic and compatible backends.">
+          {/* Thinking: control depends on the model (see utils/modelThinking.ts) */}
+          {thinkingMode === "claude_effort" && (
+            <Field label="Thinking Effort" hint="How hard the model thinks before answering. Higher handles harder problems but is slower and uses more tokens. Medium is Anthropic's default. Extra high and Max are not available on every model.">
+              <select
+                className="form-input"
+                aria-label="Thinking Effort"
+                value={claudeEffortValue}
+                onChange={(e) => setReasoningEffort(e.target.value)}
+              >
+                {CLAUDE_EFFORT_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </Field>
+          )}
+
+          {thinkingMode === "openai_effort" && (
+            <Field label="Reasoning Effort" hint="How hard the model reasons before answering. Higher handles harder problems but is slower and uses more tokens. Default lets the provider decide.">
+              <select
+                className="form-input"
+                aria-label="Reasoning Effort"
+                value={reasoningEffort}
+                onChange={(e) => { setReasoningEffort(e.target.value); if (!e.target.value) setReasoningSummary(false); }}
+              >
+                <option value="">Default</option>
+                {OPENAI_EFFORT_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </Field>
+          )}
+
+          {thinkingMode === "budget" && backend !== "openai_native" && (
+            <Field label="Thinking Budget (tokens)" hint="Tokens reserved for the model's internal reasoning before responding. For older Claude models and compatible backends.">
               <input
                 className="form-input"
                 type="text"
@@ -602,24 +658,8 @@ export function ConfigPanel({
             </Field>
           )}
 
-          {/* Reasoning Effort: OpenAI native only (o-series models) */}
-          {backend === "openai_native" && (
-            <Field label="Reasoning Effort" hint="Controls how much the model reasons before responding. Applies to o-series models (o1, o3, o4-mini). Leave as Default for standard GPT models.">
-              <select
-                className="form-input"
-                value={reasoningEffort}
-                onChange={(e) => { setReasoningEffort(e.target.value); if (!e.target.value) setReasoningSummary(false); }}
-              >
-                <option value="">Default</option>
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-              </select>
-            </Field>
-          )}
-
-          {/* Reasoning Summary: only shown when reasoning_effort is set */}
-          {backend === "openai_native" && reasoningEffort !== "" && (
+          {/* Reasoning Summary: OpenAI native reasoning models with an effort set */}
+          {backend === "openai_native" && thinkingMode === "openai_effort" && reasoningEffort !== "" && (
             <Field
               label="Show Reasoning Summary"
               hint={

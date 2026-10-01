@@ -56,7 +56,7 @@ from .base import (
 )
 from .cache_tracker import CacheTracker
 from .failure_handler import LLMFailureHandler
-from .model_config import uses_adaptive_thinking
+from .model_config import CLAUDE_EFFORT_LEVELS, uses_adaptive_thinking
 
 # Allowlisted image MIME types for multimodal content (security: reject unknown/malformed)
 _SAFE_IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
@@ -574,14 +574,14 @@ class AnthropicBackend(LLMBackend):
         }
 
     @staticmethod
-    def _apply_adaptive_thinking_rules(params: dict) -> None:
+    def _apply_adaptive_thinking_rules(params: dict, effort: str | None = None) -> None:
         """Sanitize request params for Claude 5-family / Opus 4.7+ models.
 
         These models reject temperature/top_p and thinking budget_tokens
         with HTTP 400. Strips sampling params and rewrites any thinking
         config to adaptive (display=summarized keeps thinking text in the
-        stream; the server default omits it). Thinking depth is left at
-        the server default effort (high). Forced tool_choice (any/tool)
+        stream; the server default omits it). Depth comes from ``effort``
+        (llm.reasoning_effort) when set. Forced tool_choice (any/tool)
         is also rejected on Opus 5.5+ / Sonnet 5.5+ / Fable — downgrade
         to auto. No-op for all other models.
         """
@@ -589,7 +589,13 @@ class AnthropicBackend(LLMBackend):
             return
         params.pop("temperature", None)
         params.pop("top_p", None)
-        if isinstance(params.get("thinking"), dict):
+        # effort set -> adaptive thinking at that depth via output_config.effort
+        # (extra_body: pinned SDK has no typed output_config). No effort -> a
+        # legacy thinking budget still enables adaptive at server default depth.
+        if effort in CLAUDE_EFFORT_LEVELS:
+            params["thinking"] = {"type": "adaptive", "display": "summarized"}
+            params.setdefault("extra_body", {})["output_config"] = {"effort": effort}
+        elif isinstance(params.get("thinking"), dict):
             params["thinking"] = {"type": "adaptive", "display": "summarized"}
         tool_choice = params.get("tool_choice")
         if isinstance(tool_choice, dict) and tool_choice.get("type") in ("any", "tool"):
@@ -795,7 +801,7 @@ class AnthropicBackend(LLMBackend):
             params["temperature"] = 1
             # top_p already omitted from params
 
-        self._apply_adaptive_thinking_rules(params)
+        self._apply_adaptive_thinking_rules(params, kwargs.get("reasoning_effort"))
 
         def api_call():
             return self.client.messages.create(**params)
@@ -911,7 +917,7 @@ class AnthropicBackend(LLMBackend):
             model_name = self.config.model_name
             usage_dict = None
 
-            self._apply_adaptive_thinking_rules(params)
+            self._apply_adaptive_thinking_rules(params, kwargs.get("reasoning_effort"))
             with self.client.messages.stream(**params) as stream:
                 for event in stream:
                     event_type = getattr(event, "type", "")
@@ -1092,7 +1098,7 @@ class AnthropicBackend(LLMBackend):
             model_name = self.config.model_name
             usage_dict = None
 
-            self._apply_adaptive_thinking_rules(params)
+            self._apply_adaptive_thinking_rules(params, kwargs.get("reasoning_effort"))
             async with self.async_client.messages.stream(**params) as stream:
                 async for event in stream:
                     event_type = getattr(event, "type", "")
@@ -1293,7 +1299,7 @@ class AnthropicBackend(LLMBackend):
             finish_reason = None
             usage_dict = None
 
-            self._apply_adaptive_thinking_rules(params)
+            self._apply_adaptive_thinking_rules(params, kwargs.get("reasoning_effort"))
             with self.client.messages.stream(**params) as stream:
                 for event in stream:
                     event_type = getattr(event, "type", "")
@@ -1446,7 +1452,7 @@ class AnthropicBackend(LLMBackend):
             finish_reason = None
             usage_dict = None
 
-            self._apply_adaptive_thinking_rules(params)
+            self._apply_adaptive_thinking_rules(params, kwargs.get("reasoning_effort"))
             async with self.async_client.messages.stream(**params) as stream:
                 async for event in stream:
                     event_type = getattr(event, "type", "")

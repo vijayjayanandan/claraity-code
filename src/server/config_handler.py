@@ -129,16 +129,12 @@ def save_config_from_request(data: dict, config_path: str) -> dict:
         ``{"type": "config_saved", "success": bool, "message": str}``
     """
     from src.llm.config_loader import LLMConfigData, SubAgentLLMOverride, save_llm_config
+    from src.llm.model_config import normalize_effort
 
     raw = data.get("config", {})
 
     try:
-        re_val = raw.get("reasoning_effort")
-        reasoning_effort = (
-            str(re_val).lower()
-            if re_val and str(re_val).lower() in ("low", "medium", "high")
-            else None
-        )
+        reasoning_effort = normalize_effort(raw.get("reasoning_effort"))
 
         cfg = LLMConfigData(
             backend_type=str(raw.get("backend_type", "openai_compatible")),

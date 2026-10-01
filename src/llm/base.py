@@ -63,8 +63,10 @@ class LLMConfig(BaseModel):
     # gateways without a /v1/responses endpoint.
     route_gpt_to_responses: bool = True
 
-    # Reasoning effort (OpenAI o-series models)
-    reasoning_effort: str | None = None  # "low", "medium", "high" or None (provider default)
+    # Thinking effort: low|medium|high|xhigh|max or None (off / provider default).
+    # Claude adaptive models -> output_config.effort; OpenAI reasoning models ->
+    # reasoning effort (xhigh/max clamped to high). See model_config.py.
+    reasoning_effort: str | None = None
     reasoning_summary: bool = False  # Stream reasoning text -- requires OpenAI org verification
 
     # Context settings

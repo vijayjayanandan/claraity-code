@@ -83,6 +83,28 @@ class TestStripLitellmPlaceholder:
 # ---------------------------------------------------------------------------
 
 class TestSanitizeOutboundMessages:
+    def test_strips_internal_thinking_keys(self):
+        """Claude thinking round-trip fields must not reach chat completions
+        providers (OpenAI 400s on unknown message fields). Same leak as the
+        one fixed in openai_native_backend._prepare_responses_input."""
+        messages = [
+            {
+                "role": "assistant",
+                "content": "Done.",
+                "thinking": "internal reasoning text",
+                "thinking_signature": "sig-abc",
+                "tool_calls": [{"id": "tc1", "function": {"name": "f", "arguments": "{}"}}],
+            }
+        ]
+        result = OpenAIBackend._sanitize_outbound_messages(messages)
+        assert "thinking" not in result[0]
+        assert "thinking_signature" not in result[0]
+        # Legitimate fields survive
+        assert result[0]["content"] == "Done."
+        assert result[0]["tool_calls"][0]["id"] == "tc1"
+        # Input not mutated
+        assert "thinking" in messages[0]
+
     def test_user_messages_unchanged(self):
         messages = [{"role": "user", "content": "hello"}]
         result = OpenAIBackend._sanitize_outbound_messages(messages)

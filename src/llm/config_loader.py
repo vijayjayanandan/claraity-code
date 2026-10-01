@@ -23,6 +23,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from .model_config import normalize_effort
+
 # =============================================================================
 # CONSTANTS
 # =============================================================================
@@ -130,7 +132,9 @@ class LLMConfigData:
     thinking_budget: int | None = None  # Extended thinking token budget (Claude, etc.)
     route_claude_to_messages: bool = True  # Route modern Claude models to Messages API
     route_gpt_to_responses: bool = True  # Route gpt-6+ models to the Responses API
-    reasoning_effort: str | None = None  # "low", "medium", "high" -- OpenAI o-series only
+    # Thinking effort: low|medium|high|xhigh|max. Claude adaptive models use all
+    # levels; OpenAI reasoning models clamp xhigh/max to high. None = off/default.
+    reasoning_effort: str | None = None
     reasoning_summary: bool = (
         False  # Send reasoning.summary="auto" -- requires OpenAI org verification
     )
@@ -248,11 +252,12 @@ def load_llm_config(config_path: str = DEFAULT_CONFIG_PATH) -> LLMConfigData:
         re_val = llm_data["reasoning_effort"]
         if re_val is None:
             config.reasoning_effort = None
-        elif str(re_val).lower() in ("low", "medium", "high"):
-            config.reasoning_effort = str(re_val).lower()
+        elif normalize_effort(re_val):
+            config.reasoning_effort = normalize_effort(re_val)
         else:
             _safe_stderr(
-                f"Invalid reasoning_effort '{re_val}', must be low/medium/high -- ignoring"
+                f"Invalid reasoning_effort '{re_val}', "
+                "must be low/medium/high/xhigh/max -- ignoring"
             )
 
     # -- protocol routing escape hatches (bool, default True) --

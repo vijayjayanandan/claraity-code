@@ -195,3 +195,128 @@ describe("ConfigPanel API key save flow", () => {
     expect(config!.search_key).toBe("tvly-new-search-key");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Thinking control (model-aware)
+// ---------------------------------------------------------------------------
+
+describe("ConfigPanel thinking control", () => {
+  test("Claude adaptive model shows Thinking Effort dropdown, not token budget", () => {
+    renderConfigPanel({ configData: makeConfigData({ model: "claude-opus-5-5" }) });
+
+    const select = screen.getByLabelText("Thinking Effort") as HTMLSelectElement;
+    const values = Array.from(select.options).map((o) => o.value);
+    expect(values).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    expect(select.value).toBe("medium");
+    expect(screen.queryByText("Thinking Budget (tokens)")).toBeNull();
+  });
+
+  test("OpenAI reasoning model shows Reasoning Effort dropdown with low/medium/high", () => {
+    renderConfigPanel({ configData: makeConfigData({ model: "gpt-5.1" }) });
+
+    const select = screen.getByLabelText("Reasoning Effort") as HTMLSelectElement;
+    const values = Array.from(select.options).map((o) => o.value);
+    expect(values).toEqual(["", "low", "medium", "high"]);
+    expect(screen.queryByText("Thinking Budget (tokens)")).toBeNull();
+  });
+
+  test("legacy model keeps the token budget field", () => {
+    renderConfigPanel({ configData: makeConfigData({ model: "claude-sonnet-4-6" }) });
+
+    expect(screen.getByText("Thinking Budget (tokens)")).toBeTruthy();
+    expect(screen.queryByLabelText("Thinking Effort")).toBeNull();
+    expect(screen.queryByLabelText("Reasoning Effort")).toBeNull();
+  });
+
+  test("control switches as the model name changes", async () => {
+    const user = userEvent.setup();
+    renderConfigPanel();
+    expect(screen.getByText("Thinking Budget (tokens)")).toBeTruthy();
+
+    const modelInput = screen.getByPlaceholderText("gpt-4o") as HTMLInputElement;
+    await user.clear(modelInput);
+    await user.type(modelInput, "claude-opus-5-5");
+
+    expect(screen.getByLabelText("Thinking Effort")).toBeTruthy();
+    expect(screen.queryByText("Thinking Budget (tokens)")).toBeNull();
+  });
+
+  test("choosing an effort saves reasoning_effort and clears thinking_budget", async () => {
+    const user = userEvent.setup();
+    const { postMessage } = renderConfigPanel({
+      configData: makeConfigData({ model: "claude-opus-5-5", thinking_budget: 5000 }),
+    });
+
+    await user.selectOptions(screen.getByLabelText("Thinking Effort"), "max");
+    await user.click(getSaveButton());
+
+    const config = findSavePayload(postMessage);
+    expect(config!.reasoning_effort).toBe("max");
+    expect(config!.thinking_budget).toBeNull();
+  });
+
+  test("old token budget on an adaptive model shows as Medium and the form stays clean", () => {
+    renderConfigPanel({
+      configData: makeConfigData({ model: "claude-opus-5-5", thinking_budget: 5000 }),
+    });
+
+    const select = screen.getByLabelText("Thinking Effort") as HTMLSelectElement;
+    expect(select.value).toBe("medium");
+    expect(getSaveButton()).toBeDisabled();
+  });
+
+  test("saving with nothing chosen persists medium and drops the old budget", async () => {
+    const user = userEvent.setup();
+    const { postMessage } = renderConfigPanel({
+      configData: makeConfigData({ model: "claude-opus-5-5", thinking_budget: 5000 }),
+    });
+
+    // Dirty the form via an unrelated field
+    const searchInput = getSearchKeyInput();
+    await user.click(searchInput);
+    await user.type(searchInput, "tvly-x");
+    await user.click(getSaveButton());
+
+    const config = findSavePayload(postMessage);
+    expect(config!.reasoning_effort).toBe("medium");
+    expect(config!.thinking_budget).toBeNull();
+  });
+
+  test("OpenAI-compatible backend can set effort for GPT-5 models", async () => {
+    const user = userEvent.setup();
+    const { postMessage } = renderConfigPanel({ configData: makeConfigData({ model: "gpt-5.1" }) });
+
+    await user.selectOptions(screen.getByLabelText("Reasoning Effort"), "medium");
+    await user.click(getSaveButton());
+
+    const config = findSavePayload(postMessage);
+    expect(config!.backend_type).toBe("openai_compatible");
+    expect(config!.reasoning_effort).toBe("medium");
+  });
+
+  test("Claude-only level is clamped to high when switching to an OpenAI model", async () => {
+    const user = userEvent.setup();
+    renderConfigPanel({ configData: makeConfigData({ model: "claude-opus-5-5", reasoning_effort: "max" }) });
+
+    const modelInput = screen.getByPlaceholderText("gpt-4o") as HTMLInputElement;
+    await user.clear(modelInput);
+    await user.type(modelInput, "gpt-5.1");
+
+    expect((screen.getByLabelText("Reasoning Effort") as HTMLSelectElement).value).toBe("high");
+  });
+
+  test("budget model saves thinking_budget and nulls reasoning_effort", async () => {
+    const user = userEvent.setup();
+    const { postMessage } = renderConfigPanel({
+      configData: makeConfigData({ model: "claude-sonnet-4-6", reasoning_effort: "high" }),
+    });
+
+    const budget = screen.getByPlaceholderText("(leave empty to disable)") as HTMLInputElement;
+    await user.type(budget, "8000");
+    await user.click(getSaveButton());
+
+    const config = findSavePayload(postMessage);
+    expect(config!.thinking_budget).toBe("8000");
+    expect(config!.reasoning_effort).toBeNull();
+  });
+});

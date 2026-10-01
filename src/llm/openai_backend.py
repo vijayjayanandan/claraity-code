@@ -50,7 +50,12 @@ from src.session.models.base import generate_tool_call_id
 # Use Session Model ToolCall as the canonical type
 from src.session.models.message import ToolCall, ToolCallFunction
 
-from .model_config import uses_adaptive_thinking, uses_max_completion_tokens
+from .model_config import (
+    CLAUDE_EFFORT_LEVELS,
+    openai_effort,
+    uses_adaptive_thinking,
+    uses_max_completion_tokens,
+)
 
 from .base import (
     LLMBackend,
@@ -268,18 +273,20 @@ class OpenAIBackend(LLMBackend):
         return temperature
 
     @staticmethod
-    def _apply_model_param_rules(params: dict) -> None:
+    def _apply_model_param_rules(params: dict, effort: str | None = None) -> None:
         """Sanitize request params for models with non-legacy param contracts.
 
         Claude 5-family / Opus 4.7+ (via proxy): reject temperature/top_p and
         thinking budget_tokens with HTTP 400. Strips sampling params and
         rewrites any thinking config to adaptive (display=summarized keeps
-        thinking text in the stream; the server default omits it). Thinking
-        depth is left at the server default effort (high).
+        thinking text in the stream; the server default omits it). When
+        ``effort`` is set, thinking is enabled at that depth via
+        output_config.effort; otherwise depth is the server default.
 
         OpenAI o-series / gpt-5+ (incl. Azure/LiteLLM-proxied gpt-6.x):
         reject the legacy ``max_tokens`` param (400: use
         ``max_completion_tokens``) and reject non-default temperature/top_p.
+        ``effort`` is sent as ``reasoning_effort`` (clamped to low/medium/high).
 
         No-op for all other models.
         """
@@ -289,7 +296,11 @@ class OpenAIBackend(LLMBackend):
             params.pop("temperature", None)
             params.pop("top_p", None)
             extra = params.get("extra_body")
-            if isinstance(extra, dict) and isinstance(extra.get("thinking"), dict):
+            if effort in CLAUDE_EFFORT_LEVELS:
+                extra = params.setdefault("extra_body", {})
+                extra["thinking"] = {"type": "adaptive", "display": "summarized"}
+                extra["output_config"] = {"effort": effort}
+            elif isinstance(extra, dict) and isinstance(extra.get("thinking"), dict):
                 extra["thinking"] = {"type": "adaptive", "display": "summarized"}
             return
 
@@ -298,6 +309,9 @@ class OpenAIBackend(LLMBackend):
                 params["max_completion_tokens"] = params.pop("max_tokens")
             params.pop("temperature", None)
             params.pop("top_p", None)
+            mapped = openai_effort(effort)
+            if mapped:
+                params["reasoning_effort"] = mapped
 
     @staticmethod
     def _add_cache_control_to_message(message: dict[str, Any]) -> dict[str, Any]:
@@ -390,15 +404,27 @@ class OpenAIBackend(LLMBackend):
         cleaned = cleaned.strip()
         return cleaned or None
 
+    # Agent-internal history keys consumed only by AnthropicBackend's message
+    # translator (thinking-block round-trip). Chat completions providers reject
+    # or mishandle them (OpenAI: 400 "Unknown parameter") -- same leak that was
+    # fixed in openai_native_backend._prepare_responses_input.
+    _INTERNAL_MESSAGE_KEYS = ("thinking", "thinking_signature")
+
     @staticmethod
     def _sanitize_outbound_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Clean empty/placeholder content from message history before sending.
+        """Clean message history before sending.
 
-        Prevents LiteLLM from injecting sanitization placeholders by ensuring
-        assistant messages with no real text content have content=None.
+        Strips agent-internal keys (thinking round-trip fields) that other
+        providers reject, and cleans empty/placeholder content so LiteLLM
+        doesn't inject sanitization placeholders.
         """
         result = []
         for msg in messages:
+            if any(k in msg for k in OpenAIBackend._INTERNAL_MESSAGE_KEYS):
+                msg = {
+                    k: v for k, v in msg.items()
+                    if k not in OpenAIBackend._INTERNAL_MESSAGE_KEYS
+                }
             if msg.get("role") == "assistant":
                 content = msg.get("content")
                 if isinstance(content, str):
@@ -1350,7 +1376,7 @@ class OpenAIBackend(LLMBackend):
         _chunk_count = 0
         try:
             logger.debug("llm_stream_phase", phase="http_request_start", model=params.get("model"))
-            self._apply_model_param_rules(params)
+            self._apply_model_param_rules(params, kwargs.get("reasoning_effort"))
             stream = self.client.chat.completions.create(**params)
             logger.debug(
                 "llm_stream_phase",
@@ -1598,7 +1624,7 @@ class OpenAIBackend(LLMBackend):
         _chunk_count = 0
         try:
             logger.debug("llm_stream_phase", phase="http_request_start", model=params.get("model"))
-            self._apply_model_param_rules(params)
+            self._apply_model_param_rules(params, kwargs.get("reasoning_effort"))
             stream = await self.async_client.chat.completions.create(**params)
             logger.debug(
                 "llm_stream_phase",
