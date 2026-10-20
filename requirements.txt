@@ -23,7 +23,7 @@ pydantic-settings>=2.9.0
 fastapi>=0.111.0
 uvicorn[standard]>=0.29.0
 httpx>=0.28.0
-websockets>=15.0
+websockets>=16.0
 beautifulsoup4>=4.12.0  # HTML text extraction for web_fetch tool
 
 # Async I/O
