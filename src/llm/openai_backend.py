@@ -20,6 +20,7 @@ from typing import Any, Optional
 
 try:
     from openai import AsyncOpenAI, OpenAI
+    from openai import Timeout as SDKTimeout
 except ImportError:
     raise ImportError("OpenAI SDK not installed. Install with: pip install openai")
 
@@ -50,13 +51,6 @@ from src.session.models.base import generate_tool_call_id
 # Use Session Model ToolCall as the canonical type
 from src.session.models.message import ToolCall, ToolCallFunction
 
-from .model_config import (
-    CLAUDE_EFFORT_LEVELS,
-    openai_effort,
-    uses_adaptive_thinking,
-    uses_max_completion_tokens,
-)
-
 from .base import (
     LLMBackend,
     LLMConfig,
@@ -68,6 +62,12 @@ from .base import (
 )
 from .cache_tracker import CacheTracker
 from .failure_handler import LLMFailureHandler
+from .model_config import (
+    CLAUDE_EFFORT_LEVELS,
+    openai_effort,
+    uses_adaptive_thinking,
+    uses_max_completion_tokens,
+)
 
 # LiteLLM placeholder regex for empty content sanitization.
 # LiteLLM injects "[System: Empty message content sanitised to satisfy protocol]"
@@ -197,14 +197,13 @@ class OpenAIBackend(LLMBackend):
         # configure via the Settings panel. Calls will fail gracefully.
         self.api_key = api_key or os.getenv(api_key_env) or "not-configured"
 
-        import httpx
-
         logger.info(
             f"OpenAI Backend Init - base_url: {config.base_url}, key_provided: {bool(self.api_key)}"
         )
 
         # Initialize OpenAI client with base URL from config
-        # Use httpx.Timeout for granular timeout control:
+        # Use the SDK's Timeout re-export (not httpx.Timeout -- openai>=3.0 is
+        # built on httpx2 and rejects httpx objects) for granular timeout control:
         # - connect: time to establish connection
         # - read: time between chunks (not total stream time)
         # - write: time to send request
@@ -212,7 +211,7 @@ class OpenAIBackend(LLMBackend):
         self.client = OpenAI(
             api_key=self.api_key,
             base_url=config.base_url,
-            timeout=httpx.Timeout(
+            timeout=SDKTimeout(
                 connect=DEFAULT_CONNECT_TIMEOUT,
                 read=config.timeout,
                 write=DEFAULT_WRITE_TIMEOUT,
@@ -224,7 +223,7 @@ class OpenAIBackend(LLMBackend):
         self.async_client = AsyncOpenAI(
             api_key=self.api_key,
             base_url=config.base_url,
-            timeout=httpx.Timeout(
+            timeout=SDKTimeout(
                 connect=DEFAULT_CONNECT_TIMEOUT,
                 read=config.timeout,
                 write=DEFAULT_WRITE_TIMEOUT,

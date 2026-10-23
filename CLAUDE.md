@@ -258,6 +258,8 @@ Never add write methods to StoreAdapter. MemoryManager is the single writer.
 
 9. **Document parsing runs in subprocess:** `read_file` for PDF/DOCX delegates to `document_extractor.py` via `subprocess.run()`. This isolates C-library crashes (PyMuPDF/MuPDF) from the agent process. Security guards (file size 10MB, zip bomb detection, 10K line cap, 30s timeout) are enforced. The in-process extraction methods were removed — all extraction logic lives in `document_extractor.py` only.
 
+10. **LLM SDK majors are pinned (`anthropic<1`, `openai<3`):** Both SDKs switched their HTTP layer to `httpx2` in the next major, and anthropic 1.x removed `temperature`/`top_p` from `messages.create`. Marketplace 1.3.6 was built by CI with an unpinned `anthropic` and crashed at startup (`TypeError: Invalid timeout argument ... uses httpx2`). Never pass `httpx.Timeout`/`httpx.Client` into an SDK client; use the SDK re-exports (`anthropic.Timeout`, `openai.Timeout`). Raising the pins is tracked as bead bd-e4de865b.
+
 ---
 
 ## AGENT/SUBAGENT/VSCODE PARITY CHECKLIST

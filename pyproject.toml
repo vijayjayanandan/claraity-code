@@ -23,8 +23,11 @@ classifiers = [
 ]
 
 dependencies = [
-    "openai>=2.34.0",
-    "anthropic>=0.39.0",
+    # Upper-bounded at the next major: openai 3.x and anthropic 1.x+ switched to
+    # httpx2 and anthropic 1.x removed temperature/top_p. Raise together with the
+    # SDK-upgrade task (see claraity_beads), not ad hoc.
+    "openai>=2.34.0,<3",
+    "anthropic>=0.39.0,<1",
     "tiktoken>=0.7.0",
     "pydantic>=2.11.0",
     "pydantic-settings>=2.9.0",

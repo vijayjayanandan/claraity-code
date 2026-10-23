@@ -13,8 +13,6 @@ from collections.abc import AsyncIterator, Iterator
 from copy import deepcopy
 from typing import Any, Optional
 
-import httpx
-
 try:
     import anthropic
     from anthropic import Anthropic, AsyncAnthropic
@@ -102,8 +100,11 @@ class AnthropicBackend(LLMBackend):
                 f"or pass api_key parameter."
             )
 
-        # Configure granular timeouts (matching OpenAI backend pattern)
-        timeout = httpx.Timeout(
+        # Configure granular timeouts (matching OpenAI backend pattern).
+        # Use the SDK's own Timeout re-export, never httpx.Timeout directly:
+        # anthropic>=1.0 is built on httpx2 and rejects httpx objects at
+        # construction ("Invalid `timeout` argument ... uses `httpx2`").
+        timeout = anthropic.Timeout(
             connect=DEFAULT_CONNECT_TIMEOUT,
             read=config.timeout,
             write=DEFAULT_WRITE_TIMEOUT,

@@ -18,12 +18,11 @@ from typing import Any
 
 try:
     from openai import AsyncOpenAI, OpenAI
+    from openai import Timeout as SDKTimeout
 except ImportError:
     raise ImportError(
         "OpenAI SDK not installed or too old. Install with: pip install 'openai>=2.34.0'"
     )
-
-import httpx
 
 try:
     from src.observability import get_logger
@@ -113,7 +112,8 @@ class OpenAINativeBackend(LLMBackend):
 
         self.api_key = api_key or os.getenv(api_key_env) or "not-configured"
 
-        timeout = httpx.Timeout(
+        # SDK Timeout re-export, not httpx.Timeout (openai>=3.0 uses httpx2).
+        timeout = SDKTimeout(
             connect=DEFAULT_CONNECT_TIMEOUT,
             read=config.timeout,
             write=DEFAULT_WRITE_TIMEOUT,
