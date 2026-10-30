@@ -350,9 +350,19 @@ class OpenAIBackend(LLMBackend):
                 }
             ]
         elif isinstance(content, list) and len(content) > 0:
-            last_block = content[-1].copy()
-            last_block["cache_control"] = {"type": "ephemeral"}
-            msg["content"] = content[:-1] + [last_block]
+            # cache_control is invalid on thinking blocks; mark the last
+            # non-thinking block instead (no-op if there is none).
+            for idx in range(len(content) - 1, -1, -1):
+                block = content[idx]
+                if isinstance(block, dict) and block.get("type") in (
+                    "thinking",
+                    "redacted_thinking",
+                ):
+                    continue
+                marked = block.copy()
+                marked["cache_control"] = {"type": "ephemeral"}
+                msg["content"] = content[:idx] + [marked] + content[idx + 1 :]
+                break
 
         return msg
 

@@ -562,6 +562,37 @@ class TestCacheControl:
         assert result[0]["content"] == "Hi"
         assert result[1]["content"] == "Hello"
 
+    def test_cache_control_skips_thinking_block(self, mock_anthropic):
+        """BP2 must not land on a thinking block (API rejects it)."""
+        msg = {
+            "role": "assistant",
+            "content": [
+                {"type": "thinking", "thinking": "hmm", "signature": "sig"},
+                {"type": "text", "text": "Answer"},
+            ],
+        }
+        result = mock_anthropic._add_cache_control_to_message(msg)
+        assert "cache_control" not in result["content"][0]
+        assert result["content"][1]["cache_control"] == {"type": "ephemeral"}
+
+    def test_cache_control_thinking_only_falls_back(self, mock_anthropic):
+        """Thinking-only assistant turn (max_tokens during thinking) gets no
+        cache_control; BP2 moves to the previous message instead."""
+        thinking_only = [
+            {"type": "thinking", "thinking": "long...", "signature": "sig"},
+        ]
+        messages = [
+            {"role": "user", "content": "First"},
+            {"role": "user", "content": "Second"},
+            {"role": "assistant", "content": thinking_only},
+            {"role": "user", "content": "Continue"},
+        ]
+        _, result = mock_anthropic._apply_cache_control("sys", messages)
+
+        assert result[2]["content"] == thinking_only
+        assert "cache_control" not in result[2]["content"][0]
+        assert result[1]["content"][0]["cache_control"] == {"type": "ephemeral"}
+
     def test_cache_control_empty_system(self, mock_anthropic):
         """Empty system text should produce empty system param."""
         system_param, _ = mock_anthropic._apply_cache_control(

@@ -128,6 +128,25 @@ class TestAddCacheControlToMessage:
         result = OpenAIBackend._add_cache_control_to_message(msg)
         assert result["content"] == []
 
+    def test_thinking_block_skipped(self):
+        msg = {
+            "role": "assistant",
+            "content": [
+                {"type": "text", "text": "Answer"},
+                {"type": "thinking", "thinking": "hmm", "signature": "sig"},
+            ],
+        }
+        result = OpenAIBackend._add_cache_control_to_message(msg)
+        assert result["content"][0]["cache_control"] == {"type": "ephemeral"}
+        assert "cache_control" not in result["content"][1]
+
+    def test_thinking_only_unchanged(self):
+        blocks = [{"type": "redacted_thinking", "data": "x"}]
+        msg = {"role": "assistant", "content": blocks}
+        result = OpenAIBackend._add_cache_control_to_message(msg)
+        assert result["content"] == blocks
+        assert "cache_control" not in result["content"][0]
+
     def test_original_message_not_mutated(self):
         msg = {"role": "user", "content": "Original"}
         result = OpenAIBackend._add_cache_control_to_message(msg)

@@ -509,14 +509,18 @@ class AnthropicBackend(LLMBackend):
         else:
             system_param = []
 
-        # BP2: Add cache_control to second-to-last message
+        # BP2: Add cache_control to second-to-last message. Walk back past
+        # messages with no cacheable block (e.g. thinking-only assistant
+        # turns from a max_tokens stop during thinking).
         if len(messages) >= 3:
             result = [m for m in messages]
             for i in range(len(result) - 2, 0, -1):
                 msg_content = result[i].get("content")
                 if msg_content is not None:
-                    result[i] = self._add_cache_control_to_message(result[i])
-                    break
+                    marked = self._add_cache_control_to_message(result[i])
+                    if marked.get("content") is not msg_content:
+                        result[i] = marked
+                        break
             messages = result
 
         return system_param, messages
@@ -539,11 +543,22 @@ class AnthropicBackend(LLMBackend):
                 }
             ]
         elif isinstance(content, list) and len(content) > 0:
+            # Anthropic rejects cache_control on thinking/redacted_thinking
+            # blocks ("Extra inputs are not permitted"). Mark the last
+            # cacheable block instead; if there is none, leave unchanged.
             blocks = list(content)
-            last_block = dict(blocks[-1])
-            last_block["cache_control"] = {"type": "ephemeral"}
-            blocks[-1] = last_block
-            msg["content"] = blocks
+            for idx in range(len(blocks) - 1, -1, -1):
+                block = blocks[idx]
+                if isinstance(block, dict) and block.get("type") in (
+                    "thinking",
+                    "redacted_thinking",
+                ):
+                    continue
+                marked = dict(block)
+                marked["cache_control"] = {"type": "ephemeral"}
+                blocks[idx] = marked
+                msg["content"] = blocks
+                break
 
         return msg
 
