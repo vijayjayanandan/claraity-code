@@ -1,11 +1,13 @@
-"""Skill loader — reads directory-based skills from two sources.
+"""Skill loader — reads directory-based skills from three sources.
 
 Skills are loaded from:
 1. **Built-in skills** — ``src/skills/builtins/`` (ship with the agent binary)
-2. **Project skills** — ``.claraity/skills/`` (project-specific)
+2. **Global skills** — ``~/.claraity/skills/`` (available to every project)
+3. **Project skills** — ``.claraity/skills/`` (project-specific)
 
-Project skills override built-in skills with the same directory name,
-so projects can customize or replace any built-in skill.
+Later sources override earlier ones with the same directory name:
+project overrides global overrides built-in. This lets a project replace
+a built-in or global skill without editing it in place.
 
 Each skill is a directory containing a main file named skill-<name>.md
 with YAML frontmatter, plus optional bundled resources (scripts/, references/,
@@ -89,6 +91,8 @@ class SkillInfo:
     allowed_tools: list[str] = field(default_factory=list)
     # Directory containing the skill (for resolving scripts/, references/, etc.)
     skill_dir: Path = field(default_factory=lambda: Path())
+    # Where the skill was loaded from: "builtin" | "global" | "project".
+    origin: str = "project"
 
 
 def _parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
@@ -328,12 +332,26 @@ def _split_args(args_string: str) -> list[str]:
     return parts
 
 
+def _default_global_dir() -> Path | None:
+    """Return the global skills directory (``~/.claraity/skills/``).
+
+    Returns None if the home directory cannot be resolved, which disables the
+    global tier. Falling back to another directory would mislabel it as global.
+    """
+    try:
+        return Path.home() / ".claraity" / "skills"
+    except (RuntimeError, OSError):
+        return None
+
+
 class SkillLoader:
-    """Loads skill definitions from built-in and project skill directories.
+    """Loads skill definitions from built-in, global, and project directories.
 
     Built-in skills ship with the agent (``src/skills/builtins/``).
+    Global skills live in ``~/.claraity/skills/`` and apply to every project.
     Project skills live in ``.claraity/skills/``.
-    Project skills override built-ins with the same directory name.
+
+    Priority (highest wins): project > global > built-in.
     """
 
     # Built-in skills directory (sibling to this module)
@@ -343,9 +361,15 @@ class SkillLoader:
         self,
         working_directory: Path | None = None,
         builtins_dir: Path | None = None,
+        global_dir: Path | None = None,
     ) -> None:
         root = working_directory or Path.cwd()
         self.skills_dir = root / ".claraity" / "skills"
+        # Global skills live in the user's home directory and apply to all projects.
+        # None when the home directory cannot be resolved (global tier disabled).
+        self.global_dir: Path | None = (
+            global_dir if global_dir is not None else _default_global_dir()
+        )
         # Allow overriding builtins_dir for testing (pass a nonexistent
         # path to disable built-in skills in tests).
         self.builtins_dir = builtins_dir if builtins_dir is not None else self._BUILTINS_DIR
@@ -353,27 +377,29 @@ class SkillLoader:
     def load_all(self) -> tuple[list[SkillInfo], list[SkillLoadError]]:
         """Return all valid skills sorted by (category, name), plus any load errors.
 
-        Scans built-in skills first, then project skills.  Project skills
-        override built-ins with the same directory name.  Errors from project
-        skills override errors from built-ins with the same directory name.
+        Scans built-in, then global, then project skills.  Later sources
+        override earlier ones with the same directory name.  Errors from
+        higher-priority sources override errors from lower-priority sources
+        with the same directory name.
         """
         skills_by_id: dict[str, SkillInfo] = {}
         errors_by_id: dict[str, SkillLoadError] = {}
 
-        # Built-ins first (can be overridden)
-        builtin_skills, builtin_errors = self._scan_dir(self.builtins_dir)
-        for skill in builtin_skills:
-            skills_by_id[skill.id] = skill
-        for error in builtin_errors:
-            errors_by_id[error.id] = error
-
-        # Project skills override built-ins
-        project_skills, project_errors = self._scan_dir(self.skills_dir)
-        for skill in project_skills:
-            skills_by_id[skill.id] = skill
-            errors_by_id.pop(skill.id, None)  # clear any builtin error for same id
-        for error in project_errors:
-            errors_by_id[error.id] = error
+        # Priority order: builtin < global < project. Later writes win.
+        sources = (
+            (self.builtins_dir, "builtin"),
+            (self.global_dir, "global"),
+            (self.skills_dir, "project"),
+        )
+        for base_dir, origin in sources:
+            found, errored = self._scan_dir(base_dir, origin)
+            for skill in found:
+                skills_by_id[skill.id] = skill
+                # A successfully loaded higher-priority skill clears a
+                # lower-priority error for the same id.
+                errors_by_id.pop(skill.id, None)
+            for error in errored:
+                errors_by_id[error.id] = error
 
         result = list(skills_by_id.values())
         result.sort(key=lambda s: (s.category, s.name))
@@ -382,19 +408,23 @@ class SkillLoader:
     def get_skill(self, skill_id: str) -> SkillInfo | None:
         """Load a single skill by ID (directory name).
 
-        Checks project skills first, then falls back to built-ins.
+        Checks project skills first, then global, then falls back to built-ins.
         """
-        # Try project skills first (they take priority)
-        skill = self._get_from_dir(skill_id, self.skills_dir)
-        if skill is not None:
-            return skill
+        for base_dir, origin in (
+            (self.skills_dir, "project"),
+            (self.global_dir, "global"),
+            (self.builtins_dir, "builtin"),
+        ):
+            skill = self._get_from_dir(skill_id, base_dir, origin)
+            if skill is not None:
+                return skill
+        return None
 
-        # Fall back to built-ins
-        return self._get_from_dir(skill_id, self.builtins_dir)
-
-    def _scan_dir(self, base_dir: Path) -> tuple[list[SkillInfo], list[SkillLoadError]]:
+    def _scan_dir(
+        self, base_dir: Path | None, origin: str
+    ) -> tuple[list[SkillInfo], list[SkillLoadError]]:
         """Scan a directory for valid skills, collecting load errors instead of silently dropping them."""
-        if not base_dir.is_dir():
+        if base_dir is None or not base_dir.is_dir():
             return [], []
         resolved_base = base_dir.resolve()
         skills: list[SkillInfo] = []
@@ -409,16 +439,18 @@ class SkillLoader:
                 logger.warning("skill_scan_symlink_blocked", path=str(skill_dir))
                 continue
             try:
-                skill = self._load_skill_dir(skill_dir)
+                skill = self._load_skill_dir(skill_dir, origin)
                 skills.append(skill)
             except Exception as e:
                 logger.warning("skill_load_skipped", path=str(skill_dir), error=str(e))
                 errors.append(SkillLoadError(id=skill_dir.name, filepath=skill_dir, error=str(e)))
         return skills, errors
 
-    def _get_from_dir(self, skill_id: str, base_dir: Path) -> SkillInfo | None:
+    def _get_from_dir(
+        self, skill_id: str, base_dir: Path | None, origin: str
+    ) -> SkillInfo | None:
         """Load a single skill from a specific directory."""
-        if not base_dir.is_dir():
+        if base_dir is None or not base_dir.is_dir():
             return None
         skill_dir = base_dir / skill_id
         # Path traversal guard
@@ -430,12 +462,12 @@ class SkillLoader:
         if not skill_dir.is_dir():
             return None
         try:
-            return self._load_skill_dir(skill_dir)
+            return self._load_skill_dir(skill_dir, origin)
         except Exception:
             logger.warning("skill_load_failed", skill_id=skill_id)
             return None
 
-    def _load_skill_dir(self, skill_dir: Path) -> SkillInfo:
+    def _load_skill_dir(self, skill_dir: Path, origin: str = "project") -> SkillInfo:
         """Parse a skill directory. Raises on invalid format or missing fields."""
         dir_name = skill_dir.name
         skill_file = skill_dir / f"skill-{dir_name}.md"
@@ -481,4 +513,5 @@ class SkillLoader:
             disable_model_invocation=bool(fm.get("disable-model-invocation", False)),
             allowed_tools=allowed_raw,
             skill_dir=skill_dir,
+            origin=origin,
         )

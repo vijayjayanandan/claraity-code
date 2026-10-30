@@ -386,6 +386,76 @@ what you observe in the code, trust the code and update or remove the memory.
 """
 
 
+def get_skill_locations_injection(
+    project_skills_dir: str,
+    global_skills_dir: str | None,
+) -> str:
+    """
+    Generate skill-location instructions for the agent.
+
+    Mirrors get_persistent_memory_injection: it tells the agent both skill
+    directories so it can create a skill at the right scope without asking
+    the user for a path. Project skills apply to this codebase only; global
+    skills are available to every project.
+
+    Args:
+        project_skills_dir: Absolute path to <workspace>/.claraity/skills/
+        global_skills_dir: Absolute path to ~/.claraity/skills/, or None if the
+            home directory could not be resolved (global tier disabled).
+
+    Returns:
+        Skill-location instruction block
+    """
+    layout = """A skill is a directory named after the skill id, containing a main file
+`skill-<id>.md` with YAML frontmatter (`name` and `description` are required),
+plus optional `scripts/`, `references/`, `agents/`, and `assets/` subdirectories.
+For the full authoring guide (frontmatter fields, description writing,
+preprocessing), read the built-in `skill-creator` skill file."""
+
+    if global_skills_dir is None:
+        return f"""# Skills
+
+Skills are directory-based instruction sets the user triggers with
+`/skill-name` or the lightbulb icon in the editor. You can create and edit
+them with your normal file tools (write_file, edit_file, read_file).
+
+Create skills in: `{project_skills_dir}` (this codebase only).
+Global skills are unavailable because the home directory could not be resolved.
+
+{layout}"""
+
+    return f"""# Skills
+
+Skills are directory-based instruction sets the user triggers with
+`/skill-name` or the lightbulb icon in the editor. You can create and edit
+them with your normal file tools (write_file, edit_file, read_file).
+
+There are two places a skill can live:
+
+| Scope | Directory | Applies to |
+|-------|-----------|------------|
+| **Project** | `{project_skills_dir}` | This codebase only |
+| **Global** | `{global_skills_dir}` | Every project the user opens |
+
+If the same skill id exists in both, the project copy wins (and either one
+overrides a built-in skill of the same id).
+
+{layout}
+
+**Choosing scope.** Infer it from what the user asks for and the surrounding
+context, then state your choice in passing:
+
+- Reusable tooling, personal conventions, or anything tied to the user rather
+  than one repo -> **global**.
+- Conventions, workflows, or scripts specific to the current codebase ->
+  **project**.
+
+When the intent is genuinely ambiguous, ask a single short question
+("project-only or available in all your projects?") before writing. Do not ask
+the user to supply a filesystem path -- that is your job, and you already have
+both locations above."""
+
+
 def get_plan_mode_injection(
     plan_path: str, plan_hash: str | None = None, is_awaiting_approval: bool = False
 ) -> str:
@@ -655,6 +725,7 @@ __all__ = [
     "get_system_prompt",
     "get_plan_mode_injection",
     "get_persistent_memory_injection",
+    "get_skill_locations_injection",
     "get_session_continuation_injection",
     "get_task_workflow_injection",
     "get_language_injection",

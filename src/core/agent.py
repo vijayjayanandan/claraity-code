@@ -472,9 +472,19 @@ class CodingAgent(AgentInterface):
             workspace_roots=self._workspace_roots,
         )
 
-        # Allow agent to write to user-level memory dir without safety-floor approval
+        # Allow agent to read and write the user-level memory dir and the global
+        # skills dir without the outside-workspace safety prompt (normal
+        # category approval still applies). Both live in ~/.claraity/, outside
+        # the workspace, and the agent manages them on the user's behalf.
+        from src.skills.skill_loader import _default_global_dir
+
+        allowed_outside: list[Path] = []
+        _global_skills = _default_global_dir()
+        if _global_skills is not None:
+            allowed_outside.append(_global_skills)
         if hasattr(self.memory, "user_memory_dir"):
-            self._gating.set_allowed_outside_paths([self.memory.user_memory_dir])
+            allowed_outside.append(self.memory.user_memory_dir)
+        self._gating.set_allowed_outside_paths(allowed_outside)
 
         # Special tool handlers (clarify, plan approval)
         from src.core.special_tool_handlers import SpecialToolHandlers
@@ -2903,12 +2913,29 @@ class CodingAgent(AgentInterface):
                 )
 
                 _skills_dir = self.working_directory / ".claraity" / "skills"
+                _project_has_skills = _skills_dir.is_dir() and any(
+                    p.is_dir() for p in _skills_dir.iterdir()
+                )
+                # Also count global skills so a project with none still gets
+                # the available-skills reminder.
+                from src.skills.skill_loader import _default_global_dir
+
+                # Guarded: the global dir is outside the workspace, so a
+                # permission error must not abort the whole response.
+                _global_skills_dir = _default_global_dir()
+                try:
+                    _global_has_skills = (
+                        _global_skills_dir is not None
+                        and _global_skills_dir.is_dir()
+                        and any(p.is_dir() for p in _global_skills_dir.iterdir())
+                    )
+                except OSError:
+                    _global_has_skills = False
                 _reminder_state = build_reminder_state(
                     iteration=iteration,
                     tools_used=_reminder_tools_used,
                     last_task_tool_iteration=_reminder_last_task_tool_iter,
-                    skills_exist=_skills_dir.is_dir()
-                    and any(p.is_dir() for p in _skills_dir.iterdir()),
+                    skills_exist=_project_has_skills or _global_has_skills,
                     working_directory=str(self.working_directory),
                 )
                 inject_reminders(current_context, _reminder_state, REMINDERS)

@@ -14,6 +14,11 @@ from src.skills.skill_loader import (
     substitute_arguments,
 )
 
+# Captured at import time, before the autouse fixture in tests/conftest.py
+# patches the module attribute.
+from src.skills.skill_loader import _default_global_dir as _REAL_DEFAULT_GLOBAL_DIR
+
+
 # ---------------------------------------------------------------------------
 # Frontmatter parser
 # ---------------------------------------------------------------------------
@@ -595,3 +600,221 @@ class TestExtractShellCommands:
         body = "```!\n\necho hello\n\n```"
         cmds = extract_shell_commands(body)
         assert cmds == ["echo hello"]
+# ---------------------------------------------------------------------------
+# SkillLoader — global tier (~/.claraity/skills/)
+# ---------------------------------------------------------------------------
+
+
+class TestGlobalSkills:
+    def _make_loader(self, tmp_path: Path, global_dir: Path, builtins_dir: Path | None = None):
+        return SkillLoader(
+            working_directory=tmp_path,
+            builtins_dir=builtins_dir if builtins_dir is not None else tmp_path / "_no_builtins",
+            global_dir=global_dir,
+        )
+
+    def test_global_skill_loaded(self, tmp_path: Path):
+        global_dir = tmp_path / "home" / ".claraity" / "skills"
+        _create_skill_dir(
+            global_dir,
+            "shared-skill",
+            "---\nname: Shared Skill\ndescription: Global skill\n---\n\nBody\n",
+        )
+
+        loader = self._make_loader(tmp_path, global_dir)
+        skills, _ = loader.load_all()
+
+        assert len(skills) == 1
+        assert skills[0].id == "shared-skill"
+        assert skills[0].origin == "global"
+
+    def test_global_skill_visible_from_any_project(self, tmp_path: Path):
+        """A global skill is available regardless of the project directory."""
+        global_dir = tmp_path / "home" / ".claraity" / "skills"
+        _create_skill_dir(
+            global_dir,
+            "portable",
+            "---\nname: Portable\ndescription: Works everywhere\n---\n\nBody\n",
+        )
+
+        project_a = tmp_path / "project-a"
+        project_b = tmp_path / "project-b"
+        project_a.mkdir()
+        project_b.mkdir()
+
+        for project in (project_a, project_b):
+            loader = self._make_loader(project, global_dir)
+            assert loader.get_skill("portable") is not None
+
+    def test_project_overrides_global(self, tmp_path: Path):
+        global_dir = tmp_path / "home" / ".claraity" / "skills"
+        project_dir = tmp_path / ".claraity" / "skills"
+        _create_skill_dir(
+            global_dir,
+            "review",
+            "---\nname: Global Review\ndescription: Global version\n---\n\nGlobal body\n",
+        )
+        _create_skill_dir(
+            project_dir,
+            "review",
+            "---\nname: Project Review\ndescription: Project version\n---\n\nProject body\n",
+        )
+
+        loader = self._make_loader(tmp_path, global_dir)
+        skills, _ = loader.load_all()
+
+        assert len(skills) == 1
+        assert skills[0].name == "Project Review"
+        assert skills[0].origin == "project"
+
+    def test_global_overrides_builtin(self, tmp_path: Path):
+        builtins_dir = tmp_path / "builtins"
+        global_dir = tmp_path / "home" / ".claraity" / "skills"
+        _create_skill_dir(
+            builtins_dir,
+            "review",
+            "---\nname: Builtin Review\ndescription: Builtin version\n---\n\nBuiltin body\n",
+        )
+        _create_skill_dir(
+            global_dir,
+            "review",
+            "---\nname: Global Review\ndescription: Global version\n---\n\nGlobal body\n",
+        )
+
+        loader = self._make_loader(tmp_path, global_dir, builtins_dir=builtins_dir)
+        skills, _ = loader.load_all()
+
+        assert len(skills) == 1
+        assert skills[0].name == "Global Review"
+        assert skills[0].origin == "global"
+
+    def test_builtin_origin_reported(self, tmp_path: Path):
+        builtins_dir = tmp_path / "builtins"
+        _create_skill_dir(
+            builtins_dir,
+            "shipped",
+            "---\nname: Shipped\ndescription: Builtin\n---\n\nBody\n",
+        )
+
+        loader = self._make_loader(tmp_path, tmp_path / "_no_global", builtins_dir=builtins_dir)
+        skills, _ = loader.load_all()
+
+        assert skills[0].origin == "builtin"
+
+    def test_get_skill_priority_project_then_global_then_builtin(self, tmp_path: Path):
+        builtins_dir = tmp_path / "builtins"
+        global_dir = tmp_path / "home" / ".claraity" / "skills"
+        project_dir = tmp_path / ".claraity" / "skills"
+        _create_skill_dir(
+            builtins_dir,
+            "layer",
+            "---\nname: Builtin Layer\ndescription: b\n---\n\nB\n",
+        )
+        _create_skill_dir(
+            global_dir,
+            "layer",
+            "---\nname: Global Layer\ndescription: g\n---\n\nG\n",
+        )
+
+        loader = self._make_loader(tmp_path, global_dir, builtins_dir=builtins_dir)
+        # Global present (project not yet) -> global wins over builtin
+        assert loader.get_skill("layer").name == "Global Layer"
+
+        # Add project copy -> project wins
+        _create_skill_dir(
+            project_dir,
+            "layer",
+            "---\nname: Project Layer\ndescription: p\n---\n\nP\n",
+        )
+        assert loader.get_skill("layer").name == "Project Layer"
+
+    def test_missing_global_dir_is_fine(self, tmp_path: Path):
+        loader = self._make_loader(tmp_path, tmp_path / "does-not-exist")
+        skills, errors = loader.load_all()
+        assert skills == []
+        assert errors == []
+
+    def test_global_error_does_not_persist_after_project_override(self, tmp_path: Path):
+        """A broken global skill is superseded by a valid project skill."""
+        global_dir = tmp_path / "home" / ".claraity" / "skills"
+        project_dir = tmp_path / ".claraity" / "skills"
+        # Broken global skill (no frontmatter)
+        _create_skill_dir(global_dir, "dup", "No frontmatter here")
+        _create_skill_dir(
+            project_dir,
+            "dup",
+            "---\nname: Good Dup\ndescription: valid\n---\n\nBody\n",
+        )
+
+        loader = self._make_loader(tmp_path, global_dir)
+        skills, errors = loader.load_all()
+
+        assert len(skills) == 1
+        assert skills[0].origin == "project"
+        assert not any(e.id == "dup" for e in errors)
+
+
+class TestDefaultGlobalDir:
+    def test_default_global_dir_under_home(self, monkeypatch, tmp_path: Path):
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+        assert _REAL_DEFAULT_GLOBAL_DIR() == tmp_path / ".claraity" / "skills"
+
+    def test_returns_none_when_home_unresolvable(self, monkeypatch):
+        def _raise():
+            raise RuntimeError("Could not determine home directory.")
+
+        monkeypatch.setattr(Path, "home", staticmethod(_raise))
+        assert _REAL_DEFAULT_GLOBAL_DIR() is None
+
+    def test_loader_with_no_global_dir_still_loads_project(self, monkeypatch, tmp_path: Path):
+        monkeypatch.setattr("src.skills.skill_loader._default_global_dir", lambda: None)
+        _create_skill_dir(
+            tmp_path / ".claraity" / "skills",
+            "local",
+            "---\nname: Local\ndescription: project skill\n---\n\nBody\n",
+        )
+        loader = SkillLoader(working_directory=tmp_path, builtins_dir=tmp_path / "_no_builtins")
+        assert loader.global_dir is None
+        skills, errors = loader.load_all()
+        assert [s.id for s in skills] == ["local"]
+        assert errors == []
+        assert loader.get_skill("missing") is None
+
+
+class TestSkillLocationsInjection:
+    def test_lists_both_directories(self):
+        from src.prompts.system_prompts import get_skill_locations_injection
+
+        out = get_skill_locations_injection("/proj/.claraity/skills", "/home/u/.claraity/skills")
+        assert "/proj/.claraity/skills" in out
+        assert "/home/u/.claraity/skills" in out
+        assert "project copy wins" in out
+
+    def test_without_global_dir_mentions_project_only(self):
+        from src.prompts.system_prompts import get_skill_locations_injection
+
+        out = get_skill_locations_injection("/proj/.claraity/skills", None)
+        assert "/proj/.claraity/skills" in out
+        assert "Global skills are unavailable" in out
+        assert "| **Global** |" not in out
+
+    def test_context_builder_injects_even_without_skill_dirs(
+        self, tmp_path: Path, _isolate_global_skills
+    ):
+        """A brand-new user with no skill folders still learns both locations."""
+        from src.core.context_builder import ContextBuilder
+        from src.memory import MemoryManager
+        from src.session.store.memory_store import MessageStore
+
+        manager = MemoryManager(load_file_memories=False, starting_directory=tmp_path)
+        manager.set_message_store(MessageStore(), "test-session")
+        builder = ContextBuilder(
+            memory_manager=manager, max_context_tokens=200_000, project_root=tmp_path
+        )
+        assert not (tmp_path / ".claraity" / "skills").exists()
+
+        system_prompt = builder.build_context(user_query="test", log_report=False)[0]["content"]
+
+        assert "# Skills" in system_prompt
+        assert str(tmp_path / ".claraity" / "skills") in system_prompt
+        assert str(_isolate_global_skills) in system_prompt

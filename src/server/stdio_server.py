@@ -2293,7 +2293,7 @@ class StdioProtocol(UIProtocol):
     # -----------------------------------------------------------------
 
     async def _handle_get_skills(self, data: dict) -> None:
-        """Return all available skills from .claraity/skills/."""
+        """Return all available skills from built-in, global, and project dirs."""
         try:
             from src.skills.skill_loader import SkillLoader
 
@@ -2310,6 +2310,7 @@ class StdioProtocol(UIProtocol):
                             "description": s.description,
                             "category": s.category,
                             "tags": s.tags,
+                            "origin": s.origin,
                             **({"arguments": s.arguments} if s.arguments else {}),
                             **({"argumentHint": s.argument_hint} if s.argument_hint else {}),
                         }
@@ -2326,7 +2327,12 @@ class StdioProtocol(UIProtocol):
             await self._send_json({"type": "skills_list", "skills": []})
 
     async def _handle_create_skill(self, data: dict) -> None:
-        """Create a new skill file in .claraity/skills/."""
+        """Create a skill file in the project or global skills directory.
+
+        ``scope`` selects the target: ``"project"`` (default) writes to
+        ``<working_dir>/.claraity/skills/``; ``"global"`` writes to
+        ``~/.claraity/skills/`` so the skill is available to all projects.
+        """
         import re as _re
 
         import yaml as _yaml
@@ -2336,6 +2342,9 @@ class StdioProtocol(UIProtocol):
         category = str(data.get("category", "general")).strip()
         tags = data.get("tags", [])
         body = str(data.get("body", "")).strip()
+        scope = str(data.get("scope", "project")).strip().lower()
+        if scope not in ("project", "global"):
+            scope = "project"
 
         if not name or not description:
             await self._send_json(
@@ -2373,8 +2382,18 @@ class StdioProtocol(UIProtocol):
             return
 
         try:
-            working_dir = Path(self._working_directory) if self._working_directory else Path.cwd()
-            skill_dir = working_dir / ".claraity" / "skills" / slug
+            if scope == "global":
+                from src.skills.skill_loader import _default_global_dir
+
+                base_dir = _default_global_dir()
+                if base_dir is None:
+                    raise RuntimeError("home directory could not be resolved")
+            else:
+                working_dir = (
+                    Path(self._working_directory) if self._working_directory else Path.cwd()
+                )
+                base_dir = working_dir / ".claraity" / "skills"
+            skill_dir = base_dir / slug
             skill_dir.mkdir(parents=True, exist_ok=True)
 
             # Build frontmatter
@@ -2395,7 +2414,8 @@ class StdioProtocol(UIProtocol):
                     "type": "skill_saved",
                     "success": True,
                     "name": name,
-                    "message": f"Skill '{name}' saved as {slug}/skill-{slug}.md",
+                    "scope": scope,
+                    "message": f"Skill '{name}' saved as {slug}/skill-{slug}.md ({scope})",
                 }
             )
         except Exception as e:
@@ -2405,6 +2425,7 @@ class StdioProtocol(UIProtocol):
                     "type": "skill_saved",
                     "success": False,
                     "name": name,
+                    "scope": scope,
                     "message": f"Failed to create skill: {e}",
                 }
             )

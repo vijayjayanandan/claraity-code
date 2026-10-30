@@ -17,6 +17,7 @@ from src.prompts import PromptOptimizer
 from src.prompts.system_prompts import (
     get_persistent_memory_injection,
     get_plan_mode_injection,
+    get_skill_locations_injection,
     get_system_prompt,
 )
 
@@ -395,6 +396,24 @@ class ContextBuilder:
                     # Overlapping dirs: already shown as project memories
                     mem_section += f"{user_mem_display}\n\n"
                 system_prompt = system_prompt + mem_section
+
+        # Inject skill-location instructions so the agent knows both skill
+        # directories and can pick the right scope without asking the user.
+        # Always injected (like memory) so a user with no skills yet still
+        # learns where to create their first one.
+        from src.skills.skill_loader import _default_global_dir
+
+        _project_root = self.project_root or Path.cwd()
+        project_skills_dir = _project_root / ".claraity" / "skills"
+        global_skills_dir = _default_global_dir()
+        system_prompt = (
+            system_prompt
+            + "\n\n"
+            + get_skill_locations_injection(
+                project_skills_dir=str(project_skills_dir),
+                global_skills_dir=str(global_skills_dir) if global_skills_dir else None,
+            )
+        )
 
         # Inject workspace folders context (multi-root workspace)
         if self._workspace_roots and len(self._workspace_roots) > 1:

@@ -176,9 +176,11 @@ def _content_available_skills(state: ReminderState) -> str:
 
     skills_list = "\n".join(skill_names) if skill_names else "(use lightbulb icon to browse)"
     return (
-        "Skills are available in this project. "
+        "Skills are available in this project and globally. "
         "The user can activate a skill by typing /skill-name or via the lightbulb icon. "
-        "When the user's task matches a skill, suggest they use it.\n\n"
+        "When the user's task matches a skill, suggest they use it. "
+        "To create a skill, see the Skills section of your system prompt for the "
+        "project and global directories.\n\n"
         f"Available skills:\n{skills_list}"
     )
 
