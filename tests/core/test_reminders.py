@@ -152,16 +152,6 @@ class TestInjectReminders:
 
 
 class TestPerTurnTriggers:
-    def test_align_before_acting_fires_on_iteration_1(self):
-        state = _make_state(iteration=1)
-        reminder = next(r for r in REMINDERS if r.id == "align-before-acting")
-        assert reminder.trigger(state) is True
-
-    def test_align_before_acting_silent_on_iteration_2(self):
-        state = _make_state(iteration=2)
-        reminder = next(r for r in REMINDERS if r.id == "align-before-acting")
-        assert reminder.trigger(state) is False
-
     def test_knowledge_base_fires_when_db_exists(self):
         state = _make_state(iteration=1, knowledge_db_exists=True)
         reminder = next(r for r in REMINDERS if r.id == "knowledge-base")
@@ -257,11 +247,6 @@ class TestReminderContent:
         reminder = next(r for r in REMINDERS if r.id == "knowledge-base")
         assert "claraity_query" in reminder.content(state)
 
-    def test_align_before_acting_mentions_clarifying(self):
-        state = _make_state()
-        reminder = next(r for r in REMINDERS if r.id == "align-before-acting")
-        assert "clarify" in reminder.content(state).lower()
-
     def test_task_nudge_names_the_task(self):
         state = _make_state(in_progress_task_probe=_in_progress("Fix login bug"))
         reminder = next(r for r in REMINDERS if r.id == "task-nudge")
@@ -273,3 +258,8 @@ class TestReminderContent:
         state = _make_state()
         reminder = next(r for r in REMINDERS if r.id == "available-skills")
         assert "lightbulb" in reminder.content(state)
+
+
+class TestRemovedReminders:
+    def test_align_before_acting_is_not_a_reminder(self):
+        assert all(r.id != "align-before-acting" for r in REMINDERS)

@@ -125,6 +125,7 @@ WORKING_STYLE = """# Working Style
 - **Act** when the request is clear, local, and reversible
 - **Ask** when requirements are ambiguous, scope affects architecture, or action is destructive/visible/hard to reverse
 - When asking, offer one recommended path
+- For non-trivial changes, briefly state your approach before writing code so the user can verify direction
 
 ## Output Efficiency
 - Lead with the answer or action, not reasoning

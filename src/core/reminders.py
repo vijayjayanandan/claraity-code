@@ -144,22 +144,6 @@ def inject_reminders(
 # -- Per-turn reminders (fire on iteration 1 = first LLM call of each user turn) --
 
 
-def _trigger_align_before_acting(state: ReminderState) -> bool:
-    """Fire at the start of each user turn."""
-    return state.iteration == 1
-
-
-def _content_align_before_acting(state: ReminderState) -> str:
-    return (
-        "Before implementing any non-trivial change:\n"
-        "1. Ask clarifying questions when requirements are ambiguous - don't assume.\n"
-        "2. Explain your approach concisely before writing code so the user can verify direction.\n"
-        "3. Break complex work into steps and confirm the plan.\n"
-        "4. If you're unsure about something, say so - it's better to ask than to guess wrong.\n"
-        "The goal is alignment: the user should never be surprised by what you produce."
-    )
-
-
 def _trigger_knowledge_base(state: ReminderState) -> bool:
     """Fire at the start of each user turn when knowledge DB exists."""
     return state.iteration == 1 and state.knowledge_db_exists
@@ -241,11 +225,6 @@ def _content_task_nudge(state: ReminderState) -> str:
 
 REMINDERS: list[ReminderDef] = [
     # Per-turn (fire once at the start of each user turn)
-    ReminderDef(
-        id="align-before-acting",
-        trigger=_trigger_align_before_acting,
-        content=_content_align_before_acting,
-    ),
     ReminderDef(
         id="knowledge-base",
         trigger=_trigger_knowledge_base,
