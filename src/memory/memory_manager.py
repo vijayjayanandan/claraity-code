@@ -702,6 +702,17 @@ class MemoryManager:
             conversation_context = [
                 msg for msg in conversation_context if msg.get("role") != "system"
             ]
+
+            # Stored tool results are raw (in-turn framing isn't persisted), so
+            # escape reminder tags here too. Copies, so the store is untouched.
+            from src.core.reminders import neutralize_content
+
+            conversation_context = [
+                {**msg, "content": neutralize_content(msg.get("content"))}
+                if msg.get("role") == "tool"
+                else msg
+                for msg in conversation_context
+            ]
             context.extend(conversation_context)
         else:
             # Fallback: Use WorkingMemory (legacy path)

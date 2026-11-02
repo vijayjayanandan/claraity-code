@@ -11,6 +11,7 @@ from typing import Any, Optional
 from xml.sax.saxutils import escape as xml_escape
 
 from src.core.file_reference_parser import FileReference
+from src.core.reminders import neutralize_reminder_tags
 from src.memory import MemoryManager
 from src.observability import get_logger
 from src.prompts import PromptOptimizer
@@ -505,7 +506,7 @@ class ContextBuilder:
                             file_parts.append(f"# Line: {ref.line_start}")
                         else:
                             file_parts.append(f"# Lines: {ref.line_start}-{ref.line_end}")
-                    file_parts.append(f"```\n{ref.content}\n```")
+                    file_parts.append(f"```\n{neutralize_reminder_tags(ref.content)}\n```")
                     file_parts.append("")  # Blank line between files
 
                 file_context_content = "\n".join(file_parts)

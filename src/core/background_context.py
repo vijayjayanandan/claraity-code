@@ -8,6 +8,7 @@ appends a user-role message to the context list (mutates in-place).
 from typing import Any
 
 from src.core.background_tasks import BackgroundTaskInfo, BackgroundTaskStatus
+from src.core.reminders import neutralize_reminder_tags
 
 # Output limit for stdout/stderr in the notification.
 # Matches the inline limit used by the stdio and TUI paths so the agent
@@ -53,7 +54,7 @@ def inject_background_task_completions(
             preview = output[:OUTPUT_PREVIEW_CHARS]
             if len(output) > OUTPUT_PREVIEW_CHARS:
                 preview += f"\n... ({len(output) - OUTPUT_PREVIEW_CHARS} more chars truncated)"
-            parts.append(f"Output:\n{preview}")
+            parts.append(f"Output:\n{neutralize_reminder_tags(preview)}")
 
         parts.append("")  # blank line between tasks
 

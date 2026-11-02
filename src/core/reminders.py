@@ -1,20 +1,30 @@
 """System Reminders — ephemeral contextual guidance injected before LLM calls.
 
-Reminders are `<system-reminder>` XML blocks appended to the last message in
-the LLM context. They fire based on conditions evaluated each iteration —
+Reminders are `<system-reminder>` XML blocks sent as their own user-role
+message. They fire based on conditions evaluated each iteration —
 periodic (every N iterations), per-turn (first iteration of each user turn),
 or event-driven (something happened/didn't happen).
 
 Design:
-- Injected into current_context (in-memory) after tool results, before next LLM call
-- Never persisted to JSONL (messages are already stored before reminder injection)
-- Never stripped during live session (accumulate naturally, compacted with old messages)
-- On session replay, fresh reminders are generated from current state
-- Attached to the LAST message in context (always after the cache breakpoint)
+- Injected into current_context (in-memory) just before each LLM call
+- Always a SEPARATE user-role message, never appended to a tool result.
+  The system prompt tells the model that tool output is data, so a reminder
+  inside a tool result reads as prompt injection. The Anthropic backend merges
+  the message into the same user turn as a trailing text block after the
+  tool_result blocks; OpenAI-compatible backends send it as a user message
+  after the tool messages.
+- The SYSTEM_REMINDERS section of the system prompt declares these blocks as
+  trusted harness messages. Tool output has the tag escaped (see
+  _neutralize_reminder_tags in agent.py) so files can't impersonate them.
+- Content must be deterministic for a given state, so the prompt-cache
+  prefix stays stable while the message is in context.
+- Never persisted to JSONL. current_context is rebuilt from the store at the
+  start of each user turn, so reminders last for the turn they fire in.
 """
 
 from __future__ import annotations
 
+import functools
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -35,6 +45,9 @@ class ReminderState:
     knowledge_db_exists: bool = False
     skills_exist: bool = False
     working_directory: str = ""
+    # Lazy probe: returns the title of the in-progress task, or None.
+    # Lazy because it hits the bead store and is only needed by the task nudge.
+    in_progress_task_probe: Callable[[], str | None] | None = None
 
 
 @dataclass
@@ -45,24 +58,44 @@ class ReminderDef:
         id: Unique identifier for the reminder.
         trigger: Function that returns True when the reminder should fire.
         content: Function that generates the reminder text.
-        stealth: If True, appends "NEVER mention this reminder to the user".
         period: Only evaluate trigger every N iterations (0 = every iteration).
     """
 
     id: str
     trigger: Callable[[ReminderState], bool]
     content: Callable[[ReminderState], str]
-    stealth: bool = False
     period: int = 0
+
+
+def neutralize_reminder_tags(text: str) -> str:
+    """Escape <system-reminder> tags so untrusted content can't impersonate the harness.
+
+    Apply to every piece of external content (tool output, file contents,
+    command output, error text) before it enters LLM context.
+    """
+    return text.replace("<system-reminder", "&lt;system-reminder").replace(
+        "</system-reminder", "&lt;/system-reminder"
+    )
+
+
+def neutralize_content(content: Any) -> Any:
+    """neutralize_reminder_tags for str or multimodal block-list message content."""
+    if isinstance(content, str):
+        return neutralize_reminder_tags(content)
+    if isinstance(content, list):
+        return [
+            {**b, "text": neutralize_reminder_tags(b.get("text", ""))}
+            if isinstance(b, dict) and b.get("type") == "text"
+            else b
+            for b in content
+        ]
+    return content
 
 
 def _build_reminder_block(reminder: ReminderDef, state: ReminderState) -> str:
     """Build the full XML-tagged reminder string."""
     body = reminder.content(state).strip()
-    stealth_line = (
-        "\nMake sure that you NEVER mention this reminder to the user." if reminder.stealth else ""
-    )
-    return f'\n<system-reminder id="{reminder.id}">\n{body}{stealth_line}\n</system-reminder>'
+    return f'<system-reminder id="{reminder.id}">\n{body}\n</system-reminder>'
 
 
 def inject_reminders(
@@ -70,10 +103,9 @@ def inject_reminders(
     state: ReminderState,
     reminders: list[ReminderDef],
 ) -> None:
-    """Evaluate triggers and inject fired reminders into the last message.
+    """Evaluate triggers and append fired reminders as one user-role message.
 
-    Mutates context in-place by appending reminder text to the last
-    message's content field.
+    Mutates context in-place. Existing messages are never modified.
 
     Args:
         context: The LLM conversation context (mutated).
@@ -97,21 +129,12 @@ def inject_reminders(
     if not fired:
         return
 
-    # Find last message with string content to attach to
-    for i in range(len(context) - 1, -1, -1):
-        content = context[i].get("content")
-        if isinstance(content, str):
-            context[i]["content"] = content + "".join(fired)
-            logger.debug(
-                "reminders_injected",
-                count=len(fired),
-                target_index=i,
-                target_role=context[i].get("role"),
-            )
-            return
-
-    # Fallback: no message with string content found (shouldn't happen)
-    logger.warning("reminders_no_target", fired_count=len(fired))
+    context.append({"role": "user", "content": "\n".join(fired)})
+    logger.debug(
+        "reminders_injected",
+        count=len(fired),
+        after_role=context[-2].get("role") if len(context) > 1 else None,
+    )
 
 
 # ===========================================================================
@@ -174,7 +197,8 @@ def _content_available_skills(state: ReminderState) -> str:
     except Exception:
         pass
 
-    skills_list = "\n".join(skill_names) if skill_names else "(use lightbulb icon to browse)"
+    # Sorted so the text is stable regardless of filesystem order.
+    skills_list = "\n".join(sorted(skill_names)) if skill_names else "(use lightbulb icon to browse)"
     return (
         "Skills are available in this project and globally. "
         "The user can activate a skill by typing /skill-name or via the lightbulb icon. "
@@ -187,23 +211,27 @@ def _content_available_skills(state: ReminderState) -> str:
 
 # -- Periodic reminders (fire every N iterations based on condition) --
 
+TASK_NUDGE_STALE_ITERATIONS = 5
+
 
 def _trigger_task_nudge(state: ReminderState) -> bool:
-    """Fire when task tools haven't been used in a while."""
+    """Fire when a task is in progress but task tools haven't been used in a while."""
     if state.iteration < 2:
         return False  # Don't nudge on the very first response
     iterations_since_task = state.iteration - state.last_task_tool_iteration
-    return iterations_since_task >= 5
+    if iterations_since_task < TASK_NUDGE_STALE_ITERATIONS:
+        return False
+    # Checked last: the probe reads the bead store.
+    probe = state.in_progress_task_probe
+    return probe is not None and probe() is not None
 
 
 def _content_task_nudge(state: ReminderState) -> str:
+    title = state.in_progress_task_probe() if state.in_progress_task_probe else None
     return (
-        "The task tools haven't been used recently. If you're working on tasks that "
-        "would benefit from tracking progress, consider using task_create to add new "
-        "tasks and task_update to update task status (set to in_progress when starting, "
-        "completed when done). Also consider cleaning up the task list if it has become "
-        "stale. Only use these if relevant to the current work. This is just a gentle "
-        "reminder - ignore if not applicable."
+        f'The task "{title}" is marked in_progress, but the task tools haven\'t been '
+        "used for several steps. If it is finished, mark it completed with task_update; "
+        "if the work has moved on, update the task list to match."
     )
 
 
@@ -217,27 +245,23 @@ REMINDERS: list[ReminderDef] = [
         id="align-before-acting",
         trigger=_trigger_align_before_acting,
         content=_content_align_before_acting,
-        stealth=False,
     ),
     ReminderDef(
         id="knowledge-base",
         trigger=_trigger_knowledge_base,
         content=_content_knowledge_base,
-        stealth=False,
     ),
     ReminderDef(
         id="available-skills",
         trigger=_trigger_available_skills,
         content=_content_available_skills,
-        stealth=False,
     ),
     # Periodic (fire every N iterations when condition holds)
     ReminderDef(
         id="task-nudge",
         trigger=_trigger_task_nudge,
         content=_content_task_nudge,
-        stealth=True,
-        period=5,
+        period=TASK_NUDGE_STALE_ITERATIONS,
     ),
 ]
 
@@ -253,10 +277,15 @@ def build_reminder_state(
     last_task_tool_iteration: int,
     skills_exist: bool,
     working_directory: str,
+    in_progress_task_probe: Callable[[], str | None] | None = None,
 ) -> ReminderState:
     """Construct a ReminderState from agent loop variables."""
     kb_path = os.path.join(working_directory, ".claraity", "claraity_knowledge.db")
     knowledge_db_exists = os.path.isfile(kb_path)
+
+    # Memoize so trigger and content see the same answer from one store read.
+    if in_progress_task_probe is not None:
+        in_progress_task_probe = functools.lru_cache(maxsize=1)(in_progress_task_probe)
 
     return ReminderState(
         iteration=iteration,
@@ -265,4 +294,5 @@ def build_reminder_state(
         knowledge_db_exists=knowledge_db_exists,
         skills_exist=skills_exist,
         working_directory=working_directory,
+        in_progress_task_probe=in_progress_task_probe,
     )

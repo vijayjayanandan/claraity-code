@@ -32,7 +32,6 @@ def _make_reminder(
     id: str = "test-reminder",
     trigger=None,
     content=None,
-    stealth: bool = False,
     period: int = 0,
 ) -> ReminderDef:
     """Create a test ReminderDef."""
@@ -40,7 +39,6 @@ def _make_reminder(
         id=id,
         trigger=trigger or (lambda s: True),
         content=content or (lambda s: "Test reminder content."),
-        stealth=stealth,
         period=period,
     )
 
@@ -51,21 +49,33 @@ def _make_reminder(
 
 
 class TestInjectReminders:
-    def test_appends_to_last_message(self):
+    def test_appends_separate_user_message_after_tool_result(self):
         context = [
             {"role": "system", "content": "System prompt"},
             {"role": "user", "content": "Hello"},
-            {"role": "tool", "content": "Tool result here"},
+            {"role": "tool", "tool_call_id": "c1", "content": "Tool result here"},
         ]
         state = _make_state()
         reminder = _make_reminder(content=lambda s: "Do this thing.")
 
         inject_reminders(context, state, [reminder])
 
-        assert '<system-reminder id="test-reminder">' in context[2]["content"]
-        assert "Do this thing." in context[2]["content"]
-        # Original content preserved
-        assert context[2]["content"].startswith("Tool result here")
+        assert len(context) == 4
+        assert context[3]["role"] == "user"
+        assert '<system-reminder id="test-reminder">' in context[3]["content"]
+        assert "Do this thing." in context[3]["content"]
+
+    def test_never_modifies_existing_messages(self):
+        context = [
+            {"role": "user", "content": "Hello"},
+            {"role": "tool", "tool_call_id": "c1", "content": "Tool result here"},
+        ]
+        before = [dict(m) for m in context]
+
+        inject_reminders(context, _make_state(), [_make_reminder()])
+
+        assert context[:2] == before
+        assert "<system-reminder" not in context[1]["content"]
 
     def test_no_injection_when_trigger_false(self):
         context = [{"role": "user", "content": "Hello"}]
@@ -74,9 +84,9 @@ class TestInjectReminders:
 
         inject_reminders(context, state, [reminder])
 
-        assert "<system-reminder" not in context[0]["content"]
+        assert len(context) == 1
 
-    def test_multiple_reminders_appended(self):
+    def test_multiple_reminders_share_one_message(self):
         context = [{"role": "user", "content": "Hello"}]
         state = _make_state()
         r1 = _make_reminder(id="r1", content=lambda s: "First.")
@@ -84,29 +94,26 @@ class TestInjectReminders:
 
         inject_reminders(context, state, [r1, r2])
 
-        assert 'id="r1"' in context[0]["content"]
-        assert 'id="r2"' in context[0]["content"]
+        assert len(context) == 2
+        assert 'id="r1"' in context[1]["content"]
+        assert 'id="r2"' in context[1]["content"]
 
-    def test_stealth_adds_never_mention(self):
+    def test_no_hide_from_user_instruction(self):
         context = [{"role": "user", "content": "Hello"}]
-        state = _make_state()
-        reminder = _make_reminder(stealth=True)
+        inject_reminders(context, _make_state(iteration=1), REMINDERS)
+        assert "NEVER mention" not in context[-1]["content"]
 
-        inject_reminders(context, state, [reminder])
-
-        assert "NEVER mention this reminder" in context[0]["content"]
-
-    def test_non_stealth_no_never_mention(self):
-        context = [{"role": "user", "content": "Hello"}]
-        state = _make_state()
-        reminder = _make_reminder(stealth=False)
-
-        inject_reminders(context, state, [reminder])
-
-        assert "NEVER mention" not in context[0]["content"]
+    def test_deterministic_output(self):
+        a = [{"role": "user", "content": "Hello"}]
+        b = [{"role": "user", "content": "Hello"}]
+        inject_reminders(a, _make_state(), REMINDERS)
+        inject_reminders(b, _make_state(), REMINDERS)
+        assert a == b
 
     def test_empty_context_no_crash(self):
-        inject_reminders([], _make_state(), [_make_reminder()])
+        context: list = []
+        inject_reminders(context, _make_state(), [_make_reminder()])
+        assert context == []
 
     def test_period_skips_non_matching_iterations(self):
         context = [{"role": "user", "content": "Hello"}]
@@ -115,7 +122,7 @@ class TestInjectReminders:
 
         inject_reminders(context, state, [reminder])
 
-        assert "<system-reminder" not in context[0]["content"]
+        assert len(context) == 1
 
     def test_period_fires_on_matching_iteration(self):
         context = [{"role": "user", "content": "Hello"}]
@@ -124,7 +131,7 @@ class TestInjectReminders:
 
         inject_reminders(context, state, [reminder])
 
-        assert "<system-reminder" in context[0]["content"]
+        assert "<system-reminder" in context[-1]["content"]
 
     def test_trigger_exception_skipped_gracefully(self):
         context = [{"role": "user", "content": "Hello"}]
@@ -136,21 +143,7 @@ class TestInjectReminders:
         reminder = _make_reminder(trigger=bad_trigger)
 
         inject_reminders(context, state, [reminder])  # Should not raise
-        assert "<system-reminder" not in context[0]["content"]
-
-    def test_skips_messages_without_string_content(self):
-        context = [
-            {"role": "user", "content": "Hello"},
-            {"role": "assistant", "content": None, "tool_calls": [{"id": "1"}]},
-        ]
-        state = _make_state()
-        reminder = _make_reminder()
-
-        inject_reminders(context, state, [reminder])
-
-        # Should attach to the user message (last with string content)
-        assert "<system-reminder" in context[0]["content"]
-        assert context[1]["content"] is None
+        assert len(context) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -205,26 +198,48 @@ class TestPerTurnTriggers:
 # ---------------------------------------------------------------------------
 
 
+def _in_progress(title="Fix login bug"):
+    return lambda: title
+
+
+def _nothing_in_progress():
+    return None
+
+
 class TestPeriodicTriggers:
-    def test_task_nudge_fires_after_5_iterations_without_task_tools(self):
-        state = _make_state(iteration=5, last_task_tool_iteration=-1)
+    def test_task_nudge_fires_when_in_progress_task_is_stale(self):
+        state = _make_state(
+            iteration=5, last_task_tool_iteration=-1, in_progress_task_probe=_in_progress()
+        )
         reminder = next(r for r in REMINDERS if r.id == "task-nudge")
         assert reminder.trigger(state) is True
 
+    def test_task_nudge_silent_when_nothing_in_progress(self):
+        state = _make_state(
+            iteration=5, last_task_tool_iteration=-1, in_progress_task_probe=_nothing_in_progress
+        )
+        reminder = next(r for r in REMINDERS if r.id == "task-nudge")
+        assert reminder.trigger(state) is False
+
+    def test_task_nudge_silent_without_probe(self):
+        state = _make_state(iteration=5, last_task_tool_iteration=-1)
+        reminder = next(r for r in REMINDERS if r.id == "task-nudge")
+        assert reminder.trigger(state) is False
+
     def test_task_nudge_silent_when_task_tools_recently_used(self):
-        state = _make_state(iteration=5, last_task_tool_iteration=3)
+        state = _make_state(
+            iteration=5, last_task_tool_iteration=3, in_progress_task_probe=_in_progress()
+        )
         reminder = next(r for r in REMINDERS if r.id == "task-nudge")
         # 5 - 3 = 2, which is < 5
         assert reminder.trigger(state) is False
 
     def test_task_nudge_silent_on_iteration_1(self):
-        state = _make_state(iteration=1, last_task_tool_iteration=-1)
+        state = _make_state(
+            iteration=1, last_task_tool_iteration=-1, in_progress_task_probe=_in_progress()
+        )
         reminder = next(r for r in REMINDERS if r.id == "task-nudge")
         assert reminder.trigger(state) is False
-
-    def test_task_nudge_is_stealth(self):
-        reminder = next(r for r in REMINDERS if r.id == "task-nudge")
-        assert reminder.stealth is True
 
     def test_task_nudge_has_period_5(self):
         reminder = next(r for r in REMINDERS if r.id == "task-nudge")
@@ -247,10 +262,12 @@ class TestReminderContent:
         reminder = next(r for r in REMINDERS if r.id == "align-before-acting")
         assert "clarify" in reminder.content(state).lower()
 
-    def test_task_nudge_mentions_task_create(self):
-        state = _make_state()
+    def test_task_nudge_names_the_task(self):
+        state = _make_state(in_progress_task_probe=_in_progress("Fix login bug"))
         reminder = next(r for r in REMINDERS if r.id == "task-nudge")
-        assert "task_create" in reminder.content(state)
+        content = reminder.content(state)
+        assert "Fix login bug" in content
+        assert "task_update" in content
 
     def test_available_skills_mentions_lightbulb(self):
         state = _make_state()
